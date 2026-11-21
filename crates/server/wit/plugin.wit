@@ -17,8 +17,151 @@ world plugin {}
 
 /// One world per Category, each the base and, once the stage that gives the
 /// Category its grammar lands, what a component providing it exports.
+///
+/// **An agent's is the three things about a harness that are code** (ADR-0030,
+/// *Agent*): everything else about it — its binary, its launch line, its
+/// account's paths, how it idles and asks — is data, written in the manifest's
+/// `agent` provision, and the host reads it there.
 world agent {
   include plugin;
+
+  /// Who said something in a session's record.
+  enum voice {
+    /// The agent, in its own words.
+    agent,
+    /// The agent, thinking.
+    reasoning,
+    /// Whoever put a turn to the agent: the human, or Verkstead for them.
+    put,
+  }
+
+  /// Something said, as markdown.
+  record said {
+    voice: voice,
+    markdown: string,
+  }
+
+  /// A tool the agent called.
+  record tool-call {
+    /// What the tool is called.
+    name: string,
+    /// The name the harness gave this call, which its result names back;
+    /// empty where the record gave none.
+    call: string,
+    /// One line about the call, or empty.
+    about: string,
+    /// What it was called with, whole.
+    input: string,
+  }
+
+  /// What a tool answered.
+  record tool-result {
+    /// The call this answers, by the name the harness gave it; empty where
+    /// the record gave none.
+    call: string,
+    failed: bool,
+    text: string,
+  }
+
+  /// A line of the harness's own bookkeeping: a mode it switched to, a title
+  /// it invented. Folded away under `kind`.
+  record notice {
+    kind: string,
+    line: string,
+  }
+
+  /// A line the parser does not know, kept rather than dropped (ADR-0006):
+  /// with the kind the record called it, it folds away under that name;
+  /// with none, it stands in the conversation where it was found.
+  record unknown {
+    kind: option<string>,
+    line: string,
+  }
+
+  /// One thing the record of a session holds, in the kinds the Transcript
+  /// pane draws.
+  variant entry {
+    said(said),
+    tool-call(tool-call),
+    tool-result(tool-result),
+    notice(notice),
+    unknown(unknown),
+  }
+
+  /// One of the account's configuration files as the host found it, said
+  /// from the account's directory: its contents, or none where the account
+  /// has no such file.
+  record found {
+    path: string,
+    contents: option<list<u8>>,
+  }
+
+  /// An MCP server attached to the Conversation (ADR-0021).
+  record server {
+    /// What the agent sees in front of its tool names.
+    name: string,
+    url: string,
+    headers: list<tuple<string, string>>,
+  }
+
+  /// A file the Built Root is to hold, said from where the account lands.
+  record file {
+    path: string,
+    contents: list<u8>,
+  }
+
+  /// What a session's root holds of the account's configuration.
+  record configuration {
+    files: list<file>,
+    /// The session-only settings the launch line's `{settings}` names, as
+    /// JSON, or none.
+    settings: option<string>,
+  }
+
+  /// What the host does next in a login, having fed the export what the
+  /// harness wrote.
+  variant login-step {
+    /// Nothing yet: feed it more.
+    waiting,
+    /// The address to show the human.
+    address(string),
+    /// The harness is waiting for the code the human brings back, to be
+    /// typed into it.
+    code,
+    /// Words to say to the human, such as that the code was cut short.
+    words(string),
+    /// The login is over.
+    done,
+  }
+
+  /// The record of `session`, found under the account rooted at `account`
+  /// and read in the kinds above — or none where there is no record of it
+  /// yet. Where the record is kept is the harness's own business, so finding
+  /// it is this export's as much as reading it. `account` is always
+  /// `/account`: the account's directory, granted read-only under that name
+  /// on every platform, whatever its path on the host.
+  export parse-transcript: func(account: string, session: string) -> option<list<entry>>;
+
+  /// What a session's root is to hold, given the account's configuration
+  /// files as found — with the account's own MCP servers already taken out
+  /// by the host (ADR-0011) — and the servers the Conversation attached.
+  export write-configuration: func(found: list<found>, servers: list<server>) -> configuration;
+
+  /// The next step of a login, given what the harness has written since the
+  /// last call — on either of its outputs, in whatever pieces it arrived in.
+  /// Called only for a harness whose manifest declares a login, in an instance
+  /// of the component started for that one harness, so what it was handed
+  /// before is its own to keep.
+  ///
+  /// After any answer but `waiting` it is asked again with nothing new, so
+  /// that one piece carrying an address and a prompt is answered as both.
+  ///
+  /// `words` said while the code handed over is being checked put the human
+  /// back at the same address with them — a code cut short. Said otherwise,
+  /// and followed by the harness exiting without a login, they are what the
+  /// human reads beside the fresh address the host starts — a harness giving
+  /// up — as they are beside one after a code it refused.
+  export login: func(written: string) -> login-step;
 }
 
 world process {

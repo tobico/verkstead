@@ -51,8 +51,10 @@
     "profile": {
       "account": {
         "agent_type": "Claude",
-        "claude_dir": "/srv/accounts/fable/.claude",
-        "config_file": "/srv/accounts/fable/.claude.json"
+        "paths": {
+          "claude_dir": "/srv/accounts/fable/.claude",
+          "config_file": "/srv/accounts/fable/.claude.json"
+        }
       },
       "bound": true,
       "broken": null,
@@ -72,8 +74,10 @@
     "profile": {
       "account": {
         "agent_type": "Claude",
-        "claude_dir": "/srv/accounts/opus/.claude",
-        "config_file": "/srv/accounts/opus/.claude.json"
+        "paths": {
+          "claude_dir": "/srv/accounts/opus/.claude",
+          "config_file": "/srv/accounts/opus/.claude.json"
+        }
       },
       "bound": true,
       "broken": null,
@@ -116,8 +120,10 @@
       "profile": {
         "account": {
           "agent_type": "Claude",
-          "claude_dir": "/srv/accounts/sonnet/.claude",
-          "config_file": "/srv/accounts/sonnet/.claude.json"
+          "paths": {
+            "claude_dir": "/srv/accounts/sonnet/.claude",
+            "config_file": "/srv/accounts/sonnet/.claude.json"
+          }
         },
         "bound": true,
         "broken": null,

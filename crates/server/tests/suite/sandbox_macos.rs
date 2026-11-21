@@ -443,8 +443,12 @@ fi
             std::fs::write(home.join(file), contents).unwrap();
         }
 
-        self.profile_of("codex", store::Account::Codex { home }, "gpt-5-codex")
-            .await
+        self.profile_of(
+            "codex",
+            store::Account::home(store::AgentType::CODEX, home),
+            "gpt-5-codex",
+        )
+        .await
     }
 
     /// And one of the third, whose account is one home as the second's is.
@@ -477,8 +481,12 @@ fi
             std::fs::write(home.join(file), contents).unwrap();
         }
 
-        self.profile_of("grok", store::Account::Grok { home }, "grok-4.6")
-            .await
+        self.profile_of(
+            "grok",
+            store::Account::home(store::AgentType::GROK, home),
+            "grok-4.6",
+        )
+        .await
     }
 
     /// And one of the fourth, whose account is one home holding the two
@@ -501,7 +509,7 @@ fi
 
         self.profile_of(
             "opencode",
-            store::Account::OpenCode { home },
+            store::Account::home(store::AgentType::OPENCODE, home),
             "opencode/big-pickle",
         )
         .await
@@ -628,10 +636,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
         &pool,
         &store::ProfileFacts {
             name: Some("work".to_owned()),
-            account: store::Account::Claude {
-                claude_dir,
-                config_file,
-            },
+            account: store::Account::claude(claude_dir, config_file),
             models: vec!["claude-opus-5".to_owned()],
             memory: true,
         },
@@ -1451,9 +1456,7 @@ async fn one_accounts_sessions_cannot_reach_anothers() {
     let other = fixture.codex_profile().await;
     let sandbox = fixture.sandbox();
 
-    let store::Account::Codex { home: theirs } = &other.account else {
-        panic!("a Codex Profile's account is one home");
-    };
+    let theirs = other.account.directory();
 
     let reported = probe(
         &sandbox,

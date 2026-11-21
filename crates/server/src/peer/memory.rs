@@ -280,24 +280,17 @@ async fn named(
     let wanted = wanted.clone();
 
     let named = tokio::task::spawn_blocking(move || {
-        let root = match &account {
-            store::Account::Claude { claude_dir, .. } => Root::claude(
-                platform,
-                claude_dir,
-                // The main checkout is what a root reads off a Worktree's own
-                // `.git`, so a Repo's path with `.git` on it is the same entry a
-                // session here would have named. An empty path where no Repo of
-                // this device's is that repository, which is a part `carried`
-                // leaves out — so the entry it names is never read.
-                &repo.unwrap_or_default().join(".git"),
-                worktree.as_deref().unwrap_or(Path::new("")),
-            ),
-
-            store::Account::Codex { home } => Root::codex(home),
-            store::Account::Grok { home } => Root::grok(home),
-            store::Account::OpenCode { home } => Root::opencode(home),
-            store::Account::Agy { home } => Root::agy(home),
-        };
+        let root = Root::of(
+            &account,
+            platform,
+            // The main checkout is what a root reads off a Worktree's own
+            // `.git`, so a Repo's path with `.git` on it is the same entry a
+            // session here would have named. An empty path where no Repo of
+            // this device's is that repository, which is a part `carried`
+            // leaves out — so the entry it names is never read.
+            &repo.unwrap_or_default().join(".git"),
+            worktree.as_deref().unwrap_or(Path::new("")),
+        )?;
 
         let parts = carried(
             root.synced(wanted.worktree.as_deref(), &wanted.sessions),
@@ -305,12 +298,12 @@ async fn named(
             named_worktree,
         );
 
-        (root.account().to_owned(), parts)
+        Some((root.account().to_owned(), parts))
     })
     .await;
 
     match named {
-        Ok(named) => Some(named),
+        Ok(named) => named,
 
         Err(why) => {
             tracing::error!(

@@ -12,7 +12,10 @@
 import { describe, expect, it } from "vitest";
 
 import { briefly, reading } from "../src/agents";
-import type { ProfileEntry } from "../src/api/types";
+import { pairings } from "../src/pairing";
+import { harness, harnesses, harnessName, knowHarnesses } from "../src/harnesses";
+import type { HarnessEntry, ProfileEntry } from "../src/api/types";
+import listed from "./fixtures/harnesses.json" with { type: "json" };
 
 /// One saved profile of a backend, which is all this cares about them: a name
 /// and an agent type. `null` for the name is a profile nobody named.
@@ -24,8 +27,11 @@ const profile = (
   name,
   account:
     agent_type === "Claude"
-      ? { agent_type, claude_dir: "/srv/dir", config_file: "/srv/file" }
-      : { agent_type, home: "/srv/home" },
+      ? {
+          agent_type,
+          paths: { claude_dir: "/srv/dir", config_file: "/srv/file" },
+        }
+      : { agent_type, paths: { home: "/srv/home" } },
   models: [],
   memory: true,
   broken: null,
@@ -226,5 +232,112 @@ describe("the reading with the backend left off", () => {
     expect(
       briefly({ agent: "Claude", model: "claude-opus-9", profile: "Work" }, TWO),
     ).toBe("claude-opus-9 · Work");
+  });
+});
+
+/// A Profile of a harness this server has not got — a plugin installed on the
+/// device that saved it — reads as its id, and is the one broken row no picker
+/// offers: there is nothing here to launch it with.
+describe("a harness this server has not got", () => {
+  const plugin = "3f0c7a52-9d14-4b8e-a6f1-2c5d8e9b7a40";
+
+  it("reads as its id", () => {
+    expect(
+      reading({ agent: plugin, model: "gemini-code", profile: null }, []),
+    ).toContain(plugin);
+  });
+
+  it("is offered on no picker", () => {
+    const known = profile("work", "Claude");
+    const unknown: ProfileEntry = {
+      ...profile("plugged", plugin),
+      id: "22222222-2222-4222-8222-222222222222",
+      account: { agent_type: plugin, paths: { state: "/srv/plugged" } },
+      models: ["gemini-code"],
+      broken: "HarnessUnknown",
+    };
+
+    expect(
+      pairings([{ ...known, models: ["claude-opus-5"] }, unknown]).map(
+        (row) => row.profile.id,
+      ),
+    ).toEqual([known.id]);
+  });
+
+  /// Nor is one whose plugin is disabled (Set 1764, Q20): it stays on the
+  /// settings page, broken, and no picker offers it.
+  it("is offered on no picker while its plugin is disabled", () => {
+    const known = profile("work", "Claude");
+    const disabled: ProfileEntry = {
+      ...profile("plugged", plugin),
+      id: "33333333-3333-4333-8333-333333333333",
+      account: { agent_type: plugin, paths: { state: "/srv/plugged" } },
+      models: ["gemini-code"],
+      broken: "HarnessDisabled",
+    };
+
+    expect(
+      pairings([{ ...known, models: ["claude-opus-5"] }, disabled]).map(
+        (row) => row.profile.id,
+      ),
+    ).toEqual([known.id]);
+  });
+});
+
+/// A plugin's harness whose name is no word a pattern could be made of: its
+/// name is its author's to choose, and it is read as it is spelled.
+describe("a harness named with a pattern's characters", () => {
+  const plugin = "5b1e2d7c-0a4f-4c3e-9d8b-7f6a5e4d3c21";
+  const coder: HarnessEntry = {
+    ...(listed as HarnessEntry[])[0]!,
+    id: plugin,
+    name: "C++ Coder",
+    models: [
+      { id: "cpp-large", name: "C++ Large" },
+      { id: "coder-small", name: "Small" },
+    ],
+    aliases: [],
+    login: null,
+    install: null,
+    offered: true,
+  };
+
+  it("drops the backend from a model named after it, and keeps it beside one that is not", () => {
+    knowHarnesses([...(listed as HarnessEntry[]), coder]);
+    const saved = [{ ...profile("Work", "Codex"), account: { agent_type: plugin, paths: {} } }];
+
+    expect(reading({ agent: plugin, model: "cpp-large", profile: "Work" }, saved)).toBe(
+      "C++ Large",
+    );
+    expect(reading({ agent: plugin, model: "coder-small", profile: "Work" }, saved)).toBe(
+      "C++ Coder Small",
+    );
+  });
+});
+
+/// A disabled Agent plugin's harness, which the server lists not offered so that
+/// the Profiles still standing on it are drawn under its name (Set 1764, Q20).
+describe("a harness its plugin's disabling withholds", () => {
+  const plugin = "3f0c7a52-9d14-4b8e-a6f1-2c5d8e9b7a40";
+  const withheld: HarnessEntry = {
+    ...(listed as HarnessEntry[])[0]!,
+    id: plugin,
+    name: "Stub Harness",
+    login: null,
+    install: null,
+    offered: false,
+  };
+
+  it("is named by its name and drawn with its mark", () => {
+    knowHarnesses([...(listed as HarnessEntry[]), withheld]);
+
+    expect(harnessName(plugin)).toBe("Stub Harness");
+    expect(harness(plugin)?.mark).toBe(withheld.mark);
+  });
+
+  it("is never a harness a new Profile is made of", () => {
+    knowHarnesses([...(listed as HarnessEntry[]), withheld]);
+
+    expect(harnesses().map((entry) => entry.id)).not.toContain(plugin);
   });
 });

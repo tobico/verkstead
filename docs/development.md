@@ -1631,8 +1631,21 @@ components where the script looks:
 
 ```console
 $ cargo build --release --target wasm32-wasip2 --manifest-path plugins/Cargo.toml
+$ cargo build --release --target wasm32-wasip2 --target-dir plugins/target \
+    --manifest-path plugins/tests/stub-harness/Cargo.toml
 $ mkdir -p plugins/dist && cp plugins/target/wasm32-wasip2/release/*.wasm plugins/dist/
 ```
 
 `plugins/dist/` is gitignored and wins whenever it is there, so delete it after
 changing a component's source, or the server goes on embedding the old build.
+
+**Components that are no built-in's** are under `plugins/tests/`, each a
+workspace of its own: the server's suites install them as plugins of their
+own. Apart, because they have dependencies the built-ins have not, and the
+packaged build (`nix/`) vendors only what the server's own `Cargo.lock` names;
+it leaves `plugins/tests/` out of its source, and compiles no test. Today that
+is the **stub harness**, whose component the suites write a `plugin.yaml`
+beside and install from a directory to launch sessions on a harness a plugin
+declares — see `crates/server/tests/suite/stub_harness.rs`. The build script
+builds it from its own workspace where `plugins/dist/` has none, embeds it
+nowhere, and hands the tests its path in `VERKSTEAD_STUB_HARNESS_WASM`.

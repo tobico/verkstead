@@ -4,9 +4,10 @@
 //! The last test here is the quickstart in `docs/development.md`, run against
 //! the very files that guide tells the reader to run.
 
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use super::support::server::{Server, finished, stderr, stdout};
@@ -293,16 +294,41 @@ fn the_cli_reconnects_when_the_server_restarts_mid_wait() {
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::start(tmp.path().join("verkstead.db"));
 
-    let waiting = ask(&server, tmp.path(), SET);
+    let mut waiting = ask(&server, tmp.path(), SET);
     server.await_asked_set(1);
 
+    // Read as it is written, so the restart can wait on the CLI having noticed
+    // the server gone. A Set on the server says nothing about whether the wait
+    // on it has been sent yet: a CLI slow to send it, with the server back
+    // after a fixed pause, would find a server that had never gone away.
+    let (said, retried) = (Arc::new(Mutex::new(String::new())), mpsc::channel());
+    let reading = {
+        let said = Arc::clone(&said);
+        let lines = BufReader::new(waiting.stderr.take().unwrap()).lines();
+        std::thread::spawn(move || {
+            for line in lines.map_while(Result::ok) {
+                if line.contains("retrying") {
+                    let _ = retried.0.send(());
+                }
+                let mut said = said.lock().unwrap();
+                said.push_str(&line);
+                said.push('\n');
+            }
+        })
+    };
+
     let (addr, database) = server.kill();
-    std::thread::sleep(Duration::from_millis(250));
+    retried
+        .1
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the CLI should say it is retrying once the server is gone");
     let server = Server::bind(addr, database);
 
     server.answer(1, COMPLETE);
 
-    let output = finished(waiting);
+    let mut output = finished(waiting);
+    reading.join().unwrap();
+    output.stderr = said.lock().unwrap().clone().into_bytes();
     assert!(
         output.status.success(),
         "the CLI should have ridden out the restart, got {:?}",

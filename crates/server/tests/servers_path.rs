@@ -27,7 +27,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
-use verkstead_render::{Dependency, DependencyState, OnboardingView};
+use verkstead_render::{AgentType, Dependency, DependencyState, OnboardingView};
 use verkstead_server::platform::Platform;
 use verkstead_server::{open_database, router_keeping, sandbox};
 
@@ -124,7 +124,7 @@ fn claude(reading: &OnboardingView) -> DependencyState {
     reading
         .dependencies
         .iter()
-        .find(|row| row.dependency == Dependency::Claude)
+        .find(|row| row.dependency == Dependency::Harness(AgentType::CLAUDE))
         .expect("every dependency is a row")
         .state
         .clone()

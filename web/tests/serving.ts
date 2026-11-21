@@ -10,11 +10,13 @@ import type {
   ComponentsView,
   DevicesView,
   ForwardsView,
+  HarnessEntry,
   SetReading,
   SetView,
   UnreadableSet,
 } from "../src/api/types";
 import devices from "./fixtures/devices.json" with { type: "json" };
+import harnesses from "./fixtures/harnesses.json" with { type: "json" };
 
 /// Where the shell asks whether another device is asking to link — see the
 /// default [`serving`] holds for it.
@@ -34,6 +36,10 @@ const AUTHORS = "/api/ui/authors";
 /// And what this machine has installed beyond the wizard's checks, the fourth —
 /// see the default below.
 const COMPONENTS = "/api/ui/components";
+
+/// And the harnesses the server can run, which the shell reads once for every
+/// name and mark the page draws — see the default below.
+const HARNESSES = "/api/ui/harnesses";
 
 /// One answer per fetch in the order given. The last answer is repeated,
 /// because a page polls for as long as it is open and a test should not have to
@@ -82,6 +88,10 @@ export function serving(...answers: Array<Answer>) {
   // `src/settings/Components.tsx`. A machine that cannot have an Annex, which
   // draws none, and is what every test that has not said otherwise is about.
   held.set(`GET ${COMPONENTS}`, json({ annex: null } satisfies ComponentsView));
+
+  // And the harnesses, as the real endpoint lists them — see `src/harnesses.ts`
+  // and `setup.ts`, which says the same list before anything is mounted.
+  held.set(`GET ${HARNESSES}`, json(harnesses as HarnessEntry[]));
 
   for (const answer of answers) {
     if (typeof answer === "function") {

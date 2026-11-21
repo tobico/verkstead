@@ -652,10 +652,10 @@ async fn a_share_says_nothing_about_the_machine_it_was_taken_on() {
         &pool,
         &store::ProfileFacts {
             name: Some("fable".to_owned()),
-            account: store::Account::Claude {
-                claude_dir: PathBuf::from("/srv/accounts/fable/.claude"),
-                config_file: PathBuf::from("/srv/accounts/fable/.claude.json"),
-            },
+            account: store::Account::claude(
+                PathBuf::from("/srv/accounts/fable/.claude"),
+                PathBuf::from("/srv/accounts/fable/.claude.json"),
+            ),
             models: vec!["claude-fable-5".to_owned()],
             memory: true,
         },
@@ -1730,10 +1730,7 @@ async fn a_steer_that_boards_carries_no_path_to_the_account_it_picked() {
         &pool,
         &store::ProfileFacts {
             name: Some("steering".to_owned()),
-            account: store::Account::Claude {
-                claude_dir: account.clone(),
-                config_file: config.clone(),
-            },
+            account: store::Account::claude(account.clone(), config.clone()),
             models: vec!["claude-opus-5".to_owned()],
             memory: true,
         },
@@ -1792,16 +1789,18 @@ async fn a_steer_that_boards_carries_no_path_to_the_account_it_picked() {
     assert_eq!(under.profile.name.as_deref(), Some("steering"));
     assert_eq!(under.model.as_deref(), Some("claude-opus-5"));
 
-    let verkstead_render::ProfileAccount::Claude {
-        claude_dir,
-        config_file,
-    } = &under.profile.account
-    else {
-        panic!("the type's own mark stays, it being what the row is read by");
-    };
+    let shared = &under.profile.account;
 
-    assert_eq!(claude_dir, "", "where the account is kept does not board");
-    assert_eq!(config_file, "");
+    assert_eq!(
+        shared.agent_type,
+        verkstead_render::AgentType::CLAUDE,
+        "the type's own mark stays, it being what the row is read by"
+    );
+    assert_eq!(
+        shared.paths["claude_dir"], "",
+        "where the account is kept does not board"
+    );
+    assert_eq!(shared.paths["config_file"], "");
 
     // And said of the payload whole, which is what a reader actually receives:
     // a field blanked in one place and copied in another would pass everything

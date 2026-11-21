@@ -32,6 +32,7 @@ import { Show, createEffect, createSignal, type JSX } from "solid-js";
 import app from "../App.module.css";
 import { Panes, type Pane } from "../Panes";
 import type { SharedConversation } from "../api/types";
+import { knowHarnesses } from "../harnesses";
 import { Empty } from "../notices";
 import { Timeline } from "../workbench/Timeline";
 import { titled } from "../workbench/naming";
@@ -90,6 +91,10 @@ export function Share(props: {
 /// The record itself, once there is one.
 function Record(props: { shared: SharedConversation }): JSX.Element {
   const conversation = () => props.shared.conversation;
+
+  // The harnesses the record's runs were under, which the workbench reads off
+  // its server and a share carries — see `harnesses.ts`.
+  knowHarnesses(props.shared.harnesses);
 
   /// Which level a narrow window is showing, and what the record has open.
   ///

@@ -43,7 +43,13 @@
 //! `crates/render/src/onboarding.rs`, which carries the rows and the distro and
 //! no prose at all.
 
-import type { Dependency, DependencyState, Distro } from "../api/types";
+import type {
+  Dependency,
+  DependencyState,
+  Distro,
+  HarnessInstall,
+} from "../api/types";
+import { harness } from "../harnesses";
 
 /// One row's instruction, on one operating system.
 ///
@@ -83,7 +89,7 @@ export type Instruction = {
 };
 
 /// One operating system's answers: what the tab is called, and an instruction
-/// for each of the nine rows.
+/// for each row it knows by name.
 ///
 /// Where a session looks is not among them. That was a sentence per tab naming
 /// the fixed list a session's `PATH` used to be; a session's `PATH` is now the
@@ -93,9 +99,14 @@ export type Guide = {
   /// What the tab is called.
   title: string;
 
-  /// One instruction per row. Every row, on every OS: a tab with a gap in it is
-  /// a row somebody is left staring at.
-  rows: Record<Dependency, Instruction>;
+  /// One instruction per row that is not a harness. Every row, on every OS: a
+  /// tab with a gap in it is a row somebody is left staring at.
+  rows: Record<"Sandbox" | "Git" | "Gh" | "Wsl", Instruction>;
+
+  /// And one per built-in harness, by its id: what the five hold today. A
+  /// plugin's harness is not here, its instruction being what its manifest
+  /// declares for the machine the server is on — see [`declared`].
+  harnesses: Record<BuiltIn, Instruction>;
 
   /// And what every command on this tab wants first, where they all want the
   /// same thing.
@@ -119,6 +130,9 @@ export type Guide = {
   /// here to run.
   about?: string;
 };
+
+/// The harnesses built into Verkstead, by the ids the wire spells them as.
+type BuiltIn = "Claude" | "Codex" | "Grok" | "OpenCode" | "Agy";
 
 /// The nine tabs, in the order they are drawn — the order
 /// `verkstead_render::Distro` is written in, which is the two Macs beside each
@@ -409,6 +423,11 @@ export const GUIDES: Record<Distro, Guide> = {
             "first.",
         },
       },
+      Gh: { command: "brew install gh" },
+      Wsl: WSL_ELSEWHERE,
+    },
+
+    harnesses: {
       Claude: CLAUDE_ON_A_MAC,
       Codex: {
         command: "brew install --cask codex",
@@ -417,8 +436,6 @@ export const GUIDES: Record<Distro, Guide> = {
       Grok: GROK_UNIX,
       OpenCode: { command: "brew install opencode" },
       Agy: AGY_ON_A_MAC,
-      Gh: { command: "brew install gh" },
-      Wsl: WSL_ELSEWHERE,
     },
   },
 
@@ -456,6 +473,17 @@ export const GUIDES: Record<Distro, Guide> = {
           "opens the same dialog.",
       },
 
+      Gh: {
+        link: "https://github.com/cli/cli/releases",
+        note:
+          "GitHub ships a zip for this Mac, not a package. Unpack gh into " +
+          "~/.local/bin, which is on every Mac session's PATH.",
+      },
+      Wsl: WSL_ELSEWHERE,
+    },
+
+    harnesses: {
+
       Claude: CLAUDE_ON_A_MAC,
 
       // Neither a script nor a package this machine can use: the npm the other
@@ -472,14 +500,6 @@ export const GUIDES: Record<Distro, Guide> = {
       Grok: GROK_UNIX,
       OpenCode: OPENCODE_NATIVE,
       Agy: AGY_ON_A_MAC,
-
-      Gh: {
-        link: "https://github.com/cli/cli/releases",
-        note:
-          "GitHub ships a zip for this Mac, not a package. Unpack gh into " +
-          "~/.local/bin, which is on every Mac session's PATH.",
-      },
-      Wsl: WSL_ELSEWHERE,
     },
   },
 
@@ -496,6 +516,11 @@ export const GUIDES: Record<Distro, Guide> = {
           "once from a terminal opened with Run as administrator.",
       },
       Git: { command: "winget install --id Git.Git" },
+      Gh: { command: "winget install --id GitHub.cli" },
+      Wsl: WSL_ON_WINDOWS,
+    },
+
+    harnesses: {
       Claude: orElse(
         CLAUDE_NATIVE_WINDOWS,
         windowsNpm("@anthropic-ai/claude-code"),
@@ -504,8 +529,6 @@ export const GUIDES: Record<Distro, Guide> = {
       Grok: GROK_WINDOWS,
       OpenCode: windowsNpm("opencode-ai"),
       Agy: AGY_WINDOWS,
-      Gh: { command: "winget install --id GitHub.cli" },
-      Wsl: WSL_ON_WINDOWS,
     },
   },
 
@@ -519,13 +542,16 @@ export const GUIDES: Record<Distro, Guide> = {
           "session looks along the machine's profile.",
       ),
       Git: nixos("git"),
+      Gh: nixos("gh"),
+      Wsl: WSL_ELSEWHERE,
+    },
+
+    harnesses: {
       Claude: orElse(CLAUDE_NATIVE, nixos("claude-code")),
       Codex: nixos("codex"),
       Grok: GROK_UNIX,
       OpenCode: nixos("opencode"),
       Agy: AGY_UNIX,
-      Gh: nixos("gh"),
-      Wsl: WSL_ELSEWHERE,
     },
   },
 
@@ -534,6 +560,11 @@ export const GUIDES: Record<Distro, Guide> = {
     rows: {
       Sandbox: { command: "sudo apt install bubblewrap" },
       Git: { command: "sudo apt install git" },
+      Gh: { command: "sudo apt install gh" },
+      Wsl: WSL_ELSEWHERE,
+    },
+
+    harnesses: {
       Claude: orElse(
         CLAUDE_NATIVE,
         npm("@anthropic-ai/claude-code", "sudo apt install nodejs npm"),
@@ -542,8 +573,6 @@ export const GUIDES: Record<Distro, Guide> = {
       Grok: GROK_UNIX,
       OpenCode: npm("opencode-ai", "sudo apt install nodejs npm"),
       Agy: AGY_UNIX,
-      Gh: { command: "sudo apt install gh" },
-      Wsl: WSL_ELSEWHERE,
     },
   },
 
@@ -552,6 +581,11 @@ export const GUIDES: Record<Distro, Guide> = {
     rows: {
       Sandbox: { command: "sudo dnf install bubblewrap" },
       Git: { command: "sudo dnf install git" },
+      Gh: { command: "sudo dnf install gh" },
+      Wsl: WSL_ELSEWHERE,
+    },
+
+    harnesses: {
       Claude: orElse(
         CLAUDE_NATIVE,
         npm("@anthropic-ai/claude-code", "sudo dnf install nodejs npm"),
@@ -560,8 +594,6 @@ export const GUIDES: Record<Distro, Guide> = {
       Grok: GROK_UNIX,
       OpenCode: npm("opencode-ai", "sudo dnf install nodejs npm"),
       Agy: AGY_UNIX,
-      Gh: { command: "sudo dnf install gh" },
-      Wsl: WSL_ELSEWHERE,
     },
   },
 
@@ -570,6 +602,11 @@ export const GUIDES: Record<Distro, Guide> = {
     rows: {
       Sandbox: { command: "sudo apt install bubblewrap" },
       Git: { command: "sudo apt install git" },
+      Gh: { command: "sudo apt install gh" },
+      Wsl: WSL_ELSEWHERE,
+    },
+
+    harnesses: {
       Claude: orElse(
         CLAUDE_NATIVE,
         npm("@anthropic-ai/claude-code", "sudo apt install nodejs npm"),
@@ -578,8 +615,6 @@ export const GUIDES: Record<Distro, Guide> = {
       Grok: GROK_UNIX,
       OpenCode: npm("opencode-ai", "sudo apt install nodejs npm"),
       Agy: AGY_UNIX,
-      Gh: { command: "sudo apt install gh" },
-      Wsl: WSL_ELSEWHERE,
     },
   },
 
@@ -588,6 +623,11 @@ export const GUIDES: Record<Distro, Guide> = {
     rows: {
       Sandbox: { command: "sudo pacman -S bubblewrap" },
       Git: { command: "sudo pacman -S git" },
+      Gh: { command: "sudo pacman -S github-cli" },
+      Wsl: WSL_ELSEWHERE,
+    },
+
+    harnesses: {
       Claude: orElse(
         CLAUDE_NATIVE,
         npm("@anthropic-ai/claude-code", "sudo pacman -S npm"),
@@ -596,8 +636,6 @@ export const GUIDES: Record<Distro, Guide> = {
       Grok: GROK_UNIX,
       OpenCode: npm("opencode-ai", "sudo pacman -S npm"),
       Agy: AGY_UNIX,
-      Gh: { command: "sudo pacman -S github-cli" },
-      Wsl: WSL_ELSEWHERE,
     },
   },
 
@@ -613,6 +651,15 @@ export const GUIDES: Record<Distro, Guide> = {
           "switched off.",
       },
       Git: { note: "Install your distribution's git package." },
+      Gh: {
+        note:
+          "Install your distribution's GitHub CLI package, which is gh or " +
+          "github-cli.",
+      },
+      Wsl: WSL_ELSEWHERE,
+    },
+
+    harnesses: {
       Claude: orElse(
         CLAUDE_NATIVE,
         npm(
@@ -624,12 +671,6 @@ export const GUIDES: Record<Distro, Guide> = {
       Grok: GROK_UNIX,
       OpenCode: npm("opencode-ai", "install your distribution's nodejs and npm"),
       Agy: AGY_UNIX,
-      Gh: {
-        note:
-          "Install your distribution's GitHub CLI package, which is gh or " +
-          "github-cli.",
-      },
-      Wsl: WSL_ELSEWHERE,
     },
   },
 };
@@ -660,11 +701,42 @@ function theAccount(directory: string | null): Instruction {
   return { ...bare, command: `${bare.command} --data-dir "${directory}"` };
 }
 
+/// What a plugin's harness is told, out of what its manifest declares: the
+/// commands that install it, the link to its own instructions, or — where it
+/// declares neither — that it has to be found by hand.
+///
+/// **The same on every tab.** A manifest's commands are read for the platform
+/// the server is on, so another tab has no other commands to show; and they are
+/// what the run would have run, which is what this screen is the by-hand
+/// version of.
+function declared(install: HarnessInstall | null | undefined): Instruction {
+  const commands = install?.commands ?? [];
+  // A web page and nothing else, as the server reads a manifest's: what is
+  // drawn here is a link the human presses, and a plugin is not to put one in
+  // front of them that runs anything.
+  const link = /^https?:\/\//i.test(install?.instructions ?? "")
+    ? (install?.instructions ?? undefined)
+    : undefined;
+
+  if (commands.length === 0 && link === undefined) {
+    return { note: "Its plugin doesn't say how to install it." };
+  }
+
+  return {
+    // A line apiece, as the run takes them: joined with `&&`, a comment ending
+    // one would swallow the rest, and Windows PowerShell has no `&&` at all.
+    ...(commands.length > 0 ? { command: commands.join("\n") } : {}),
+    ...(link !== undefined ? { link } : {}),
+    note: "As its plugin declares it for the machine Verkstead runs on.",
+  };
+}
+
 /// The instruction for one row on one tab, as this machine reads it.
 ///
-/// The written-down answer for every row but two — see [`theAccount`], which is
-/// the row this server has a word about, and [`WSL_RESTART`], which is what the
-/// WSL row is told on a machine whose `state` says its restart is still owed.
+/// The written-down answer for every row but three — see [`theAccount`], which
+/// is the row this server has a word about, [`WSL_RESTART`], which is what the
+/// WSL row is told on a machine whose `state` says its restart is still owed,
+/// and a plugin's harness, which is [`declared`].
 export function instructionFor(
   distro: Distro,
   dependency: Dependency,
@@ -675,7 +747,19 @@ export function instructionFor(
     return WSL_RESTART;
   }
 
-  return distro === "Windows" && dependency === "Sandbox"
-    ? theAccount(directory)
-    : GUIDES[distro].rows[dependency];
+  if (distro === "Windows" && dependency === "Sandbox") {
+    return theAccount(directory);
+  }
+
+  const guide = GUIDES[distro];
+
+  if (Object.hasOwn(guide.rows, dependency)) {
+    return guide.rows[dependency as keyof Guide["rows"]];
+  }
+
+  if (Object.hasOwn(guide.harnesses, dependency)) {
+    return guide.harnesses[dependency as BuiltIn];
+  }
+
+  return declared(harness(dependency)?.install);
 }

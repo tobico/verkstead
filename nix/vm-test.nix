@@ -1101,18 +1101,21 @@ testers.runNixOSTest {
         # Profile and picked again with it, and the two have to agree.
         model = "claude-opus-5"
 
-        # The account goes in the shape its own agent type keeps one, with the
-        # type beside it: a Claude Profile is the pair bound over `~/.claude`
-        # and `~/.claude.json`, where every other type this knows about is one
-        # home. Flat on the wire, which is what `ProfileAccount` is.
+        # The account goes as every harness's does, its paths under the keys
+        # the harness declares them by, with the type beside them: Claude's
+        # are the pair bound over `~/.claude` and `~/.claude.json`, where
+        # every other built-in declares one home. That is what
+        # `ProfileAccount` is.
         saved = post(
             "/api/ui/profiles",
             {
                 "name": "vm",
                 "account": {
                     "agent_type": "Claude",
-                    "claude_dir": "${account}/.claude",
-                    "config_file": "${account}/.claude.json",
+                    "paths": {
+                        "claude_dir": "${account}/.claude",
+                        "config_file": "${account}/.claude.json",
+                    },
                 },
                 "models": [model],
             },

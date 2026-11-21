@@ -1622,8 +1622,10 @@ async fn profile(app: &Router, elsewhere: &Path, name: &str) -> String {
             "name": name,
             "account": {
                 "agent_type": "Claude",
-                "claude_dir": claude_dir,
-                "config_file": config_file,
+                "paths": {
+                    "claude_dir": claude_dir,
+                    "config_file": config_file,
+                },
             },
             "models": ["claude-opus-5"],
         }),
@@ -2700,7 +2702,7 @@ async fn starting_is_refused_when_a_chosen_profiles_pair_has_gone() {
         grill(&app, id).await,
         GrillingStarted::ProfileBroken(ProfileTrouble {
             broken: Broken::DirMissing,
-            agent_type: AgentType::Claude,
+            agent_type: AgentType::CLAUDE,
         }),
     );
 }
@@ -7173,7 +7175,7 @@ async fn a_signed_out_stop_offers_the_login_only_for_an_account_at_home_here() {
         vec![(
             notice,
             Some(verkstead_render::NoticeLogIn {
-                agent_type: verkstead_render::AgentType::Claude,
+                agent_type: verkstead_render::AgentType::CLAUDE,
                 profile: here.id,
                 name: here.name.clone(),
             })
@@ -7197,10 +7199,10 @@ async fn a_signed_out_stop_offers_the_login_only_for_an_account_at_home_here() {
         "aa00bb11cc22dd33ee44ff5566778899",
         &store::ProfileFacts {
             name: Some("theirs".to_owned()),
-            account: store::Account::Claude {
-                claude_dir: PathBuf::from("/home/someone-else/.claude"),
-                config_file: PathBuf::from("/home/someone-else/.claude.json"),
-            },
+            account: store::Account::claude(
+                PathBuf::from("/home/someone-else/.claude"),
+                PathBuf::from("/home/someone-else/.claude.json"),
+            ),
             models: vec!["sonnet".to_owned()],
             memory: true,
         },
@@ -7293,7 +7295,7 @@ async fn a_sessions_event_says_what_it_was_launched_under() {
     );
     assert_eq!(
         output.agent_type,
-        Some(AgentType::Claude),
+        Some(AgentType::CLAUDE),
         "and which agent ran it, which is what the harness mark is drawn from",
     );
 
@@ -7335,7 +7337,7 @@ async fn a_sessions_event_says_which_harness_ran_it() {
     );
     assert_eq!(
         output.agent_type,
-        Some(AgentType::Codex),
+        Some(AgentType::CODEX),
         "and the agent that ran it, which is the Profile's own type and not a default",
     );
 
@@ -7382,7 +7384,7 @@ async fn what_the_profile_became_afterwards_changes_nothing() {
         &format!("/api/ui/profiles/{}", picked.profile.id),
         &serde_json::json!({
             "name": "renamed",
-            "account": { "agent_type": "Codex", "home": home },
+            "account": { "agent_type": "Codex", "paths": { "home": home } },
             "models": ["gpt-5.2-codex"],
         }),
     )
@@ -7397,7 +7399,7 @@ async fn what_the_profile_became_afterwards_changes_nothing() {
     );
     assert_eq!(
         output.agent_type,
-        Some(AgentType::Claude),
+        Some(AgentType::CLAUDE),
         "and the agent that ran it, whatever the Profile has since become",
     );
 
@@ -7422,7 +7424,7 @@ async fn codex_profile(app: &Router, elsewhere: &Path, name: &str) -> String {
         "/api/ui/profiles",
         &serde_json::json!({
             "name": name,
-            "account": { "agent_type": "Codex", "home": codex_home(elsewhere, name) },
+            "account": { "agent_type": "Codex", "paths": { "home": codex_home(elsewhere, name) } },
             "models": ["gpt-5.2-codex"],
         }),
     )
@@ -10513,7 +10515,7 @@ async fn adopting_is_refused_when_a_chosen_profiles_pair_has_gone() {
         press_adopt(&app, id).await,
         Adopted::ProfileBroken(ProfileTrouble {
             broken: Broken::DirMissing,
-            agent_type: AgentType::Claude,
+            agent_type: AgentType::CLAUDE,
         }),
     );
     nothing_adopted(&app, id, &repo).await;
@@ -12199,7 +12201,7 @@ async fn a_start_refused_for_its_profiles_or_its_target_closes_nothing() {
         press_take_up(&app, unready).await,
         TakenUp::ProfileBroken(ProfileTrouble {
             broken: Broken::DirMissing,
-            agent_type: AgentType::Claude,
+            agent_type: AgentType::CLAUDE,
         }),
     );
     assert_eq!(

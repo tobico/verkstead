@@ -35,14 +35,8 @@ import {
 } from "../api/client";
 import type { AgentType, LoginState } from "../api/types";
 import { useReading } from "../freshness";
+import { harness as harnessOf } from "../harnesses";
 import styles from "./LoggingIn.module.css";
-
-/// What the modal calls the harness it logs in: the short name the server's own
-/// words about the login use too. Only the harnesses whose login it runs.
-const CALLED: Partial<Record<AgentType, string>> = {
-  Claude: "Claude",
-  Agy: "Antigravity",
-};
 
 /// The modal, open over `profile` for as long as it is mounted.
 export function LoggingIn(props: {
@@ -97,7 +91,11 @@ export function LoggingIn(props: {
     void closeLogin(props.profile, viewer).catch(() => {});
   });
 
-  const harness = (): string => CALLED[props.agentType] ?? "the agent";
+  // What the modal calls the harness it logs in: the short name the server's
+  // own words about the login use too, which the harness list carries for the
+  // harnesses whose login it runs.
+  const harness = (): string =>
+    harnessOf(props.agentType)?.login ?? "the agent";
 
   const state = (): LoginState | null =>
     login.data ?? open.data ?? null;

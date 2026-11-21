@@ -28,8 +28,11 @@ rustPlatform.buildRustPackage {
       ../crates
       # The built-in plugins, whose wasm components `crates/server/build.rs`
       # builds for `wasm32-wasip2` and embeds — `rustBuildToolchain` carries that
-      # target, and the components have no dependencies to vendor.
-      ../plugins
+      # target, and the components have no dependencies to vendor. Not
+      # `plugins/tests/`, the suites' own components, which do and are a
+      # workspace apart: `cargoLock` vendors the crates `Cargo.lock` names
+      # alone, and this build compiles no test that would ask for them.
+      (lib.fileset.difference ../plugins ../plugins/tests)
       # Read by the server for the stable channel the Annex it makes is on —
       # see `crates/server/src/annex/flake.rs`.
       ../flake.nix

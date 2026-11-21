@@ -43,8 +43,8 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 use verkstead_render::{
-    Dependency, DependencyState, DependencyView, InstallPress, InstallState, OnboardingView,
-    RunPhase,
+    AgentType, Dependency, DependencyState, DependencyView, InstallPress, InstallState,
+    OnboardingView, RunPhase,
 };
 use verkstead_server::github::Gh;
 use verkstead_server::onboarding::Machine;
@@ -159,9 +159,9 @@ async fn the_vendor_installers_run_as_the_user_and_what_they_land_is_on_the_path
     let ticked = [
         Dependency::Sandbox,
         Dependency::Git,
-        Dependency::Claude,
-        Dependency::Grok,
-        Dependency::Agy,
+        Dependency::Harness(AgentType::CLAUDE),
+        Dependency::Harness(AgentType::GROK),
+        Dependency::Harness(AgentType::AGY),
     ];
 
     let pressed = install(&app, &ticked).await;
@@ -197,7 +197,7 @@ async fn the_vendor_installers_run_as_the_user_and_what_they_land_is_on_the_path
     let grok = home.path().join(GROK_LANDS);
 
     assert_eq!(
-        state(&landed, Dependency::Claude),
+        state(&landed, Dependency::Harness(AgentType::CLAUDE)),
         &DependencyState::Present {
             at: Some(local.join("claude").to_string_lossy().into_owned()),
             target: None,
@@ -205,7 +205,7 @@ async fn the_vendor_installers_run_as_the_user_and_what_they_land_is_on_the_path
         "the row is present at the directory Anthropic's installer lands in",
     );
     assert_eq!(
-        state(&landed, Dependency::Grok),
+        state(&landed, Dependency::Harness(AgentType::GROK)),
         &DependencyState::Present {
             at: Some(grok.join("grok").to_string_lossy().into_owned()),
             target: None,
@@ -213,7 +213,7 @@ async fn the_vendor_installers_run_as_the_user_and_what_they_land_is_on_the_path
         "and at the one xAI's does",
     );
     assert_eq!(
-        state(&landed, Dependency::Agy),
+        state(&landed, Dependency::Harness(AgentType::AGY)),
         &DependencyState::Present {
             at: Some(
                 home.path()
@@ -229,7 +229,7 @@ async fn the_vendor_installers_run_as_the_user_and_what_they_land_is_on_the_path
 
     for installed in ticked {
         assert_eq!(
-            install_state(&landed, installed),
+            install_state(&landed, installed.clone()),
             &InstallState::Idle,
             "{installed:?}: nothing is left on a row the run installed",
         );

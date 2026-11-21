@@ -1,5 +1,5 @@
-//! The models the viewer knows the names of, and what it does about one it does
-//! not.
+//! The models the harnesses declare, read off the harness list, and what the
+//! viewer does about one none of them declares.
 //!
 //! The fallback is the whole reason there is a test here. A list of the models
 //! there are goes stale the week another one ships, so the interesting case is
@@ -8,42 +8,53 @@
 
 import { describe, expect, it } from "vitest";
 
-import { AGENT_NAME } from "../src/agents";
-import { KNOWN_MODELS, known, prettify } from "../src/models";
+import { harness, harnesses } from "../src/harnesses";
+import { known, offeredFor, prettify } from "../src/models";
+
+/// Every model any harness here declares, as the form offers them.
+function declared(): string[] {
+  return harnesses().flatMap((entry) => entry.models.map((model) => model.id));
+}
 
 describe("the known models", () => {
-  /// A backend apiece as well as a name, because the profile form offers one
-  /// backend's models at a time: an entry naming a backend nobody has a name for
-  /// is one nothing would offer.
-  it("gives every one of them a pretty name, an id and a backend", () => {
-    expect(KNOWN_MODELS.length).toBeGreaterThan(0);
+  /// A name as well as an id, read off the harness that declares it.
+  it("gives every one of them a pretty name and an id", () => {
+    expect(declared().length).toBeGreaterThan(0);
 
-    for (const model of KNOWN_MODELS) {
-      expect(model.id).not.toBe("");
-      expect(model.name).not.toBe("");
-      expect(model.name).not.toBe(model.id);
-      expect(AGENT_NAME[model.agent]).toBeTruthy();
+    for (const entry of harnesses()) {
+      for (const model of entry.models) {
+        expect(model.id).not.toBe("");
+        expect(model.name).not.toBe("");
+        expect(model.name).not.toBe(model.id);
+        expect(prettify(model.id)).toBe(model.name);
+      }
     }
   });
 
-  /// Every backend that can launch has at least one model written down. Not a
-  /// rule about the world — an account can be given an id by hand — but the
-  /// picks are the ordinary way in, and a backend with none would be a form that
+  /// Every backend that can launch declares at least one model. Not a rule
+  /// about the world — an account can be given an id by hand — but the picks
+  /// are the ordinary way in, and a backend with none would be a form that
   /// looked broken until somebody guessed at a spelling.
   it("knows a model for every backend", () => {
-    for (const agent of Object.keys(AGENT_NAME)) {
+    for (const agent of harnesses().map((entry) => entry.id)) {
       expect(
-        KNOWN_MODELS.some((model) => model.agent === agent),
-        `nothing is written down for ${agent}`,
-      ).toBe(true);
+        offeredFor(agent).length,
+        `nothing is declared for ${agent}`,
+      ).toBeGreaterThan(0);
     }
   });
 
   /// Two entries under one id would make [`prettify`] answer whichever the map
   /// was built with last, which is a way of being quietly wrong.
   it("lists each id once", () => {
-    const ids = KNOWN_MODELS.map((model) => model.id);
+    const ids = declared();
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  /// And a harness the server has not got offers nothing, rather than another's.
+  it("offers nothing for a harness this server has not got", () => {
+    expect(harness("nonesuch")).toBeUndefined();
+    expect(offeredFor("nonesuch")).toEqual([]);
   });
 
   it("reads a known id as its name", () => {
@@ -75,7 +86,7 @@ describe("the known models", () => {
   /// And never offered as picks, which is the whole of why they are not
   /// entries: a form filled in from this list says which model it meant.
   it("offers none of them as a pick", () => {
-    const ids = KNOWN_MODELS.map((model) => model.id);
+    const ids = declared();
 
     for (const alias of ["fable", "opus", "sonnet", "haiku"]) {
       expect(ids).not.toContain(alias);
@@ -101,7 +112,7 @@ describe("the known models", () => {
   /// pick says exactly which model it meant, and `opus[1m]` is the harness's
   /// short name for whichever one it calls Opus this month.
   it("offers the two that are worth a row, in full", () => {
-    const ids = KNOWN_MODELS.map((model) => model.id);
+    const ids = offeredFor("Claude").map((model) => model.id);
 
     expect(ids).toContain("claude-opus-5[1m]");
     expect(ids).toContain("claude-sonnet-5[1m]");

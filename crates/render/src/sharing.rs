@@ -46,7 +46,7 @@ use crate::conversations::{
     CommitPane, CompanionView, ConversationView, SteerEvent, SteerPairingView, SteerRecordView,
     TimelineEvent,
 };
-use crate::profiles::{PairingView, PickedView, ProfileAccount, ProfileEntry};
+use crate::profiles::{HarnessEntry, PairingView, PickedView, ProfileAccount, ProfileEntry};
 use crate::repos::RepoEntry;
 use crate::view::SetView;
 
@@ -98,6 +98,13 @@ pub struct SharedConversation {
     /// reader is owed the date of the thing in their hands, and sharing again
     /// makes another one rather than freshening this.
     pub exported_at: String,
+
+    /// Every harness the server that took it could run, for the names and the
+    /// marks the record draws its runs under.
+    ///
+    /// Carried for the reason the sheets are: the workbench reads the list off
+    /// its server, and a share has none to read it off.
+    pub harnesses: Vec<HarnessEntry>,
 }
 
 /// One commit as a share carries it: the pane the workbench would have fetched,
@@ -178,6 +185,7 @@ pub fn shared(
     sets: Vec<SetView>,
     commits: Vec<SharedCommit>,
     exported_at: String,
+    harnesses: Vec<HarnessEntry>,
 ) -> SharedConversation {
     let timeline: Vec<TimelineEvent> = conversation
         .timeline
@@ -328,6 +336,7 @@ pub fn shared(
             ..conversation
         },
         exported_at,
+        harnesses,
     }
 }
 
@@ -424,7 +433,7 @@ fn boarding(event: TimelineEvent) -> TimelineEvent {
 /// the human filled and what they picked to run the work is part of that form.
 /// What a reader has no business with is the same thing the Repo's `path` and
 /// the Worktree are: **where** it is kept. An account is directories — Claude's
-/// pair, and the one home every type after it keeps — and a share is a file
+/// pair, and the one home every built-in after it keeps — and a share is a file
 /// that is emailed about and attached to pull requests.
 ///
 /// Emptied rather than dropped, for the reason the Repo's path is: what a share
@@ -433,23 +442,13 @@ fn boarding(event: TimelineEvent) -> TimelineEvent {
 /// the model stay — those are what the pane says, and they say nothing about
 /// this machine.
 fn unpathed(account: ProfileAccount) -> ProfileAccount {
-    match account {
-        ProfileAccount::Claude { .. } => ProfileAccount::Claude {
-            claude_dir: String::new(),
-            config_file: String::new(),
-        },
-        ProfileAccount::Codex { .. } => ProfileAccount::Codex {
-            home: String::new(),
-        },
-        ProfileAccount::Grok { .. } => ProfileAccount::Grok {
-            home: String::new(),
-        },
-        ProfileAccount::OpenCode { .. } => ProfileAccount::OpenCode {
-            home: String::new(),
-        },
-        ProfileAccount::Agy { .. } => ProfileAccount::Agy {
-            home: String::new(),
-        },
+    ProfileAccount {
+        paths: account
+            .paths
+            .into_keys()
+            .map(|key| (key, String::new()))
+            .collect(),
+        ..account
     }
 }
 

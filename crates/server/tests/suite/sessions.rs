@@ -67,6 +67,8 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
+
+use crate::stub_harness::{self, StubHarness};
 use verkstead_render::{
     Adopted, AgentOutputEvent, AnswerAttached, Attached, BaseRecorded, BriefSaved, Capture,
     CommitEvent, CommitPane, CompanionAdded, CompanionMode, CompanionModeChosen, CompanionView,
@@ -2224,6 +2226,34 @@ async fn grilling_on_agy(stub: &str) -> Grilling {
     .await
 }
 
+/// And the same with every role on a harness a plugin declares — see
+/// [`Bench::everything_on_a_plugin`].
+async fn grilling_on_a_plugin(harness: StubHarness, stub: &str) -> Grilling {
+    grilling_spilling_on_a_plugin(tempfile::tempdir().unwrap(), harness, stub, PULL_REQUEST).await
+}
+
+/// The same, spilling into `spill` and opening its pull request through `gh`.
+async fn grilling_spilling_on_a_plugin(
+    spill: tempfile::TempDir,
+    harness: StubHarness,
+    stub: &str,
+    gh: &str,
+) -> Grilling {
+    grilling_however_started(
+        spill,
+        stub,
+        gh,
+        *BRISKLY,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::EverythingOnAPlugin(harness),
+        Origin::None,
+        Seeded::Nothing,
+        None,
+    )
+    .await
+}
+
 /// What Verkstead is told this backend has on its Screen when it is sitting at
 /// its prompt — one line, the whole of the coupling to somebody else's display.
 const AT_THE_PROMPT: &str = "▌ ready for anything";
@@ -2803,6 +2833,10 @@ enum Pickers {
     /// And on the fifth — see [`Bench::everything_on_agy`].
     EverythingOnAgy,
 
+    /// And on a harness a plugin declares, installed from a directory first —
+    /// see [`Bench::everything_on_a_plugin`].
+    EverythingOnAPlugin(StubHarness),
+
     /// Every role under a Pairing of its own, and the grilling Profile's memory
     /// switched off — see [`Bench::forgetting`].
     GrillingForgetting,
@@ -3089,6 +3123,7 @@ async fn grilling_on(
         Pickers::EverythingOnGrok => bench.everything_on_grok(id).await,
         Pickers::EverythingOnOpenCode => bench.everything_on_opencode(id).await,
         Pickers::EverythingOnAgy => bench.everything_on_agy(id).await,
+        Pickers::EverythingOnAPlugin(harness) => bench.everything_on_a_plugin(id, harness).await,
         Pickers::GrillingForgetting => bench.forgetting("grilling").await,
         Pickers::GrillingOnCodexForgetting => {
             bench.grilling_on_codex(id).await;
@@ -3397,6 +3432,66 @@ impl Bench {
         .await;
     }
 
+    /// Install `harness` off the Plugins section, save a Profile of it on the
+    /// form — a field apiece for the two paths it declares — and press every
+    /// picker onto it.
+    ///
+    /// **On the models the Codex fixtures run**, which the stubs already tell a
+    /// grilling from a step by: a plugin's models are whatever it declares, and
+    /// these are the ones every backlog here is written against.
+    async fn everything_on_a_plugin(&self, id: i64, harness: StubHarness) {
+        harness
+            .installed(
+                &self.app,
+                self.elsewhere.path(),
+                [CODEX_MODEL, CODEX_GRILLING_MODEL],
+            )
+            .await;
+
+        let saved: ProfileSaved = post(
+            &self.app,
+            "/api/ui/profiles",
+            &serde_json::json!({
+                "name": "stubbed",
+                "account": {
+                    "agent_type": harness.uuid(),
+                    "paths": stub_harness::account(&self.elsewhere.path().join("stubbed")),
+                },
+                "models": [CODEX_MODEL, CODEX_GRILLING_MODEL],
+            }),
+        )
+        .await;
+        assert_eq!(saved, ProfileSaved::Saved);
+
+        let profiles: Vec<verkstead_render::ProfileEntry> =
+            get(&self.app, "/api/ui/profiles").await;
+        let profile_id = profiles
+            .into_iter()
+            .find(|profile| profile.name.as_deref() == Some("stubbed"))
+            .expect("the Profile just saved should be on the list")
+            .id;
+
+        for (role, model) in [
+            ("grilling", CODEX_GRILLING_MODEL),
+            ("implementation", CODEX_MODEL),
+            ("review", CODEX_MODEL),
+        ] {
+            let pairing = serde_json::json!({ "profile_id": profile_id, "model": model });
+            let picked = match role {
+                "review" => serde_json::json!({ "pairing": pairing }),
+                _ => pairing,
+            };
+
+            let chosen: verkstead_render::ProfileChosen = post(
+                &self.app,
+                &format!("/api/ui/conversations/{id}/{role}-pairing"),
+                &picked,
+            )
+            .await;
+            assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
+        }
+    }
+
     /// The Profile both of the Codex pickers pick, and the pressing of the
     /// pickers named, each on the model it is paired with.
     async fn on_codex(&self, id: i64, roles: &[(&str, &str)]) {
@@ -3444,7 +3539,7 @@ impl Bench {
             "/api/ui/profiles",
             &serde_json::json!({
                 "name": name,
-                "account": { "agent_type": agent_type, "home": home },
+                "account": { "agent_type": agent_type, "paths": { "home": home } },
                 "models": models,
             }),
         )
@@ -3882,8 +3977,10 @@ async fn profile(app: &Router, root: &Path, name: &str) -> String {
             "name": name,
             "account": {
                 "agent_type": "Claude",
-                "claude_dir": claude_dir,
-                "config_file": config_file,
+                "paths": {
+                    "claude_dir": claude_dir,
+                    "config_file": config_file,
+                },
             },
             "models": [format!("claude-{name}-5"), format!("claude-{name}-4.8")],
         }),
@@ -5180,6 +5277,524 @@ async fn an_agy_session_is_launched_with_the_line_agy_takes() {
             .is_some_and(|excluded| excluded.split(' ').any(|line| line == ".gemini/")),
         "and `.gemini/` is excluded from git in the Worktree by the time agy starts: {said:?}"
     );
+}
+
+/// A session on a harness a plugin declares is launched with the line its
+/// manifest writes, each placeholder filled: the model under `--model`, the
+/// Brief as the positional, the session id Verkstead named under
+/// `--session-id`, and the tail with the Worktree and the file the session-only
+/// settings were written to.
+///
+/// **And its `~/.stub` is a root built out of the manifest's account** — the
+/// memory store joined, and the configuration the component's
+/// `write-configuration` answered: the account's own `settings.json` handed
+/// back with the account's own MCP server taken out before the export saw it,
+/// and the server the Conversation attached written into `servers.json`. What
+/// the manifest says in `environment` and `excluded` is said too. **And the
+/// account's second path**, a file, is joined at `~/.stub.json`.
+#[tokio::test]
+async fn a_plugin_harness_session_is_launched_with_its_declared_line_and_root() {
+    let fixture = grilling_however_started_serving(
+        tempfile::tempdir().unwrap(),
+        r#"
+        printf 'where=%s\n' "$(pwd)"
+        printf 'root=%s\n' "$(ls -A "$HOME/.stub" | tr '\n' ' ')"
+        printf 'servers=%s\n' "$(cat "$HOME/.stub/servers.json")"
+        printf 'settings=%s\n' "$(tr -d '\n ' < "$HOME/.stub/settings.json")"
+        printf 'beside=%s\n' "$(cat "$HOME/.stub.json")"
+        printf 'says=%s\n' "$STUB_HARNESS_SAYS"
+        printf 'excluded=%s\n' "$(cat "$(git rev-parse --path-format=absolute --git-path info/exclude)" | tr '\n' ' ')"
+        for arg in "$0" "$@"; do printf 'arg=%s\n' "$arg" | tr -d '\n'; printf '\n'; done
+        set -- "$0" "$@"
+        while [ $# -gt 1 ]; do
+            if [ "$1" = --settings ]; then printf 'session-settings=%s\n' "$(cat "$2")"; fi
+            shift
+        done
+        "#,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::EverythingOnAPlugin(StubHarness::Silent),
+        Origin::None,
+        Seeded::Nothing,
+        None,
+        &[("tracker", "http://127.0.0.1:9/mcp")],
+    )
+    .await;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains(&format!("arg=--model\narg={CODEX_GRILLING_MODEL}\n")),
+        "the model under the flag the manifest names: {said:?}"
+    );
+    assert!(
+        said.lines()
+            .skip_while(|line| *line != format!("arg={CODEX_GRILLING_MODEL}"))
+            .nth(1)
+            .is_some_and(|prompt| prompt.contains("The API has none.")),
+        "and the Brief, as the positional after it: {said:?}"
+    );
+    assert!(
+        said.lines()
+            .skip_while(|line| *line != "arg=--session-id")
+            .nth(1)
+            .is_some_and(|line| line.len() > "arg=".len()),
+        "and the session id it was named, under `--session-id`: {said:?}"
+    );
+
+    let where_it_ran = said
+        .lines()
+        .find_map(|line| line.strip_prefix("where="))
+        .expect("the session says where it ran");
+    assert!(
+        said.contains(&format!("arg=--yes\narg=--worktree\narg={where_it_ran}\n")),
+        "and the tail, with the Worktree it runs in filled in: {said:?}"
+    );
+    assert!(
+        said.contains("session-settings={\"quiet\":true}\n"),
+        "and the session-only settings, written to the file `{{settings}}` names: {said:?}"
+    );
+
+    let root = said
+        .lines()
+        .find_map(|line| line.strip_prefix("root="))
+        .expect("the session lists its root");
+    for held in [
+        "memory",
+        "settings.json",
+        "servers.json",
+        "verkstead-settings.json",
+    ] {
+        assert!(
+            root.split(' ').any(|entry| entry == held),
+            "its `~/.stub` holds {held}: {said:?}"
+        );
+    }
+
+    let servers = said
+        .lines()
+        .find_map(|line| line.strip_prefix("servers="))
+        .expect("the session reads its servers");
+    let servers: serde_json::Value = serde_json::from_str(servers).unwrap();
+    assert_eq!(
+        servers["tracker"]["url"], "http://127.0.0.1:9/mcp",
+        "the attached server is in what write-configuration wrote: {said:?}"
+    );
+
+    let settings = said
+        .lines()
+        .find_map(|line| line.strip_prefix("settings="))
+        .expect("the session reads its settings");
+    assert!(
+        settings.contains("\"theme\":\"dark\""),
+        "the account's own settings are handed to the export: {said:?}"
+    );
+    assert!(
+        !settings.contains("the-accounts-own") && !said.contains("the-accounts-own"),
+        "and the account's own server never reached it: {said:?}"
+    );
+    assert!(
+        said.contains("beside={\"beside\":true}\n"),
+        "the account's path after its directory is given too: {said:?}"
+    );
+
+    assert!(
+        said.contains(&format!("says={}\n", stub_harness::SAYS.1)),
+        "the environment the manifest declares: {said:?}"
+    );
+    assert!(
+        said.lines()
+            .find_map(|line| line.strip_prefix("excluded="))
+            .is_some_and(|excluded| excluded.split(' ').any(|line| line == ".stub-work/")),
+        "and what it writes in the Worktree kept out of git: {said:?}"
+    );
+}
+
+/// A backlog worked by sessions of a plugin harness that idles by its
+/// signature is worked to the end on that signature going — the manifest's own
+/// wording, which no built-in's is.
+///
+/// **And the silence each leaves mid-turn ends nothing**: it is longer than
+/// the rescue's grace, and the signature stands through it, so a harness judged
+/// by its silence instead would have been typed into.
+#[tokio::test]
+async fn plugin_harness_sessions_are_ended_on_the_signature_their_manifest_declares() {
+    let fixture = grilling_on_a_plugin(
+        StubHarness::Drawing,
+        &a_backlog_at_work(
+            CODEX_GRILLING_MODEL,
+            stub_harness::AT_WORK,
+            stub_harness::AT_ITS_PROMPT,
+            true,
+        ),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: {:?}",
+        notices(&view),
+    );
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "and nothing was typed into any of them while their signature stood",
+    );
+}
+
+/// **A session already running on a plugin's harness finishes when the plugin
+/// is disabled** (Set 1764, Q20): unticking takes the harness off every picker,
+/// and the session it is running goes on to its own end with nothing cut
+/// short — the harness stays standing for whatever is still holding it.
+#[tokio::test]
+async fn a_session_on_a_plugin_harness_finishes_after_the_plugin_is_disabled() {
+    let spill = tempfile::tempdir().unwrap();
+    let go = spill.path().join("go");
+    let harness = StubHarness::Silent;
+
+    let fixture = grilling_spilling_on_a_plugin(
+        spill,
+        harness,
+        &format!(
+            "while [ ! -e '{go}' ]; do printf '.'; sleep 0.1; done\n\
+             printf '\\nfinished with its plugin disabled\\n'\n",
+            go = go.display(),
+        ),
+        PULL_REQUEST,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.running).map(|o| o.id))
+        .await;
+
+    let view: verkstead_render::PluginsView = post(
+        &fixture.app,
+        &format!("/api/ui/plugins/{}/enabled", harness.uuid()),
+        &serde_json::json!({ "enabled": false }),
+    )
+    .await;
+    assert!(
+        view.installed
+            .iter()
+            .any(|row| row.uuid == harness.uuid() && !row.enabled),
+        "the plugin is disabled under the running session",
+    );
+
+    std::fs::write(&go, "").unwrap();
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let said = fixture.capture(event).await;
+    assert!(
+        said.contains("finished with its plugin disabled"),
+        "the session ran to its own end: {said:?}",
+    );
+}
+
+/// And one whose second manifest says it idles by silence is worked to the
+/// end on its silence, drawing nothing at all.
+#[tokio::test]
+async fn plugin_harness_sessions_declared_silent_are_ended_on_their_silence() {
+    let fixture = grilling_on_a_plugin(StubHarness::Silent, A_BACKLOG_OF_ONE).await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: {:?}",
+        notices(&view),
+    );
+}
+
+/// An ask on a plugin harness whose manifest says `store-and-nudge` comes back
+/// stored, the session that sent it is held open rather than prodded, and the
+/// Response is typed in for it to fetch — as on Codex.
+#[tokio::test]
+async fn an_ask_on_a_store_and_nudge_plugin_harness_is_stored_and_holds_its_session_open() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling_on_a_plugin(
+        spill,
+        StubHarness::Drawing,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX_AND_IDLE),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_asking(&fixture, &reviews).await;
+
+    let set = fixture.ask_stored(REVIEW).await;
+
+    tokio::time::sleep(BRISKLY.proposing * 4).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        outputs(&view).last().is_some_and(|output| output.running),
+        "the session is still there to be nudged: {:?}",
+        outputs(&view).last(),
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "nor was it prodded: {:?}",
+        notices(&view),
+    );
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 2 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the answers were in and the session that read them was never ended",
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: {:?}",
+        notices(&view),
+    );
+}
+
+/// And one whose manifest says `blocking` holds its ask open: the session
+/// waiting on it is neither ended nor prodded, however long the human takes.
+#[tokio::test]
+async fn a_blocking_plugin_harness_session_holding_an_ask_is_neither_ended_nor_prodded() {
+    let fixture = grilling_on_a_plugin(
+        StubHarness::DrawingBlocking,
+        &a_step_that_holds_an_ask(
+            CODEX_GRILLING_MODEL,
+            stub_harness::AT_WORK,
+            stub_harness::AT_ITS_PROMPT,
+        ),
+    )
+    .await;
+
+    picked(&fixture, "task-list").await;
+
+    fixture
+        .until(|view| {
+            let outputs = outputs(view);
+            (outputs.len() >= 2 && outputs.last().is_some_and(|output| output.running))
+                .then_some(())
+        })
+        .await;
+
+    let set = fixture.ask(A_STEPS_QUESTION).await;
+    std::fs::write(handoff_directory(&fixture).join("hold"), "").unwrap();
+
+    until_written(&handoff_directory(&fixture).join("holding")).await;
+
+    tokio::time::sleep(BRISKLY.long_stop + BRISKLY.proposing * 2).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        outputs(&view).last().is_some_and(|output| output.running),
+        "the session is still there to read what they say: {:?}",
+        outputs(&view).last(),
+    );
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "and nothing was typed into it",
+    );
+    assert!(notices(&view).is_empty(), "{:?}", notices(&view));
+
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+}
+
+/// What a plugin harness's stub writes before a record's first line: the
+/// session id it was named, read off its line, and the record it keeps under
+/// it — in the account's `memory/`, where its `parse-transcript` looks.
+const A_STUB_RECORD: &str = r#"
+name=
+while [ $# -gt 0 ]; do
+    if [ "$1" = --session-id ]; then name=$2; fi
+    shift
+done
+log=$HOME/.stub/memory/$name.jsonl
+"#;
+
+/// A plugin harness's Transcript is what its component's `parse-transcript`
+/// answered: drawn while the session runs, and the rest of it once it ends.
+///
+/// **And what its component marks unknown folds away under its own name**, as
+/// a backend's line of an unknown kind always has (ADR-0006).
+#[tokio::test]
+async fn a_plugin_harness_s_transcript_is_drawn_out_of_what_its_component_read() {
+    let fixture = grilling_on_a_plugin(
+        StubHarness::Silent,
+        &format!(
+            r#"{A_STUB_RECORD}
+printf '%s\n' '{{"said":"put","markdown":"Rate limiting"}}' > "$log"
+printf '%s\n' '{{"said":"agent","markdown":"Reading the **brief**."}}' >> "$log"
+printf '%s\n' '{{"call":"shell","id":"c1","about":"List the tasks","input":"ls .tasks"}}' >> "$log"
+printf '%s\n' '{{"unknown":"rewind","line":"to 3"}}' >> "$log"
+while [ ! -f /tmp/verkstead/go ]; do sleep 0.1; done
+printf '%s\n' '{{"result":"c1","failed":false,"text":"01-count.md"}}' >> "$log"
+"#
+        ),
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    let live = fixture.spoken(event, 3).await;
+
+    assert!(
+        output(&fixture.view().await).is_some_and(|output| output.running),
+        "drawn while the session was still running"
+    );
+    assert_eq!(
+        live.turns,
+        vec![
+            Turn::Put(verkstead_render::Put {
+                id: 1,
+                html: "<p>Rate limiting</p>\n".to_owned(),
+            }),
+            Turn::Prose(verkstead_render::Prose {
+                id: 2,
+                html: "<p>Reading the <strong>brief</strong>.</p>\n".to_owned(),
+            }),
+            Turn::ToolUse(verkstead_render::ToolUse {
+                id: 3,
+                name: "shell".to_owned(),
+                call: "c1".to_owned(),
+                about: "List the tasks".to_owned(),
+                input: "ls .tasks".to_owned(),
+            }),
+        ],
+    );
+    assert_eq!(
+        live.bookkeeping
+            .iter()
+            .map(|kept| (kept.kind.as_str(), kept.line.as_str()))
+            .collect::<Vec<_>>(),
+        [("rewind", "to 3")],
+        "the entry its component marked unknown folds away under the kind it gave",
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("go"), "").unwrap();
+    fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|_| ()))
+        .await;
+
+    let ended = fixture.spoken(event, 4).await;
+    assert_eq!(
+        ended.turns.last(),
+        Some(&Turn::ToolResult(verkstead_render::ToolResult {
+            id: 4,
+            call: "c1".to_owned(),
+            failed: false,
+            text: "01-count.md".to_owned(),
+        })),
+        "and what it wrote last is drawn once it ended: {:?}",
+        ended.turns,
+    );
+    assert_eq!(ended.unreadable, None);
+}
+
+/// A plugin harness whose component stops while it reads the record leaves
+/// the Transcript empty, saying why — and the session runs on.
+#[tokio::test]
+async fn a_plugin_harness_whose_component_stops_reading_leaves_its_transcript_empty() {
+    let fixture = grilling_on_a_plugin(
+        StubHarness::Silent,
+        &format!(
+            r#"{A_STUB_RECORD}
+printf '%s\n' '{{"said":"agent","markdown":"Reading the brief."}}' > "$log"
+printf '%s\n' '{{"trap":true}}' >> "$log"
+printf 'Reading the brief.\n'
+sleep 300
+"#
+        ),
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+
+    let deadline = Instant::now() + *PATIENCE;
+    let view = loop {
+        let view: TranscriptView = get(
+            &fixture.app,
+            &format!("/api/ui/conversations/{}/transcript/{event}", fixture.id),
+        )
+        .await;
+        if view.unreadable.is_some() {
+            break view;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the Transcript never said it couldn't be read: {view:?}"
+        );
+        pause(Duration::from_millis(25)).await;
+    };
+
+    assert!(
+        view.turns.is_empty() && view.bookkeeping.is_empty(),
+        "nothing of what it stopped reading is drawn: {view:?}"
+    );
+    assert!(
+        view.unreadable
+            .as_deref()
+            .is_some_and(|why| why.contains("couldn't read it")),
+        "and it says so: {view:?}"
+    );
+
+    tokio::time::sleep(BRISKLY.proposing * 2).await;
+    let view = fixture.view().await;
+    let printed = output(&view).expect("the session is on the Timeline");
+    assert!(printed.running, "the session itself runs on");
+    assert!(
+        fixture.capture(event).await.contains("Reading the brief."),
+        "and its Capture is written as ever"
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
 /// A Codex session's log is found rather than named: codex takes no session id,
@@ -18019,7 +18634,7 @@ async fn an_account_that_signs_out_stops_the_run_with_a_log_in_press() {
     assert_eq!(
         notice.log_in,
         Some(verkstead_render::NoticeLogIn {
-            agent_type: verkstead_render::AgentType::Claude,
+            agent_type: verkstead_render::AgentType::CLAUDE,
             profile: implementation.id,
             name: Some("implementation".to_owned()),
         }),

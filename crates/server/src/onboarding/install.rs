@@ -78,32 +78,34 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use base64::Engine;
-use verkstead_render::{Dependency, Distro, InstallState, RunPhase, RunView};
+use verkstead_render::{Distro, InstallState, RunPhase, RunView};
 
-use super::{Machine, SHELL};
+use super::{Machine, Row, SHELL};
 use crate::annex::flake::{self, Binary};
 use crate::annex::{Backend, Inside, Keeping, Probed, image, pinning};
 use crate::platform::Platform;
 use crate::remote::{Elevate, Raised};
 use crate::settings::Settings;
 
-/// Every row of the step, in the order the wizard draws them.
+/// Every row of the step a run knows by name, in the order the wizard draws
+/// them — a plugin's harness, which the wizard draws after the built-ins, is
+/// placed there by [`place`].
 ///
 /// Which is the order a run works through them in and the order the packages
 /// are named in. The same order [`Machine::rows`] probes in, held to it by
 /// `the_rows_are_worked_in_the_order_the_wizard_draws_them`: a run installing in
 /// one order under a page listing in another would be two accounts of one
 /// press.
-const ROWS: &[Dependency] = &[
-    Dependency::Sandbox,
-    Dependency::Git,
-    Dependency::Claude,
-    Dependency::Codex,
-    Dependency::Grok,
-    Dependency::OpenCode,
-    Dependency::Agy,
-    Dependency::Gh,
-    Dependency::Wsl,
+const ROWS: &[Row] = &[
+    Row::Sandbox,
+    Row::Git,
+    Row::CLAUDE,
+    Row::CODEX,
+    Row::GROK,
+    Row::OPENCODE,
+    Row::AGY,
+    Row::Gh,
+    Row::Wsl,
 ];
 
 /// The program an npm harness is installed with, and the name whose absence
@@ -455,7 +457,7 @@ struct Run {
 #[derive(Debug)]
 struct Going {
     /// Every ticked row and where it has got to, in [`ROWS`] order.
-    rows: Vec<(Dependency, Progress)>,
+    rows: Vec<(Row, Progress)>,
 
     phase: RunPhase,
     status: String,
@@ -500,7 +502,7 @@ struct Unit {
 
     /// The rows it installs: what it comes to lands on every one of them, and
     /// on nothing else.
-    covers: Vec<Dependency>,
+    covers: Vec<Row>,
 
     /// And what the status line says while it is running.
     doing: String,
@@ -690,7 +692,7 @@ struct Plan {
     /// Each with the sentence that goes under it on the hint screen. They fail
     /// before anything is raised: a machine Verkstead has no command for is one
     /// to say so about rather than one to put a password dialog on.
-    beyond: Vec<(Dependency, String)>,
+    beyond: Vec<(Row, String)>,
 
     /// And whose shell a unit's line is one of, which is the one thing about
     /// running it that is not written on the unit: `/bin/sh` on the two Unixes
@@ -721,7 +723,7 @@ impl Installer {
         &self,
         machine: &Machine,
         settings: &Settings,
-        ticked: &[Dependency],
+        ticked: &[Row],
         keeping: Option<Keeping>,
         linking: Option<Linking>,
     ) -> Result<(), Refusal> {
@@ -794,7 +796,7 @@ impl Installer {
     /// The run as the wizard reads it, and what each row it holds is doing.
     ///
     /// Nothing where no press has been made in this server's life.
-    pub(crate) fn reading(&self) -> Option<(RunView, Vec<(Dependency, InstallState)>)> {
+    pub(crate) fn reading(&self) -> Option<(RunView, Vec<(Row, InstallState)>)> {
         let held = self.run.lock().expect("the install run's lock");
 
         held.as_ref().map(|run| run.reading())
@@ -804,7 +806,7 @@ impl Installer {
 impl Run {
     /// A run of `plan`, with every row it cannot install already failed.
     fn of(plan: &Plan, hostname: &str) -> Run {
-        let mut rows: Vec<(Dependency, Progress)> = plan
+        let mut rows: Vec<(Row, Progress)> = plan
             .units
             .iter()
             .flat_map(|unit| unit.covers.iter().copied())
@@ -889,7 +891,7 @@ impl Run {
     }
 
     /// What the wizard draws of it.
-    fn reading(&self) -> (RunView, Vec<(Dependency, InstallState)>) {
+    fn reading(&self) -> (RunView, Vec<(Row, InstallState)>) {
         let going = self.held();
 
         let done = going
@@ -936,7 +938,7 @@ impl AsTheUser {
 
 impl Going {
     /// Every row in `covers` reads `progress`.
-    fn set(&mut self, covers: &[Dependency], progress: Progress) {
+    fn set(&mut self, covers: &[Row], progress: Progress) {
         for (dependency, held) in self.rows.iter_mut() {
             if covers.contains(dependency) {
                 *held = progress.clone();
@@ -1049,6 +1051,104 @@ fn work(
     }
 
     run.over();
+}
+
+/// A plugin's install `commands` as one line of `platform`'s shell that runs
+/// each as a step of its own and stops at the first that fails.
+///
+/// **A step apiece rather than the lines joined.** A line is the plugin
+/// author's and may end in a comment, or be several lines itself: joined with
+/// `&&`, a `# comment` swallows every command after it and the run reads as
+/// installed. And the shell Windows raises is Windows PowerShell, which has no
+/// `&&` at all. So each command stands on lines of its own, closed before the
+/// check on it begins. **One unit even so**, so that Windows asks for the
+/// elevation once rather than once a command.
+fn stepped(platform: Platform, commands: &[String]) -> String {
+    commands
+        .iter()
+        .map(|command| match platform {
+            // A subshell apiece, so nothing one step sets reaches the next, as
+            // nothing would between units.
+            //
+            // **And under `set -e` inside it**, so that a command running over
+            // several lines fails where any of them does rather than where its
+            // last one does. Not `|| exit` on the subshell, which would turn
+            // `set -e` off inside it: the shell ignores `-e` throughout
+            // anything whose status a `||` is testing.
+            Platform::Linux | Platform::MacOs => format!(
+                "(\nset -e\n{command}\n)\nstep=$?\nif [ \"$step\" -ne 0 ]; then exit \"$step\"; fi"
+            ),
+            // A cmdlet that fails throws, `$ErrorActionPreference` being
+            // `Stop` — see [`powershell`] — and a program that fails says so
+            // in `$LASTEXITCODE`, which is asked after every line of it that
+            // ends a statement: see [`each_line_checked`].
+            Platform::Windows => format!(
+                "& {{\n{}\n}}\nif ($LASTEXITCODE) {{ exit $LASTEXITCODE }}",
+                each_line_checked(command)
+            ),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `command`, a PowerShell command of a plugin's that may run over several
+/// lines, with `$LASTEXITCODE` asked after each line that ends a statement.
+///
+/// **Windows PowerShell 5.1 does not stop at a program that fails**, whatever
+/// `$ErrorActionPreference` says, and `$LASTEXITCODE` holds only the last
+/// program's: an `npm` that failed followed by one that did not would read as
+/// a step that passed. So the check goes after every line it can go after —
+/// one not inside a here-string, not inside a bracket left open, and not ending
+/// in what carries the statement on to the next line. A line the check cannot
+/// follow is checked at the next line it can.
+fn each_line_checked(command: &str) -> String {
+    const CHECK: &str = "if ($LASTEXITCODE) { exit $LASTEXITCODE }";
+
+    let mut depth: i64 = 0;
+    let mut here: Option<char> = None;
+    let mut out: Vec<String> = Vec::new();
+
+    for line in command.lines() {
+        out.push(line.to_owned());
+
+        let trimmed = line.trim();
+        if let Some(quote) = here {
+            if trimmed.starts_with(&format!("{quote}@")) {
+                here = None;
+            } else {
+                continue;
+            }
+        }
+        if trimmed.ends_with("@\"") || trimmed.ends_with("@'") {
+            here = trimmed.chars().last();
+            continue;
+        }
+
+        // The line as code: what is quoted counted as nothing, and nothing
+        // after a comment begins.
+        let mut code = String::new();
+        let mut quote: Option<char> = None;
+        for c in line.chars() {
+            match quote {
+                Some(open) if c == open => quote = None,
+                Some(_) => {}
+                None if c == '"' || c == '\'' => quote = Some(c),
+                None if c == '#' => break,
+                None => code.push(c),
+            }
+        }
+        let opened = code.chars().filter(|c| matches!(c, '{' | '(')).count();
+        let closed = code.chars().filter(|c| matches!(c, '}' | ')')).count();
+        depth += opened as i64 - closed as i64;
+
+        let code = code.trim_end();
+        let carried = code.ends_with(['|', '`', ',', '=']);
+        if depth <= 0 && !carried && !code.is_empty() {
+            out.push(CHECK.to_owned());
+        }
+    }
+
+    out.join("\n")
 }
 
 /// Put `unit` behind the platform's password dialog, moving the status line on
@@ -1389,17 +1489,19 @@ fn watch(run: &Arc<Run>, marker: PathBuf, doing: String) -> (Arc<AtomicBool>, Jo
 /// here would be a new Distro quietly handed the Linux packager's *nothing*,
 /// which is a hint screen saying there is no command for a machine there is one
 /// for.
-fn plan(machine: &Machine, ticked: &[Dependency]) -> Plan {
+fn plan(machine: &Machine, ticked: &[Row]) -> Plan {
     let distro = machine.distro();
 
     // The WSL row is the box's rather than any package manager's, so it is
     // worked here and none of the arms below ever sees it — see [`annexing`].
-    let wsl = ticked.contains(&Dependency::Wsl);
-    let rows: Vec<Dependency> = ticked
+    // And a plugin's harness is its manifest's, so it is worked here too — see
+    // [`plugging`].
+    let wsl = ticked.contains(&Row::Wsl);
+    let (plugged, rows): (Vec<Row>, Vec<Row>) = ticked
         .iter()
         .copied()
-        .filter(|row| *row != Dependency::Wsl)
-        .collect();
+        .filter(|row| *row != Row::Wsl)
+        .partition(|row| row.plugged().is_some());
     let ticked = rows.as_slice();
 
     let mut plan = match distro {
@@ -1418,11 +1520,65 @@ fn plan(machine: &Machine, ticked: &[Dependency]) -> Plan {
         },
     };
 
+    plugging(machine, &plugged, &mut plan);
+
     if wsl {
         annexing(machine, &mut plan);
     }
 
     plan
+}
+
+/// What each ticked harness a plugin declares adds to `plan`, after the
+/// package manager's and the vendors' units: the commands its manifest
+/// declares for this platform, in one unit of a step apiece (Set 1764, Q19)
+/// — see [`stepped`].
+///
+/// **As the user**, the way a vendor's installer runs: what a manifest says to
+/// run is that plugin author's, and nothing about it asks for a privilege — a
+/// command that wants one says `sudo` itself. **And raised on Windows**, where
+/// every unit is, its lines being PowerShell's.
+///
+/// Where the install lands is the manifest's business and is not written to
+/// `session_path`: the row ticks when a session's `PATH` finds the binary, as
+/// it does for a program installed by hand. A harness that declares no
+/// command is a row for the hint screen, with its instructions.
+fn plugging(machine: &Machine, plugged: &[Row], plan: &mut Plan) {
+    for row in plugged {
+        let install = row
+            .plugged()
+            .and_then(crate::harness::of)
+            .map(|harness| (harness.named(), harness.install()));
+
+        let Some((name, Some(install))) = install
+            .filter(|(_, install)| install.is_some_and(|install| !install.commands.is_empty()))
+        else {
+            plan.beyond.push((*row, no_commands(*row)));
+            continue;
+        };
+
+        plan.units.push(Unit {
+            line: stepped(machine.platform, install.commands),
+            covers: vec![*row],
+            doing: format!("Installing {name}…"),
+            how: match machine.platform {
+                Platform::Windows => How::Raised,
+                Platform::Linux | Platform::MacOs => How::AsTheUser,
+            },
+            lands: None,
+            chain: None,
+            regrants: None,
+            making: None,
+        });
+    }
+}
+
+/// What goes under a plugin harness's row that declares nothing to run here.
+fn no_commands(row: Row) -> String {
+    format!(
+        "{} has no install command for this machine. Install it by hand.",
+        named(row)
+    )
 }
 
 /// What a ticked WSL row adds to `plan`, after every other row: what the probe
@@ -1451,7 +1607,7 @@ fn plan(machine: &Machine, ticked: &[Dependency]) -> Plan {
 /// up where it was.
 fn annexing(machine: &Machine, plan: &mut Plan) {
     let Some(annex) = machine.annex() else {
-        plan.beyond.push((Dependency::Wsl, NO_ANNEX.to_owned()));
+        plan.beyond.push((Row::Wsl, NO_ANNEX.to_owned()));
         return;
     };
 
@@ -1463,7 +1619,7 @@ fn annexing(machine: &Machine, plan: &mut Plan) {
                 .extend(steps.iter().enumerate().map(|(number, step)| Unit {
                     line: step.line.to_owned(),
                     covers: if number + 1 == steps.len() {
-                        vec![Dependency::Wsl]
+                        vec![Row::Wsl]
                     } else {
                         Vec::new()
                     },
@@ -1502,7 +1658,7 @@ fn annexing(machine: &Machine, plan: &mut Plan) {
                 .extend(STEPS.iter().map(|(making, how, doing)| Unit {
                     line: String::new(),
                     covers: match making {
-                        Making::Link => vec![Dependency::Wsl],
+                        Making::Link => vec![Row::Wsl],
                         _ => Vec::new(),
                     },
                     doing: (*doing).to_owned(),
@@ -1514,9 +1670,7 @@ fn annexing(machine: &Machine, plan: &mut Plan) {
                 }));
         }
 
-        Probed::VirtualizationOff => plan
-            .beyond
-            .push((Dependency::Wsl, VIRTUALIZATION_OFF.to_owned())),
+        Probed::VirtualizationOff => plan.beyond.push((Row::Wsl, VIRTUALIZATION_OFF.to_owned())),
 
         Probed::NeedsRestart | Probed::Present { .. } => {}
     }
@@ -1524,12 +1678,12 @@ fn annexing(machine: &Machine, plan: &mut Plan) {
 
 /// Every ticked row on a machine whose archive carries what it is asking for:
 /// the one raised command, and the vendors' own installers after it.
-fn packages(machine: &Machine, ticked: &[Dependency], packager: Packager) -> Plan {
+fn packages(machine: &Machine, ticked: &[Row], packager: Packager) -> Plan {
     let mut packages: Vec<&str> = Vec::new();
     let mut from_npm: Vec<&str> = Vec::new();
-    let mut covers: Vec<Dependency> = Vec::new();
-    let mut vendors: Vec<(Dependency, Vendor, PathBuf)> = Vec::new();
-    let mut beyond: Vec<(Dependency, String)> = Vec::new();
+    let mut covers: Vec<Row> = Vec::new();
+    let mut vendors: Vec<(Row, Vendor, PathBuf)> = Vec::new();
+    let mut beyond: Vec<(Row, String)> = Vec::new();
 
     for row in ticked {
         match installs(packager, *row) {
@@ -1630,7 +1784,7 @@ fn packages(machine: &Machine, ticked: &[Dependency], packager: Packager) -> Pla
 /// The same unit on every platform that has one: what a vendor's installer is
 /// is a line to run under this user's home, and neither the archive beside it
 /// nor the Homebrew beside it has anything to say about that.
-fn vendors_own(row: Dependency, vendor: Vendor, lands: PathBuf) -> Unit {
+fn vendors_own(row: Row, vendor: Vendor, lands: PathBuf) -> Unit {
     Unit {
         line: vendor.line.to_owned(),
         covers: vec![row],
@@ -1665,11 +1819,11 @@ fn vendors_own(row: Dependency, vendor: Vendor, lands: PathBuf) -> Unit {
 /// **The sandbox row is neither.** `sandbox-exec` is Apple's own and on every
 /// Mac, so the row is ticked by the probe rather than by anybody — and a press
 /// that named it anyway has nothing to install and nothing to say about it.
-fn homebrew(machine: &Machine, ticked: &[Dependency]) -> Plan {
+fn homebrew(machine: &Machine, ticked: &[Row]) -> Plan {
     let getting = getting(machine, ticked);
 
     let mut units: Vec<Unit> = Vec::new();
-    let mut beyond: Vec<(Dependency, String)> = Vec::new();
+    let mut beyond: Vec<(Row, String)> = Vec::new();
 
     for row in ticked {
         match on_a_mac(*row) {
@@ -1720,7 +1874,7 @@ enum Getting {
 ///
 /// Asked once per press rather than per row: what it comes to is a `PATH` walk
 /// for `brew`, and seven walks for one answer would be six too many.
-fn getting(machine: &Machine, ticked: &[Dependency]) -> Getting {
+fn getting(machine: &Machine, ticked: &[Row]) -> Getting {
     // A press with no `brew` line in it wants no Homebrew: a ticked Grok Build
     // by itself is xAI's installer and nothing else, and a Mac that has never
     // heard of Homebrew is not a machine to install one on over it.
@@ -1781,7 +1935,7 @@ struct Brew {
 
 impl Brew {
     /// The unit that installs it for `row`.
-    fn unit(&self, row: Dependency) -> Unit {
+    fn unit(&self, row: Row) -> Unit {
         Unit {
             line: format!(
                 "{BREW} install {}{}",
@@ -1822,26 +1976,26 @@ enum OnAMac {
 }
 
 /// Which of the three one row is.
-fn on_a_mac(dependency: Dependency) -> OnAMac {
+fn on_a_mac(dependency: Row) -> OnAMac {
     match dependency {
-        Dependency::Sandbox => OnAMac::Nothing,
+        Row::Sandbox => OnAMac::Nothing,
 
-        Dependency::Git => OnAMac::Brew(Brew {
+        Row::Git => OnAMac::Brew(Brew {
             name: "git",
             cask: false,
         }),
-        Dependency::OpenCode => OnAMac::Brew(Brew {
+        Row::OPENCODE => OnAMac::Brew(Brew {
             name: "opencode",
             cask: false,
         }),
-        Dependency::Gh => OnAMac::Brew(Brew {
+        Row::Gh => OnAMac::Brew(Brew {
             name: "gh",
             cask: false,
         }),
 
         // Which ships as an application rather than as a formula, so it is a
         // cask rather than a plain `brew install`.
-        Dependency::Codex => OnAMac::Brew(Brew {
+        Row::CODEX => OnAMac::Brew(Brew {
             name: "codex",
             cask: true,
         }),
@@ -1851,11 +2005,12 @@ fn on_a_mac(dependency: Dependency) -> OnAMac {
         // as `~/.local/bin` was somewhere a Mac session could not look; the
         // Mac floor carries it now, so what a tick runs is the install that
         // stays current — see [`CLAUDE`], and ADR-0016's *Macs*.
-        Dependency::Claude => OnAMac::Vendor(CLAUDE),
-        Dependency::Grok => OnAMac::Vendor(GROK),
-        Dependency::Agy => OnAMac::Vendor(AGY),
+        Row::CLAUDE => OnAMac::Vendor(CLAUDE),
+        Row::GROK => OnAMac::Vendor(GROK),
+        Row::AGY => OnAMac::Vendor(AGY),
 
-        Dependency::Wsl => unreachable!("the WSL row is worked by `annexing`"),
+        Row::Wsl => unreachable!("the WSL row is worked by `annexing`"),
+        Row::Harness(_) => unreachable!("a plugin's harness is worked by `plugging`"),
     }
 }
 
@@ -1887,9 +2042,9 @@ fn on_a_mac(dependency: Dependency) -> OnAMac {
 ///
 /// **The sandbox row is neither**, as it is on the other Mac: `sandbox-exec` is
 /// Apple's own and the probe ticks it.
-fn intel(machine: &Machine, ticked: &[Dependency]) -> Plan {
+fn intel(machine: &Machine, ticked: &[Row]) -> Plan {
     let mut units: Vec<Unit> = Vec::new();
-    let mut beyond: Vec<(Dependency, String)> = Vec::new();
+    let mut beyond: Vec<(Row, String)> = Vec::new();
 
     for row in ticked {
         match on_an_intel_mac(*row) {
@@ -1939,20 +2094,21 @@ enum OnAnIntelMac {
 }
 
 /// Which of the four one row is.
-fn on_an_intel_mac(dependency: Dependency) -> OnAnIntelMac {
+fn on_an_intel_mac(dependency: Row) -> OnAnIntelMac {
     match dependency {
-        Dependency::Sandbox => OnAnIntelMac::Nothing,
+        Row::Sandbox => OnAnIntelMac::Nothing,
 
-        Dependency::Claude => OnAnIntelMac::Vendor(CLAUDE),
-        Dependency::Grok => OnAnIntelMac::Vendor(GROK),
-        Dependency::Agy => OnAnIntelMac::Vendor(AGY),
-        Dependency::OpenCode => OnAnIntelMac::Vendor(OPENCODE),
-        Dependency::Gh => OnAnIntelMac::Release,
+        Row::CLAUDE => OnAnIntelMac::Vendor(CLAUDE),
+        Row::GROK => OnAnIntelMac::Vendor(GROK),
+        Row::AGY => OnAnIntelMac::Vendor(AGY),
+        Row::OPENCODE => OnAnIntelMac::Vendor(OPENCODE),
+        Row::Gh => OnAnIntelMac::Release,
 
-        Dependency::Git => OnAnIntelMac::Beyond(XCODE_TOOLS),
-        Dependency::Codex => OnAnIntelMac::Beyond(CODEX_ON_INTEL),
+        Row::Git => OnAnIntelMac::Beyond(XCODE_TOOLS),
+        Row::CODEX => OnAnIntelMac::Beyond(CODEX_ON_INTEL),
 
-        Dependency::Wsl => unreachable!("the WSL row is worked by `annexing`"),
+        Row::Wsl => unreachable!("the WSL row is worked by `annexing`"),
+        Row::Harness(_) => unreachable!("a plugin's harness is worked by `plugging`"),
     }
 }
 
@@ -1968,7 +2124,7 @@ fn on_an_intel_mac(dependency: Dependency) -> OnAnIntelMac {
 fn ghs_release(home: &Path) -> Unit {
     Unit {
         line: GH_RELEASE.to_owned(),
-        covers: vec![Dependency::Gh],
+        covers: vec![Row::Gh],
         doing: "Unpacking GitHub's release of gh…".to_owned(),
         how: How::AsTheUser,
         lands: Some(home.join(LOCAL_BIN)),
@@ -2003,9 +2159,9 @@ fn ghs_release(home: &Path) -> Unit {
 /// elevated verb — see [`the_account`]. A machine this server cannot name
 /// itself on, or one it was never told the Data Directory of, is a row for the
 /// hint screen with the line a human runs instead.
-fn windows(machine: &Machine, ticked: &[Dependency]) -> Plan {
+fn windows(machine: &Machine, ticked: &[Row]) -> Plan {
     let mut units: Vec<Unit> = Vec::new();
-    let mut beyond: Vec<(Dependency, String)> = Vec::new();
+    let mut beyond: Vec<(Row, String)> = Vec::new();
     let mut from_npm = false;
 
     for row in ticked {
@@ -2069,7 +2225,7 @@ fn windows(machine: &Machine, ticked: &[Dependency]) -> Plan {
 ///
 /// `covers` is empty for the one that installs node, which is a unit nobody's
 /// row is about.
-fn winget(covers: Vec<Dependency>, id: &str, chain: Option<Chain>) -> Unit {
+fn winget(covers: Vec<Row>, id: &str, chain: Option<Chain>) -> Unit {
     Unit {
         line: format!("{WINGET} {id} {UNATTENDED}"),
         covers,
@@ -2116,7 +2272,7 @@ fn the_account(machine: &Machine) -> Result<Unit, String> {
             said(&verkstead.to_string_lossy()),
             said(&data_dir.to_string_lossy()),
         ),
-        covers: vec![Dependency::Sandbox],
+        covers: vec![Row::Sandbox],
         doing: format!("Making the local account {account} sessions run as…"),
         how: How::Raised,
         lands: None,
@@ -2153,27 +2309,28 @@ enum OnWindows {
 /// front of it.** Claude Code is the native installer here as it is on a Linux
 /// — winget carries no Anthropic package — and the two npm harnesses are npm's
 /// for want of anything else that is really theirs.
-fn on_windows(dependency: Dependency) -> OnWindows {
+fn on_windows(dependency: Row) -> OnWindows {
     match dependency {
-        Dependency::Sandbox => OnWindows::Account,
+        Row::Sandbox => OnWindows::Account,
 
-        Dependency::Git => OnWindows::Winget("Git.Git"),
-        Dependency::Gh => OnWindows::Winget("GitHub.cli"),
+        Row::Git => OnWindows::Winget("Git.Git"),
+        Row::Gh => OnWindows::Winget("GitHub.cli"),
 
-        Dependency::Codex => OnWindows::FromNpm("@openai/codex"),
-        Dependency::OpenCode => OnWindows::FromNpm("opencode-ai"),
+        Row::CODEX => OnWindows::FromNpm("@openai/codex"),
+        Row::OPENCODE => OnWindows::FromNpm("opencode-ai"),
 
-        Dependency::Claude => OnWindows::Vendor(CLAUDE_ON_WINDOWS),
-        Dependency::Grok => OnWindows::Vendor(GROK_ON_WINDOWS),
-        Dependency::Agy => OnWindows::Vendor(AGY_ON_WINDOWS),
+        Row::CLAUDE => OnWindows::Vendor(CLAUDE_ON_WINDOWS),
+        Row::GROK => OnWindows::Vendor(GROK_ON_WINDOWS),
+        Row::AGY => OnWindows::Vendor(AGY_ON_WINDOWS),
 
-        Dependency::Wsl => unreachable!("the WSL row is worked by `annexing`"),
+        Row::Wsl => unreachable!("the WSL row is worked by `annexing`"),
+        Row::Harness(_) => unreachable!("a plugin's harness is worked by `plugging`"),
     }
 }
 
 /// A plan that installs nothing, every ticked row failed with the same
 /// sentence.
-fn nothing(machine: &Machine, ticked: &[Dependency], why: &str) -> Plan {
+fn nothing(machine: &Machine, ticked: &[Row], why: &str) -> Plan {
     Plan {
         units: Vec::new(),
         beyond: ticked
@@ -2245,22 +2402,23 @@ enum Installs {
 /// leads with it and why the two npm harnesses here are the other two. And the
 /// `grok-cli` in nixpkgs and the one on npm are other people's projects rather
 /// than xAI's grok, so neither is a package this could name.
-fn installs(packager: Packager, dependency: Dependency) -> Installs {
+fn installs(packager: Packager, dependency: Row) -> Installs {
     match dependency {
         // `bubblewrap`, `git`, `nodejs` and `npm` are the same word in all three
         // archives; the GitHub CLI is the one they disagree about.
-        Dependency::Sandbox => Installs::Package("bubblewrap"),
-        Dependency::Git => Installs::Package("git"),
-        Dependency::Gh => Installs::Package(packager.gh),
+        Row::Sandbox => Installs::Package("bubblewrap"),
+        Row::Git => Installs::Package("git"),
+        Row::Gh => Installs::Package(packager.gh),
 
-        Dependency::Codex => Installs::FromNpm("@openai/codex"),
-        Dependency::OpenCode => Installs::FromNpm("opencode-ai"),
+        Row::CODEX => Installs::FromNpm("@openai/codex"),
+        Row::OPENCODE => Installs::FromNpm("opencode-ai"),
 
-        Dependency::Claude => Installs::Vendor(CLAUDE),
-        Dependency::Grok => Installs::Vendor(GROK),
-        Dependency::Agy => Installs::Vendor(AGY),
+        Row::CLAUDE => Installs::Vendor(CLAUDE),
+        Row::GROK => Installs::Vendor(GROK),
+        Row::AGY => Installs::Vendor(AGY),
 
-        Dependency::Wsl => unreachable!("the WSL row is worked by `annexing`"),
+        Row::Wsl => unreachable!("the WSL row is worked by `annexing`"),
+        Row::Harness(_) => unreachable!("a plugin's harness is worked by `plugging`"),
     }
 }
 
@@ -2314,7 +2472,7 @@ fn no_command(distro: Distro) -> String {
 /// The vendors' installers all write under `$HOME`, so a server started
 /// with none — a unit file's environment with the variable unset — has nowhere
 /// to put what they install and nothing to write to `session_path` afterwards.
-fn no_home(dependency: Dependency) -> String {
+fn no_home(dependency: Row) -> String {
     format!(
         "{} installs under a home directory, and this server was started \
          without one.",
@@ -2323,17 +2481,21 @@ fn no_home(dependency: Dependency) -> String {
 }
 
 /// What a row is called in a sentence.
-fn named(dependency: Dependency) -> &'static str {
+fn named(dependency: Row) -> &'static str {
     match dependency {
-        Dependency::Sandbox => "bubblewrap",
-        Dependency::Git => "git",
-        Dependency::Claude => "Claude Code",
-        Dependency::Codex => "Codex",
-        Dependency::Grok => "Grok Build",
-        Dependency::OpenCode => "OpenCode",
-        Dependency::Agy => "The Antigravity CLI",
-        Dependency::Gh => "The GitHub CLI",
-        Dependency::Wsl => "WSL",
+        Row::Harness(agent_type) if agent_type.built_in().is_none() => {
+            crate::harness::of(agent_type).map_or("The harness", |harness| harness.named())
+        }
+        Row::Sandbox => "bubblewrap",
+        Row::Git => "git",
+        Row::CLAUDE => "Claude Code",
+        Row::CODEX => "Codex",
+        Row::GROK => "Grok Build",
+        Row::OPENCODE => "OpenCode",
+        Row::AGY => "The Antigravity CLI",
+        Row::Gh => "The GitHub CLI",
+        Row::Wsl => "WSL",
+        Row::Harness(_) => "The harness",
     }
 }
 
@@ -2423,18 +2585,38 @@ fn asking(hostname: &str) -> String {
 }
 
 /// `ticked` in the order the step draws its rows, each of them once.
-fn ordered(ticked: &[Dependency]) -> Vec<Dependency> {
-    ROWS.iter()
-        .copied()
-        .filter(|dependency| ticked.contains(dependency))
-        .collect()
+fn ordered(ticked: &[Row]) -> Vec<Row> {
+    let mut ordered: Vec<Row> = Vec::new();
+
+    for row in ticked {
+        if !ordered.contains(row) {
+            ordered.push(*row);
+        }
+    }
+
+    // Stable, so plugins' harnesses keep the order they were ticked in, which
+    // is the order the wizard draws them.
+    ordered.sort_by_key(|row| place(*row));
+    ordered
 }
 
-/// Where one row is in that order.
-fn place(dependency: Dependency) -> usize {
-    ROWS.iter()
-        .position(|row| *row == dependency)
-        .unwrap_or(ROWS.len())
+/// Where one row is in that order: a plugin's harness after the built-ins and
+/// before `gh`, which is where the wizard draws it.
+fn place(dependency: Row) -> usize {
+    let after_the_built_ins = ROWS
+        .iter()
+        .position(|row| *row == Row::Gh)
+        .unwrap_or(ROWS.len());
+
+    match dependency.plugged() {
+        Some(_) => after_the_built_ins,
+        None => ROWS
+            .iter()
+            .position(|row| *row == dependency)
+            .map_or(ROWS.len(), |place| {
+                place + usize::from(place >= after_the_built_ins)
+            }),
+    }
 }
 
 #[cfg(test)]
@@ -2445,10 +2627,153 @@ mod tests {
 
     use crate::platform::{Environment, Platform};
 
+    /// A plugin's commands run a step apiece: a comment ending one takes
+    /// nothing after it with it, and the first that fails stops the rest and
+    /// fails the line.
+    #[cfg(unix)]
+    #[test]
+    fn a_plugins_commands_run_a_step_apiece_and_stop_at_a_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let ran = |commands: &[&str]| {
+            let commands: Vec<String> = commands.iter().map(|line| (*line).to_owned()).collect();
+            std::process::Command::new(SHELL)
+                .arg("-c")
+                .arg(stepped(Platform::HERE, &commands))
+                .current_dir(dir.path())
+                .status()
+                .unwrap()
+                .success()
+        };
+
+        assert!(ran(&["touch one  # the first", "touch two"]));
+        assert!(
+            dir.path().join("two").exists(),
+            "a comment swallowed the next step"
+        );
+
+        assert!(!ran(&["false", "touch three"]));
+        assert!(
+            !dir.path().join("three").exists(),
+            "a step ran after a failure"
+        );
+
+        assert!(!ran(&["false\ntouch four", "touch five"]));
+        assert!(
+            !dir.path().join("four").exists() && !dir.path().join("five").exists(),
+            "a step running over several lines went on past a line that failed"
+        );
+    }
+
+    /// A check after each line that ends a statement, and none inside a block
+    /// left open, a here-string, or a line carried on to the next.
+    #[test]
+    fn a_windows_step_is_checked_after_every_statement_it_holds() {
+        const CHECK: &str = "if ($LASTEXITCODE) { exit $LASTEXITCODE }";
+
+        assert_eq!(
+            each_line_checked("npm i -g one\nnpm i -g two"),
+            format!("npm i -g one\n{CHECK}\nnpm i -g two\n{CHECK}")
+        );
+        assert_eq!(
+            each_line_checked("foreach ($p in 'a', 'b') {\n  npm i -g $p\n}"),
+            format!("foreach ($p in 'a', 'b') {{\n  npm i -g $p\n}}\n{CHECK}")
+        );
+        assert_eq!(
+            each_line_checked("$text = @\"\nnot (a statement\n\"@\nGet-Item x |\n  Out-Null"),
+            format!("$text = @\"\nnot (a statement\n\"@\nGet-Item x |\n  Out-Null\n{CHECK}")
+        );
+    }
+
+    /// And under the shell Windows raises, Windows PowerShell 5.1, as the one
+    /// script the raise hands it: a comment ending one step takes nothing with
+    /// it, and the first step that fails — a program exiting non-zero or a
+    /// cmdlet that throws — stops the rest and fails the script, with the
+    /// program's own exit code.
+    #[cfg(windows)]
+    #[test]
+    fn a_plugins_commands_run_under_windows_powershell_a_step_apiece() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = |name: &str| said(&dir.path().join(name).to_string_lossy());
+        let made = |name: &str| format!("New-Item -ItemType File -Path {} | Out-Null", at(name));
+        let ran = |commands: &[String]| {
+            let script = raising(
+                Platform::Windows,
+                &stepped(Platform::Windows, commands),
+                None,
+            );
+            let (program, arguments) = script.split_first().unwrap();
+            std::process::Command::new(program)
+                .args(arguments)
+                .output()
+                .unwrap()
+        };
+
+        let edition = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", "$PSVersionTable.PSVersion.Major"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&edition.stdout).trim(),
+            "5",
+            "the shell raised is Windows PowerShell 5.1"
+        );
+
+        let all = ran(&[
+            format!("{}  # the first", made("one")),
+            "cmd.exe /c exit 0".to_owned(),
+            made("two"),
+        ]);
+        assert!(all.status.success(), "{all:?}");
+        assert!(
+            dir.path().join("two").exists(),
+            "a comment swallowed the next step"
+        );
+
+        let exited = ran(&["cmd.exe /c exit 3".to_owned(), made("three")]);
+        assert_eq!(exited.status.code(), Some(3), "{exited:?}");
+        assert!(
+            !dir.path().join("three").exists(),
+            "a step ran after a program failed"
+        );
+
+        let early = ran(&[format!("cmd.exe /c exit 5\n{}", made("five")), made("six")]);
+        assert_eq!(early.status.code(), Some(5), "{early:?}");
+        assert!(
+            !dir.path().join("five").exists() && !dir.path().join("six").exists(),
+            "a step running over several lines went on past a program that failed"
+        );
+
+        let threw = ran(&[format!("Get-Item {}", at("missing")), made("four")]);
+        assert!(!threw.status.success(), "{threw:?}");
+        assert!(
+            !dir.path().join("four").exists(),
+            "a step ran after a cmdlet threw"
+        );
+    }
+
+    /// And on Windows, where the shell is Windows PowerShell and has no `&&`,
+    /// each is a script block of its own lines, checked once it is closed.
+    #[test]
+    fn a_plugins_commands_on_windows_are_a_block_apiece() {
+        let commands = [
+            "npm i -g stub  # global".to_owned(),
+            "stub --setup".to_owned(),
+        ];
+
+        assert_eq!(
+            stepped(Platform::Windows, &commands),
+            "& {\nnpm i -g stub  # global\nif ($LASTEXITCODE) { exit $LASTEXITCODE }\n}\n\
+             if ($LASTEXITCODE) { exit $LASTEXITCODE }\n\
+             & {\nstub --setup\nif ($LASTEXITCODE) { exit $LASTEXITCODE }\n}\n\
+             if ($LASTEXITCODE) { exit $LASTEXITCODE }"
+        );
+        assert!(!stepped(Platform::Windows, &commands).contains("&&"));
+    }
+
     /// The sandbox, git and one npm harness, which is the ticking the whole of
     /// this is about: two packages, a package manager that has neither of the
     /// other two, and a harness that comes off npm.
-    const TICKED: &[Dependency] = &[Dependency::Sandbox, Dependency::Git, Dependency::Codex];
+    const TICKED: &[Row] = &[Row::Sandbox, Row::Git, Row::CODEX];
 
     /// The home a stated machine runs under, which is what the two vendors'
     /// installers land under.
@@ -2587,7 +2912,7 @@ mod tests {
     }
 
     /// Which rows a plan says nothing here can install.
-    fn beyond(plan: &Plan) -> Vec<Dependency> {
+    fn beyond(plan: &Plan) -> Vec<Row> {
         plan.beyond.iter().map(|(row, _)| *row).collect()
     }
 
@@ -2600,10 +2925,10 @@ mod tests {
     #[test]
     fn the_rows_are_worked_in_the_order_the_wizard_draws_them() {
         // A Windows with a box, which is the one machine drawing every row.
-        let drawn: Vec<Dependency> = annexed(Probed::NoWsl)
+        let drawn: Vec<Row> = annexed(Probed::NoWsl)
             .rows()
             .iter()
-            .map(|row| row.dependency)
+            .map(|row| Row::of(&row.dependency))
             .collect();
 
         assert_eq!(drawn, ROWS);
@@ -2639,7 +2964,7 @@ mod tests {
     /// And the GitHub CLI is the one name they disagree about.
     #[test]
     fn the_github_cli_is_named_as_the_archive_names_it() {
-        let ticked = &[Dependency::Gh];
+        let ticked = &[Row::Gh];
 
         assert_eq!(
             line(&plan(&machine(Distro::Ubuntu), ticked)),
@@ -2678,7 +3003,7 @@ mod tests {
     #[test]
     fn node_stays_out_where_no_npm_harness_was_ticked() {
         assert_eq!(
-            line(&plan(&machine(Distro::Ubuntu), &[Dependency::Git])),
+            line(&plan(&machine(Distro::Ubuntu), &[Row::Git])),
             "apt-get update; apt-get install -y git",
         );
     }
@@ -2702,6 +3027,29 @@ mod tests {
         );
     }
 
+    /// A plugin's harness is placed after the built-ins and before `gh`, in
+    /// the order the wizard draws it, and one this server has no harness for
+    /// is the hint screen's rather than a command anybody guessed at.
+    #[test]
+    fn a_plugins_harness_is_worked_after_the_built_ins_and_needs_its_own_command() {
+        let stub = Row::Harness(crate::store::AgentType::read(
+            "0d1e2f3a-4b5c-4d6e-8f7a-9b0c1d2e3f4a",
+        ));
+
+        assert_eq!(
+            ordered(&[Row::Gh, stub, Row::CLAUDE, Row::Sandbox, stub]),
+            [Row::Sandbox, Row::CLAUDE, stub, Row::Gh],
+        );
+
+        let plan = plan(&machine(Distro::Ubuntu), &[Row::Git, stub]);
+
+        assert_eq!(beyond(&plan), [stub]);
+        assert!(
+            plan.units.iter().all(|unit| !unit.covers.contains(&stub)),
+            "nothing is run for it: {plan:?}",
+        );
+    }
+
     /// The two rows that are not a package are a unit each, after the elevated
     /// batch and run as the user, landing where the vendor's own installer puts
     /// what it installs.
@@ -2709,7 +3057,7 @@ mod tests {
     fn the_vendor_installers_are_their_own_units_after_the_batch() {
         let plan = plan(
             &machine(Distro::Ubuntu),
-            &[Dependency::Git, Dependency::Claude, Dependency::Grok],
+            &[Row::Git, Row::CLAUDE, Row::GROK],
         );
 
         assert!(plan.beyond.is_empty(), "{plan:?}");
@@ -2728,7 +3076,7 @@ mod tests {
         );
         assert_eq!(claude.how, How::AsTheUser);
         assert_eq!(claude.doing, "Running Anthropic's installer…");
-        assert_eq!(claude.covers, [Dependency::Claude]);
+        assert_eq!(claude.covers, [Row::CLAUDE]);
         assert_eq!(claude.lands, Some(PathBuf::from(HOME).join(".local/bin")));
 
         assert_eq!(grok.line, "curl -fsSL https://x.ai/cli/install.sh | bash");
@@ -2742,10 +3090,7 @@ mod tests {
     /// where its script puts `agy` and nowhere else.
     #[test]
     fn the_antigravity_cli_is_googles_installer_landing_in_local_bin() {
-        let plan = plan(
-            &machine(Distro::Fedora),
-            &[Dependency::Git, Dependency::Agy],
-        );
+        let plan = plan(&machine(Distro::Fedora), &[Row::Git, Row::AGY]);
 
         assert!(plan.beyond.is_empty(), "{plan:?}");
 
@@ -2761,7 +3106,7 @@ mod tests {
         );
         assert_eq!(agy.how, How::AsTheUser);
         assert_eq!(agy.doing, "Running Google's installer…");
-        assert_eq!(agy.covers, [Dependency::Agy]);
+        assert_eq!(agy.covers, [Row::AGY]);
         assert_eq!(agy.lands, Some(PathBuf::from(HOME).join(".local/bin")));
         assert_eq!(agy.chain, None);
     }
@@ -2773,11 +3118,11 @@ mod tests {
     fn a_machine_with_no_home_installs_neither_of_them() {
         let plan = plan(
             &under(Distro::Ubuntu, &PathBuf::new(), None),
-            &[Dependency::Git, Dependency::Claude, Dependency::Grok],
+            &[Row::Git, Row::CLAUDE, Row::GROK],
         );
 
         assert_eq!(line(&plan), "apt-get update; apt-get install -y git");
-        assert_eq!(beyond(&plan), [Dependency::Claude, Dependency::Grok]);
+        assert_eq!(beyond(&plan), [Row::CLAUDE, Row::GROK]);
         assert!(
             plan.beyond[0].1.contains("Claude Code") && plan.beyond[0].1.contains("home"),
             "the row is named in its own words: {:?}",
@@ -2805,12 +3150,7 @@ mod tests {
 
         let plan = plan(
             &stated(Distro::MacOs, dir.path()),
-            &[
-                Dependency::Sandbox,
-                Dependency::Git,
-                Dependency::Claude,
-                Dependency::Grok,
-            ],
+            &[Row::Sandbox, Row::Git, Row::CLAUDE, Row::GROK],
         );
 
         assert!(plan.beyond.is_empty(), "{plan:?}");
@@ -2821,7 +3161,7 @@ mod tests {
 
         assert_eq!(git.line, "brew install git");
         assert_eq!(git.how, How::AsTheUser);
-        assert_eq!(git.covers, [Dependency::Git]);
+        assert_eq!(git.covers, [Row::Git]);
         assert_eq!(git.lands, None, "Homebrew's prefix is on the Apple floor");
 
         // Anthropic's own installer rather than Homebrew's cask, which is the
@@ -2853,7 +3193,7 @@ mod tests {
     #[test]
     fn both_macs_install_the_antigravity_cli_with_googles_own() {
         for distro in [Distro::MacOs, Distro::MacOsIntel] {
-            let plan = plan(&machine(distro), &[Dependency::Agy]);
+            let plan = plan(&machine(distro), &[Row::AGY]);
 
             assert!(plan.beyond.is_empty(), "{distro:?}: {plan:?}");
 
@@ -2883,7 +3223,7 @@ mod tests {
     /// as the user and raising nothing.
     #[test]
     fn a_mac_with_claude_alone_ticked_installs_no_homebrew() {
-        let plan = plan(&machine(Distro::MacOs), &[Dependency::Claude]);
+        let plan = plan(&machine(Distro::MacOs), &[Row::CLAUDE]);
 
         assert!(plan.beyond.is_empty(), "{plan:?}");
 
@@ -2896,7 +3236,7 @@ mod tests {
             "curl -fsSL https://claude.ai/install.sh | bash"
         );
         assert_eq!(claude.how, How::AsTheUser);
-        assert_eq!(claude.covers, [Dependency::Claude]);
+        assert_eq!(claude.covers, [Row::CLAUDE]);
         assert_eq!(
             claude.lands,
             Some(PathBuf::from(HOME).join(".local/bin")),
@@ -2910,10 +3250,7 @@ mod tests {
     /// line and in the same chain as them.
     #[test]
     fn a_mac_without_homebrew_installs_it_before_anything_else() {
-        let plan = plan(
-            &machine(Distro::MacOs),
-            &[Dependency::Git, Dependency::Grok, Dependency::Gh],
-        );
+        let plan = plan(&machine(Distro::MacOs), &[Row::Git, Row::GROK, Row::Gh]);
 
         assert!(plan.beyond.is_empty(), "{plan:?}");
 
@@ -2979,7 +3316,7 @@ mod tests {
             &format!("#!/bin/sh\n: > '{}'\n", ran.display()),
         );
 
-        let plan = plan(&machine(Distro::MacOs), &[Dependency::Git, Dependency::Gh]);
+        let plan = plan(&machine(Distro::MacOs), &[Row::Git, Row::Gh]);
         let run = Arc::new(Run::of(&plan, "a-mac"));
 
         work(
@@ -3026,7 +3363,7 @@ mod tests {
                 Some(PathBuf::from(HOME)),
                 None,
             ),
-            &[Dependency::Git, Dependency::Grok, Dependency::Gh],
+            &[Row::Git, Row::GROK, Row::Gh],
         );
 
         assert_eq!(
@@ -3035,7 +3372,7 @@ mod tests {
             "the one row that is not Homebrew's goes ahead",
         );
 
-        assert_eq!(beyond(&plan), [Dependency::Git, Dependency::Gh]);
+        assert_eq!(beyond(&plan), [Row::Git, Row::Gh]);
         assert!(
             plan.beyond[0].1.contains("Homebrew"),
             "the row says what could not be done: {:?}",
@@ -3055,13 +3392,7 @@ mod tests {
     fn an_intel_mac_installs_with_the_vendors_own_and_raises_nothing() {
         let plan = plan(
             &machine(Distro::MacOsIntel),
-            &[
-                Dependency::Sandbox,
-                Dependency::Claude,
-                Dependency::Grok,
-                Dependency::OpenCode,
-                Dependency::Gh,
-            ],
+            &[Row::Sandbox, Row::CLAUDE, Row::GROK, Row::OPENCODE, Row::Gh],
         );
 
         let [claude, grok, opencode, gh] = plan.units.as_slice() else {
@@ -3073,7 +3404,7 @@ mod tests {
             "curl -fsSL https://claude.ai/install.sh | bash"
         );
         assert_eq!(claude.how, How::AsTheUser);
-        assert_eq!(claude.covers, [Dependency::Claude]);
+        assert_eq!(claude.covers, [Row::CLAUDE]);
         assert_eq!(claude.lands, Some(PathBuf::from(HOME).join(".local/bin")));
 
         // And xAI's, which is the same unit here as on every other machine.
@@ -3089,7 +3420,7 @@ mod tests {
         );
         assert_eq!(opencode.how, How::AsTheUser);
         assert_eq!(opencode.doing, "Running OpenCode's installer…");
-        assert_eq!(opencode.covers, [Dependency::OpenCode]);
+        assert_eq!(opencode.covers, [Row::OPENCODE]);
         assert_eq!(
             opencode.lands,
             Some(PathBuf::from(HOME).join(".opencode/bin")),
@@ -3111,7 +3442,7 @@ mod tests {
         // And GitHub's own release, which is the row that is neither a package
         // nor a vendor's script: a zip a release carries, unpacked into the
         // same directory Anthropic's installer writes into.
-        assert_eq!(gh.covers, [Dependency::Gh]);
+        assert_eq!(gh.covers, [Row::Gh]);
         assert_eq!(gh.doing, "Unpacking GitHub's release of gh…");
         assert_eq!(gh.lands, Some(PathBuf::from(HOME).join(LOCAL_BIN)));
         assert!(
@@ -3143,18 +3474,15 @@ mod tests {
     /// screen with a sentence apiece, naming what each of them wants.
     #[test]
     fn an_intel_mac_sends_the_rows_it_cannot_install_to_the_hint_screen() {
-        let plan = plan(
-            &machine(Distro::MacOsIntel),
-            &[Dependency::Git, Dependency::Codex],
-        );
+        let plan = plan(&machine(Distro::MacOsIntel), &[Row::Git, Row::CODEX]);
 
         assert!(
             plan.units.is_empty(),
             "nothing to run for either of them: {plan:?}"
         );
-        assert_eq!(beyond(&plan), [Dependency::Git, Dependency::Codex]);
+        assert_eq!(beyond(&plan), [Row::Git, Row::CODEX]);
 
-        let said = |row: Dependency| {
+        let said = |row: Row| {
             plan.beyond
                 .iter()
                 .find(|(dependency, _)| *dependency == row)
@@ -3163,17 +3491,17 @@ mod tests {
         };
 
         assert!(
-            said(Dependency::Git).contains("xcode-select --install"),
+            said(Row::Git).contains("xcode-select --install"),
             "{}",
-            said(Dependency::Git),
+            said(Row::Git),
         );
         assert!(
-            said(Dependency::Codex).contains("~/.local/bin"),
+            said(Row::CODEX).contains("~/.local/bin"),
             "{}",
-            said(Dependency::Codex),
+            said(Row::CODEX),
         );
 
-        for row in [Dependency::Git, Dependency::Codex] {
+        for row in [Row::Git, Row::CODEX] {
             assert!(
                 !said(row).contains("brew") && !said(row).contains("Homebrew"),
                 "nothing on this machine is Homebrew's: {}",
@@ -3189,14 +3517,11 @@ mod tests {
     fn an_intel_mac_with_no_home_installs_nothing() {
         let plan = plan(
             &under(Distro::MacOsIntel, &PathBuf::new(), None),
-            &[Dependency::Claude, Dependency::OpenCode, Dependency::Gh],
+            &[Row::CLAUDE, Row::OPENCODE, Row::Gh],
         );
 
         assert!(plan.units.is_empty(), "{plan:?}");
-        assert_eq!(
-            beyond(&plan),
-            [Dependency::Claude, Dependency::OpenCode, Dependency::Gh],
-        );
+        assert_eq!(beyond(&plan), [Row::CLAUDE, Row::OPENCODE, Row::Gh],);
         assert!(
             plan.beyond[1].1.contains("OpenCode") && plan.beyond[1].1.contains("home"),
             "the row is named in its own words: {:?}",
@@ -3213,7 +3538,7 @@ mod tests {
     /// still installs what Homebrew carries, OpenCode included.
     #[test]
     fn the_apple_silicon_mac_still_installs_opencode_with_homebrew() {
-        let plan = plan(&machine(Distro::MacOs), &[Dependency::OpenCode]);
+        let plan = plan(&machine(Distro::MacOs), &[Row::OPENCODE]);
 
         let [prefix, installing, opencode] = plan.units.as_slice() else {
             panic!("the prefix, Homebrew, and the row: {plan:?}");
@@ -3232,10 +3557,7 @@ mod tests {
     /// behind the dialog.
     #[test]
     fn a_windows_machine_raises_a_unit_for_every_ticked_row() {
-        let plan = plan(
-            &windows_machine(&PathBuf::new()),
-            &[Dependency::Git, Dependency::Codex],
-        );
+        let plan = plan(&windows_machine(&PathBuf::new()), &[Row::Git, Row::CODEX]);
 
         assert!(plan.beyond.is_empty(), "{plan:?}");
 
@@ -3253,12 +3575,12 @@ mod tests {
             git.line,
             format!("winget install --id Git.Git {UNATTENDED}")
         );
-        assert_eq!(git.covers, [Dependency::Git]);
+        assert_eq!(git.covers, [Row::Git]);
         assert_eq!(git.lands, None, "winget installs onto the machine's floor");
         assert_eq!(git.chain, None, "git wants no node");
 
         assert_eq!(codex.line, "npm install -g @openai/codex");
-        assert_eq!(codex.covers, [Dependency::Codex]);
+        assert_eq!(codex.covers, [Row::CODEX]);
 
         for unit in [node, git, codex] {
             assert_eq!(
@@ -3286,7 +3608,7 @@ mod tests {
     #[test]
     fn a_ticked_wsl_row_with_no_wsl_raises_turning_it_on_and_the_update() {
         let machine = annexed(Probed::NoWsl);
-        let plan = plan(&machine, &[Dependency::Wsl, Dependency::Git]);
+        let plan = plan(&machine, &[Row::Wsl, Row::Git]);
 
         assert!(plan.beyond.is_empty(), "{plan:?}");
 
@@ -3294,7 +3616,7 @@ mod tests {
             panic!("git, and the two that turn WSL on: {plan:?}");
         };
 
-        assert_eq!(git.covers, [Dependency::Git]);
+        assert_eq!(git.covers, [Row::Git]);
 
         let steps = machine.annex().unwrap().turning_on();
         assert_eq!(
@@ -3303,7 +3625,7 @@ mod tests {
         );
 
         assert!(on.covers.is_empty(), "one row is one step of the bar");
-        assert_eq!(update.covers, [Dependency::Wsl]);
+        assert_eq!(update.covers, [Row::Wsl]);
 
         for unit in [on, update] {
             assert_eq!(unit.how, How::Raised, "{unit:?}");
@@ -3333,7 +3655,7 @@ mod tests {
     /// hint screen says so.
     #[test]
     fn a_ticked_wsl_row_owing_a_restart_raises_nothing() {
-        let plan = plan(&annexed(Probed::NeedsRestart), &[Dependency::Wsl]);
+        let plan = plan(&annexed(Probed::NeedsRestart), &[Row::Wsl]);
 
         assert!(plan.units.is_empty(), "{plan:?}");
         assert!(plan.beyond.is_empty(), "{plan:?}");
@@ -3345,10 +3667,7 @@ mod tests {
     /// raised, and the row is the link's.
     #[test]
     fn a_ticked_wsl_row_with_no_annex_makes_one() {
-        let plan = plan(
-            &annexed(Probed::NoDistro),
-            &[Dependency::Wsl, Dependency::Git],
-        );
+        let plan = plan(&annexed(Probed::NoDistro), &[Row::Wsl, Row::Git]);
 
         assert!(plan.beyond.is_empty(), "{plan:?}");
 
@@ -3356,9 +3675,9 @@ mod tests {
             panic!("git, and the Annex made: {plan:?}");
         };
 
-        assert_eq!(git.covers, [Dependency::Git]);
+        assert_eq!(git.covers, [Row::Git]);
 
-        let steps: Vec<(Option<Making>, How, &[Dependency])> = making
+        let steps: Vec<(Option<Making>, How, &[Row])> = making
             .iter()
             .map(|unit| (unit.making, unit.how, unit.covers.as_slice()))
             .collect();
@@ -3371,7 +3690,7 @@ mod tests {
                 (Some(Making::Firewall), How::Raised, &[][..]),
                 (Some(Making::Write), How::AsTheUser, &[][..]),
                 (Some(Making::Rebuild), How::AsTheUser, &[][..]),
-                (Some(Making::Link), How::AsTheUser, &[Dependency::Wsl][..]),
+                (Some(Making::Link), How::AsTheUser, &[Row::Wsl][..]),
             ]
         );
 
@@ -3435,7 +3754,7 @@ mod tests {
             escalation: &dyn Elevate,
             linking: Option<Linking>,
         ) -> (RunView, InstallState) {
-            let plan = plan(&annexed(Probed::NoDistro), &[Dependency::Wsl]);
+            let plan = plan(&annexed(Probed::NoDistro), &[Row::Wsl]);
             let run = Arc::new(Run::of(&plan, "ada-pc"));
 
             let annexing = Annexing {
@@ -3461,7 +3780,7 @@ mod tests {
             );
 
             let (view, rows) = run.reading();
-            let [(Dependency::Wsl, row)] = rows.as_slice() else {
+            let [(Row::Wsl, row)] = rows.as_slice() else {
                 panic!("the WSL row: {rows:?}");
             };
 
@@ -3742,13 +4061,10 @@ mod tests {
     /// anyway raises nothing and the hint screen has the reason.
     #[test]
     fn a_ticked_wsl_row_with_virtualization_off_goes_beyond_with_the_reason() {
-        let plan = plan(&annexed(Probed::VirtualizationOff), &[Dependency::Wsl]);
+        let plan = plan(&annexed(Probed::VirtualizationOff), &[Row::Wsl]);
 
         assert!(plan.units.is_empty(), "{plan:?}");
-        assert_eq!(
-            plan.beyond,
-            [(Dependency::Wsl, VIRTUALIZATION_OFF.to_owned())]
-        );
+        assert_eq!(plan.beyond, [(Row::Wsl, VIRTUALIZATION_OFF.to_owned())]);
     }
 
     /// And a machine with no way of having an Annex raises nothing for it,
@@ -3756,10 +4072,10 @@ mod tests {
     #[test]
     fn a_ticked_wsl_row_with_no_box_goes_beyond() {
         for machine in [machine(Distro::Ubuntu), windows_machine(&PathBuf::new())] {
-            let plan = plan(&machine, &[Dependency::Wsl]);
+            let plan = plan(&machine, &[Row::Wsl]);
 
             assert!(plan.units.is_empty(), "{plan:?}");
-            assert_eq!(beyond(&plan), [Dependency::Wsl]);
+            assert_eq!(beyond(&plan), [Row::Wsl]);
         }
     }
 
@@ -3770,20 +4086,14 @@ mod tests {
         let installer = Installer::raising(None);
 
         installer
-            .start(
-                &annexed(Probed::NoWsl),
-                &nowhere(),
-                &[Dependency::Wsl],
-                None,
-                None,
-            )
+            .start(&annexed(Probed::NoWsl), &nowhere(), &[Row::Wsl], None, None)
             .unwrap();
 
         let (run, rows) = installer.reading().expect("a press makes a run");
 
         assert_eq!(run.phase, RunPhase::Done);
 
-        let [(Dependency::Wsl, InstallState::Failed { why })] = rows.as_slice() else {
+        let [(Row::Wsl, InstallState::Failed { why })] = rows.as_slice() else {
             panic!("the WSL row, failed: {rows:?}");
         };
 
@@ -3797,7 +4107,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         crate::stand_ins::program(&dir.path().join("npm.CMD"), "@exit 0\n");
 
-        let plan = plan(&windows_machine(dir.path()), &[Dependency::OpenCode]);
+        let plan = plan(&windows_machine(dir.path()), &[Row::OPENCODE]);
 
         assert_eq!(line(&plan), "npm install -g opencode-ai");
     }
@@ -3807,7 +4117,7 @@ mod tests {
     /// directory outright, the account's name being a fingerprint of it.
     #[test]
     fn the_windows_sandbox_row_makes_the_session_account() {
-        let plan = plan(&windows_machine(&PathBuf::new()), &[Dependency::Sandbox]);
+        let plan = plan(&windows_machine(&PathBuf::new()), &[Row::Sandbox]);
 
         let [account] = plan.units.as_slice() else {
             panic!("the one row, and one unit for it: {plan:?}");
@@ -3821,7 +4131,7 @@ mod tests {
             ),
         );
         assert_eq!(account.how, How::Raised);
-        assert_eq!(account.covers, [Dependency::Sandbox]);
+        assert_eq!(account.covers, [Row::Sandbox]);
         assert_eq!(account.lands, None, "an account lands on no `PATH`");
 
         // And it says which account it made, which is what the named pipe is
@@ -3838,14 +4148,14 @@ mod tests {
     fn a_windows_machine_that_cannot_name_itself_makes_no_account() {
         let plan = plan(
             &windows_machine(&PathBuf::new()).running(None),
-            &[Dependency::Sandbox, Dependency::Git],
+            &[Row::Sandbox, Row::Git],
         );
 
         assert_eq!(
             line(&plan),
             format!("winget install --id Git.Git {UNATTENDED}")
         );
-        assert_eq!(beyond(&plan), [Dependency::Sandbox]);
+        assert_eq!(beyond(&plan), [Row::Sandbox]);
         assert!(
             plan.beyond[0].1.contains("which program it's running"),
             "the row says what could not be done: {:?}",
@@ -3861,10 +4171,7 @@ mod tests {
     /// token, so `%USERPROFILE%` on the far side of it is still the human's.
     #[test]
     fn the_windows_vendor_installers_are_raised_and_land_under_the_profile() {
-        let plan = plan(
-            &windows_machine(&PathBuf::new()),
-            &[Dependency::Claude, Dependency::Grok],
-        );
+        let plan = plan(&windows_machine(&PathBuf::new()), &[Row::CLAUDE, Row::GROK]);
 
         let [claude, grok] = plan.units.as_slice() else {
             panic!("a unit per vendor: {plan:?}");
@@ -3890,7 +4197,7 @@ mod tests {
     /// server never rereads.
     #[test]
     fn the_windows_antigravity_cli_lands_in_local_app_data() {
-        let plan = plan(&windows_machine(&PathBuf::new()), &[Dependency::Agy]);
+        let plan = plan(&windows_machine(&PathBuf::new()), &[Row::AGY]);
 
         let [agy] = plan.units.as_slice() else {
             panic!("Google's installer: {plan:?}");
@@ -3978,9 +4285,9 @@ mod tests {
     fn cancelling_finishes_what_is_running_and_skips_the_rest() {
         let plan = Plan {
             units: vec![
-                unit("first", Dependency::Sandbox),
-                unit("second", Dependency::Git),
-                unit("third", Dependency::Gh),
+                unit("first", Row::Sandbox),
+                unit("second", Row::Git),
+                unit("third", Row::Gh),
             ],
             beyond: Vec::new(),
             platform: Platform::Linux,
@@ -4014,15 +4321,15 @@ mod tests {
             rows,
             [
                 // It ran, so what it reads is the probe's business again.
-                (Dependency::Sandbox, InstallState::Idle),
+                (Row::Sandbox, InstallState::Idle),
                 (
-                    Dependency::Git,
+                    Row::Git,
                     InstallState::Failed {
                         why: CANCELLED.to_owned(),
                     },
                 ),
                 (
-                    Dependency::Gh,
+                    Row::Gh,
                     InstallState::Failed {
                         why: CANCELLED.to_owned(),
                     },
@@ -4078,7 +4385,7 @@ mod tests {
     }
 
     /// One raised unit installing one row.
-    fn unit(line: &str, covers: Dependency) -> Unit {
+    fn unit(line: &str, covers: Row) -> Unit {
         Unit {
             line: line.to_owned(),
             covers: vec![covers],

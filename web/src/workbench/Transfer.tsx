@@ -49,8 +49,9 @@ import { For, Show, createSignal, createUniqueId, type JSX } from "solid-js";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 
 import { Modal } from "../Modal";
-import { AGENT_NAME, DEFAULT_PROFILE } from "../agents";
+import { DEFAULT_PROFILE } from "../agents";
 import { preflight, transfer } from "../api/client";
+import { harnessName } from "../harnesses";
 import type {
   ClonableRepo,
   ConversationView,
@@ -166,7 +167,7 @@ function lacking(
 
   return `${ROLE_NAME[said.Harness.role]} is paired with ${
     said.Harness.profile ?? DEFAULT_PROFILE
-  }, which runs ${AGENT_NAME[said.Harness.agent_type]}. ${harnessAbsentOn(
+  }, which runs ${harnessName(said.Harness.agent_type)}. ${harnessAbsentOn(
     said.Harness.agent_type,
     device,
   )}`;

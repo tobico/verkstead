@@ -627,7 +627,7 @@ impl Grilling {
             &self.pool,
             &store::ProfileFacts {
                 name: Some("codex".to_owned()),
-                account: store::Account::Codex { home: codex },
+                account: store::Account::home(store::AgentType::CODEX, codex),
                 models: vec!["gpt-5-codex".to_owned()],
                 memory,
             },
@@ -677,7 +677,7 @@ impl Grilling {
             &self.pool,
             &store::ProfileFacts {
                 name: Some("opencode".to_owned()),
-                account: store::Account::OpenCode { home },
+                account: store::Account::home(store::AgentType::OPENCODE, home),
                 models: vec!["opencode/big-pickle".to_owned()],
                 memory,
             },
@@ -740,7 +740,7 @@ impl Grilling {
             &self.pool,
             &store::ProfileFacts {
                 name: Some("grok".to_owned()),
-                account: store::Account::Grok { home: grok },
+                account: store::Account::home(store::AgentType::GROK, grok),
                 models: vec!["grok-4.6".to_owned()],
                 memory,
             },
@@ -797,7 +797,7 @@ impl Grilling {
             &self.pool,
             &store::ProfileFacts {
                 name: Some("agy".to_owned()),
-                account: store::Account::Agy { home: gemini },
+                account: store::Account::home(store::AgentType::AGY, gemini),
                 models: vec!["gemini-3.8-flash-medium".to_owned()],
                 memory,
             },
@@ -1023,10 +1023,7 @@ async fn grilling() -> Grilling {
         &pool,
         &store::ProfileFacts {
             name: Some("work".to_owned()),
-            account: store::Account::Claude {
-                claude_dir,
-                config_file,
-            },
+            account: store::Account::claude(claude_dir, config_file),
             models: vec!["claude-opus-5".to_owned()],
             memory: true,
         },

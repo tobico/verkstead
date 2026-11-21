@@ -66,6 +66,32 @@ pub struct PluginRow {
     /// How many settings fields its manifest declares: where any, the row
     /// opens a pane drawing them.
     pub settings: u32,
+    /// How many Agent Profiles name the harness it provides, whatever the
+    /// checkbox says: a disabled one's stay, offered on no picker, and while
+    /// any stand **Remove** is refused.
+    pub profiles: u32,
+    /// The harness it provides, where it provides one and has loaded here:
+    /// whether its binary is on this machine, and the press that installs
+    /// it.
+    pub harness: Option<PluginHarness>,
+}
+
+/// The harness an Agent plugin's row provides, as this device has it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PluginHarness {
+    /// Its id, which the install run is pressed with.
+    pub id: crate::AgentType,
+    /// The program a session of it runs, looked for on a session's `PATH`.
+    pub binary: String,
+    /// Whether a session here would find it, which is its onboarding row's
+    /// answer.
+    pub present: bool,
+    /// Whether its manifest declares commands that install it here, which is
+    /// what the row's **Install** runs.
+    pub installable: bool,
+    /// And what the install run has made of it, where one has been started.
+    pub install: crate::InstallState,
 }
 
 /// A dependency a row's plugin is in trouble over, with the press that would

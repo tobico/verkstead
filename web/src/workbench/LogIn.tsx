@@ -8,8 +8,8 @@
 
 import { Show, createSignal, type JSX } from "solid-js";
 
-import { AGENT_NAME } from "../agents";
 import type { NoticeLogIn } from "../api/types";
+import { harnessName } from "../harnesses";
 import { LoggingIn } from "../profiles/LoggingIn";
 import styles from "./LogIn.module.css";
 
@@ -20,8 +20,8 @@ export function LogIn(props: { press: NoticeLogIn }): JSX.Element {
   // human gave the account where they gave it one.
   const called = () =>
     props.press.name
-      ? `${AGENT_NAME[props.press.agent_type]} · ${props.press.name}`
-      : AGENT_NAME[props.press.agent_type];
+      ? `${harnessName(props.press.agent_type)} · ${props.press.name}`
+      : harnessName(props.press.agent_type);
 
   return (
     <>

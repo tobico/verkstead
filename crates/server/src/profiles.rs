@@ -6,9 +6,10 @@
 //! server's: a form that checked it would be a courtesy, since this endpoint is
 //! reachable without one. Anywhere the server can read is somewhere an account
 //! can be kept — the human's own login under `~` included, which is the account a
-//! Profile most naturally names. What an account *is* — Claude's pair, and the
-//! single home each backend after it keeps one under — is the agent type's, and
-//! every judgement here is made per type for that reason.
+//! Profile most naturally names. What an account *is* — Claude's pair, the
+//! single home each built-in after it keeps one under, whatever a plugin
+//! declares — is the harness's to say, and every judgement here is made by the
+//! paths it declares for that reason (see [`crate::harness::Harness::paths`]).
 //!
 //! **And a Profile may be bound on other devices alone**, which is the one
 //! row here nothing is judged about against this filesystem: every device
@@ -41,8 +42,9 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileDevice, ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice, RowDevice,
+    AgentType, Broken, HarnessEntry, HarnessInstall, HarnessModel, HarnessPath, PairingView,
+    PickedView, ProfileAccount, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileDevice,
+    ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice, RowDevice,
 };
 
 use crate::resolved::{Resolved, resolve};
@@ -50,6 +52,10 @@ use crate::{AppState, store};
 
 /// Save a new Profile, or say why not.
 pub(crate) async fn create(pool: &SqlitePool, edit: &ProfileEdit) -> Result<ProfileSaved> {
+    if let Some(refusal) = behind(pool, &edit.account.agent_type).await? {
+        return Ok(refusal);
+    }
+
     let (facts, login) = match checked(edit).await? {
         Ok(checked) => checked,
         Err(refusal) => return Ok(refusal),
@@ -75,6 +81,10 @@ pub(crate) async fn edit(pool: &SqlitePool, id: &str, edit: &ProfileEdit) -> Res
     let Some(held) = store::load_profile(pool, id).await? else {
         return Ok(ProfileSaved::NoSuchProfile);
     };
+
+    if let Some(refusal) = behind(pool, &edit.account.agent_type).await? {
+        return Ok(refusal);
+    }
 
     let saving = match held.unbound {
         None => match checked(edit).await? {
@@ -103,6 +113,37 @@ pub(crate) async fn edit(pool: &SqlitePool, id: &str, edit: &ProfileEdit) -> Res
         store::Saving::NameTaken => ProfileSaved::NameTaken,
         store::Saving::DefaultTaken => ProfileSaved::DefaultTaken,
     })
+}
+
+/// Why a Profile of `agent_type` cannot be saved while the cluster is as it
+/// is, or nothing where it can.
+///
+/// **A Profile replicates to every member**, and a release older than this
+/// one reads a Profile naming a harness it does not know as an error that
+/// takes the whole of its list with it — pickers, prefill and cards. A
+/// built-in is written as the word every release reads, so only a plugin's
+/// harness waits, and it waits for every member to be on a release that reads
+/// one — see [`crate::updates::reads_plugin_harnesses`].
+async fn behind(pool: &SqlitePool, agent_type: &AgentType) -> Result<Option<ProfileSaved>> {
+    if stored(agent_type).built_in().is_some() {
+        return Ok(None);
+    }
+
+    Ok(store::members(pool)
+        .await?
+        .into_iter()
+        .find(|member| !crate::updates::reads_plugin_harnesses(member.version.as_deref()))
+        .map(|member| {
+            let name = &member.name;
+            let on = member
+                .version
+                .as_deref()
+                .map_or_else(|| "an older release".to_owned(), str::to_owned);
+
+            ProfileSaved::MemberBehind(format!(
+                "{name} is on {on}, which can't read a profile of a plugin's agent. Update {name} first."
+            ))
+        }))
 }
 
 /// Remove one, whoever had chosen it.
@@ -270,6 +311,7 @@ async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<
         .collect();
     let machine = state.onboarding.machine().clone();
     let signed_out = state.logins.signed_out();
+    let plugged = Plugged::read(state).await?;
 
     Ok(tokio::task::spawn_blocking(move || {
         // Whether each harness a Profile not bound here runs is on this
@@ -302,7 +344,9 @@ async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<
 
                 ProfileEntry {
                     id: profile.id.clone(),
-                    broken: broken(&profile, reachable, &harnesses, &signed_out),
+                    broken: plugged
+                        .withheld(profile.agent_type())
+                        .or_else(|| broken(&profile, reachable, &harnesses, &signed_out)),
                     login: lends(&profile),
                     bound: profile.unbound.is_none(),
                     name: profile.name,
@@ -315,6 +359,49 @@ async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<
             .collect()
     })
     .await?)
+}
+
+/// Which plugin harnesses this server offers, and which of the rest are a
+/// disabled plugin's — what a Profile of a harness that is not built in is
+/// judged by before anything else.
+struct Plugged {
+    offered: Vec<store::AgentType>,
+    disabled: HashSet<store::AgentType>,
+}
+
+impl Plugged {
+    async fn read(state: &AppState) -> Result<Plugged> {
+        let disabled =
+            crate::store::replicated::live_records::<crate::replicating::plugins::Plugins>(
+                &state.pool,
+            )
+            .await?
+            .into_iter()
+            .filter(|record| !record.fields.enabled)
+            .map(|record| store::AgentType::read(&record.uuid))
+            .collect();
+
+        Ok(Plugged {
+            offered: state.plugins.harnesses(),
+            disabled,
+        })
+    }
+
+    /// Why a Profile of `agent_type` is offered on no picker, where it is a
+    /// plugin's harness this server does not offer (Set 1764, Q20): its plugin
+    /// disabled, or not loaded here at all. Nothing for a built-in, or for a
+    /// harness this server offers.
+    fn withheld(&self, agent_type: store::AgentType) -> Option<Broken> {
+        if agent_type.built_in().is_some() || self.offered.contains(&agent_type) {
+            return None;
+        }
+
+        Some(if self.disabled.contains(&agent_type) {
+            Broken::HarnessDisabled
+        } else {
+            Broken::HarnessUnknown
+        })
+    }
 }
 
 /// What a Profile card's line per device is drawn off: every device of the
@@ -413,10 +500,8 @@ fn lends(profile: &store::Profile) -> bool {
 
 /// Whether an account at these paths holds its login file, looked at here.
 fn holds_login(account: &store::Account) -> bool {
-    matches!(
-        resolve(&crate::sandbox::root::login_at(account)),
-        Resolved::At(_)
-    )
+    crate::sandbox::root::login_at(account)
+        .is_some_and(|login| matches!(resolve(&login), Resolved::At(_)))
 }
 
 /// How a device a Profile is bound on is read, off the membership.
@@ -545,6 +630,10 @@ fn runnable(pairing: Option<&PairingView>) -> bool {
 /// 2. **The harness is not on this machine** — [`Broken::HarnessMissing`]. The
 ///    onboarding probe's own finding, in that step's own word.
 ///
+/// **Before any of it, a harness this server has not got** —
+/// [`Broken::HarnessUnknown`] — bound here or not: there is nothing to judge
+/// its paths by, and nothing to launch it with.
+///
 /// **And that is the whole of it** for such a Profile: a row that passes both
 /// is a row to run under, and there is nothing about this filesystem to go and
 /// put right.
@@ -559,6 +648,10 @@ fn broken(
     harnesses: &HashMap<store::AgentType, bool>,
     signed_out: &HashSet<String>,
 ) -> Option<Broken> {
+    let Some(harness) = crate::harness::of(profile.agent_type()) else {
+        return Some(Broken::HarnessUnknown);
+    };
+
     if profile.unbound.is_some() {
         if !reachable {
             return Some(Broken::NoBoundDevice);
@@ -579,28 +672,7 @@ fn broken(
         return None;
     }
 
-    let paths: Vec<(PathBuf, Broken)> = match &profile.account {
-        store::Account::Claude {
-            claude_dir,
-            config_file,
-        } => vec![
-            (claude_dir.clone(), Broken::DirMissing),
-            (config_file.clone(), Broken::ConfigMissing),
-        ],
-        store::Account::Codex { home }
-        | store::Account::Grok { home }
-        | store::Account::Agy { home } => {
-            vec![(home.clone(), Broken::HomeMissing)]
-        }
-
-        // An OpenCode home is judged by the two directories opencode keeps an
-        // account in rather than by the directory holding them: those are what
-        // is mounted, and a home that has never had opencode run in it has
-        // neither. See [`crate::sandbox::OPENCODE_CONFIG_INSIDE_HOME`].
-        store::Account::OpenCode { home } => {
-            xdg(home).map(|path| (path, Broken::HomeMissing)).collect()
-        }
-    };
+    let paths = harness.judged(&profile.account);
 
     for (path, missing) in paths {
         if !matches!(resolve(&path), Resolved::At(_)) {
@@ -686,110 +758,52 @@ fn named(edit: &ProfileEdit) -> Result<(Option<String>, Vec<String>), ProfileSav
 
 /// The account, resolved — or the reason it is refused.
 ///
-/// One arm per agent type, because what a Profile names is that type's own
-/// shape: Claude's pair here, and the single home each backend after it keeps
-/// its whole account under when its stage lands.
-///
-/// Every path is judged the same way and refused by its own name: pointing the
-/// config field at the directory is an easy mistake, and "that path is wrong"
-/// would not say which one.
+/// One field per path the harness declares, each judged as it declares it — a
+/// directory or a file, and the directories inside it a session mounts — and
+/// each refused by its own name: pointing the config field at a directory is
+/// an easy mistake, and "that path is wrong" would not say which one.
 fn inspect(account: &ProfileAccount) -> Result<store::Account, ProfileSaved> {
-    match account {
-        ProfileAccount::Claude {
-            claude_dir,
-            config_file,
-        } => {
-            let dir = match resolve(Path::new(claude_dir.trim())) {
-                Resolved::At(path) => path,
-                Resolved::NotAbsolute => return Err(ProfileSaved::DirNotAbsolute),
-                Resolved::Missing => return Err(ProfileSaved::DirMissing),
-            };
+    let agent_type = stored(&account.agent_type);
 
-            if !dir.is_dir() {
-                return Err(ProfileSaved::NotADirectory);
-            }
-
-            let config = match resolve(Path::new(config_file.trim())) {
-                Resolved::At(path) => path,
-                Resolved::NotAbsolute => return Err(ProfileSaved::ConfigNotAbsolute),
-                Resolved::Missing => return Err(ProfileSaved::ConfigMissing),
-            };
-
-            if !config.is_file() {
-                return Err(ProfileSaved::NotAFile);
-            }
-
-            Ok(store::Account::Claude {
-                claude_dir: dir,
-                config_file: config,
-            })
-        }
-
-        ProfileAccount::Codex { home } => Ok(store::Account::Codex { home: kept(home)? }),
-
-        ProfileAccount::Grok { home } => Ok(store::Account::Grok { home: kept(home)? }),
-
-        ProfileAccount::Agy { home } => Ok(store::Account::Agy { home: kept(home)? }),
-
-        // An OpenCode home is the directory the two opencode keeps an account
-        // in sit under, so both of those are judged as well as the home itself
-        // — they are what a session mounts, and a directory that has never had
-        // opencode run in it holds neither. Each is judged by the same rule and
-        // refused in the same words, because for this type they *are* the home
-        // the account is kept under.
-        ProfileAccount::OpenCode { home } => {
-            let home = kept(home)?;
-
-            for path in xdg(&home) {
-                directory(&path)?;
-            }
-
-            Ok(store::Account::OpenCode { home })
-        }
-    }
-}
-
-/// The two directories an OpenCode account is kept in, under the home a Profile
-/// names.
-///
-/// opencode reads the XDG base directories rather than keeping a dot-directory
-/// of its own, and a Profile's home is a home to resolve them inside — see
-/// [`crate::sandbox::OPENCODE_CONFIG_INSIDE_HOME`], which is where the same two
-/// relative paths are bound from and to.
-fn xdg(home: &Path) -> impl Iterator<Item = PathBuf> {
-    [
-        crate::sandbox::OPENCODE_CONFIG_INSIDE_HOME,
-        crate::sandbox::OPENCODE_DATA_INSIDE_HOME,
-    ]
-    .map(|inside| home.join(inside))
-    .into_iter()
-}
-
-/// The one directory a type whose whole account is one home named, judged the
-/// way each of Claude's pair is.
-///
-/// One check for every such type rather than one apiece: what differs between
-/// them is which account the directory is, and that is the arm above, not this.
-fn kept(home: &str) -> Result<PathBuf, ProfileSaved> {
-    directory(Path::new(home.trim()))
-}
-
-/// The same, of a path rather than of something typed into the form.
-///
-/// What an OpenCode home holds is judged this way: the two directories under it
-/// are derived rather than typed, so there is nothing to trim off either.
-fn directory(home: &Path) -> Result<PathBuf, ProfileSaved> {
-    let home = match resolve(home) {
-        Resolved::At(path) => path,
-        Resolved::NotAbsolute => return Err(ProfileSaved::HomeNotAbsolute),
-        Resolved::Missing => return Err(ProfileSaved::HomeMissing),
+    let Some(harness) = crate::harness::of(agent_type) else {
+        return Err(ProfileSaved::NoSuchHarness);
     };
 
-    if !home.is_dir() {
-        return Err(ProfileSaved::HomeNotADirectory);
+    let mut paths = Vec::new();
+
+    for declared in harness.paths() {
+        let typed = account.paths.get(declared.key).map_or("", String::as_str);
+        let path = judged(Path::new(typed.trim()), declared.file, &declared.refused)?;
+
+        // What is mounted of an account kept somewhere inside the path, each
+        // judged by the same rule and refused in the same words, because for
+        // this harness they *are* the path the account is kept under.
+        for inside in declared.within {
+            judged(&path.join(inside), false, &declared.refused)?;
+        }
+
+        paths.push((declared.key, path));
     }
 
-    Ok(home)
+    Ok(store::Account::new(agent_type, paths))
+}
+
+/// One path, resolved and of the kind it is declared to be — or what it is
+/// refused as: named relatively, nothing there, or the wrong kind of thing.
+fn judged(path: &Path, file: bool, refused: &[ProfileSaved; 3]) -> Result<PathBuf, ProfileSaved> {
+    let [not_absolute, missing, not_of_its_kind] = refused.clone();
+
+    let path = match resolve(path) {
+        Resolved::At(path) => path,
+        Resolved::NotAbsolute => return Err(not_absolute),
+        Resolved::Missing => return Err(missing),
+    };
+
+    match file {
+        true if path.is_file() => Ok(path),
+        false if path.is_dir() => Ok(path),
+        _ => Err(not_of_its_kind),
+    }
 }
 
 /// Choose the Pairing a Conversation's grilling session will run under.
@@ -905,32 +919,19 @@ fn chosen(chosen: store::Chosen) -> ProfileChosen {
     }
 }
 
-/// The store's account as the viewer receives it, held to the wire's the same
-/// way: one arm per agent type, and the paths that type has.
+/// The store's account as the viewer receives it: the harness, and each path
+/// under its key.
 ///
 /// The paths are stored as UTF-8 in the first place — one that is not cannot be
 /// saved — so nothing is lost putting them back on the wire.
 pub(crate) fn account(account: &store::Account) -> ProfileAccount {
-    match account {
-        store::Account::Claude {
-            claude_dir,
-            config_file,
-        } => ProfileAccount::Claude {
-            claude_dir: claude_dir.to_string_lossy().into_owned(),
-            config_file: config_file.to_string_lossy().into_owned(),
-        },
-        store::Account::Codex { home } => ProfileAccount::Codex {
-            home: home.to_string_lossy().into_owned(),
-        },
-        store::Account::Grok { home } => ProfileAccount::Grok {
-            home: home.to_string_lossy().into_owned(),
-        },
-        store::Account::OpenCode { home } => ProfileAccount::OpenCode {
-            home: home.to_string_lossy().into_owned(),
-        },
-        store::Account::Agy { home } => ProfileAccount::Agy {
-            home: home.to_string_lossy().into_owned(),
-        },
+    ProfileAccount {
+        agent_type: agent_type(account.agent_type()),
+        paths: account
+            .keyed()
+            .iter()
+            .map(|(key, path)| (key.clone(), path.to_string_lossy().into_owned()))
+            .collect(),
     }
 }
 
@@ -946,15 +947,148 @@ pub(crate) fn shown(name: Option<&str>) -> &str {
     name.unwrap_or("Default")
 }
 
+/// How the built-ins are spelled on the wire, which is how they were spelled
+/// when the wire's word for a harness was an enum's: a device still on an
+/// older release reads them, and the viewer's fixtures say them.
+const WIRE: [(store::AgentType, &str); 5] = [
+    (store::AgentType::CLAUDE, "Claude"),
+    (store::AgentType::CODEX, "Codex"),
+    (store::AgentType::GROK, "Grok"),
+    (store::AgentType::OPENCODE, "OpenCode"),
+    (store::AgentType::AGY, "Agy"),
+];
+
 /// And the agent type on its own, for the Timeline: what a session ran under is
 /// recorded without an account, the Profile it came from being a thing that can
-/// since have gone.
+/// since have gone. A plugin harness is its id.
 pub(crate) fn agent_type(agent_type: store::AgentType) -> AgentType {
-    match agent_type {
-        store::AgentType::Claude => AgentType::Claude,
-        store::AgentType::Codex => AgentType::Codex,
-        store::AgentType::Grok => AgentType::Grok,
-        store::AgentType::OpenCode => AgentType::OpenCode,
-        store::AgentType::Agy => AgentType::Agy,
+    let wire = WIRE
+        .iter()
+        .find(|(stored, _)| *stored == agent_type)
+        .map_or(agent_type.word(), |(_, wire)| wire);
+
+    AgentType(wire.into())
+}
+
+/// And back again, for a reading that came off the wire and wants the harness
+/// it names — see [`crate::harness::of`].
+pub(crate) fn stored(agent_type: &AgentType) -> store::AgentType {
+    WIRE.iter()
+        .find(|(_, wire)| *wire == agent_type.as_str())
+        .map_or_else(
+            || store::AgentType::read(agent_type.as_str()),
+            |(stored, _)| *stored,
+        )
+}
+
+/// Every harness this server can run a session on, as the viewer draws it —
+/// see [`verkstead_render::HarnessEntry`]: the built-ins, and after them the
+/// ones the Agent plugins that loaded here declare, `plugged`.
+///
+/// **And after those, the harnesses withheld**, `withheld` — see
+/// [`withheld`] — each not offered: a disabled Agent plugin's, which the
+/// Profiles still standing on it are drawn by. Drawn from the harness itself
+/// where this process stood it up, and by its plugin's name alone where it
+/// never did, its manifest not having been read since the server started.
+pub(crate) fn harnesses(
+    plugged: &[store::AgentType],
+    withheld: &[(store::AgentType, String)],
+) -> Vec<HarnessEntry> {
+    let offered = crate::harness::every().chain(plugged.iter().filter_map(|agent_type| {
+        crate::harness::of(*agent_type).map(|harness| (*agent_type, harness))
+    }));
+
+    offered
+        .map(|(agent_type, harness)| entry(agent_type, harness, true))
+        .chain(withheld.iter().map(
+            |(agent_type, named)| match crate::harness::of(*agent_type) {
+                Some(harness) => entry(*agent_type, harness, false),
+                None => HarnessEntry {
+                    id: self::agent_type(*agent_type),
+                    name: named.clone(),
+                    mark: String::new(),
+                    paths: Vec::new(),
+                    login: None,
+                    found_at: Vec::new(),
+                    first_run: String::new(),
+                    models: Vec::new(),
+                    aliases: Vec::new(),
+                    binary: String::new(),
+                    install: None,
+                    offered: false,
+                },
+            },
+        ))
+        .collect()
+}
+
+/// The harnesses of disabled Agent plugins that Profiles still stand on, each
+/// with its plugin's name — what [`harnesses`] lists as not offered.
+pub(crate) async fn withheld(state: &AppState) -> Result<Vec<(store::AgentType, String)>> {
+    let named: HashSet<store::AgentType> = store::profiles(&state.pool)
+        .await?
+        .iter()
+        .map(store::Profile::agent_type)
+        .collect();
+    let offered = state.plugins.harnesses();
+
+    Ok(
+        crate::store::replicated::live_records::<crate::replicating::plugins::Plugins>(&state.pool)
+            .await?
+            .into_iter()
+            .filter(|record| !record.fields.enabled)
+            .map(|record| (store::AgentType::read(&record.uuid), record.fields.name))
+            .filter(|(agent_type, _)| {
+                agent_type.built_in().is_none()
+                    && named.contains(agent_type)
+                    && !offered.contains(agent_type)
+            })
+            .collect(),
+    )
+}
+
+/// One harness as the viewer draws it.
+fn entry(
+    agent_type: store::AgentType,
+    harness: &dyn crate::harness::Harness,
+    offered: bool,
+) -> HarnessEntry {
+    HarnessEntry {
+        id: self::agent_type(agent_type),
+        name: harness.named().to_owned(),
+        mark: harness.mark().to_owned(),
+        paths: harness
+            .paths()
+            .into_iter()
+            .map(|declared| HarnessPath {
+                key: declared.key.to_owned(),
+                label: declared.label.to_owned(),
+                purpose: declared.purpose.to_owned(),
+                placeholder: declared.placeholder.to_owned(),
+                file: declared.file,
+            })
+            .collect(),
+        login: harness.speaking().map(|speaking| speaking.name.to_owned()),
+        found_at: harness.found_at().into_iter().map(str::to_owned).collect(),
+        first_run: harness.first_run().to_owned(),
+        models: modelled(harness.models()),
+        aliases: modelled(harness.aliases()),
+        binary: harness.binary().to_owned(),
+        install: harness.install().map(|install| HarnessInstall {
+            instructions: install.instructions.map(str::to_owned),
+            commands: install.commands.to_vec(),
+        }),
+        offered,
     }
+}
+
+/// Models as a harness answers them, as the wire carries them.
+fn modelled(models: Vec<(&str, &str)>) -> Vec<HarnessModel> {
+    models
+        .into_iter()
+        .map(|(id, name)| HarnessModel {
+            id: id.to_owned(),
+            name: name.to_owned(),
+        })
+        .collect()
 }

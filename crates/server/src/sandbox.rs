@@ -129,6 +129,8 @@ mod surface;
 // And what a session is given of its account: a `.claude`, a `.codex`, a `.grok`
 // or OpenCode's two directories of Verkstead's own, built out of an allowlist —
 // see [`root`].
+#[cfg(test)]
+mod built_roots;
 pub(crate) mod root;
 mod sharing;
 
@@ -370,16 +372,16 @@ const COMPLAINT: usize = 500;
 /// Claude's pair, and the one directory each backend after it keeps its whole
 /// account under. Written out rather than derived, because they are the paths
 /// those programs look in and not a scheme any of them follows.
-const CLAUDE_DIR_INSIDE_HOME: &str = ".claude";
-const CLAUDE_CONFIG_INSIDE_HOME: &str = ".claude.json";
-const CODEX_INSIDE_HOME: &str = ".codex";
-const GROK_INSIDE_HOME: &str = ".grok";
-const AGY_INSIDE_HOME: &str = ".gemini";
+pub(crate) const CLAUDE_DIR_INSIDE_HOME: &str = ".claude";
+pub(crate) const CLAUDE_CONFIG_INSIDE_HOME: &str = ".claude.json";
+pub(crate) const CODEX_INSIDE_HOME: &str = ".codex";
+pub(crate) const GROK_INSIDE_HOME: &str = ".grok";
+pub(crate) const AGY_INSIDE_HOME: &str = ".gemini";
 
 /// What makes a `~/.gemini` the Antigravity CLI's account rather than what
 /// Gemini CLI left behind: the directory agy keeps its own state in, which
 /// Gemini CLI never writes. Read off agy 1.4.12, which makes it at every start.
-const AGY_ACCOUNT_MARK: &str = "antigravity-cli";
+pub(crate) const AGY_ACCOUNT_MARK: &str = "antigravity-cli";
 
 /// And OpenCode's, which is two of them rather than one: it keeps no
 /// dot-directory of its own and reads the XDG base directories instead,
@@ -427,7 +429,7 @@ pub(crate) const OPENCODE_DATA_INSIDE_HOME: &str = ".local/share/opencode";
 /// opencode 1.18.25, which is the release this backend is pinned at: a stable
 /// install of that names the file `opencode.db` on its own, so what this is
 /// worth is the day the host installs a beta.
-const OPENCODE_DB: &str = "OPENCODE_DB";
+pub(crate) const OPENCODE_DB: &str = "OPENCODE_DB";
 pub(crate) const OPENCODE_DB_FILE: &str = "opencode.db";
 
 /// And how long a command opencode's shell tool will run before it kills it,
@@ -438,7 +440,7 @@ pub(crate) const OPENCODE_DB_FILE: &str = "opencode.db";
 /// human is on a phone, so the wait is measured in hours; the shell tool's own
 /// default is two minutes, and its description tells the model that a command
 /// with no timeout is killed after it. So the Guide tells an OpenCode session
-/// to pass a large one — see the CLI's `running-opencode.md` — and this raises
+/// to pass a large one — see `harness/running/opencode.md` — and this raises
 /// what a session that passed nothing gets. Both, because the instruction is
 /// the mechanism and this is what stands under a drifted instruction: an ask
 /// killed two minutes in is an answer the human gave to nobody.
@@ -460,8 +462,9 @@ pub(crate) const OPENCODE_DB_FILE: &str = "opencode.db";
 /// says `EXPERIMENTAL` on it, and moving it costs one edit here. A value it
 /// cannot read as a positive integer is ignored rather than refused, so the
 /// number is written out in milliseconds rather than computed into one.
-const OPENCODE_BASH_DEFAULT_TIMEOUT: &str = "OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS";
-const OPENCODE_BASH_DEFAULT_TIMEOUT_MS: &str = "86400000";
+pub(crate) const OPENCODE_BASH_DEFAULT_TIMEOUT: &str =
+    "OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS";
+pub(crate) const OPENCODE_BASH_DEFAULT_TIMEOUT_MS: &str = "86400000";
 
 /// What tells a Claude session not to update itself.
 ///
@@ -477,7 +480,7 @@ const OPENCODE_BASH_DEFAULT_TIMEOUT_MS: &str = "86400000";
 /// Claude's own spelling, which is why it is named here rather than composed:
 /// moving it costs one edit. Nothing but that backend reads it, so nothing else
 /// is told it.
-const DISABLE_AUTOUPDATER: &str = "DISABLE_AUTOUPDATER";
+pub(crate) const DISABLE_AUTOUPDATER: &str = "DISABLE_AUTOUPDATER";
 
 /// What sends an Antigravity CLI process on Windows to its file store rather
 /// than the Credential Manager, and the value it is given.
@@ -498,7 +501,7 @@ const DISABLE_AUTOUPDATER: &str = "DISABLE_AUTOUPDATER";
 /// and on the two Unixes agy finds no keyring inside a sandbox by itself. The
 /// value is the shape `sshd` gives it, a loopback to a loopback, since a
 /// reader that went further than *is it set* would find nothing to follow.
-const AGY_FILE_STORE: (&str, &str) = ("SSH_CONNECTION", "127.0.0.1 0 127.0.0.1 22");
+pub(crate) const AGY_FILE_STORE: (&str, &str) = ("SSH_CONNECTION", "127.0.0.1 0 127.0.0.1 22");
 
 /// Which backend a session is running, in its own environment.
 ///
@@ -1460,15 +1463,15 @@ fn system(platform: Platform) -> &'static [&'static str] {
 /// rule: it is resolved on a session's `PATH`, followed into whatever install
 /// it links into, and granted where that install is the human's own.
 ///
-/// The harness names are [`crate::sessions::binary`]'s rather than written
+/// The harness names are [`crate::harness::BINARIES`] rather than written
 /// again, because what a row is about is the program a session of that type is
 /// launched as.
 pub(crate) const PROGRAMS: &[&str] = &[
-    crate::sessions::binary(store::AgentType::Claude),
-    crate::sessions::binary(store::AgentType::Codex),
-    crate::sessions::binary(store::AgentType::Grok),
-    crate::sessions::binary(store::AgentType::OpenCode),
-    crate::sessions::binary(store::AgentType::Agy),
+    crate::harness::BINARIES[0],
+    crate::harness::BINARIES[1],
+    crate::harness::BINARIES[2],
+    crate::harness::BINARIES[3],
+    crate::harness::BINARIES[4],
     GIT,
     GH,
 ];
@@ -1663,64 +1666,17 @@ pub(crate) enum Standing {
     Nowhere,
 }
 
-/// Whether the file `at`, resolved for `program`, is Claude Code's **desktop
-/// app** rather than the command-line tool a session is launched as.
+/// Whether the file `at`, resolved for `program`, is a **desktop app** rather
+/// than the command-line tool a session is launched as.
 ///
-/// **Decided by shape, and nothing is run to find out.** An Electron binary
-/// asked for `--version` may open a window on somebody's screen, and
-/// [ADR 0016](../../../docs/adr/0016-onboarding.md) kept the wizard to reads —
-/// so this is `stat`s and path reading, and every arm of it is a unit test on a
-/// machine that is not Windows.
-///
-/// Two shapes, and the platform is a value rather than a `cfg`:
-///
-/// - an ancestor directory named [`ANTHROPIC_CLAUDE`], which is where the app a
-///   person downloads installs itself under `%LOCALAPPDATA%` — the versioned
-///   `app-x.y.z` it really runs out of is under the same directory;
-/// - a sibling [`SQUIRREL_UPDATE`], which is Squirrel's updater standing beside
-///   the app it updates.
-///
-/// **Two, and both of them seen.** A third was written and taken out again: a
-/// parent directory called `WindowsApps`, where an app-execution alias stands
-/// and where a Microsoft Store package would put one. No machine here has ever had that
-/// alias, and the cost of guessing wrong is not a row's wrong sentence — this
-/// answer refuses a session outright, with nothing on the Profile to overrule
-/// it, so a `claude.exe` alias standing in the directory every Windows user
-/// already has on their `PATH` would stop the product on that machine and tell
-/// the human to install what they have. A shape goes in here when somebody has
-/// seen it.
+/// The harness the name belongs to is what answers — see
+/// [`crate::harness::Harness::desktop_app`] — and Claude Code's is the one
+/// that has one. A name that is no harness's, `git` and `gh`, is never one.
 fn desktop_app(platform: Platform, program: &str, at: &Path) -> bool {
-    if platform != Platform::Windows || program != crate::sessions::binary(store::AgentType::Claude)
-    {
-        return false;
-    }
-
-    let Some(directory) = at.parent() else {
-        return false;
-    };
-
-    // The ancestors rather than the parent: what the downloaded app resolves to
-    // sits a versioned directory below the one it installed into.
-    at.ancestors()
-        .skip(1)
-        .filter_map(Path::file_name)
-        .any(|name| called(name, ANTHROPIC_CLAUDE))
-        || directory.join(SQUIRREL_UPDATE).is_file()
+    crate::harness::BUILT_IN
+        .iter()
+        .any(|harness| harness.binary() == program && harness.desktop_app(platform, at))
 }
-
-/// Whether a path component is `against`, the way Windows reads one: without
-/// regard to case.
-fn called(component: &OsStr, against: &str) -> bool {
-    component
-        .as_encoded_bytes()
-        .eq_ignore_ascii_case(against.as_bytes())
-}
-
-/// Where the Claude Code desktop app installs itself under `%LOCALAPPDATA%`.
-const ANTHROPIC_CLAUDE: &str = "AnthropicClaude";
-
-/// Squirrel's updater, which stands beside the app it updates.
-const SQUIRREL_UPDATE: &str = "Update.exe";
 
 /// Where `program` was seen on the `PATH` the server itself was started with,
 /// in a directory a session's own does not hold.
@@ -1963,7 +1919,10 @@ pub(crate) fn installs(platform: Platform, path: &OsStr, home: &Path) -> Vec<Pat
         return directories;
     }
 
-    for program in PROGRAMS {
+    // And every harness a plugin declares, followed as the built-ins are.
+    let plugged = crate::harness::plugged_binaries();
+
+    for program in PROGRAMS.iter().chain(plugged.iter()) {
         for landed in opened(platform, program, Some(path), None, Some(home)) {
             let Some(directory) = holding(&landed, home) else {
                 continue;
@@ -2556,40 +2515,13 @@ pub fn sets_itself(name: &str) -> bool {
 /// one of them twice over. Which is exactly the distinction the Windows arm
 /// turns on: a directory is joined in by a junction and a file by a hard link,
 /// and only the second of those cares what volume anything is on.
+///
+/// Nothing for a harness this server has not got, whose account is never
+/// mounted here.
 fn account_inside(account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBuf)> {
-    match account {
-        store::Account::Claude {
-            claude_dir,
-            config_file,
-        } => vec![
-            (claude_dir.clone(), home.join(CLAUDE_DIR_INSIDE_HOME)),
-            (config_file.clone(), home.join(CLAUDE_CONFIG_INSIDE_HOME)),
-        ],
-        store::Account::Codex { home: account } => {
-            vec![(account.clone(), home.join(CODEX_INSIDE_HOME))]
-        }
-        store::Account::Grok { home: account } => {
-            vec![(account.clone(), home.join(GROK_INSIDE_HOME))]
-        }
-        // Two rather than one, and the same relative path on both sides of
-        // each: an OpenCode Profile's home is an opencode home, and the XDG
-        // defaults resolve inside the fresh HOME — see
-        // [`OPENCODE_CONFIG_INSIDE_HOME`].
-        store::Account::OpenCode { home: account } => {
-            [OPENCODE_CONFIG_INSIDE_HOME, OPENCODE_DATA_INSIDE_HOME]
-                .into_iter()
-                .map(|inside| (account.join(inside), home.join(inside)))
-                .collect()
-        }
-        // agy's own directory inside `~/.gemini` rather than the whole of it:
-        // that is what a session is given the memory of, and what tells an
-        // account from a bare `~/.gemini` Gemini CLI left — see
-        // [`AGY_ACCOUNT_MARK`].
-        store::Account::Agy { home: account } => vec![(
-            account.join(AGY_ACCOUNT_MARK),
-            home.join(AGY_INSIDE_HOME).join(AGY_ACCOUNT_MARK),
-        )],
-    }
+    crate::harness::of(account.agent_type())
+        .map(|harness| harness.account_inside(account, home))
+        .unwrap_or_default()
 }
 
 /// The account an agent of `agent_type` keeps directly in `home`, where the
@@ -2610,7 +2542,7 @@ fn account_inside(account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBu
 ///
 /// Blocking: one `stat` per path of the shape.
 pub(crate) fn account_in_home(agent_type: store::AgentType, home: &Path) -> Option<store::Account> {
-    let account = kept_in(agent_type, home);
+    let account = kept_in(agent_type, home)?;
 
     account_inside(&account, home)
         .into_iter()
@@ -2631,25 +2563,10 @@ pub(crate) fn account_in_home(agent_type: store::AgentType, home: &Path) -> Opti
 /// launching under a Profile that lives elsewhere fetches the files a root is
 /// made of into a directory under its Data Directory and this is the account
 /// they go in — see [`Homes::account_mirror`] and [`root::mirrored_of`].
-pub(crate) fn kept_in(agent_type: store::AgentType, home: &Path) -> store::Account {
-    match agent_type {
-        store::AgentType::Claude => store::Account::Claude {
-            claude_dir: home.join(CLAUDE_DIR_INSIDE_HOME),
-            config_file: home.join(CLAUDE_CONFIG_INSIDE_HOME),
-        },
-        store::AgentType::Codex => store::Account::Codex {
-            home: home.join(CODEX_INSIDE_HOME),
-        },
-        store::AgentType::Grok => store::Account::Grok {
-            home: home.join(GROK_INSIDE_HOME),
-        },
-        store::AgentType::OpenCode => store::Account::OpenCode {
-            home: home.to_owned(),
-        },
-        store::AgentType::Agy => store::Account::Agy {
-            home: home.join(AGY_INSIDE_HOME),
-        },
-    }
+///
+/// `None` for a harness this server has not got.
+pub(crate) fn kept_in(agent_type: store::AgentType, home: &Path) -> Option<store::Account> {
+    crate::harness::of(agent_type).map(|harness| harness.kept_in(home))
 }
 
 /// Whichever of `account`'s own paths cannot be joined into a profile at
@@ -4267,16 +4184,8 @@ impl Sandbox {
         // not start. Nothing is made where the Profile shares no memory, there
         // being no join to make. Refused the way a handoff directory that cannot
         // be made is.
-        let root = match &profile.account {
-            store::Account::Claude { claude_dir, .. } => {
-                root::Root::claude(homes.platform(), claude_dir, &git_dir, &worktree)
-            }
-            store::Account::Codex { home } => root::Root::codex(home),
-            store::Account::Grok { home } => root::Root::grok(home),
-            store::Account::OpenCode { home } => root::Root::opencode(home),
-            store::Account::Agy { home } => root::Root::agy(home),
-        }
-        .remembering(profile.memory);
+        let root = root::Root::of(&profile.account, homes.platform(), &git_dir, &worktree)?
+            .remembering(profile.memory);
 
         if let Err(error) = root.made_in_account() {
             tracing::error!(
@@ -4437,16 +4346,8 @@ impl Sandbox {
         // Started in the place and named after it: Claude names a `projects/`
         // entry for the directory it was started in and trusts it, and a login
         // has the one directory to name, which is said as both halves.
-        let root = match &profile.account {
-            store::Account::Claude { claude_dir, .. } => {
-                root::Root::claude(homes.platform(), claude_dir, &place, &place)
-            }
-            store::Account::Codex { home } => root::Root::codex(home),
-            store::Account::Grok { home } => root::Root::grok(home),
-            store::Account::OpenCode { home } => root::Root::opencode(home),
-            store::Account::Agy { home } => root::Root::agy(home),
-        }
-        .remembering(profile.memory);
+        let root = root::Root::of(&profile.account, homes.platform(), &place, &place)?
+            .remembering(profile.memory);
 
         if root.made_in_account().is_err() {
             return None;
@@ -4931,7 +4832,9 @@ impl Sandbox {
         // it — see [`Sandbox::config_described`].
         self.root_described(&self.root, launch.builds, &mut surface);
 
-        if let store::Account::Claude { config_file, .. } = &self.account {
+        if let Some(config_file) = crate::harness::of(self.account.agent_type())
+            .and_then(|harness| harness.copied(&self.account))
+        {
             self.config_described(&self.root, config_file, launch.builds, &mut surface);
         }
 
@@ -5077,38 +4980,13 @@ impl Sandbox {
             surface.set(NIXOS_ENVIRONMENT_DONE, "1");
         }
 
-        // What a Claude session is told about itself: that it is not to update
-        // the install it is running. The native binary writes a new version
-        // into `~/.local/share/claude/versions/`, which is read-only inside —
-        // see [`installs`], which is what puts it inside — so an updater in
-        // there is a session spending its first minutes failing at something
-        // nobody asked it to do, and the install is the human's own besides.
-        // Every Claude session wherever `claude` was found, rather than only
-        // the ones that found the human's: a session is never what moves an
-        // install on, whosever it is.
-        if matches!(self.account, store::Account::Claude { .. }) {
-            surface.set(DISABLE_AUTOUPDATER, "1");
-        }
-
-        // The two an OpenCode session is told about itself: where its store
-        // goes, because opencode names the file after the release channel the
-        // install came from and the reader that follows a Transcript opens the
-        // path this chose; and how long its shell tool holds a command the
-        // model gave no timeout of its own, which is what a blocking ask under
-        // this backend stands on — see [`OPENCODE_BASH_DEFAULT_TIMEOUT`].
-        if matches!(self.account, store::Account::OpenCode { .. }) {
-            surface.set(OPENCODE_DB, OPENCODE_DB_FILE).set(
-                OPENCODE_BASH_DEFAULT_TIMEOUT,
-                OPENCODE_BASH_DEFAULT_TIMEOUT_MS,
-            );
-        }
-
-        // And an Antigravity CLI process on Windows, that its login is the
-        // account's file rather than the session account's vault — see
-        // [`AGY_FILE_STORE`].
-        if self.platform == Platform::Windows && matches!(self.account, store::Account::Agy { .. })
+        // And what this session's harness is told about itself, which no
+        // other harness reads — see [`crate::harness::Harness::environment`].
+        for (name, value) in crate::harness::of(self.account.agent_type())
+            .map(|harness| harness.environment(self.platform))
+            .unwrap_or_default()
         {
-            surface.set(AGY_FILE_STORE.0, AGY_FILE_STORE.1);
+            surface.set(name, value);
         }
 
         // And where the toolchain that build runs is, on a machine whose Rust
@@ -5484,9 +5362,7 @@ impl Sandbox {
         surface: &Surface,
         baseline: &sharing::Baseline,
     ) -> Option<(PathBuf, PathBuf)> {
-        let store::Account::Claude { config_file, .. } = &self.account else {
-            return None;
-        };
+        let config_file = crate::harness::of(self.account.agent_type())?.copied(&self.account)?;
 
         let copy = self.config_copy();
 
@@ -5501,7 +5377,7 @@ impl Sandbox {
                 .expect("a baseline nothing has panicked holding") = contents;
         }
 
-        Some((config_file.clone(), copy))
+        Some((config_file.to_owned(), copy))
     }
 
     /// What a session's ending has to see to about its login, on top of
@@ -7789,9 +7665,8 @@ mod tests {
         // A Claude account named by its paths alone: the login inside the
         // directory half is a file a hard link is asked for too, so the
         // directory has to be on a volume this test can say.
-        let claude_in = |dir: &str, config: &str| store::Account::Claude {
-            claude_dir: PathBuf::from(dir),
-            config_file: PathBuf::from(config),
+        let claude_in = |dir: &str, config: &str| {
+            store::Account::claude(PathBuf::from(dir), PathBuf::from(config))
         };
         let claude = |config: &str| claude_in(r"C:\Users\someone\.claude", config);
 
@@ -7841,9 +7716,7 @@ mod tests {
             across_volumes(
                 Platform::Windows,
                 profile,
-                &store::Account::OpenCode {
-                    home: account.path().to_owned(),
-                },
+                &store::Account::home(store::AgentType::OPENCODE, account.path().to_owned()),
                 true
             ),
             None,
@@ -7856,9 +7729,10 @@ mod tests {
         let opencode = across_volumes(
             Platform::Windows,
             profile,
-            &store::Account::OpenCode {
-                home: PathBuf::from(r"D:\accounts\someone"),
-            },
+            &store::Account::home(
+                store::AgentType::OPENCODE,
+                PathBuf::from(r"D:\accounts\someone"),
+            ),
             false,
         )
         .expect("an OpenCode login on another drive is one a hard link cannot join in");
@@ -7869,9 +7743,10 @@ mod tests {
         let codex = across_volumes(
             Platform::Windows,
             profile,
-            &store::Account::Codex {
-                home: PathBuf::from(r"D:\accounts\someone\.codex"),
-            },
+            &store::Account::home(
+                store::AgentType::CODEX,
+                PathBuf::from(r"D:\accounts\someone\.codex"),
+            ),
             true,
         )
         .expect("a Codex login on another drive is one a hard link cannot join in");
@@ -7881,9 +7756,10 @@ mod tests {
             across_volumes(
                 Platform::Windows,
                 profile,
-                &store::Account::Codex {
-                    home: PathBuf::from(r"C:\Users\someone\.codex"),
-                },
+                &store::Account::home(
+                    store::AgentType::CODEX,
+                    PathBuf::from(r"C:\Users\someone\.codex")
+                ),
                 true
             ),
             None,
@@ -7894,9 +7770,10 @@ mod tests {
         let grok = across_volumes(
             Platform::Windows,
             profile,
-            &store::Account::Grok {
-                home: PathBuf::from(r"D:\accounts\someone\.grok"),
-            },
+            &store::Account::home(
+                store::AgentType::GROK,
+                PathBuf::from(r"D:\accounts\someone\.grok"),
+            ),
             true,
         )
         .expect("a Grok login on another drive is one a hard link cannot join in");
@@ -7929,8 +7806,8 @@ mod tests {
         // Whatever the Profile's binding on the device it is bound on names, which is a
         // path on that machine and may be any drive at all — the thing a mirror exists
         // so that this device never has to join in.
-        for elsewhere in [store::AgentType::Claude, store::AgentType::Codex] {
-            let at_home = kept_in(elsewhere, Path::new(r"Z:\accounts\someone"));
+        for elsewhere in [store::AgentType::CLAUDE, store::AgentType::CODEX] {
+            let at_home = kept_in(elsewhere, Path::new(r"Z:\accounts\someone")).unwrap();
 
             assert!(
                 across_volumes(
@@ -7946,7 +7823,8 @@ mod tests {
             let mirrored = kept_in(
                 elsewhere,
                 &homes.account_mirror("0b0e4c1a-5d2f-4e7b-9a3c-6f1d2e3b4a5c"),
-            );
+            )
+            .unwrap();
 
             assert_eq!(
                 across_volumes(

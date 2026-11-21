@@ -11,7 +11,7 @@
 //! absent from it too without anybody having to notice.
 //!
 //! **One shape for every harness**, in four parts. Which files and directories
-//! each part is, is the harness's own — see [`Harness`]:
+//! each part is, is the harness's own — see [`Allowlist`]:
 //!
 //! - **The login, linked**, where the account has one.
 //! - **The memory store, joined only where the Profile's memory switch is on.**
@@ -48,6 +48,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::harness::{Beside, Harness};
 use crate::platform::Platform;
 use crate::settings::AttachedServer;
 
@@ -55,21 +56,21 @@ use crate::settings::AttachedServer;
 ///
 /// Not there at all on a Mac whose login is in the Keychain, which is a root
 /// with no credentials in it — see [`Root::joined`].
-const CREDENTIALS: &str = ".credentials.json";
+pub(crate) const CREDENTIALS: &str = ".credentials.json";
 
 /// The directory of per-path entries Claude keeps memory and transcripts in.
-const PROJECTS: &str = "projects";
+pub(crate) const PROJECTS: &str = "projects";
 
 /// The settings file Claude reads for the user, inside `~/.claude`.
-const SETTINGS: &str = "settings.json";
+pub(crate) const SETTINGS: &str = "settings.json";
 
 /// The file Claude reads as its global instructions, inside `~/.claude`.
-const CLAUDE_INSTRUCTIONS: &str = "CLAUDE.md";
+pub(crate) const CLAUDE_INSTRUCTIONS: &str = "CLAUDE.md";
 
 /// The file the other three read as their global instructions: Codex's and
 /// Grok Build's inside the account's own directory, and OpenCode's inside its
 /// config directory.
-const AGENTS: &str = "AGENTS.md";
+pub(crate) const AGENTS: &str = "AGENTS.md";
 
 /// Of the account's own settings, the keys a root's settings carry over.
 ///
@@ -87,17 +88,17 @@ const CARRIED: [&str; 2] = ["apiKeyHelper", "env"];
 /// for a session's whole life: read off codex 0.154, whose `codex login` over
 /// an `auth.json` already there leaves the same inode behind. The launch line
 /// says `cli_auth_credentials_store=file`, so this file is where the login is.
-const AUTH: &str = "auth.json";
+pub(crate) const AUTH: &str = "auth.json";
 
 /// The configuration file Codex reads for the user, inside `~/.codex`.
-const CODEX_CONFIG: &str = "config.toml";
+pub(crate) const CODEX_CONFIG: &str = "config.toml";
 
 /// What Codex and Grok Build both call the directory their sessions write their
 /// logs under, inside the account's directory.
-const SESSIONS: &str = "sessions";
+pub(crate) const SESSIONS: &str = "sessions";
 
 /// The configuration file Grok Build reads for the user, inside `~/.grok`.
-const GROK_CONFIG: &str = "config.toml";
+pub(crate) const GROK_CONFIG: &str = "config.toml";
 
 /// The two directories Codex's memory is kept in, inside `~/.codex`: the
 /// rollouts every session writes, and the memory files — `MEMORY.md` and
@@ -117,7 +118,7 @@ const GROK_CONFIG: &str = "config.toml";
 /// memories feature's two phases, and `codex features list` says `memories` is
 /// off unless `[features]` in `config.toml` turns it on — which the file a root
 /// is written never carries, see [`CODEX_CARRIED`].
-const CODEX_MEMORY: [&str; 2] = [SESSIONS, "memories"];
+pub(crate) const CODEX_MEMORY: [&str; 2] = [SESSIONS, "memories"];
 
 /// Of the account's own `config.toml`, the keys a root's carries over.
 ///
@@ -126,7 +127,7 @@ const CODEX_MEMORY: [&str; 2] = [SESSIONS, "memories"];
 /// `model_providers` says where it is. Everything else is how the human works —
 /// `mcp_servers`, `profiles`, `projects`, hooks, `notify`, `[features]` — and
 /// none of it is a session's.
-const CODEX_CARRIED: [&str; 2] = ["model_provider", "model_providers"];
+pub(crate) const CODEX_CARRIED: [&str; 2] = ["model_provider", "model_providers"];
 
 /// The two directories Grok Build's memory is kept in, inside `~/.grok`: the
 /// sessions every run writes, and the memory files its memory feature writes
@@ -147,7 +148,7 @@ const CODEX_CARRIED: [&str; 2] = ["model_provider", "model_providers"];
 ///
 /// Not `skills/`, `plugins/`, `agents/`, `workflows/`, `logs/`, `docs/` or
 /// `pager.toml`, which are the human's or grok's own furniture.
-const GROK_MEMORY: [&str; 2] = [SESSIONS, "memory"];
+pub(crate) const GROK_MEMORY: [&str; 2] = [SESSIONS, "memory"];
 
 /// Of the account's own `config.toml`, what a Grok root's carries over: each a
 /// top-level key, or a `table.key` inside one.
@@ -165,7 +166,7 @@ const GROK_MEMORY: [&str; 2] = [SESSIONS, "memory"];
 ///
 /// Everything else is how the human works — `mcp_servers`, `hooks`, `skills`,
 /// `plugins`, `permission`, `memory`, `ui` — and none of it is a session's.
-const GROK_CARRIED: [&str; 7] = [
+pub(crate) const GROK_CARRIED: [&str; 7] = [
     "model",
     "model_providers",
     "auth_provider",
@@ -180,7 +181,7 @@ const GROK_CARRIED: [&str; 7] = [
 ///
 /// Not the account's `node_modules/`, `package.json`, agents, commands, themes
 /// or skills, which are how the human works.
-const OPENCODE_CONFIG: &str = super::OPENCODE_CONFIG_INSIDE_HOME;
+pub(crate) const OPENCODE_CONFIG: &str = super::OPENCODE_CONFIG_INSIDE_HOME;
 
 /// The directory OpenCode keeps its login and its database in, inside its home.
 ///
@@ -191,18 +192,18 @@ const OPENCODE_CONFIG: &str = super::OPENCODE_CONFIG_INSIDE_HOME;
 /// logs travel with it. Where memory is not shared, the directory is the
 /// root's own, the database in it starts empty, and the login alone is linked
 /// into it.
-const OPENCODE_DATA: &str = super::OPENCODE_DATA_INSIDE_HOME;
+pub(crate) const OPENCODE_DATA: &str = super::OPENCODE_DATA_INSIDE_HOME;
 
 /// The file OpenCode keeps a login in, inside its home.
 ///
 /// **Written in place**, like Codex's: read off opencode 1.18.30, whose
 /// `opencode auth logout` leaves the same inode behind. So a link of it stays
 /// the account's file for the session's whole life.
-const OPENCODE_AUTH: &str = ".local/share/opencode/auth.json";
+pub(crate) const OPENCODE_AUTH: &str = ".local/share/opencode/auth.json";
 
 /// The configuration files OpenCode reads for the user, inside its config
 /// directory, in the order it reads them: a later file's keys win.
-const OPENCODE_CONFIGS: [&str; 2] = ["opencode.json", "opencode.jsonc"];
+pub(crate) const OPENCODE_CONFIGS: [&str; 2] = ["opencode.json", "opencode.jsonc"];
 
 /// Of the account's own configuration, the key a root's carries over:
 /// `provider`, which says where a custom provider is and how it is reached.
@@ -227,11 +228,11 @@ const OPENCODE_CARRIED: &str = "provider";
 /// hooks, skills, rules or servers. What agy makes for itself in either, it
 /// makes fresh: a run with neither marks its own post-onboarding steps done in
 /// `jetski_state.pbtxt` before it draws the sign-in screen.
-const AGY_CLI: &str = "antigravity-cli";
-const AGY_CUSTOMISATION: &str = "config";
+pub(crate) const AGY_CLI: &str = "antigravity-cli";
+pub(crate) const AGY_CUSTOMISATION: &str = "config";
 
 /// The settings file agy reads for the user, inside `~/.gemini`.
-const AGY_SETTINGS: &str = "antigravity-cli/settings.json";
+pub(crate) const AGY_SETTINGS: &str = "antigravity-cli/settings.json";
 
 /// Of the account's own `settings.json`, the keys a root's carries over.
 ///
@@ -246,7 +247,7 @@ const AGY_CARRIED: [&str; 3] = ["modelProvider", "customModelsConfig", "gcp"];
 
 /// The file agy reads its MCP servers from, inside `~/.gemini`: the global
 /// configuration its own documentation names, keyed `mcpServers`.
-const AGY_MCP: &str = "config/mcp_config.json";
+pub(crate) const AGY_MCP: &str = "config/mcp_config.json";
 
 /// The file agy reads as its global rules, inside `~/.gemini`.
 ///
@@ -258,7 +259,7 @@ const AGY_MCP: &str = "config/mcp_config.json";
 /// global rule. One of the two, and the first of them, written alone. Proved
 /// on a signed-in agy 1.4.12: a rule written here alone reached the model,
 /// which answered from it without reading a file.
-const AGY_INSTRUCTIONS: &str = "GEMINI.md";
+pub(crate) const AGY_INSTRUCTIONS: &str = "GEMINI.md";
 
 /// The memory agy keeps, inside `~/.gemini`: the record of each conversation,
 /// what a conversation leaves behind it, and the database of summaries that
@@ -267,7 +268,7 @@ const AGY_INSTRUCTIONS: &str = "GEMINI.md";
 /// it.
 ///
 /// Read off agy 1.4.12, which makes all three at every start.
-const AGY_MEMORY: [&str; 2] = ["antigravity-cli/conversations", "antigravity-cli/brain"];
+pub(crate) const AGY_MEMORY: [&str; 2] = ["antigravity-cli/conversations", "antigravity-cli/brain"];
 
 /// And the database of the three, which is a file rather than a directory.
 ///
@@ -290,7 +291,7 @@ const AGY_SUMMARIES: &str = "antigravity-cli/conversation_summaries.db";
 /// still joined, which is all `--conversation <id>` resumes from; what the
 /// account's own index misses is the row of a session Verkstead ran, which agy
 /// writes for itself the next time the human resumes that conversation.
-const AGY_SUMMARIES_JOINED: &[&str] = if cfg!(target_os = "macos") {
+pub(crate) const AGY_SUMMARIES_JOINED: &[&str] = if cfg!(target_os = "macos") {
     &[]
 } else {
     &[
@@ -316,8 +317,8 @@ const AGY_SUMMARIES_JOINED: &[&str] = if cfg!(target_os = "macos") {
 /// and agy keeps the file under `cache/`, so the account's own may be gone
 /// whatever the account has seen. The telemetry the second screen offers is
 /// left where agy's default leaves it, as ADR-0011 has it.
-const AGY_ONBOARDED: &str = "antigravity-cli/cache/onboarding.json";
-const AGY_ONBOARDED_AS: &str = "{\"onboardingComplete\":true}\n";
+pub(crate) const AGY_ONBOARDED: &str = "antigravity-cli/cache/onboarding.json";
+pub(crate) const AGY_ONBOARDED_AS: &str = "{\"onboardingComplete\":true}\n";
 
 /// The file agy falls to for its login where its keyring is unreachable,
 /// inside `~/.gemini`.
@@ -330,7 +331,7 @@ const AGY_ONBOARDED_AS: &str = "{\"onboardingComplete\":true}\n";
 ///
 /// **Written in place**, opened for writing and truncated rather than renamed
 /// over, so a bind of it on Linux takes the write the way a Codex login's does.
-const AGY_LOGIN: &str = "antigravity-cli/antigravity-oauth-token";
+pub(crate) const AGY_LOGIN: &str = "antigravity-cli/antigravity-oauth-token";
 
 /// Of the account's `.claude.json`, the key its MCP servers are under: at the top
 /// level, and again under each `projects` entry.
@@ -378,7 +379,7 @@ const TYPE: &str = "type";
 /// Antigravity CLI in its `mcp_config.json`. Codex alone
 /// spells it something else, which is the whole of what its form differs in:
 /// see [`CODEX_HEADERS`].
-const HEADERS: &str = "headers";
+pub(crate) const HEADERS: &str = "headers";
 
 /// Of a Codex or a Grok Build `config.toml`, the table the Conversation's
 /// servers are written under: one sub-table apiece, `[mcp_servers.<name>]`,
@@ -406,7 +407,7 @@ const MCP_SERVERS_TOML: &str = "mcp_servers";
 /// and-sandbox`, which is *YOLO mode* on its own header — called an attached
 /// server's tool with no prompt and the key absent. A key that changes nothing
 /// is a key not written.
-const CODEX_HEADERS: &str = "http_headers";
+pub(crate) const CODEX_HEADERS: &str = "http_headers";
 
 /// Of an OpenCode `opencode.json`, the key the Conversation's servers are
 /// written under, one entry apiece.
@@ -473,64 +474,74 @@ pub(crate) struct Root {
     account: PathBuf,
 
     /// Which harness's allowlist this is.
-    harness: Harness,
+    harness: Allowlist,
+
+    /// Where the session runs, as a harness whose store is keyed by it names
+    /// it — see [`Place`] — and `None` for every other harness.
+    place: Option<Place>,
 
     /// Whether the memory store is joined at all: the Profile's memory switch —
     /// see [`Root::remembering`].
     memory: bool,
+
+    /// The account's paths after its directory, each as a session is given
+    /// it — see [`Beside`]. None, for every built-in.
+    beside: Vec<Beside>,
 }
 
-/// Which harness a root is for, and what that harness's allowlist is made of.
+/// Which harness a root is for, which is what answers what its allowlist is
+/// made of — see [`Harness`], whose account half each of [`Root`]'s answers
+/// is asked of.
+///
+/// Told apart by the binary, which is the one thing no two harnesses share.
+#[derive(Clone, Copy)]
+struct Allowlist(&'static dyn Harness);
+
+impl std::fmt::Debug for Allowlist {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0.binary())
+    }
+}
+
+impl PartialEq for Allowlist {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.binary() == other.0.binary()
+    }
+}
+
+impl Eq for Allowlist {}
+
+/// Where a session runs, as a harness that keys its memory store by the
+/// directory a session runs in names it: Claude Code's, which is the one that
+/// does — see [`Harness::placed`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Harness {
-    /// Claude Code: `.credentials.json` linked, two entries under `projects/`
-    /// as its memory, and a `settings.json` written.
-    Claude {
-        /// The `projects/` entry of the Repo's main checkout, which holds
-        /// Claude's memory of the Repo.
-        repo: String,
+pub(crate) struct Place {
+    /// The `projects/` entry of the Repo's main checkout, which holds
+    /// Claude's memory of the Repo.
+    pub(crate) repo: String,
 
-        /// And the Worktree's, where the session's transcript is written — the
-        /// same name as `repo` where the session works in the main checkout
-        /// itself.
-        ///
-        /// **Two names rather than the joined list**, because the two are two
-        /// different things wherever the machine at the other end of a link is
-        /// concerned: the memory sync carries each to the entry *that* machine
-        /// names for the same thing, and a list with the repeat already taken
-        /// out would have nothing left to say which was which — see
-        /// [`Root::synced`]. What is joined is [`Root::entries`], which is
-        /// these two with a repeat taken out.
-        worktree: String,
+    /// And the Worktree's, where the session's transcript is written — the
+    /// same name as `repo` where the session works in the main checkout
+    /// itself.
+    ///
+    /// **Two names rather than the joined list**, because the two are two
+    /// different things wherever the machine at the other end of a link is
+    /// concerned: the memory sync carries each to the entry *that* machine
+    /// names for the same thing, and a list with the repeat already taken
+    /// out would have nothing left to say which was which — see
+    /// [`Root::synced`]. What is joined is [`Place::entries`], which is
+    /// these two with a repeat taken out.
+    pub(crate) worktree: String,
 
-        /// The same two paths as `.claude.json` keys its `projects` entries:
-        /// the plain path, with forward slashes on Windows. One where the two
-        /// are the same path.
-        trusted: Vec<String>,
-    },
-
-    /// Codex: `auth.json` linked, `sessions/` and `memories/` as its memory,
-    /// and a `config.toml` written — see [`CODEX_MEMORY`].
-    Codex,
-
-    /// Grok Build: `auth.json` linked, `sessions/` and `memory/` as its memory,
-    /// and a `config.toml` written — see [`GROK_MEMORY`].
-    Grok,
-
-    /// OpenCode: its data directory as its memory, joined whole, or built with
-    /// `auth.json` alone linked into it — see [`OPENCODE_DATA`]. And its config
-    /// directory built, with an `opencode.json` written.
-    OpenCode,
-
-    /// The Antigravity CLI: its conversations, `brain/` and summaries database
-    /// as its memory, joined as one, and a `settings.json` written, with the
-    /// MCP servers in `config/mcp_config.json` — see [`AGY_MEMORY`].
-    Agy,
+    /// The same two paths as `.claude.json` keys its `projects` entries:
+    /// the plain path, with forward slashes on Windows. One where the two
+    /// are the same path.
+    pub(crate) trusted: Vec<String>,
 }
 
-impl Root {
-    /// The Claude root for a session in `worktree`, whose Repo's common git
-    /// directory is `git_dir`, logged in as the account at `account`.
+impl Place {
+    /// The place of a session on `platform` in `worktree`, whose Repo's common
+    /// git directory is `git_dir`.
     ///
     /// **Each path as Claude will read it inside**, because the name is the
     /// path's. The main checkout is what Claude reads back out of the
@@ -544,12 +555,7 @@ impl Root {
     /// **And plain**, because resolving a path on Windows writes `\\?\` in
     /// front of it, and Claude names an entry from the path it was started in,
     /// which has no such prefix — see [`super::plainly`].
-    pub(crate) fn claude(
-        platform: Platform,
-        account: &Path,
-        git_dir: &Path,
-        worktree: &Path,
-    ) -> Root {
+    fn at(platform: Platform, git_dir: &Path, worktree: &Path) -> Place {
         let worktree = match platform {
             Platform::Linux => worktree.to_owned(),
             Platform::MacOs | Platform::Windows => resolved(worktree),
@@ -577,66 +583,129 @@ impl Root {
             .try_into()
             .expect("one name apiece, and there are two paths");
 
+        Place {
+            repo,
+            worktree,
+            trusted,
+        }
+    }
+
+    /// The `projects/` entries a Claude root joins, in the order they are said
+    /// and with a repeat taken out: the Repo's main checkout's first, which
+    /// holds Claude's memory of the Repo, and the Worktree's after it, where
+    /// the session's transcript is written. One where the session is working in
+    /// the main checkout itself.
+    pub(crate) fn entries(&self) -> Vec<&str> {
+        if self.repo == self.worktree {
+            vec![&self.repo]
+        } else {
+            vec![&self.repo, &self.worktree]
+        }
+    }
+}
+
+impl Root {
+    /// The root for a session in `worktree`, whose Repo's common git directory
+    /// is `git_dir`, logged in as `account` — on `platform`, which is what the
+    /// two paths are read on. `None` for a harness this server has not got.
+    ///
+    /// The two paths are what a harness that keys its store by the directory a
+    /// session runs in names it by — see [`Place`] — and nothing to any other
+    /// harness, none of which keeps more than one store for every directory it
+    /// runs in.
+    pub(crate) fn of(
+        account: &crate::store::Account,
+        platform: Platform,
+        git_dir: &Path,
+        worktree: &Path,
+    ) -> Option<Root> {
+        let harness = crate::harness::of(account.agent_type())?;
+
+        Some(Root {
+            beside: harness.beside(account),
+            ..Root::with(
+                harness,
+                harness.directory(account),
+                platform,
+                git_dir,
+                worktree,
+            )
+        })
+    }
+
+    /// The root `harness` gives a session logged in as the account at
+    /// `account`, sharing its memory.
+    fn with(
+        harness: &'static dyn Harness,
+        account: &Path,
+        platform: Platform,
+        git_dir: &Path,
+        worktree: &Path,
+    ) -> Root {
         Root {
             account: account.to_owned(),
-            harness: Harness::Claude {
-                repo,
-                worktree,
-                trusted,
-            },
+            harness: Allowlist(harness),
+            place: harness
+                .placed()
+                .then(|| Place::at(platform, git_dir, worktree)),
             memory: true,
+            beside: Vec::new(),
         }
+    }
+
+    /// The Claude root for a session in `worktree`, whose Repo's common git
+    /// directory is `git_dir`, logged in as the account at `account`.
+    #[cfg(test)]
+    pub(crate) fn claude(
+        platform: Platform,
+        account: &Path,
+        git_dir: &Path,
+        worktree: &Path,
+    ) -> Root {
+        let harness = crate::harness::of(crate::store::AgentType::CLAUDE).expect("built in");
+
+        Root::with(harness, account, platform, git_dir, worktree)
+    }
+
+    /// The root of a harness whose store is not keyed by where a session runs,
+    /// for a session logged in as the account at `account`.
+    #[cfg(test)]
+    fn unplaced(agent_type: crate::store::AgentType, account: &Path) -> Root {
+        let harness = crate::harness::of(agent_type).expect("built in");
+
+        Root::with(
+            harness,
+            account,
+            Platform::HERE,
+            Path::new(""),
+            Path::new(""),
+        )
     }
 
     /// The Codex root for a session logged in as the account at `account`.
-    ///
-    /// Nothing about the Worktree is in it: Codex keeps one `sessions/` for
-    /// every directory it runs in, and its trust is said on the launch line.
+    #[cfg(test)]
     pub(crate) fn codex(account: &Path) -> Root {
-        Root {
-            account: account.to_owned(),
-            harness: Harness::Codex,
-            memory: true,
-        }
+        Root::unplaced(crate::store::AgentType::CODEX, account)
     }
 
     /// The Grok Build root for a session logged in as the account at `account`.
-    ///
-    /// Nothing about the Worktree is in it, for Codex's reason: grok keeps one
-    /// `sessions/` and one `memory/` for every directory it runs in.
+    #[cfg(test)]
     pub(crate) fn grok(account: &Path) -> Root {
-        Root {
-            account: account.to_owned(),
-            harness: Harness::Grok,
-            memory: true,
-        }
+        Root::unplaced(crate::store::AgentType::GROK, account)
     }
 
     /// The OpenCode root for a session logged in as the account whose home is
     /// `account`.
-    ///
-    /// Nothing about the Worktree is in it, for Codex's reason: opencode keeps
-    /// one database for every directory it runs in.
+    #[cfg(test)]
     pub(crate) fn opencode(account: &Path) -> Root {
-        Root {
-            account: account.to_owned(),
-            harness: Harness::OpenCode,
-            memory: true,
-        }
+        Root::unplaced(crate::store::AgentType::OPENCODE, account)
     }
 
     /// The Antigravity CLI root for a session logged in as the account at
     /// `account`.
-    ///
-    /// Nothing about the Worktree is in it, for Codex's reason: agy keeps one
-    /// `conversations/` for every directory it runs in, and its trust is said
-    /// on the launch line.
+    #[cfg(test)]
     pub(crate) fn agy(account: &Path) -> Root {
-        Root {
-            account: account.to_owned(),
-            harness: Harness::Agy,
-            memory: true,
-        }
+        Root::unplaced(crate::store::AgentType::AGY, account)
     }
 
     /// The same root, sharing the account's memory or not.
@@ -657,23 +726,14 @@ impl Root {
     /// What this root is called among a Conversation's roots, which is what a
     /// launch into it is registered under — see [`super::sharing`].
     pub(crate) fn named(&self) -> &'static str {
-        match self.harness {
-            Harness::Claude { .. } => super::CLAUDE_DIR_INSIDE_HOME,
-            Harness::Codex => super::CODEX_INSIDE_HOME,
-            Harness::Grok => super::GROK_INSIDE_HOME,
-            Harness::OpenCode => "opencode",
-            Harness::Agy => super::AGY_INSIDE_HOME,
-        }
+        self.harness.0.root()
     }
 
     /// Where the account's directory lands inside HOME, which is what every
     /// path of the account's is under there: `.claude`, `.codex` or `.grok`,
     /// and HOME itself for OpenCode, whose account is a home.
     fn landing(&self) -> &'static Path {
-        Path::new(match self.harness {
-            Harness::Claude { .. } | Harness::Codex | Harness::Grok | Harness::Agy => self.named(),
-            Harness::OpenCode => "",
-        })
+        Path::new(self.harness.0.landing())
     }
 
     /// The directories of Verkstead's own this root is made of, each said from
@@ -687,13 +747,7 @@ impl Root {
     /// directory. And the config directory alone where memory is shared, the
     /// data directory then being the account's, joined whole.
     pub(crate) fn built(&self) -> Vec<&'static str> {
-        match (&self.harness, self.memory) {
-            (Harness::Claude { .. } | Harness::Codex | Harness::Grok | Harness::Agy, _) => {
-                vec![self.named()]
-            }
-            (Harness::OpenCode, true) => vec![OPENCODE_CONFIG],
-            (Harness::OpenCode, false) => vec![OPENCODE_CONFIG, OPENCODE_DATA],
-        }
+        self.harness.0.built(self.memory)
     }
 
     /// The directories inside a root built in the Conversation's own directory
@@ -705,16 +759,12 @@ impl Root {
     pub(crate) fn furnished_in(&self, built: &Path) -> Vec<PathBuf> {
         let root = built.join(self.landing());
 
-        match self.harness {
-            Harness::Agy => vec![
-                root.join(AGY_CLI),
-                root.join(AGY_CUSTOMISATION),
-                root.join(AGY_ONBOARDED).parent().unwrap().to_owned(),
-            ],
-            Harness::Claude { .. } | Harness::Codex | Harness::Grok | Harness::OpenCode => {
-                Vec::new()
-            }
-        }
+        self.harness
+            .0
+            .furnished()
+            .into_iter()
+            .map(|inside| root.join(inside))
+            .collect()
     }
 
     /// Where the directory of `projects/` entries is in a Claude root at `root`.
@@ -751,10 +801,11 @@ impl Root {
     /// `None` for an OpenCode account sharing its memory, whose login is inside
     /// the data directory joined whole — see [`Root::login_alone`].
     pub(crate) fn login_of(account: &crate::store::Account, memory: bool) -> Option<PathBuf> {
-        match account {
-            crate::store::Account::OpenCode { .. } if memory => None,
-            account => Some(login_at(account)),
-        }
+        let harness = crate::harness::of(account.agent_type())?;
+
+        (!(memory && harness.login_in_memory()))
+            .then(|| login_at(account))
+            .flatten()
     }
 
     /// Whether the login is joined as a file of its own. It always is, except
@@ -762,17 +813,12 @@ impl Root {
     /// data directory joined whole, so it is the account's with nothing more
     /// said about it and nothing to hand back.
     pub(crate) fn login_alone(&self) -> bool {
-        !matches!((&self.harness, self.memory), (Harness::OpenCode, true))
+        !(self.memory && self.harness.0.login_in_memory())
     }
 
     /// Where the login file is, inside the account's directory.
     fn login(&self) -> &'static str {
-        match self.harness {
-            Harness::Claude { .. } => CREDENTIALS,
-            Harness::Codex | Harness::Grok => AUTH,
-            Harness::OpenCode => OPENCODE_AUTH,
-            Harness::Agy => AGY_LOGIN,
-        }
+        self.harness.0.login()
     }
 
     /// The configuration files a root is given: where each goes in a root built
@@ -780,9 +826,12 @@ impl Root {
     /// is Verkstead's own, written as each session starts, and neither joined
     /// nor written back.
     ///
-    /// Read off the account's own file as it is at this moment, so a key the
-    /// human changes reaches the next session. Claude's is a `settings.json` —
-    /// see [`settings`]. Codex's and Grok Build's is a `config.toml` — see
+    /// Read off the account's own files as they are at this moment — the ones
+    /// the harness names as its configuration, see
+    /// [`Harness::configuration`] — so a key the human changes reaches the next
+    /// session, and composed by the harness out of what was found — see
+    /// [`Harness::configured`]. Claude's is a `settings.json` — see
+    /// [`settings`]. Codex's and Grok Build's is a `config.toml` — see
     /// [`toml_carrying`]. OpenCode's is an `opencode.json` — see
     /// [`opencode_config`]. The Antigravity CLI's is a `settings.json` — see
     /// [`agy_settings`] — and, where the Conversation attached any, an
@@ -805,70 +854,36 @@ impl Root {
     ) -> Vec<(PathBuf, Vec<u8>)> {
         let root = built.join(self.landing());
 
-        let written = match self.harness {
-            Harness::Claude { .. } => (
-                root.join(SETTINGS),
-                settings(std::fs::read(self.account.join(SETTINGS)).ok().as_deref()),
-            ),
-            Harness::Codex => (
-                root.join(CODEX_CONFIG),
-                toml_carrying(
-                    std::fs::read_to_string(self.account.join(CODEX_CONFIG))
-                        .ok()
-                        .as_deref(),
-                    &CODEX_CARRIED,
-                    servers,
-                    CODEX_HEADERS,
-                ),
-            ),
-            Harness::Grok => (
-                root.join(GROK_CONFIG),
-                toml_carrying(
-                    std::fs::read_to_string(self.account.join(GROK_CONFIG))
-                        .ok()
-                        .as_deref(),
-                    &GROK_CARRIED,
-                    servers,
-                    HEADERS,
-                ),
-            ),
-            Harness::OpenCode => {
-                let config = Path::new(OPENCODE_CONFIG);
+        let found = self
+            .harness
+            .0
+            .configuration()
+            .into_iter()
+            .map(|file| std::fs::read(self.account.join(file)).ok())
+            .collect();
 
-                (
-                    root.join(config).join(OPENCODE_CONFIGS[0]),
-                    opencode_config(
-                        OPENCODE_CONFIGS.map(|file| {
-                            std::fs::read_to_string(self.account.join(config).join(file)).ok()
-                        }),
-                        servers,
-                    ),
-                )
-            }
-            Harness::Agy => {
-                let settings = (
-                    root.join(AGY_SETTINGS),
-                    agy_settings(
-                        std::fs::read(self.account.join(AGY_SETTINGS))
-                            .ok()
-                            .as_deref(),
-                    ),
-                );
+        let beside = self
+            .beside
+            .iter()
+            .filter(|beside| !beside.file)
+            .flat_map(|beside| {
+                beside.configuration.iter().filter_map(|file| {
+                    let found = std::fs::read(beside.host.join(file)).ok()?;
+                    Some((
+                        built.join(&beside.mounted).join(file),
+                        crate::harness::plugged::serverless(&found),
+                    ))
+                })
+            })
+            .collect::<Vec<_>>();
 
-                let onboarded = (root.join(AGY_ONBOARDED), AGY_ONBOARDED_AS.into());
-
-                return match servers.is_empty() {
-                    true => vec![settings, onboarded],
-                    false => vec![
-                        settings,
-                        (root.join(AGY_MCP), agy_servers(servers)),
-                        onboarded,
-                    ],
-                };
-            }
-        };
-
-        vec![written]
+        self.harness
+            .0
+            .configured(found, servers)
+            .into_iter()
+            .map(|(inside, contents)| (root.join(inside), contents))
+            .chain(beside)
+            .collect()
     }
 
     /// The global instructions file a root is given: where it goes in a root
@@ -906,14 +921,9 @@ impl Root {
             return None;
         }
 
-        let root = built.join(self.landing());
-
-        let path = match self.harness {
-            Harness::Claude { .. } => root.join(CLAUDE_INSTRUCTIONS),
-            Harness::Codex | Harness::Grok => root.join(AGENTS),
-            Harness::OpenCode => root.join(OPENCODE_CONFIG).join(AGENTS),
-            Harness::Agy => root.join(AGY_INSTRUCTIONS),
-        };
+        let path = built
+            .join(self.landing())
+            .join(self.harness.0.instructions());
 
         Some((path, text.as_bytes().to_vec()))
     }
@@ -938,7 +948,7 @@ impl Root {
     /// rename replaces the link instead, which is handed back as it ends — see
     /// [`super::closing`].
     pub(crate) fn login_copied(&self, platform: Platform) -> bool {
-        matches!((&self.harness, platform), (Harness::Grok, Platform::Linux))
+        self.harness.0.login_copied(platform)
     }
 
     /// The `.claude.json` a Claude session is given: a copy of the account's own
@@ -956,10 +966,10 @@ impl Root {
     ///
     /// Blocking: one read.
     pub(crate) fn config(&self, config_file: &Path, servers: &[AttachedServer]) -> Vec<u8> {
-        let trusted = match &self.harness {
-            Harness::Claude { trusted, .. } => trusted.as_slice(),
-            Harness::Codex | Harness::Grok | Harness::OpenCode | Harness::Agy => &[],
-        };
+        let trusted = self
+            .place
+            .as_ref()
+            .map_or(&[][..], |place| place.trusted.as_slice());
 
         config(std::fs::read(config_file).ok().as_deref(), trusted, servers)
     }
@@ -983,7 +993,7 @@ impl Root {
     ///
     /// Blocking.
     pub(crate) fn made_in_account(&self) -> io::Result<()> {
-        let files = self.joined_files();
+        let files = self.harness.0.memory_files();
 
         for store in self.joined_store() {
             let path = self.account.join(&store);
@@ -999,6 +1009,14 @@ impl Root {
                     .open(&path)?;
             } else {
                 std::fs::create_dir_all(path)?;
+            }
+        }
+
+        if self.memory {
+            for beside in self.beside.iter().filter(|beside| !beside.file) {
+                for store in &beside.memory {
+                    std::fs::create_dir_all(beside.host.join(store))?;
+                }
             }
         }
 
@@ -1031,6 +1049,30 @@ impl Root {
             ));
         }
 
+        for beside in &self.beside {
+            let there = inside.join(&beside.mounted);
+
+            if beside.file {
+                if beside.host.is_file() {
+                    joined.push((beside.host.clone(), there));
+                }
+                continue;
+            }
+
+            for credentials in &beside.credentials {
+                let host = beside.host.join(credentials);
+                if host.is_file() {
+                    joined.push((host, there.join(credentials)));
+                }
+            }
+
+            if self.memory {
+                for store in &beside.memory {
+                    joined.push((beside.host.join(store), there.join(store)));
+                }
+            }
+        }
+
         joined
     }
 
@@ -1050,15 +1092,24 @@ impl Root {
 
         let root = built.join(self.landing());
 
-        match self.harness {
-            Harness::Claude { .. } => vec![Root::projects_in(&root)],
-            Harness::Codex => CODEX_MEMORY.iter().map(|store| root.join(store)).collect(),
-            Harness::Grok => GROK_MEMORY.iter().map(|store| root.join(store)).collect(),
-            Harness::OpenCode => Vec::new(),
-            // The two directories, and not the database: agy makes its own
-            // where there is none, and a database of nothing is no file.
-            Harness::Agy => AGY_MEMORY.iter().map(|store| root.join(store)).collect(),
-        }
+        let beside = self
+            .beside
+            .iter()
+            .filter(|beside| !beside.file)
+            .flat_map(|beside| {
+                beside
+                    .memory
+                    .iter()
+                    .map(|store| built.join(&beside.mounted).join(store))
+            });
+
+        self.harness
+            .0
+            .unshared()
+            .into_iter()
+            .map(|store| root.join(store))
+            .chain(beside)
+            .collect()
     }
 
     /// The memory store joined from the account, each as a path relative to
@@ -1069,49 +1120,7 @@ impl Root {
             return Vec::new();
         }
 
-        match &self.harness {
-            Harness::Claude { .. } => self
-                .entries()
-                .into_iter()
-                .map(|entry| Path::new(PROJECTS).join(entry))
-                .collect(),
-            Harness::Codex => CODEX_MEMORY.iter().map(PathBuf::from).collect(),
-            Harness::Grok => GROK_MEMORY.iter().map(PathBuf::from).collect(),
-            Harness::OpenCode => vec![PathBuf::from(OPENCODE_DATA)],
-            Harness::Agy => AGY_MEMORY
-                .iter()
-                .chain(AGY_SUMMARIES_JOINED)
-                .map(PathBuf::from)
-                .collect(),
-        }
-    }
-
-    /// Which of [`Root::joined_store`] are files rather than directories: the
-    /// Antigravity CLI's summaries database and its two siblings, and nothing
-    /// of any other harness's.
-    fn joined_files(&self) -> Vec<PathBuf> {
-        match self.harness {
-            Harness::Agy => AGY_SUMMARIES_JOINED.iter().map(PathBuf::from).collect(),
-            Harness::Claude { .. } | Harness::Codex | Harness::Grok | Harness::OpenCode => {
-                Vec::new()
-            }
-        }
-    }
-
-    /// The `projects/` entries a Claude root joins, in the order they are said
-    /// and with a repeat taken out: the Repo's main checkout's first, which
-    /// holds Claude's memory of the Repo, and the Worktree's after it, where
-    /// the session's transcript is written. One where the session is working in
-    /// the main checkout itself.
-    ///
-    /// None for every other harness, none of which keys its store by the
-    /// directory a session runs in.
-    fn entries(&self) -> Vec<&str> {
-        match &self.harness {
-            Harness::Claude { repo, worktree, .. } if repo == worktree => vec![repo],
-            Harness::Claude { repo, worktree, .. } => vec![repo, worktree],
-            Harness::Codex | Harness::Grok | Harness::OpenCode | Harness::Agy => Vec::new(),
-        }
+        self.harness.0.memory(self.place.as_ref())
     }
 
     /// The **parts of the memory store** a session that runs from a copy syncs, each
@@ -1126,46 +1135,8 @@ impl Root {
     /// rewrite, done twice rather than sent: a name computed any way but the
     /// harness's own is a second entry rather than the same memory.
     ///
-    /// **The unit is the smallest one each harness's store has**, because only
-    /// one of the four keys its store by path:
-    ///
-    /// - **Claude** — the two entries a root already names, one for the Repo and
-    ///   one for the Worktree.
-    /// - **Codex** — the memory files whole, and out of the one flat directory
-    ///   of rollouts the ones this Conversation's sessions wrote, which is what
-    ///   `worktree` picks out: the store is filed by date and holds every
-    ///   repository the human has ever worked in, and none of the rest of it is
-    ///   this Repo's anything.
-    /// - **Grok Build** — the same, its sessions picked out by the ids Verkstead
-    ///   named them with, which is what its store files a session's directory
-    ///   under. Not `session_search.sqlite` at the top of it, which is the
-    ///   human's index of the whole store: a copy of a mirror's partial one
-    ///   written over it on the bound device would be a search that had lost the rest.
-    /// - **OpenCode** — the one database Verkstead pins every session it runs
-    ///   onto, and the two siblings SQLite keeps beside it: the store runs in
-    ///   write-ahead-log mode, and a database carried without its `-wal` and
-    ///   `-shm` will not open. Not the data directory whole, which also holds
-    ///   the login the account mirror carries and whatever other channel of
-    ///   opencode the host has installed — see [`super::OPENCODE_DB_FILE`].
-    ///
-    ///   **And this is the one harness whose unit is not this Repo's.** opencode
-    ///   keeps a row per session in that one database rather than a directory
-    ///   per working directory, so the sessions of every repository the human
-    ///   has run it in are inside the file, and the file is the smallest thing
-    ///   there is to carry. Narrowing further means reading and writing rows of
-    ///   a schema that is opencode's own and moves between releases — which is
-    ///   the dependency [`crate::records`] deliberately does not take, it being
-    ///   allowed to stop reading where this would have to keep writing. So what
-    ///   crosses is narrower than it was and is still the whole store, and the
-    ///   bound in [`crate::mirroring::memory::MOST_A_STORE_IS`] is what stands
-    ///   in front of a big one.
-    /// - **Antigravity CLI** — Grok's rule twice over, by the ids agy gave this
-    ///   Conversation's sessions (see [`crate::transcript`]): the one database
-    ///   per conversation under `conversations/`, and the conversation's own
-    ///   directory under `brain/`, where its Transcript is. Not the summaries
-    ///   database beside them, for the reason Grok's index stays: it is the
-    ///   human's list of every conversation, and agy 1.4.12 resumes one it has no
-    ///   row for, writing the row as it does.
+    /// **The unit is the smallest one each harness's store has** — see
+    /// [`Harness::synced`], which is each harness's list.
     ///
     /// **Nothing at all where the memory switch is off**, which is the reading
     /// [`Root::joined_store`] makes of the same switch: a session that runs from a
@@ -1181,69 +1152,9 @@ impl Root {
             return Vec::new();
         }
 
-        let part = |label: &'static str, inside: PathBuf, whose: Whose| Part {
-            label,
-            inside,
-            whose,
-        };
-
-        match &self.harness {
-            Harness::Claude {
-                repo,
-                worktree: written,
-                ..
-            } => vec![
-                part(REPO, Path::new(PROJECTS).join(repo), Whose::Everything),
-                part(
-                    WORKTREE,
-                    Path::new(PROJECTS).join(written),
-                    Whose::Everything,
-                ),
-            ],
-
-            Harness::Codex => vec![
-                part(MEMORY, PathBuf::from(CODEX_MEMORY[1]), Whose::Everything),
-                part(
-                    SESSIONS_PART,
-                    PathBuf::from(SESSIONS),
-                    Whose::Naming(worktree.unwrap_or_default().to_owned()),
-                ),
-            ],
-
-            Harness::Grok => vec![
-                part(MEMORY, PathBuf::from(GROK_MEMORY[1]), Whose::Everything),
-                part(
-                    SESSIONS_PART,
-                    PathBuf::from(SESSIONS),
-                    Whose::Called(sessions.to_vec()),
-                ),
-            ],
-
-            Harness::OpenCode => vec![part(
-                DATA,
-                PathBuf::from(OPENCODE_DATA),
-                Whose::Database(super::OPENCODE_DB_FILE),
-            )],
-
-            // The record `--conversation` resumes from and the brain directory
-            // the Transcript is followed in, each picked out by the ids agy
-            // gave this Conversation's sessions. Not the summaries database,
-            // which is the human's index of every conversation they have had:
-            // agy 1.4.12 resumes a conversation that has no row in it and
-            // writes the row itself.
-            Harness::Agy => vec![
-                part(
-                    CONVERSATIONS,
-                    PathBuf::from(AGY_MEMORY[0]),
-                    Whose::Databases(sessions.to_vec()),
-                ),
-                part(
-                    BRAIN,
-                    PathBuf::from(AGY_MEMORY[1]),
-                    Whose::Called(sessions.to_vec()),
-                ),
-            ],
-        }
+        self.harness
+            .0
+            .synced(self.place.as_ref(), worktree, sessions)
     }
 }
 
@@ -1344,15 +1255,12 @@ pub(crate) enum Whose {
 /// its own, which is every root but an OpenCode one sharing its memory — there
 /// the login is inside the data directory joined whole, and this is still where it
 /// is.
-pub(crate) fn login_at(account: &crate::store::Account) -> PathBuf {
-    match account {
-        crate::store::Account::Claude { claude_dir, .. } => claude_dir.join(CREDENTIALS),
-        crate::store::Account::Codex { home } | crate::store::Account::Grok { home } => {
-            home.join(AUTH)
-        }
-        crate::store::Account::OpenCode { home } => home.join(OPENCODE_AUTH),
-        crate::store::Account::Agy { home } => home.join(AGY_LOGIN),
-    }
+///
+/// `None` for a harness this server has not got.
+pub(crate) fn login_at(account: &crate::store::Account) -> Option<PathBuf> {
+    let harness = crate::harness::of(account.agent_type())?;
+
+    Some(harness.directory(account).join(harness.login()))
 }
 
 /// And where a **mirror** of an account of `agent_type` keeps its login, said from
@@ -1362,8 +1270,8 @@ pub(crate) fn login_at(account: &crate::store::Account) -> PathBuf {
 /// the login off its mirror at this path, and the device it was fetched from
 /// writes what arrives into its own account's own — see [`login_at`], which is the
 /// same file said of a real account.
-pub(crate) fn login_inside(agent_type: crate::store::AgentType) -> PathBuf {
-    login_at(&super::kept_in(agent_type, Path::new("")))
+pub(crate) fn login_inside(agent_type: crate::store::AgentType) -> Option<PathBuf> {
+    login_at(&crate::harness::of(agent_type)?.kept_in(Path::new("")))
 }
 
 /// Every path a **mirror** of an account of `agent_type` holds, each said from
@@ -1391,38 +1299,16 @@ pub(crate) fn login_inside(agent_type: crate::store::AgentType) -> PathBuf {
 pub(crate) fn mirrored_of(agent_type: crate::store::AgentType) -> Vec<PathBuf> {
     // The login first, by the one name both ends of the write-back hold to — see
     // [`login_inside`] — and the configuration after it.
-    let login = login_inside(agent_type);
+    //
+    // Nothing for a harness this server has not got, which no mirror is made of.
+    let Some(harness) = crate::harness::of(agent_type) else {
+        return Vec::new();
+    };
 
-    match agent_type {
-        crate::store::AgentType::Claude => {
-            let claude = Path::new(super::CLAUDE_DIR_INSIDE_HOME);
-
-            vec![
-                login,
-                claude.join(SETTINGS),
-                PathBuf::from(super::CLAUDE_CONFIG_INSIDE_HOME),
-            ]
-        }
-
-        crate::store::AgentType::Codex => {
-            vec![
-                login,
-                Path::new(super::CODEX_INSIDE_HOME).join(CODEX_CONFIG),
-            ]
-        }
-
-        crate::store::AgentType::Grok => {
-            vec![login, Path::new(super::GROK_INSIDE_HOME).join(GROK_CONFIG)]
-        }
-
-        crate::store::AgentType::OpenCode => {
-            vec![login, Path::new(OPENCODE_CONFIG).join(OPENCODE_CONFIGS[0])]
-        }
-
-        crate::store::AgentType::Agy => {
-            vec![login, Path::new(super::AGY_INSIDE_HOME).join(AGY_SETTINGS)]
-        }
-    }
+    login_inside(agent_type)
+        .into_iter()
+        .chain(harness.mirrored())
+        .collect()
 }
 
 /// And what a mirror of `account` holds at each of them, read off the account as
@@ -1452,52 +1338,12 @@ pub(crate) fn mirrored_of(agent_type: crate::store::AgentType) -> Vec<PathBuf> {
 ///
 /// Blocking: one read per path.
 pub(crate) fn mirrored(account: &crate::store::Account) -> Vec<(PathBuf, Option<Vec<u8>>)> {
-    let read = |path: PathBuf| std::fs::read(path).ok();
-    let text = |path: PathBuf| std::fs::read_to_string(path).ok();
-
-    let composed = match account {
-        crate::store::Account::Claude {
-            claude_dir,
-            config_file,
-        } => vec![
-            read(claude_dir.join(CREDENTIALS)),
-            Some(settings(read(claude_dir.join(SETTINGS)).as_deref())),
-            Some(mirrored_config(read(config_file.clone()).as_deref())),
-        ],
-
-        crate::store::Account::Codex { home } => vec![
-            read(home.join(AUTH)),
-            Some(toml_carrying(
-                text(home.join(CODEX_CONFIG)).as_deref(),
-                &CODEX_CARRIED,
-                &[],
-                CODEX_HEADERS,
-            )),
-        ],
-
-        crate::store::Account::Grok { home } => vec![
-            read(home.join(AUTH)),
-            Some(toml_carrying(
-                text(home.join(GROK_CONFIG)).as_deref(),
-                &GROK_CARRIED,
-                &[],
-                HEADERS,
-            )),
-        ],
-
-        crate::store::Account::OpenCode { home } => vec![
-            read(home.join(OPENCODE_AUTH)),
-            Some(opencode_config(
-                OPENCODE_CONFIGS.map(|file| text(home.join(OPENCODE_CONFIG).join(file))),
-                &[],
-            )),
-        ],
-
-        crate::store::Account::Agy { home } => vec![
-            read(home.join(AGY_LOGIN)),
-            Some(agy_settings(read(home.join(AGY_SETTINGS)).as_deref())),
-        ],
+    let Some(harness) = crate::harness::of(account.agent_type()) else {
+        return Vec::new();
     };
+
+    let composed = std::iter::once(login_at(account).and_then(|login| std::fs::read(login).ok()))
+        .chain(harness.mirroring(account));
 
     mirrored_of(account.agent_type())
         .into_iter()
@@ -1520,7 +1366,7 @@ pub(crate) fn mirrored(account: &crate::store::Account) -> Vec<(PathBuf, Option<
 /// An account whose file is not there, or does not read as a JSON object, is a
 /// mirror holding an empty one — which is what a root built from it would be
 /// given anyway.
-fn mirrored_config(account: Option<&[u8]>) -> Vec<u8> {
+pub(crate) fn mirrored_config(account: Option<&[u8]>) -> Vec<u8> {
     let mut copy = match account.and_then(|bytes| serde_json::from_slice(bytes).ok()) {
         Some(serde_json::Value::Object(own)) => own,
         _ => Object::new(),
@@ -1559,7 +1405,7 @@ fn unnamed(copy: &mut Object) {
 /// among what is carried, so what a session finds under that key is the
 /// Conversation's and nothing else. A Conversation with none attached is no key
 /// at all, which is the file as it was written before there were any.
-fn opencode_config(account: [Option<String>; 2], servers: &[AttachedServer]) -> Vec<u8> {
+pub(crate) fn opencode_config(account: [Option<String>; 2], servers: &[AttachedServer]) -> Vec<u8> {
     let mut written = Object::new();
 
     for text in account.iter().flatten() {
@@ -1725,7 +1571,7 @@ fn in_string(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, onto: &mut St
 ///
 /// A Conversation with none attached is no table at all, which is the file as
 /// it was written before there were any.
-fn toml_carrying(
+pub(crate) fn toml_carrying(
     account: Option<&str>,
     carried: &[&str],
     servers: &[AttachedServer],
@@ -1807,7 +1653,7 @@ fn toml_carrying(
 ///
 /// And the [`CARRIED`] keys of the account's own, as they are there. Nothing
 /// else of it, and nothing at all of a file that is not a JSON object.
-fn settings(account: Option<&[u8]>) -> Vec<u8> {
+pub(crate) fn settings(account: Option<&[u8]>) -> Vec<u8> {
     let mut written = serde_json::Map::new();
 
     written.insert(
@@ -1833,7 +1679,7 @@ fn settings(account: Option<&[u8]>) -> Vec<u8> {
 ///
 /// An account with no such file, or one that does not read as a JSON object, is
 /// given an empty object — which agy reads as every setting at its default.
-fn agy_settings(account: Option<&[u8]>) -> Vec<u8> {
+pub(crate) fn agy_settings(account: Option<&[u8]>) -> Vec<u8> {
     let mut written = Object::new();
 
     if let Some(serde_json::Value::Object(own)) =
@@ -1858,7 +1704,7 @@ fn agy_settings(account: Option<&[u8]>) -> Vec<u8> {
 /// reads `headers` beside it. No `type`: agy tells the transport by which of
 /// `url` and `command` an entry has. The account's own file is never read, so
 /// what a session finds here is the Conversation's and nothing else.
-fn agy_servers(servers: &[AttachedServer]) -> Vec<u8> {
+pub(crate) fn agy_servers(servers: &[AttachedServer]) -> Vec<u8> {
     let mut ours = Object::new();
 
     for server in servers {
@@ -2263,22 +2109,22 @@ mod tests {
 
     /// A Claude root's `projects/` entries.
     fn entries(root: &Root) -> Vec<String> {
-        match &root.harness {
-            Harness::Claude { .. } => root.entries().into_iter().map(str::to_owned).collect(),
-            Harness::Codex | Harness::Grok | Harness::OpenCode | Harness::Agy => {
-                panic!("only a Claude root has `projects/` entries")
-            }
-        }
+        let place = root
+            .place
+            .as_ref()
+            .expect("only a Claude root has `projects/` entries");
+
+        place.entries().into_iter().map(str::to_owned).collect()
     }
 
     /// And the paths its `.claude.json` copy trusts.
     fn trusted(root: &Root) -> Vec<String> {
-        match &root.harness {
-            Harness::Claude { trusted, .. } => trusted.clone(),
-            Harness::Codex | Harness::Grok | Harness::OpenCode | Harness::Agy => {
-                panic!("only a Claude root has a `.claude.json` to trust in")
-            }
-        }
+        let place = root
+            .place
+            .as_ref()
+            .expect("only a Claude root has a `.claude.json` to trust in");
+
+        place.trusted.clone()
     }
 
     /// The name of the entry this very checkout's memory is under, which is
@@ -3608,18 +3454,14 @@ mod tests {
 
         assert_eq!(
             Root::login_of(
-                &crate::store::Account::OpenCode {
-                    home: account.clone()
-                },
+                &crate::store::Account::home(crate::store::AgentType::OPENCODE, account.clone()),
                 true
             ),
             None
         );
         assert_eq!(
             Root::login_of(
-                &crate::store::Account::OpenCode {
-                    home: account.clone()
-                },
+                &crate::store::Account::home(crate::store::AgentType::OPENCODE, account.clone()),
                 false
             ),
             Some(account.join(OPENCODE_AUTH))
@@ -3847,10 +3689,7 @@ mod tests {
         )
         .unwrap();
 
-        let account = crate::store::Account::Claude {
-            claude_dir: claude_dir.clone(),
-            config_file,
-        };
+        let account = crate::store::Account::claude(claude_dir.clone(), config_file);
 
         let held = mirrored(&account);
 
@@ -3868,7 +3707,7 @@ mod tests {
             held.iter()
                 .map(|(inside, _)| inside.clone())
                 .collect::<Vec<_>>(),
-            mirrored_of(crate::store::AgentType::Claude),
+            mirrored_of(crate::store::AgentType::CLAUDE),
             "the paths are the one list both ends hold to",
         );
 
@@ -3923,7 +3762,10 @@ mod tests {
         let home = dir.path().join(".codex");
         std::fs::create_dir_all(&home).unwrap();
 
-        let held = mirrored(&crate::store::Account::Codex { home });
+        let held = mirrored(&crate::store::Account::home(
+            crate::store::AgentType::CODEX,
+            home,
+        ));
 
         assert_eq!(held[0].0, PathBuf::from(".codex/auth.json"));
         assert_eq!(held[0].1, None, "there is no login to hand over");
@@ -3942,12 +3784,12 @@ mod tests {
         let home = Path::new("/home/you");
 
         for agent_type in [
-            crate::store::AgentType::Claude,
-            crate::store::AgentType::Codex,
-            crate::store::AgentType::Grok,
-            crate::store::AgentType::OpenCode,
+            crate::store::AgentType::CLAUDE,
+            crate::store::AgentType::CODEX,
+            crate::store::AgentType::GROK,
+            crate::store::AgentType::OPENCODE,
         ] {
-            let held = mirrored(&crate::sandbox::kept_in(agent_type, home));
+            let held = mirrored(&crate::sandbox::kept_in(agent_type, home).unwrap());
 
             assert_eq!(
                 held.iter()
@@ -3975,19 +3817,19 @@ mod tests {
         let under = Path::new("/var/lib/verkstead/accounts/7");
 
         for agent_type in [
-            crate::store::AgentType::Claude,
-            crate::store::AgentType::Codex,
-            crate::store::AgentType::Grok,
-            crate::store::AgentType::OpenCode,
+            crate::store::AgentType::CLAUDE,
+            crate::store::AgentType::CODEX,
+            crate::store::AgentType::GROK,
+            crate::store::AgentType::OPENCODE,
         ] {
             assert_eq!(
                 mirrored_of(agent_type).first(),
-                Some(&login_inside(agent_type)),
+                login_inside(agent_type).as_ref(),
                 "{agent_type:?} mirrors its login first",
             );
             assert_eq!(
-                under.join(login_inside(agent_type)),
-                login_at(&crate::sandbox::kept_in(agent_type, under)),
+                login_inside(agent_type).map(|inside| under.join(inside)),
+                login_at(&crate::sandbox::kept_in(agent_type, under).unwrap()),
                 "{agent_type:?}: a mirror is a home, so the login in it is the \
                  login of the account that home holds",
             );

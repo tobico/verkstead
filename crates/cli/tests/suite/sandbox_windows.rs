@@ -389,10 +389,7 @@ fn standing(granting: bool) -> Grilling {
             &pool,
             &store::ProfileFacts {
                 name: Some("work".to_owned()),
-                account: store::Account::Claude {
-                    claude_dir,
-                    config_file,
-                },
+                account: store::Account::claude(claude_dir, config_file),
                 models: vec!["claude-opus-5".to_owned()],
                 memory: true,
             },

@@ -355,8 +355,8 @@
   width: 0.95em;
 }
 
-/* The models: a tick per model this build knows, and the field under them for an
-   id it does not.
+/* The models: a tick per model the harness declares, and the field under them
+   for an id it does not.
 
    A fieldset with none of a fieldset's box — the markup is what says these ticks
    are one question, and the frame it comes with would be the only frame on a

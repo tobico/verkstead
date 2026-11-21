@@ -1,6 +1,6 @@
 The Claude, Codex and OpenCode marks beside this notice are lobehub/lobe-icons',
-the copies the workbench keeps under `web/src/marks/` (see
-`web/src/HarnessMark.tsx` there for where they came from and the one edit made
+the copies the workbench keeps under `crates/server/src/harness/marks/` (see
+`crates/server/src/harness.rs` there for where they came from and the one edit made
 to them). This is that project's own licence, kept beside the art it covers
 because MIT asks for the notice to travel with the copy.
 

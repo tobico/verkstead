@@ -378,7 +378,7 @@ describe("the lines under a met step", () => {
     const codex = {
       ...PROFILE_LIST[0]!,
       id: "99999999-9999-4999-8999-999999999999",
-      account: { agent_type: "Codex", home: "/srv/accounts/codex" },
+      account: { agent_type: "Codex", paths: { home: "/srv/accounts/codex" } },
     } as ProfileEntry;
 
     expect(harnesses([codex, ...PROFILE_LIST])).toBe("Claude Code and Codex");

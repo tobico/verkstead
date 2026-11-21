@@ -1,6 +1,10 @@
 import { cleanup, configure } from "@solidjs/testing-library";
 import { afterEach, beforeEach } from "vitest";
 
+import type { HarnessEntry } from "../src/api/types";
+import { knowHarnesses } from "../src/harnesses";
+import harnesses from "./fixtures/harnesses.json" with { type: "json" };
+
 // The library cleans up after itself only when vitest's globals are on, and
 // they are not: an uncleaned render leaves the last test's DOM in the document
 // for the next one's queries to find two of everything.
@@ -143,3 +147,9 @@ document.addEventListener("keydown", (event) => {
 // An uncleaned render leaves its dialog in that set, and the next test's Escape
 // would reach for a dialog no longer on the page.
 afterEach(() => opened.clear());
+
+// And the harnesses the server can run, as it lists them. The shell reads the
+// list once and holds it for the whole page — see `src/harnesses.ts` — so a test
+// mounting a component without the shell around it starts from the list the
+// shell would have read, rendered by the real endpoint into the fixture.
+beforeEach(() => knowHarnesses(harnesses as HarnessEntry[]));

@@ -157,6 +157,7 @@ export function Output(props: {
               // What the accumulation is: the record from its beginning.
               whole: true,
               cursor: arrived.cursor,
+              unreadable: arrived.unreadable ?? before.unreadable,
             }
           : arrived;
 
@@ -364,6 +365,15 @@ export function Output(props: {
               What this session said couldn't be read.{" "}
               {transcript.error?.message}
             </ErrorLine>
+          </Match>
+          {/* A plugin harness's component that couldn't read the record:
+              nothing of it is drawn, and this says why. */}
+          <Match when={transcript.data?.unreadable}>
+            {(why) => (
+              <ErrorLine>
+                What this session said couldn't be read. {why()}
+              </ErrorLine>
+            )}
           </Match>
           <Match when={spoke() && transcript.data}>
             {(said) => <Record said={said()} live={!over} />}

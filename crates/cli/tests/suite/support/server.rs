@@ -44,10 +44,17 @@ impl Server {
     }
 
     pub fn bind(addr: SocketAddr, database: PathBuf) -> Self {
-        Self::serve(addr, database)
+        Self::serve(addr, database, false)
     }
 
-    fn serve(addr: SocketAddr, database: PathBuf) -> Self {
+    /// The same, keeping what it makes beside its database, as a real server
+    /// keeps it in its Data Directory — which is what installing a Plugin
+    /// wants.
+    pub fn keeping(database: PathBuf) -> Self {
+        Self::serve("127.0.0.1:0".parse().unwrap(), database, true)
+    }
+
+    fn serve(addr: SocketAddr, database: PathBuf, keeping: bool) -> Self {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
@@ -98,7 +105,14 @@ impl Server {
         //
         // Built on the runtime, because building one starts the sweep the
         // server starts and that wants a runtime under it.
-        let app = runtime.block_on(async { verkstead_server::router(pool) });
+        let app = runtime.block_on(async {
+            match keeping {
+                true => {
+                    verkstead_server::router_keeping(pool, database.parent().unwrap().to_owned())
+                }
+                false => verkstead_server::router(pool),
+            }
+        });
 
         // The pipe beside the socket, so that one test can put the round trip
         // through the pipe and the next through the URL against the same

@@ -68,8 +68,10 @@ fn edit(name: &str, claude_dir: &Path, config_file: &Path, models: &[&str]) -> s
         "name": name,
         "account": {
             "agent_type": "Claude",
-            "claude_dir": claude_dir,
-            "config_file": config_file,
+            "paths": {
+                "claude_dir": claude_dir,
+                "config_file": config_file,
+            },
         },
         "models": models,
     })
@@ -82,8 +84,10 @@ fn unnamed(claude_dir: &Path, config_file: &Path) -> serde_json::Value {
         "name": null,
         "account": {
             "agent_type": "Claude",
-            "claude_dir": claude_dir,
-            "config_file": config_file,
+            "paths": {
+                "claude_dir": claude_dir,
+                "config_file": config_file,
+            },
         },
         "models": ["claude-opus-5"],
     })
@@ -128,7 +132,7 @@ fn made(home: PathBuf) -> PathBuf {
 fn codex_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value {
     serde_json::json!({
         "name": name,
-        "account": { "agent_type": "Codex", "home": home },
+        "account": { "agent_type": "Codex", "paths": { "home": home } },
         "models": models,
     })
 }
@@ -137,7 +141,7 @@ fn codex_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value {
 fn grok_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value {
     serde_json::json!({
         "name": name,
-        "account": { "agent_type": "Grok", "home": home },
+        "account": { "agent_type": "Grok", "paths": { "home": home } },
         "models": models,
     })
 }
@@ -146,7 +150,7 @@ fn grok_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value {
 fn opencode_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value {
     serde_json::json!({
         "name": name,
-        "account": { "agent_type": "OpenCode", "home": home },
+        "account": { "agent_type": "OpenCode", "paths": { "home": home } },
         "models": models,
     })
 }
@@ -155,7 +159,7 @@ fn opencode_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value 
 fn agy_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value {
     serde_json::json!({
         "name": name,
-        "account": { "agent_type": "Agy", "home": home },
+        "account": { "agent_type": "Agy", "paths": { "home": home } },
         "models": models,
     })
 }
@@ -367,14 +371,14 @@ async fn a_saved_profile_appears_on_the_list_with_everything_it_was_given() {
     let resolved = accounts.path().canonicalize().unwrap();
     assert_eq!(
         profile.account,
-        ProfileAccount::Claude {
-            claude_dir: resolved.join("work/.claude").to_str().unwrap().to_owned(),
-            config_file: resolved
+        ProfileAccount::claude(
+            resolved.join("work/.claude").to_str().unwrap().to_owned(),
+            resolved
                 .join("work/.claude.json")
                 .to_str()
                 .unwrap()
-                .to_owned(),
-        }
+                .to_owned()
+        )
     );
 
     // Its pair is where it was left, which is the ordinary case.
@@ -548,10 +552,10 @@ async fn a_pair_under_a_home_the_server_was_never_told_about_saves_and_reads_unb
     let resolved = home.path().canonicalize().unwrap();
     assert_eq!(
         listed[0].account,
-        ProfileAccount::Claude {
-            claude_dir: resolved.join(".claude").to_str().unwrap().to_owned(),
-            config_file: resolved.join(".claude.json").to_str().unwrap().to_owned(),
-        }
+        ProfileAccount::claude(
+            resolved.join(".claude").to_str().unwrap().to_owned(),
+            resolved.join(".claude.json").to_str().unwrap().to_owned()
+        )
     );
 }
 
@@ -580,12 +584,16 @@ async fn a_pair_reached_through_a_symlink_is_stored_where_it_really_is() {
         ProfileSaved::Saved
     );
 
-    let ProfileAccount::Claude { claude_dir, .. } = &listed(&app).await[0].account else {
-        panic!("a Claude Profile should come back as a Claude account");
-    };
+    let account = &listed(&app).await[0].account;
 
     assert_eq!(
-        claude_dir,
+        account.agent_type,
+        verkstead_render::AgentType::CLAUDE,
+        "a Claude Profile should come back as a Claude account"
+    );
+
+    assert_eq!(
+        &account.paths["claude_dir"],
         real_dir.canonicalize().unwrap().to_str().unwrap()
     );
 }
@@ -752,7 +760,7 @@ async fn a_harness_takes_one_profile_nobody_named() {
                 "name": null,
                 "account": {
                     "agent_type": "Codex",
-                    "home": home(accounts.path(), "codex"),
+                    "paths": { "home": home(accounts.path(), "codex") },
                 },
                 "models": ["gpt-5.2-codex"],
             })
@@ -844,9 +852,10 @@ async fn a_profile_whose_account_is_one_home_saves_and_reads_back_with_it() {
     assert_eq!(profile.models, MODELS);
     assert_eq!(
         profile.account,
-        ProfileAccount::Codex {
-            home: resolved.join("codex/.codex").to_str().unwrap().to_owned(),
-        }
+        ProfileAccount::home(
+            verkstead_render::AgentType::CODEX,
+            resolved.join("codex/.codex").to_str().unwrap().to_owned()
+        )
     );
     assert_eq!(profile.broken, None);
 }
@@ -907,22 +916,26 @@ async fn a_home_account_saves_and_reads_back_as_its_own_type() {
             .map(|profile| profile.account.clone())
             .collect::<Vec<_>>(),
         vec![
-            ProfileAccount::Codex {
-                home: resolved.join("codex/.codex").to_str().unwrap().to_owned(),
-            },
-            ProfileAccount::Grok {
-                home: resolved.join("grok/.grok").to_str().unwrap().to_owned(),
-            },
-            ProfileAccount::OpenCode {
-                home: resolved
+            ProfileAccount::home(
+                verkstead_render::AgentType::CODEX,
+                resolved.join("codex/.codex").to_str().unwrap().to_owned()
+            ),
+            ProfileAccount::home(
+                verkstead_render::AgentType::GROK,
+                resolved.join("grok/.grok").to_str().unwrap().to_owned()
+            ),
+            ProfileAccount::home(
+                verkstead_render::AgentType::OPENCODE,
+                resolved
                     .join("opencode/opencode")
                     .to_str()
                     .unwrap()
-                    .to_owned(),
-            },
-            ProfileAccount::Agy {
-                home: resolved.join("vertex/.gemini").to_str().unwrap().to_owned(),
-            },
+                    .to_owned()
+            ),
+            ProfileAccount::home(
+                verkstead_render::AgentType::AGY,
+                resolved.join("vertex/.gemini").to_str().unwrap().to_owned()
+            ),
         ]
     );
     assert!(listed.iter().all(|profile| profile.broken.is_none()));
@@ -1979,8 +1992,10 @@ async fn the_platform_default_prefers_claude_code_and_its_unnamed_profile() {
                 "name": null,
                 "account": {
                     "agent_type": "Claude",
-                    "claude_dir": claude_dir,
-                    "config_file": config_file,
+                    "paths": {
+                        "claude_dir": claude_dir,
+                        "config_file": config_file,
+                    },
                 },
                 "models": MODELS,
             }),
@@ -2135,4 +2150,499 @@ async fn an_unusable_candidate_falls_through_to_the_default_and_then_to_nothing(
     );
     assert_eq!(offered.implementation, None);
     assert_eq!(offered.review, PickedView::Nothing);
+}
+
+/// **A Profile naming a harness this server has not got** — a plugin installed
+/// on the device that saved it — is listed like any other, its paths as its
+/// binding holds them, and broken: there is nothing here to launch it with.
+/// The viewer leaves it off every picker on that word.
+#[tokio::test]
+async fn a_profile_of_a_harness_this_server_has_not_got_is_listed_broken() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let plugin = "3f0c7a52-9d14-4b8e-a6f1-2c5d8e9b7a40";
+
+    store::create_profile(
+        &pool,
+        &store::ProfileFacts {
+            name: Some("plugged".to_owned()),
+            account: store::Account::new(
+                store::AgentType::read(plugin),
+                [("state", PathBuf::from("/home/you/accounts/plugged"))],
+            ),
+            models: vec!["gemini-code".to_owned()],
+            memory: true,
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let app = router_keeping(pool, dir.path().to_owned());
+
+    let [row] = <[_; 1]>::try_from(listed(&app).await).unwrap();
+
+    assert_eq!(row.account.agent_type.as_str(), plugin);
+    assert_eq!(
+        row.account.paths.get("state").map(String::as_str),
+        Some("/home/you/accounts/plugged")
+    );
+    assert_eq!(row.broken, Some(Broken::HarnessUnknown));
+}
+
+/// And saving one names the harness that is not here rather than judging
+/// paths nothing here declared.
+#[tokio::test]
+async fn a_profile_of_a_harness_this_server_has_not_got_is_refused_a_save() {
+    let (_accounts, _dir, app) = workbench().await;
+
+    let saved: ProfileSaved = post(
+        &app,
+        "/api/ui/profiles",
+        &serde_json::json!({
+            "name": "plugged",
+            "account": {
+                "agent_type": "3f0c7a52-9d14-4b8e-a6f1-2c5d8e9b7a40",
+                "paths": { "state": "/home/you/accounts/plugged" },
+            },
+            "models": ["gemini-code"],
+        }),
+    )
+    .await;
+
+    assert_eq!(saved, ProfileSaved::NoSuchHarness);
+}
+
+/// The harnesses the server can run, as the viewer draws them: each built-in
+/// under the word the wire has always spelled it in, with its name, its mark
+/// and the paths its account is made of.
+#[tokio::test]
+async fn the_harness_list_names_every_built_in_with_its_paths_and_mark() {
+    let (_accounts, _dir, app) = workbench().await;
+
+    let harnesses: Vec<verkstead_render::HarnessEntry> = get(&app, "/api/ui/harnesses").await;
+
+    let ids: Vec<&str> = harnesses.iter().map(|entry| entry.id.as_str()).collect();
+    assert_eq!(ids, ["Claude", "Codex", "Grok", "OpenCode", "Agy"]);
+
+    let claude = &harnesses[0];
+    assert_eq!(claude.name, "Claude Code");
+    assert!(claude.mark.starts_with("<svg"));
+    assert_eq!(
+        claude
+            .paths
+            .iter()
+            .map(|path| path.key.as_str())
+            .collect::<Vec<_>>(),
+        ["claude_dir", "config_file"]
+    );
+    assert_eq!(claude.login.as_deref(), Some("Claude"));
+    assert_eq!(
+        claude
+            .models
+            .iter()
+            .map(|model| (model.id.as_str(), model.name.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("claude-opus-5", "Opus 5"),
+            ("claude-fable-5", "Fable 5"),
+            ("claude-sonnet-5", "Sonnet 5"),
+            ("claude-haiku-4-5-20251001", "Haiku 4.5"),
+            ("claude-opus-5[1m]", "Opus 5 (1M context)"),
+            ("claude-sonnet-5[1m]", "Sonnet 5 (1M context)"),
+        ],
+        "the models the form has always offered a Claude Profile, in its order"
+    );
+    assert_eq!(
+        claude
+            .aliases
+            .iter()
+            .map(|alias| alias.id.as_str())
+            .collect::<Vec<_>>(),
+        ["opus", "fable", "sonnet", "haiku"],
+        "and the short names it reads and never offers"
+    );
+
+    let codex = &harnesses[1];
+    assert_eq!(
+        codex
+            .paths
+            .iter()
+            .map(|path| path.key.as_str())
+            .collect::<Vec<_>>(),
+        ["home"]
+    );
+    assert_eq!(codex.login, None);
+
+    let offered = |at: usize| -> Vec<&str> {
+        harnesses[at]
+            .models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect()
+    };
+    assert_eq!(offered(1), ["gpt-5-codex"]);
+    assert_eq!(offered(2), ["grok-4.6", "grok-4.5"]);
+    assert_eq!(
+        offered(3),
+        ["minimax/minimax-m2.1", "opencode/gpt-5.1-codex"]
+    );
+    assert_eq!(
+        offered(4),
+        [
+            "gemini-3.8-flash-high",
+            "gemini-3.8-flash-medium",
+            "gemini-3.8-flash-low",
+            "claude-opus-4-6-thinking",
+            "claude-sonnet-4-6",
+            "gpt-oss-120b-medium",
+        ]
+    );
+    assert!(
+        harnesses[1..].iter().all(|entry| entry.aliases.is_empty()),
+        "Claude Code's short names are its own"
+    );
+}
+
+/// A plugin harness declares its own models: its Profile form offers them,
+/// and a fresh Repo's default Pairing on it runs the one its manifest names
+/// for each role — after every built-in, which keep their places.
+#[tokio::test]
+async fn a_plugin_harness_offers_its_declared_models_and_defaults_to_its_declared_one() {
+    use crate::stub_harness::{self, StubHarness};
+
+    let (accounts, dir, app) = workbench().await;
+    let harness = StubHarness::Offering;
+    harness
+        .installed(&app, dir.path(), ["stub-large", "stub-grilling"])
+        .await;
+    let repo = fresh_repo(&app, accounts.path(), "verkstead").await;
+
+    let harnesses: Vec<verkstead_render::HarnessEntry> = get(&app, "/api/ui/harnesses").await;
+    let entry = harnesses
+        .iter()
+        .find(|entry| entry.id.as_str() == harness.uuid())
+        .expect("the plugin harness is listed");
+    assert_eq!(
+        entry
+            .models
+            .iter()
+            .map(|model| (model.id.as_str(), model.name.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("stub-large", "Stub default"),
+            ("stub-grilling", "Stub grilling")
+        ],
+        "the manifest's list, by the names it gives"
+    );
+
+    assert_eq!(
+        save(
+            &app,
+            &serde_json::json!({
+                "name": null,
+                "account": {
+                    "agent_type": harness.uuid(),
+                    "paths": stub_harness::account(accounts.path()),
+                },
+                "models": ["stub-large", "stub-grilling"],
+            }),
+        )
+        .await,
+        ProfileSaved::Saved
+    );
+    let stubbed = listed(&app).await.remove(0);
+
+    let offered = prefill(&app, repo).await;
+    assert_eq!(
+        on(offered.grilling.as_ref()),
+        Some((stubbed.id.as_str(), "stub-grilling")),
+        "the model the manifest names for the grilling"
+    );
+    assert_eq!(
+        on(offered.implementation.as_ref()),
+        Some((stubbed.id.as_str(), "stub-large")),
+        "and its default for a role it names nothing for"
+    );
+
+    let claude = saved(&app, accounts.path(), "work").await;
+    let offered = prefill(&app, repo).await;
+    assert_eq!(
+        on(offered.grilling.as_ref()).map(|(profile, _)| profile),
+        Some(claude.id.as_str()),
+        "a built-in's Profile is preferred, whenever it was saved"
+    );
+}
+
+/// A plugin harness's paths are refused in no built-in's words, each naming
+/// the field its manifest labelled — so with a directory and a file declared,
+/// the refusal says which of the two was wrong.
+#[tokio::test]
+async fn a_plugin_harness_path_is_refused_by_the_label_its_manifest_gave_it() {
+    use crate::stub_harness::{self, StubHarness};
+
+    let (accounts, dir, app) = workbench().await;
+    let harness = StubHarness::Offering;
+    harness
+        .installed(&app, dir.path(), ["stub-large", "stub-grilling"])
+        .await;
+
+    let saving = |paths: serde_json::Value| {
+        serde_json::json!({
+            "name": null,
+            "account": { "agent_type": harness.uuid(), "paths": paths },
+            "models": ["stub-large"],
+        })
+    };
+    let paths = stub_harness::account(accounts.path());
+    let with = |key: &str, at: serde_json::Value| {
+        let mut paths = paths.clone();
+        paths[key] = at;
+        saving(paths)
+    };
+
+    assert_eq!(
+        save(
+            &app,
+            &with("config", serde_json::json!(accounts.path().join(".stub")))
+        )
+        .await,
+        ProfileSaved::PathNotAFile("Stub config file".to_owned()),
+    );
+    assert_eq!(
+        save(
+            &app,
+            &with("dir", serde_json::json!(accounts.path().join(".stub.json")))
+        )
+        .await,
+        ProfileSaved::PathNotADirectory("Stub directory".to_owned()),
+    );
+    assert_eq!(
+        save(
+            &app,
+            &with(
+                "config",
+                serde_json::json!(accounts.path().join("gone.json"))
+            )
+        )
+        .await,
+        ProfileSaved::PathMissing("Stub config file".to_owned()),
+    );
+    assert_eq!(
+        save(&app, &with("dir", "relative/.stub".into())).await,
+        ProfileSaved::PathNotAbsolute("Stub directory".to_owned()),
+    );
+    assert_eq!(
+        save(&app, &saving(paths.clone())).await,
+        ProfileSaved::Saved
+    );
+}
+
+/// **A Profile of a plugin's harness waits for every member to be on this
+/// release**: an older one reads a Profile naming a harness it does not know as
+/// an error that takes its whole list with it. The refusal names the member
+/// and what to update; a built-in's Profile saves as it always has, and once
+/// the member says this release the plugin's saves too.
+#[tokio::test]
+async fn a_plugin_harness_profile_waits_for_a_member_on_an_older_release() {
+    use crate::stub_harness::{self, StubHarness};
+    use verkstead_server::device::reading::RUNNING;
+
+    let (accounts, dir, app) = workbench().await;
+    let harness = StubHarness::Silent;
+    harness
+        .installed(&app, dir.path(), ["stub-large", "stub-grilling"])
+        .await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    let member = |version: Option<&str>| store::Linking {
+        device: "b9848802c777ffdd4da2761f540a8e99".to_owned(),
+        name: "winvm".to_owned(),
+        os: "Windows".to_owned(),
+        addresses: vec!["127.0.0.1:9".to_owned()],
+        fingerprint: "00".repeat(32),
+        kept_by: None,
+        version: version.map(str::to_owned),
+        install: None,
+    };
+    store::record_member(&pool, &member(Some("0.1.0")))
+        .await
+        .unwrap();
+
+    let plugged = serde_json::json!({
+        "name": "stubbed",
+        "account": {
+            "agent_type": harness.uuid(),
+            "paths": stub_harness::account(accounts.path()),
+        },
+        "models": ["stub-large"],
+    });
+    assert_eq!(
+        save(&app, &plugged).await,
+        ProfileSaved::MemberBehind(
+            "winvm is on 0.1.0, which can't read a profile of a plugin's agent. Update winvm \
+             first."
+                .to_owned()
+        )
+    );
+    saved(&app, accounts.path(), "work").await;
+
+    store::record_member(&pool, &member(None)).await.unwrap();
+    assert_eq!(
+        save(&app, &plugged).await,
+        ProfileSaved::MemberBehind(
+            "winvm is on an older release, which can't read a profile of a plugin's agent. \
+             Update winvm first."
+                .to_owned()
+        ),
+        "a member that says no version is older than any",
+    );
+
+    store::record_member(&pool, &member(Some(RUNNING)))
+        .await
+        .unwrap();
+    assert_eq!(save(&app, &plugged).await, ProfileSaved::Saved);
+}
+
+/// **A disabled Agent plugin's Profiles stay, offered on no picker** (Set 1764,
+/// Q20): each reads broken as its plugin disabled, and a Conversation on a Repo
+/// remembering one starts with that role empty, the roles beside it filled as
+/// they were. Its row counts them, and **Remove** is refused while any stand,
+/// saying how many. Ticking it again offers them again.
+#[tokio::test]
+async fn a_disabled_plugins_profiles_stay_and_are_offered_on_no_picker() {
+    use crate::stub_harness::{self, StubHarness};
+
+    let (accounts, dir, app) = workbench().await;
+    let harness = StubHarness::Silent;
+    harness
+        .installed(&app, dir.path(), ["stub-large", "stub-grilling"])
+        .await;
+
+    let id = conversation(&app, accounts.path()).await;
+    assert_eq!(
+        save(
+            &app,
+            &serde_json::json!({
+                "name": "stubbed",
+                "account": {
+                    "agent_type": harness.uuid(),
+                    "paths": stub_harness::account(accounts.path()),
+                },
+                "models": ["stub-large"],
+            }),
+        )
+        .await,
+        ProfileSaved::Saved
+    );
+    let stubbed = listed(&app)
+        .await
+        .into_iter()
+        .find(|profile| profile.name.as_deref() == Some("stubbed"))
+        .expect("the plugin's Profile is listed");
+    let fable = saved(&app, accounts.path(), "fable").await;
+
+    choose_grilling(&app, id, &stubbed.id, "stub-large").await;
+    choose_implementation(&app, id, &fable.id, MODEL).await;
+    choose_review(&app, id, &fable.id, MODEL).await;
+    grill(dir.path(), id).await;
+
+    let picked = |view: &ConversationView| {
+        view.grilling_pairing
+            .as_ref()
+            .map(|pairing| pairing.profile.id.clone())
+    };
+    assert_eq!(
+        picked(&opened(&app, another(&app).await).await),
+        Some(stubbed.id.clone()),
+        "remembered while the plugin is ticked",
+    );
+
+    let enabled = |on: bool| {
+        let app = app.clone();
+        async move {
+            let view: verkstead_render::PluginsView = post(
+                &app,
+                &format!("/api/ui/plugins/{}/enabled", harness.uuid()),
+                &serde_json::json!({ "enabled": on }),
+            )
+            .await;
+            view
+        }
+    };
+
+    let view = enabled(false).await;
+    let row = view
+        .installed
+        .iter()
+        .find(|row| row.uuid == harness.uuid())
+        .unwrap();
+    assert_eq!(row.profiles, 1, "the row counts the Profile it keeps");
+    assert_eq!(row.harness, None, "and offers no harness while disabled");
+
+    let kept = listed(&app)
+        .await
+        .into_iter()
+        .find(|profile| profile.id == stubbed.id)
+        .expect("a disabled plugin's Profile stays");
+    assert_eq!(kept.broken, Some(Broken::HarnessDisabled));
+
+    // And its harness is still listed, not offered, so that the Profile is
+    // drawn under its name and mark rather than its id.
+    let harnesses: Vec<verkstead_render::HarnessEntry> = get(&app, "/api/ui/harnesses").await;
+    let withheld = harnesses
+        .iter()
+        .find(|entry| entry.id.as_str() == harness.uuid())
+        .expect("a disabled plugin's harness its Profile stands on is listed");
+    assert!(!withheld.offered, "and not offered");
+    assert_eq!(withheld.name, "Stub Harness");
+    assert!(!withheld.mark.is_empty(), "drawn with its mark");
+    assert!(
+        harnesses
+            .iter()
+            .filter(|entry| entry.id.as_str() != harness.uuid())
+            .all(|entry| entry.offered),
+        "every other harness is offered",
+    );
+
+    let view = opened(&app, another(&app).await).await;
+    assert_eq!(
+        picked(&view),
+        None,
+        "the remembered Pairing is not applied: the role starts empty",
+    );
+    assert_eq!(
+        view.implementation_pairing
+            .map(|pairing| pairing.profile.id.clone()),
+        Some(fable.id.clone()),
+        "and the roles beside it are filled as they were",
+    );
+
+    let (status, refusal) = fetch(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/ui/plugins/{}/remove", harness.uuid()))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refusal}");
+    assert!(
+        refusal.contains("can't be removed while 1 agent profile uses it"),
+        "the refusal says how many: {refusal}",
+    );
+
+    enabled(true).await;
+    let back = listed(&app)
+        .await
+        .into_iter()
+        .find(|profile| profile.id == stubbed.id)
+        .unwrap();
+    assert_eq!(back.broken, None, "ticked again, it is offered again");
 }

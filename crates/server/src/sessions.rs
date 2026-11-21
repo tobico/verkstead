@@ -53,6 +53,7 @@ use crate::attachments::Attachments;
 use crate::build_cache::BuildCache;
 use crate::capture::{Reading, Told};
 use crate::handoffs::Handoffs;
+use crate::harness::{self, Resume};
 use crate::nudge::Nudges;
 use crate::platform::Platform;
 use crate::runner::Pace;
@@ -328,7 +329,7 @@ impl Agents {
     pub(crate) fn logging_in(
         &self,
         profile: &store::Profile,
-        words: &[&str],
+        words: &[String],
     ) -> Option<(Sandbox, Vec<String>)> {
         let sandbox = Sandbox::for_login(
             profile,
@@ -342,7 +343,7 @@ impl Agents {
             Some(standing) => standing.clone(),
             None => vec![binary(profile.agent_type()).to_owned()],
         };
-        argv.extend(words.iter().map(|word| (*word).to_owned()));
+        argv.extend(words.iter().cloned());
 
         Some((sandbox, argv))
     }
@@ -530,10 +531,10 @@ impl Agents {
     /// the half of the choice the Profile does not make. A Conversation that
     /// chose its Profile before there was a model to choose beside it runs on
     /// the one that Profile carried — see [`store::Pairing::runs_on`]. What the
-    /// flag is spelled is the backend's — see [`Line::model`]. The prompt
+    /// flag is spelled is the backend's — see [`harness::Line::model`]. The prompt
     /// follows it: as the one positional argument for the three backends that
     /// take it that way, and under the flag its own line names where a backend
-    /// takes it flagged instead — see [`Line::prompt`].
+    /// takes it flagged instead — see [`harness::Line::prompt`].
     ///
     /// A Profile listing no models is refused when it is saved, so the flag is
     /// only ever left off for a row somebody edited by hand — and left off
@@ -553,17 +554,17 @@ impl Agents {
     /// and the flag is then left off entirely rather than passed empty: an agent
     /// told to run under no name at all would refuse to start, where one not
     /// told anything picks its own. A backend that takes no session id at all is
-    /// told none whatever Verkstead named it — see [`Line::names_the_session`].
+    /// told none whatever Verkstead named it — see [`harness::Line::session`].
     ///
     /// **And in that same place, where `named` says the session is being
     /// continued rather than opened, goes the backend's resume instead** — see
-    /// [`Line::resume`]. The two are mutually exclusive by construction: a
+    /// [`harness::Line::resume`]. The two are mutually exclusive by construction: a
     /// session cannot be both named and resumed, so a resumed launch names none
     /// and the conversation keeps the id it already had. Which is the id
     /// `session` carries here, this launch running under the name of the session
     /// it is carrying on from.
     ///
-    /// Last of all comes the tail the backend itself needs — see [`Line::tail`]
+    /// Last of all comes the tail the backend itself needs — see [`harness::Line::tail`]
     /// — which with the two above is the whole of what reads differently for one
     /// agent type than for another.
     ///
@@ -581,16 +582,17 @@ impl Agents {
     /// reason every other choice here is: the arm this machine will never run
     /// is still an arm a test on it can ask for.
     ///
-    /// `None` is a prompt that could not be written down, which is a session
-    /// with nothing to be started on — the caller starts none, the way it
-    /// starts none for a sandbox it could not build. Nothing else here can fail,
-    /// so the platform that keeps its prompt on the line is always `Some`.
+    /// `None` is a prompt that could not be written down, or a harness this
+    /// server has not got — either a session with nothing to be started on, so
+    /// the caller starts none, the way it starts none for a sandbox it could not
+    /// build. The second never reaches here in practice: the root is built
+    /// first, and refused for the same missing harness.
     ///
     /// **This blocks on the platform that writes the file**, which is why it is
     /// asked from the same blocking thread the sandbox is built on.
     ///
     /// `companions` is the Worktree of each Companion Repo, which only the
-    /// Antigravity CLI's line says anything about — see [`line`].
+    /// Antigravity CLI's line says anything about — see [`crate::harness::Harness::line`].
     #[allow(clippy::too_many_arguments)]
     fn argv(
         &self,
@@ -603,7 +605,8 @@ impl Agents {
         companions: &[PathBuf],
     ) -> Option<Vec<String>> {
         let agent_type = pairing.profile.agent_type();
-        let line = line(agent_type, worktree, companions);
+        let harness = harness::of(agent_type)?;
+        let line = harness.line(worktree, companions);
 
         let mut argv = match &self.agent {
             Some(standing) => standing.clone(),
@@ -619,38 +622,58 @@ impl Agents {
             Named::Opening => None,
         };
 
-        // A resume that is a subcommand is the first word after the binary, ahead
-        // of the options it takes: what follows is that subcommand's line rather
-        // than the ordinary one.
-        if let Some((Resume::Subcommand { word, .. }, _)) = resuming {
-            argv.push((*word).to_owned());
-        }
-
-        if let Some(model) = pairing.runs_on() {
-            argv.push(line.model.to_owned());
-            argv.push(model.to_owned());
-        }
-
-        // And the session it is resuming, where that subcommand takes it as the
-        // positional in front of the prompt. Here rather than in the one slot
-        // below, because a positional's place on the line is the whole of what
-        // says which argument it is.
-        if let Some((Resume::Subcommand { .. }, session)) = resuming {
-            argv.push(session.to_owned());
-        }
-
-        if let Some(flag) = line.prompt {
-            argv.push(flag.to_owned());
-        }
-
-        argv.push(match self.homes.platform() {
+        let prompt = match self.homes.platform() {
             Platform::Windows => self.handoffs.wrote_prompt(
                 conversation_id,
                 self.homes.for_conversation(conversation_id).handoffs(),
                 prompt,
             )?,
             Platform::Linux | Platform::MacOs => prompt.to_owned(),
-        });
+        };
+
+        // Where the session-only settings are written, inside the root a
+        // session finds in its HOME — see [`harness::SETTINGS_FILE`].
+        let settings = self
+            .homes
+            .for_conversation(conversation_id)
+            .path()
+            .join(harness.landing())
+            .join(harness::SETTINGS_FILE)
+            .display()
+            .to_string();
+        let worktree = worktree.map(|worktree| worktree.display().to_string());
+
+        let filling = harness::Filling {
+            model: pairing.runs_on(),
+            prompt: Some(&prompt),
+            session,
+            worktree: worktree.as_deref(),
+            settings: Some(&settings),
+        };
+        let fill = |words: &[String]| harness::filled(words, filling);
+
+        // A resume that is a subcommand is the first words after the binary,
+        // ahead of the options it takes: what follows is that subcommand's line
+        // rather than the ordinary one.
+        if let Some((Resume::Subcommand { words, .. }, _)) = resuming {
+            argv.extend(fill(words));
+        }
+
+        if pairing.runs_on().is_some() {
+            argv.extend(fill(&line.model));
+        }
+
+        // And the session it is resuming, where that subcommand takes it as the
+        // positional in front of the prompt rather than among its words. Here
+        // rather than in the one slot below, because a positional's place on
+        // the line is the whole of what says which argument it is.
+        if let Some((Resume::Subcommand { words, .. }, session)) = resuming
+            && !harness::holds(words, harness::SESSION)
+        {
+            argv.push(session.to_owned());
+        }
+
+        argv.extend(fill(&line.prompt));
 
         // The session's name, or the resume that stands in its place: one slot,
         // because a session cannot be both named and resumed. A launch that is
@@ -658,10 +681,7 @@ impl Agents {
         // launch opening one is told to run under it. The subcommand shape has
         // said both of its halves already, and says neither again.
         match resuming {
-            Some((Resume::Flag(flag), session)) => {
-                argv.push((*flag).to_owned());
-                argv.push(session.to_owned());
-            }
+            Some((Resume::Flag(words), _)) => argv.extend(fill(words)),
 
             Some((Resume::Subcommand { .. }, _)) => {}
 
@@ -669,79 +689,46 @@ impl Agents {
             // a continuation with no resume to say — and that one is told nothing
             // at all: the name belongs to a session it is not opening.
             None => {
-                if let (Named::Opening, Some(session)) =
-                    (named, session.filter(|_| line.names_the_session))
-                {
-                    argv.push("--session-id".to_owned());
-                    argv.push(session.to_owned());
+                if let (Named::Opening, Some(_), Some(words)) = (named, session, &line.session) {
+                    argv.extend(fill(words));
                 }
             }
         }
 
-        argv.extend(line.tail);
+        argv.extend(fill(&line.tail));
 
         // And what the continuation itself needs said, which the ordinary line has
         // no business carrying: a setting about how a resume is resolved means
         // nothing to a launch that is opening a conversation.
         if let Some((Resume::Subcommand { also, .. }, _)) = resuming {
-            argv.extend(also.iter().cloned());
+            argv.extend(fill(also));
         }
 
         Some(argv)
     }
 
     /// What a session of `agent_type` has on its Screen that says whether it has
-    /// stopped, and `None` where its idle is the silence itself.
+    /// stopped, and `None` where its idle is the silence itself — the harness's
+    /// own at-work line, see [`crate::harness::Harness::at_work`].
     ///
-    /// **One constant per backend**, the same bargain the usage-limit phrase
-    /// makes — see [`crate::limits`]: the wording is the backend's and it will
-    /// move, so it is kept in one place and costs one edit when it does. What
-    /// puts a signature that has drifted in front of the human rather than
-    /// leaving a session nothing ever catches is the long-stop behind it — see
-    /// [`Judged::Drawing`].
-    ///
-    /// Claude has none, and none rather than an unknown one: it draws inline
-    /// rather than repainting a screen, so there is no frame to read a prompt
-    /// off, and three seconds of silence is an answer that works.
-    ///
-    /// Codex's is [`CODEX_AT_WORK`], Grok Build's is [`GROK_AT_WORK`],
-    /// OpenCode's is [`OPENCODE_AT_WORK`] and the Antigravity CLI's is
-    /// [`AGY_AT_WORK`], and all four are the same one of the two readings — see
-    /// [`Signature`]. Every backend that draws a screen has now been measured
-    /// and every one of them came out that way round, so
-    /// the at-the-prompt reading stands unused: what it is there for is the
-    /// backend that turns out to differ, and none has. What stands where any of
-    /// the three goes instead is whatever the suite handed in, which is the
-    /// prompt drawn by the stub it stands where an agent goes: no backend here
+    /// All of them are the same one of the two readings — see [`Signature`] —
+    /// so the at-the-prompt reading stands unused: what it is there for is the
+    /// harness that turns out to differ, and none has. What stands where a
+    /// harness's own goes instead is whatever the suite handed in, which is the
+    /// prompt drawn by the stub it stands where an agent goes: no harness here
     /// draws a prompt of its own, so that reading is proved against a stub
-    /// rather than against an account.
+    /// rather than against an account. A harness whose idle is the silence
+    /// gets no signature even then.
     fn signature(&self, agent_type: store::AgentType) -> Option<Signature> {
-        match agent_type {
-            store::AgentType::Claude => None,
-            store::AgentType::Codex => Some(
-                self.signature
-                    .clone()
-                    .unwrap_or_else(|| Signature::AtWork(CODEX_AT_WORK.to_owned())),
-            ),
-            store::AgentType::Grok => Some(
-                self.signature
-                    .clone()
-                    .unwrap_or_else(|| Signature::AtWork(GROK_AT_WORK.to_owned())),
-            ),
-            store::AgentType::OpenCode => Some(
-                self.signature
-                    .clone()
-                    .unwrap_or_else(|| Signature::AtWork(OPENCODE_AT_WORK.to_owned())),
-            ),
-            store::AgentType::Agy => Some(
-                self.signature
-                    .clone()
-                    .unwrap_or_else(|| Signature::AtWork(AGY_AT_WORK.to_owned())),
-            ),
-        }
+        let at_work = harness::of(agent_type)?.at_work()?;
+
+        Some(
+            self.signature
+                .clone()
+                .unwrap_or_else(|| Signature::AtWork(at_work.to_owned())),
+        )
     }
 
-    /// And how a session of that type is judged idle — see [`Judged`].
     fn judged(&self, agent_type: store::AgentType) -> Judged {
         match self.signature(agent_type) {
             Some(signature) => Judged::Drawing {
@@ -753,143 +740,22 @@ impl Agents {
     }
 }
 
-/// The program a Profile of each agent type is run as.
+/// The program a Profile of `agent_type` is run as — see [`crate::harness::Harness::binary`].
 ///
-/// The host provides them, as it provides `claude` (ADR-0011): the installer
-/// puts each backend's binary on the system profile the sandbox already reads,
-/// and a Profile whose binary is missing fails at session start, named in the
-/// Capture of the session that could not run.
-///
-/// A later backend adds one arm here and nothing else, which is the whole
-/// reason this is a mapping rather than a name written into the line. The type
-/// comes off the Pairing's Profile, so nothing has to be plumbed through to say
-/// which agent is being launched.
-///
-/// `const` so that the one list of the names a session is followed into can be
-/// built out of it rather than write them again — see
-/// [`crate::sandbox::PROGRAMS`].
-pub(crate) const fn binary(agent_type: store::AgentType) -> &'static str {
-    match agent_type {
-        store::AgentType::Claude => "claude",
-        store::AgentType::Codex => "codex",
-        store::AgentType::Grok => "grok",
-        store::AgentType::OpenCode => "opencode",
-        store::AgentType::Agy => "agy",
-    }
+/// The id itself for a harness this server has not got, which is no program
+/// on any `PATH`: what is looked for is then not found, which is what is true.
+pub(crate) fn binary(agent_type: store::AgentType) -> &'static str {
+    harness::of(agent_type).map_or(agent_type.word(), |harness| harness.binary())
 }
 
-/// What a backend writes inside the Worktree it runs in, as the line of
-/// `info/exclude` that keeps it out of git — see [`crate::worktrees::excluded`].
-///
-/// The Antigravity CLI's `.gemini/`, where agy 1.4.12 keeps its transcript of
-/// the session and whatever else it files under the workspace; and nothing for
-/// the four before it, which write nothing there.
-fn written_in_worktree(agent_type: store::AgentType) -> Option<&'static str> {
-    match agent_type {
-        store::AgentType::Agy => Some(".gemini/"),
-        store::AgentType::Claude
-        | store::AgentType::Codex
-        | store::AgentType::Grok
-        | store::AgentType::OpenCode => None,
-    }
-}
-
-/// The rest of a backend's launch line: how it is told its model, how it is
-/// given the Brief, whether it takes the session id Verkstead named, and what
-/// goes on the end.
-///
-/// One value rather than a mapping apiece, because they are one fact — what
-/// this backend's command line looks like — and a stage that lands a backend
-/// writes it once here.
-struct Line {
-    /// What the model is said with. `--model` reads as claude's own; codex
-    /// takes `-m`.
-    model: &'static str,
-
-    /// The flag the Brief goes under, or `None` where it is the one positional
-    /// argument.
-    ///
-    /// The positional is what every backend up to this one takes, and opencode
-    /// is the first that does not: its positional is the project to start in,
-    /// and the prompt is `--prompt`. Said here rather than assumed, so that a
-    /// backend taking either shape is one arm of the mapping below rather than
-    /// a branch in the builder.
-    prompt: Option<&'static str>,
-
-    /// Whether the session Verkstead named is named on the line.
-    ///
-    /// False for a backend that takes no session id at all, whose log is
-    /// therefore found rather than named — see [`crate::transcript`].
-    names_the_session: bool,
-
-    /// And the other line this same backend has: the one that **continues** a
-    /// conversation instead of opening one, under the id of the session that was
-    /// having it.
-    ///
-    /// Mutually exclusive with [`Line::names_the_session`] wherever both could
-    /// be said, and that is a fact about what a session is rather than a
-    /// convention: a conversation carried on keeps the id it already had, so
-    /// there is nothing left to name it.
-    ///
-    /// And it is not always a flag — see [`Resume`]: codex's is a subcommand, and
-    /// what a subcommand changes is the shape of the whole line rather than what
-    /// is on the end of it.
-    ///
-    /// `None` where Verkstead does not carry a conversation on from a session of
-    /// this backend, which is now no backend at all: all five have a resume, and
-    /// what separated them was never that but whether Verkstead knew the id to
-    /// resume by and whether their store had to be put right first. It stays an
-    /// `Option` because a sixth backend lands here before either of those is
-    /// answered for it, and until they are a launch under it opens a session of
-    /// its own, which is Verkstead's own Resume and nothing lost.
-    resume: Option<Resume>,
-
-    /// The flags and configuration overrides that go last, after the prompt.
-    ///
-    /// Owned rather than borrowed, because the trust pre-seed below names the
-    /// Worktree this session is being launched in.
-    tail: Vec<String>,
-}
-
-/// How a backend is told to carry a conversation on rather than open one — see
-/// [`Line::resume`].
-///
-/// **Two shapes rather than one spelling**, because the backends do not agree on
-/// what a resume *is*. For three of them it is another option on the same line,
-/// and the id goes where the id would have gone. For codex it is a subcommand:
-/// the line is `codex resume <session-id> <prompt>`, so the word comes ahead of
-/// everything the ordinary line says and the id is a positional in front of the
-/// prompt rather than a value after a flag.
-///
-/// What does *not* change with the shape is the rest of the line. A resumed
-/// session is the same session under the same account in the same Worktree, so the
-/// model, the approval bypass and every configuration override the ordinary line
-/// carries come across onto the subcommand — a resume that dropped them would come
-/// up logged out and sitting on a trust prompt.
-enum Resume {
-    /// A flag and the id, written where the session id it is mutually exclusive
-    /// with would have gone. Claude's and Grok Build's, both spelled `--resume`,
-    /// and OpenCode's, spelled `--session`.
-    Flag(&'static str),
-
-    /// A subcommand and the id, written in front of the line rather than on the
-    /// end of it. Codex's.
-    Subcommand {
-        /// The word itself, straight after the binary.
-        word: &'static str,
-
-        /// And what the continuation needs said that the ordinary line does not,
-        /// which goes on the end with the tail.
-        ///
-        /// Here rather than in [`Line::tail`] because it is about resuming: a
-        /// launch opening a conversation would be carrying a setting for a
-        /// question it is not asking.
-        also: Vec<String>,
-    },
+/// What a harness writes inside the Worktree it runs in — see
+/// [`crate::harness::Harness::written_in_worktree`].
+fn written_in_worktree(agent_type: store::AgentType) -> Vec<&'static str> {
+    harness::of(agent_type).map_or_else(Vec::new, |harness| harness.written_in_worktree())
 }
 
 /// Whether the session Verkstead named is one this launch is **opening** or one
-/// it is **continuing** — see [`Line::resume`], which is what a continuation is
+/// it is **continuing** — see [`harness::Line::resume`], which is what a continuation is
 /// said with.
 ///
 /// A value rather than an `Option` of the id, because the id is the same either
@@ -907,429 +773,6 @@ enum Named {
     /// *Transfer*).
     Continuing,
 }
-
-/// Which line `agent_type` takes, for a session working in `worktree` beside
-/// the Worktrees of its Companion Repos, `companions`.
-///
-/// **Every backend is launched with its approval bypass on.** Running
-/// unattended is what Verkstead promises rather than something the account's
-/// own configuration is trusted to have been left holding: a session that
-/// stopped to ask for approval would be asking it in front of nobody, with the
-/// whole backlog behind it waiting on an answer that is not coming. What stops
-/// a session doing harm is the Sandbox, which this does not touch and which is
-/// still the boundary — and codex's own sandbox is off rather than nested,
-/// because it will not start inside bwrap and bwrap is already the boundary.
-///
-/// Codex and grok both draw a full-screen TUI, and `--no-alt-screen` keeps each
-/// drawing inline instead: the Capture and the Screen are the record of what a
-/// session did, and an alternate screen is a record that is thrown away as the
-/// program leaves it.
-///
-/// **opencode has no such flag and takes the alternate screen**, which is a
-/// finding rather than an oversight (ADR-0011): its Screen reads either way,
-/// since the screen model tracks which buffer is in front, and what its Capture
-/// then replays to is the farewell banner opencode leaves on the ordinary
-/// buffer as it exits rather than anything the session did. The record this
-/// backend is read back from is its session store, which is what the Timeline
-/// draws from. `--mini` — the minimal interface, which draws inline and carries
-/// the same at-work label — is what to reach for the day the Capture has to be
-/// that record instead.
-///
-/// **And every one of the four is a backend Verkstead continues a conversation
-/// on.** Claude's resume is `--resume <session-id>`, written where the session id it
-/// is mutually exclusive with would have gone — after the prompt, which stays
-/// exactly where it already is, and which claude takes alongside the flag as the
-/// first message of the conversation it picks up (checked against claude 2.1.278:
-/// the log it resumed carries the prompt as its own last one, under the same session
-/// id and in the same file). A session id it holds no log for is refused by name
-/// rather than opened, which is why the log is proved to be there before the line is
-/// built at all — see [`crate::transcript::carried`].
-///
-/// **Grok Build's is the same shape under the same spelling**, and the exclusion is
-/// the backend's own rather than Verkstead's reading of it: grok 1.0.34 says of
-/// `--session-id` that it names a **new** conversation, that it must not already
-/// exist, and that with `--resume` it is only valid alongside `--fork-session` —
-/// which a conversation carried on is the opposite of. So `--resume <session-id>`
-/// stands where the name would have been, the prompt stays positional, and a
-/// UUID-shaped value is always read as an id rather than matched against session
-/// titles. Its log is proved to be there for Claude's reason and one more: grok
-/// resolves a resume against the directory it was started in, so the log has to have
-/// been moved under this device's own name for this Worktree first — see
-/// [`crate::transcript::relocated`], and the one left on [`Line::resume`]'s `None`.
-///
-/// **Codex's is a subcommand rather than a flag**, which is the one line in this
-/// table whose shape changes rather than growing an argument: `codex resume
-/// <session-id> <prompt>`, the word straight after the binary and both of the
-/// others its positionals (codex 0.155.1's own help, and driven to prove it). The
-/// model flag and every override the ordinary line carries come across onto it —
-/// a resume without them comes up logged out and sitting on the trust prompt —
-/// and one more goes on that the ordinary line has no business with:
-/// [`CODEX_RESUME_CWD`].
-///
-/// **And nothing of codex's store has to be put right, which is why it is asked
-/// this way.** Codex files its rollouts by the date they were written rather than
-/// by the directory they were written in, so what the memory sync carries lands at
-/// the same relative path it left. A resume by an explicit id is resolved against
-/// the whole store and not against the directory codex was started in — driven
-/// against 0.155.1, which resumed a rollout recording a directory that machine
-/// never had — so where Grok needs its log moved, Codex needs nothing moved at
-/// all. Which is the answer worth having: the relocation writes into somebody
-/// else's store, and this does not.
-///
-/// **What it has instead is a prompt about which directory to resume in.** Where a
-/// rollout records a directory other than the one codex is started in — which a
-/// carried one always does — 0.155.1 asks the human to choose between them, and a
-/// session stopped at a prompt is a run waiting on nobody. [`CODEX_RESUME_CWD`] is
-/// that choice made: this device's Worktree, which is where the work now is.
-///
-/// **Its id is the one Verkstead did not pick.** Codex takes no session id at
-/// launch, so what goes after the subcommand is the id the rollout gives itself —
-/// read out of the log as the Transcript search finds it and written onto the
-/// record there, which is what leaves a device that never ran the session able to
-/// resume it. See [`crate::transcript::names_itself`] and
-/// [`crate::transcript::in_the_store`].
-///
-/// **Grok Build is the one backend after Claude that takes the session id.** It
-/// takes it under the spelling [`Agents::argv`] writes, it insists on a valid
-/// UUID and it refuses one it already has a session for — all three of which
-/// Verkstead's own names satisfy, being version-4 UUIDs drawn fresh per session.
-/// So its log is named at launch rather than found afterwards, which is
-/// Claude's shape and the opposite of Codex's. Its own sandbox is off for the
-/// reason codex's is, and nothing about its account is said on the line: grok
-/// reads its whole configuration out of the home the Profile named.
-///
-/// **What its account needs is said on the line rather than written into it.**
-/// Codex takes `-c key=value` overrides, which is how the home is configured
-/// without Verkstead writing into a directory that belongs to the human's
-/// account: the credential store file-backed, since there is no keyring inside
-/// the sandbox and a login that reached for one would find nothing; and the
-/// Worktree pre-seeded as trusted, since some versions still put the trust
-/// prompt up despite the bypass and a session stopped at a prompt is a run
-/// waiting on nobody.
-///
-/// **OpenCode's is the shortest line here.** The model as `-m provider/model`
-/// — the whole string is what the human typed on the Profile — the Brief under
-/// `--prompt`, and `--auto` for the approvals, which is where the other three
-/// backends' bypasses sit. `--prompt` submits rather than only prefilling
-/// (checked against opencode 1.18.25: the home screen fills the prompt in and
-/// sends it as soon as the model store is ready), so nothing is typed into the
-/// terminal to start the session working. It has no sandbox of its own to
-/// switch off, and it takes no session id at launch: `--session` means
-/// *continue this one* and is validated against the store before the TUI
-/// starts, so a fresh name would be a session that never starts rather than a
-/// session named — which is why its log is found rather than named, as codex's
-/// is. Everything else about the account is in the directories the Profile
-/// named — see [`crate::sandbox`].
-///
-/// **And that same flag is its resume**, the shortest line here staying the
-/// shortest: `--session <session-id>` where the name a session that took one
-/// would have gone, the prompt under its own flag exactly where it already is,
-/// and the model and the approvals unchanged. Nothing is added and nothing comes
-/// off — opencode has no equivalent of codex's question about which directory to
-/// resume in, because it does not ask: it resumes in the directory the session's
-/// own row records, which is why that row is what has to be put right. `--fork`
-/// beside the flag is what would make it a conversation branched rather than
-/// carried on, and it is never passed (opencode 1.18.31's own help, and driven to
-/// prove the rest of this).
-///
-/// **Its id is the store's own, as Codex's is.** opencode names no session on the
-/// line, so what goes after the flag is the id the row in its store turned out to
-/// be under — read as the records reader finds that row and written onto the
-/// record there, which is what leaves a device that never ran the session able to
-/// resume it. See [`crate::transcript::found_in_the_store`].
-///
-/// **And its store is the one that has to be written into rather than moved
-/// about.** opencode keeps a row per session in one database and the memory sync
-/// carries the file whole, so the row of a carried session lands still recording
-/// the *sending* device's Worktree — and a resume against it would open in a
-/// directory this machine has not got, the row's own directory being where
-/// opencode resumes. So that one column is brought onto this device's Worktree
-/// before the line is built at all, and a store this build cannot write leaves
-/// the row alone and falls through to Verkstead's own Resume. See
-/// [`crate::records::carried`].
-///
-/// **The Antigravity CLI's says what a session needs of agy's settings on the
-/// line**, as a session-only `--settings` JSON that agy never saves — see
-/// [`agy_settings`] — so nothing of it is written into the account (ADR-0011).
-/// The model under `--model`, the Brief under `--prompt-interactive`, which
-/// runs it as the first turn and stays interactive, `--dangerously-skip-
-/// permissions` for the approvals, and an `--add-dir` per Companion Repo, which
-/// is how agy is told a directory beyond the one it was started in is part of
-/// the workspace. It takes no session id at launch, so its conversation is
-/// found rather than named. Read off agy 1.4.12's own help.
-///
-/// **Its resume is `--conversation <id>`**, written where the session id would
-/// have gone, after the Brief — which agy takes alongside it as the next turn
-/// of the conversation it picks up (checked against agy 1.4.12, which appended
-/// that turn to the same conversation's transcript). The id is the one its
-/// summaries index gave the conversation, put on the record as the session was
-/// followed — see [`crate::transcript`] — and the record is proved to be here
-/// before the line is built, see [`crate::transcript::carried`].
-fn line(agent_type: store::AgentType, worktree: Option<&Path>, companions: &[PathBuf]) -> Line {
-    match agent_type {
-        store::AgentType::Claude => Line {
-            model: "--model",
-            prompt: None,
-            names_the_session: true,
-            resume: Some(Resume::Flag("--resume")),
-            tail: vec!["--dangerously-skip-permissions".to_owned()],
-        },
-        store::AgentType::Codex => {
-            let mut tail = vec![
-                "--dangerously-bypass-approvals-and-sandbox".to_owned(),
-                "--no-alt-screen".to_owned(),
-                "-c".to_owned(),
-                format!("{CODEX_CREDENTIAL_STORE}=\"file\""),
-            ];
-
-            // A session with no Worktree is one that never starts — see
-            // [`Sessions::start`] — so what this leaves off is the trust of a
-            // directory there is none of, rather than a prompt let through.
-            //
-            // The whole table rather than the one key under it, because codex
-            // splits a `-c` key on every dot it finds and does not stop at the
-            // quotes: a Worktree named for a Repo or a branch with a dot in it
-            // — and either may have one — is a path
-            // `projects."…".trust_level` addresses some other way, and the
-            // session then sits on the trust prompt for ever. A table on the
-            // right-hand side is read as the TOML it is.
-            if let Some(worktree) = worktree {
-                tail.push("-c".to_owned());
-                tail.push(format!(
-                    "projects={{\"{}\"={{trust_level=\"trusted\"}}}}",
-                    worktree.display()
-                ));
-            }
-
-            Line {
-                model: "-m",
-                prompt: None,
-                names_the_session: false,
-                resume: Some(Resume::Subcommand {
-                    word: "resume",
-                    also: vec!["-c".to_owned(), format!("{CODEX_RESUME_CWD}=\"current\"")],
-                }),
-                tail,
-            }
-        }
-        store::AgentType::Grok => Line {
-            model: "-m",
-            prompt: None,
-            names_the_session: true,
-            resume: Some(Resume::Flag("--resume")),
-            tail: vec![
-                "--always-approve".to_owned(),
-                "--sandbox".to_owned(),
-                "off".to_owned(),
-                "--no-alt-screen".to_owned(),
-            ],
-        },
-        store::AgentType::OpenCode => Line {
-            model: "-m",
-            prompt: Some("--prompt"),
-            names_the_session: false,
-            resume: Some(Resume::Flag("--session")),
-            tail: vec!["--auto".to_owned()],
-        },
-        store::AgentType::Agy => {
-            let mut tail = vec!["--dangerously-skip-permissions".to_owned()];
-
-            for companion in companions {
-                tail.push("--add-dir".to_owned());
-                tail.push(companion.display().to_string());
-            }
-
-            tail.push("--settings".to_owned());
-            tail.push(agy_settings(
-                worktree
-                    .into_iter()
-                    .chain(companions.iter().map(PathBuf::as_path)),
-            ));
-
-            Line {
-                model: "--model",
-                prompt: Some("--prompt-interactive"),
-                names_the_session: false,
-                resume: Some(Resume::Flag("--conversation")),
-                tail,
-            }
-        }
-    }
-}
-
-/// The session-only settings an Antigravity CLI session is launched with, as
-/// the JSON `--settings` takes: what running unattended in a Worktree needs of
-/// agy, said for this session and never saved into the account.
-///
-/// - `toolPermission: always-proceed`, so no tool call waits on an approval
-///   nobody is there to give — the setting beside the flag that says the same.
-/// - `allowNonWorkspaceAccess`, because the skills a session reads and the
-///   handoff it writes to are outside the Worktree.
-/// - `trustedWorkspaces`, the Worktree and every companion, so none of them
-///   stops the session on a question about trusting it.
-/// - `altScreenMode: never`, so agy draws inline and the Capture is the record
-///   of what the session did, as `--no-alt-screen` is for codex and grok.
-/// - `runningLightSpeed: off`, the light agy runs along its at-work line, which
-///   would repaint the Screen for nothing every few frames.
-/// - `enableTerminalSandbox: false`: agy's own sandbox for its shell tool,
-///   nested inside bwrap, which is already the boundary.
-///
-/// The mode is left as agy's default — `auto` turns that same sandbox on — and
-/// effort and telemetry are left as the account has them. Key names read off
-/// agy 1.4.12.
-fn agy_settings<'a>(trusted: impl Iterator<Item = &'a Path>) -> String {
-    serde_json::json!({
-        "toolPermission": "always-proceed",
-        "allowNonWorkspaceAccess": true,
-        "trustedWorkspaces": trusted
-            .map(|path| path.display().to_string())
-            .collect::<Vec<_>>(),
-        "altScreenMode": "never",
-        "runningLightSpeed": "off",
-        "enableTerminalSandbox": false,
-    })
-    .to_string()
-}
-
-/// Where codex keeps the credentials a login writes, which inside the sandbox
-/// has to be the file beside the configuration rather than a keyring.
-///
-/// Named because it is somebody else's spelling, the same bargain the
-/// usage-limit phrase and the idle signature make: one place to edit when it
-/// moves.
-const CODEX_CREDENTIAL_STORE: &str = "cli_auth_credentials_store";
-
-/// And which directory codex resumes a session **in**, which for a conversation
-/// carried across a cluster is this device's rather than the one the rollout
-/// records.
-///
-/// A rollout records the directory its session ran in, and a carried one records
-/// the *sending* device's Worktree — a path that does not exist here. Codex
-/// 0.155.1 puts the two side by side and asks the human to pick, which is a
-/// session stopped in front of nobody; this setting is that choice made once, and
-/// the choice is the directory codex was started in, which is where the work now
-/// is. Its other value would resume into the path the work has left.
-///
-/// Said on the line rather than written into the account's configuration, for the
-/// reason [`CODEX_CREDENTIAL_STORE`] is: the home belongs to the human's account.
-/// And on the resume alone — see [`Resume::Subcommand`] — because an ordinary
-/// launch resumes nothing.
-///
-/// Named for the reason the spelling above it is, and it is the same bargain: the
-/// key is codex's and it will move, and moving it costs one edit here.
-const CODEX_RESUME_CWD: &str = "tui.resume_cwd";
-
-/// What codex has on its Screen while it is working, and nothing of what it has
-/// there when it is waiting for a human — see [`Signature::AtWork`].
-///
-/// Read off codex 0.149.0 rather than guessed at, and the reading is the whole
-/// reason this backend's answer is an at-work line rather than a prompt: the
-/// frame codex leaves when its turn is over and the frame it draws mid-turn are
-/// the same screen but for this one line. The composer, its placeholder — `Ask
-/// Codex to do anything` — and the bar under it stand in both, so none of them
-/// says anything about whether the session has stopped.
-///
-/// The fragment rather than the whole line, because the rest of it moves while
-/// this does not: the spinner glyph in front changes every frame, and the
-/// seconds count up.
-///
-/// Named for the same reason the spelling above is, and it is the same bargain
-/// the usage-limit phrase makes: the wording is codex's and it will move, and
-/// moving it costs one edit here.
-const CODEX_AT_WORK: &str = "esc to interrupt";
-
-/// What grok has on its Screen while it is working, and nothing of what it has
-/// there when it is waiting for a human — see [`Signature::AtWork`].
-///
-/// Read off grok 1.0.13 driven on a hundred-column terminal rather than guessed
-/// at, and it comes out where codex came out: the frame grok leaves when its
-/// turn is over and the frame it draws mid-turn are the same screen but for the
-/// live status line — `⠧ Responding… 5.7s … [stop]` — and this hint on the row
-/// under the composer. The composer itself, its `❯`, the `grok-4.6 ·
-/// always-approve` label on its border and the `Shift+Tab:mode` and
-/// `Ctrl+x:shortcuts` hints beside this one stand in both, so none of them says
-/// whether the session has stopped.
-///
-/// The hint rather than the `[stop]` chip, which goes and comes with it: the
-/// hints are the row grok draws at the foot of every frame, where the status
-/// line is there only while a turn runs, and a keybinding label is a harder
-/// thing to find by accident in what the session printed than a bracketed word
-/// is.
-///
-/// The fragment rather than the whole row, because the rest of it moves while
-/// this does not: a turn that has backgrounded something adds `Ctrl+b:send to
-/// bg` beside it, and the hints at rest change with what the composer is
-/// offering.
-///
-/// Named for the same reason [`CODEX_AT_WORK`] is, and it is the same bargain
-/// the usage-limit phrase makes: the wording is grok's and it will move, and
-/// moving it costs one edit here.
-const GROK_AT_WORK: &str = "Esc:cancel";
-
-/// What opencode has on its Screen while it is working, and nothing of what it
-/// has there when it is waiting for a human — see [`Signature::AtWork`].
-///
-/// Read off opencode 1.18.25 driven on a hundred-column terminal rather than
-/// guessed at, and it comes out where the two before it came out: the frame
-/// opencode leaves when its turn is over and the frame it draws mid-turn are
-/// the same screen but for the status bar at its foot. Mid-turn that bar is a
-/// progress dial and this label — `⬝⬝⬝⬝⬝■■■  esc interrupt` — and at rest it is
-/// the project's path instead. The composer above it, the `Build auto ·
-/// <model>` label on its border and the `tab agents` and `ctrl+p commands`
-/// hints beside this one stand in both, so none of them says whether the
-/// session has stopped. Across two turns of one session sampled once a second —
-/// a tool call and then a streamed reply, twice — the label was in every
-/// working frame and in none of the resting ones.
-///
-/// The label rather than the dial in front of it, which goes and comes with it:
-/// the dial's cells fill and empty every frame where this does not move, and a
-/// keybinding label is a harder thing to find by accident in what the session
-/// printed than a run of block characters is.
-///
-/// Two words where codex's is three — opencode writes `esc interrupt` where
-/// codex writes `esc to interrupt` — so neither backend's constant reads the
-/// other's frame, which is what the tests on this reading turn on.
-///
-/// **And it is the same label in either interface opencode offers.** The
-/// minimal one — `--mini`, which is what draws inline rather than taking the
-/// alternate screen — puts it in a status bar of its own, and it goes there
-/// when the turn is over exactly as it goes here. So the reading does not turn
-/// on which of the two a session was started in, whatever a later stage
-/// decides about the Capture (ADR-0011).
-///
-/// Named for the same reason [`CODEX_AT_WORK`] is, and it is the same bargain
-/// the usage-limit phrase makes: the wording is opencode's and it will move,
-/// and moving it costs one edit here.
-const OPENCODE_AT_WORK: &str = "esc interrupt";
-
-/// What the Antigravity CLI has on its Screen while it is working, and nothing
-/// of what it has there when it is waiting for a human — see
-/// [`Signature::AtWork`].
-///
-/// Read off agy 1.4.12, signed in and launched on the line a session is, with
-/// the running light off, sampled once a second across three sessions: a reply
-/// of one word, a call to an MCP server, and a shell command held for four
-/// minutes as a background task. agy draws inline, but it repaints the foot of
-/// what it drew — the composer between two rules and a hint row under it — and
-/// that row is where the two states differ. Mid-turn its left end is this
-/// label; at rest it is `? for shortcuts`. The model's name on the right of the
-/// row, and the `1 task(s) · /tasks` beside it while a background task runs,
-/// stand in both. The label was in every working frame and in none of the
-/// resting ones, a turn that had handed its command to the background included.
-///
-/// **Silence would have read it too**: a resting agy sends not a byte, and a
-/// working one never went a second without repainting its spinner. The label
-/// rather than the silence because it is the reading every backend that
-/// repaints a screen takes, and because a turn waiting on a slow model would
-/// otherwise rest on a spinner nobody has promised to keep turning.
-///
-/// Three words, as codex's are, and a different three — `esc to cancel` against
-/// `esc to interrupt` — so neither backend's constant reads the other's frame.
-///
-/// Named for the same reason [`CODEX_AT_WORK`] is, and it is the same bargain
-/// the usage-limit phrase makes: the wording is agy's and it will move, and
-/// moving it costs one edit here.
-const AGY_AT_WORK: &str = "esc to cancel";
 
 /// The sessions this server has running, by the Conversation each belongs to.
 ///
@@ -1620,7 +1063,7 @@ enum Judged {
 ///   by its at-work line *going*.
 ///
 /// Codex is the second, and it is the reason there are two — see
-/// [`CODEX_AT_WORK`], where the frames it draws are set out.
+/// [`crate::harness::Harness::at_work`], where the frames it draws are set out.
 ///
 /// **The two read the silence differently, and they have to.** A prompt standing
 /// is a whole answer: the backend has drawn the thing it draws only when it is
@@ -2303,7 +1746,7 @@ impl Sessions {
     }
 
     /// How a Conversation's running session asks: the channel its backend's
-    /// agent type names — see [`store::AgentType::channel`].
+    /// harness answers — see [`crate::harness::Harness::channel`].
     ///
     /// The register rather than the Conversation's Pairings, because what this
     /// decides is how *this* session's Set is stored and a Conversation runs its
@@ -2342,7 +1785,7 @@ impl Sessions {
                     .get(&conversation_id)
                     .map(|launch| launch.agent_type)
             })
-            .map(store::AgentType::channel)
+            .map(harness::channel)
             .unwrap_or(store::Channel::Blocking)
     }
 
@@ -3160,17 +2603,17 @@ impl Sessions {
 
                 // And what the harness writes inside the Worktree, kept out of
                 // the Diff and every commit before it has written any of it.
-                if let (Some(pattern), Some(worktree)) = (
-                    written_in_worktree(pairing.profile.agent_type()),
-                    conversation.worktree.as_deref(),
-                ) && !crate::worktrees::excluded(worktree, pattern)
-                {
-                    tracing::warn!(
-                        conversation_id,
-                        pattern,
-                        "what this session's harness writes inside the Worktree could not be \
-                         excluded from git, so it will show in the Diff"
-                    );
+                for pattern in written_in_worktree(pairing.profile.agent_type()) {
+                    if let Some(worktree) = conversation.worktree.as_deref()
+                        && !crate::worktrees::excluded(worktree, pattern)
+                    {
+                        tracing::warn!(
+                            conversation_id,
+                            pattern,
+                            "what this session's harness writes inside the Worktree could not \
+                             be excluded from git, so it will show in the Diff"
+                        );
+                    }
                 }
 
                 agents.sandboxed(&conversation, &pairing.profile, &argv)
@@ -3829,7 +3272,7 @@ struct Continuing {
 /// - **The Pairing about to run is the harness that session ran on.** A
 ///   Conversation whose Profile was changed under it has a log no other backend
 ///   could read.
-/// - **That harness has a resume line at all** — see [`Line::resume`], which is
+/// - **That harness has a resume line at all** — see [`harness::Line::resume`], which is
 ///   now every one of the five, and is still asked because a sixth backend lands
 ///   without one.
 /// - **The Profile shares its account's memory.** A session under one that does
@@ -4013,8 +3456,8 @@ async fn carried_on(
         );
     }
 
-    if line(continued.agent_type, conversation.worktree.as_deref(), &[])
-        .resume
+    if harness::of(continued.agent_type)
+        .and_then(|harness| harness.line(conversation.worktree.as_deref(), &[]).resume)
         .is_none()
     {
         return Carrying::Instead(
@@ -4880,10 +4323,10 @@ mod tests {
         store::Profile {
             id: "1".to_owned(),
             name: Some("fable".to_owned()),
-            account: store::Account::Claude {
-                claude_dir: PathBuf::from("/srv/accounts/fable/.claude"),
-                config_file: PathBuf::from("/srv/accounts/fable/.claude.json"),
-            },
+            account: store::Account::claude(
+                PathBuf::from("/srv/accounts/fable/.claude"),
+                PathBuf::from("/srv/accounts/fable/.claude.json"),
+            ),
             models: vec!["claude-fable-5".to_owned(), "claude-opus-5".to_owned()],
             memory: true,
             unbound: None,
@@ -4907,9 +4350,10 @@ mod tests {
             profile: store::Profile {
                 id: "2".to_owned(),
                 name: Some("work".to_owned()),
-                account: store::Account::Codex {
-                    home: PathBuf::from("/srv/accounts/work/.codex"),
-                },
+                account: store::Account::home(
+                    store::AgentType::CODEX,
+                    PathBuf::from("/srv/accounts/work/.codex"),
+                ),
                 models: vec!["gpt-5-codex".to_owned()],
                 memory: true,
                 unbound: None,
@@ -4925,9 +4369,10 @@ mod tests {
             profile: store::Profile {
                 id: "3".to_owned(),
                 name: Some("xai".to_owned()),
-                account: store::Account::Grok {
-                    home: PathBuf::from("/srv/accounts/work/.grok"),
-                },
+                account: store::Account::home(
+                    store::AgentType::GROK,
+                    PathBuf::from("/srv/accounts/work/.grok"),
+                ),
                 models: vec!["grok-4.6".to_owned()],
                 memory: true,
                 unbound: None,
@@ -4945,9 +4390,10 @@ mod tests {
             profile: store::Profile {
                 id: "4".to_owned(),
                 name: Some("zen".to_owned()),
-                account: store::Account::OpenCode {
-                    home: PathBuf::from("/srv/accounts/zen/opencode"),
-                },
+                account: store::Account::home(
+                    store::AgentType::OPENCODE,
+                    PathBuf::from("/srv/accounts/zen/opencode"),
+                ),
                 models: vec!["opencode/big-pickle".to_owned()],
                 memory: true,
                 unbound: None,
@@ -4963,9 +4409,10 @@ mod tests {
             profile: store::Profile {
                 id: "5".to_owned(),
                 name: None,
-                account: store::Account::Agy {
-                    home: PathBuf::from("/srv/accounts/gemini/.gemini"),
-                },
+                account: store::Account::home(
+                    store::AgentType::AGY,
+                    PathBuf::from("/srv/accounts/gemini/.gemini"),
+                ),
                 models: vec!["gemini-pro".to_owned()],
                 memory: true,
                 unbound: None,
@@ -5195,7 +4642,7 @@ mod tests {
     /// And one override the ordinary line does not carry: which directory codex
     /// resumes *in*. A carried rollout records the sending device's Worktree, and
     /// codex 0.155.1 stops to ask which of the two directories to use — see
-    /// [`CODEX_RESUME_CWD`], which is that question answered with the one the work
+    /// codex's `RESUME_CWD`, which is that question answered with the one the work
     /// is now in.
     #[test]
     fn a_continued_codex_session_is_told_to_resume_by_a_subcommand() {
@@ -5562,15 +5009,15 @@ mod tests {
     /// out of git.
     #[test]
     fn only_agy_writes_inside_the_worktree() {
-        assert_eq!(written_in_worktree(store::AgentType::Agy), Some(".gemini/"));
+        assert_eq!(written_in_worktree(store::AgentType::AGY), [".gemini/"]);
 
         for agent_type in [
-            store::AgentType::Claude,
-            store::AgentType::Codex,
-            store::AgentType::Grok,
-            store::AgentType::OpenCode,
+            store::AgentType::CLAUDE,
+            store::AgentType::CODEX,
+            store::AgentType::GROK,
+            store::AgentType::OPENCODE,
         ] {
-            assert_eq!(written_in_worktree(agent_type), None);
+            assert!(written_in_worktree(agent_type).is_empty());
         }
     }
 
@@ -6030,7 +5477,7 @@ exit 1
         );
 
         {
-            let launching = sessions.launching(CONVERSATION, store::AgentType::Claude);
+            let launching = sessions.launching(CONVERSATION, store::AgentType::CLAUDE);
 
             assert!(
                 sessions.starting(CONVERSATION),
@@ -6060,7 +5507,7 @@ exit 1
         assert_eq!(sessions.running_or_launching(), 0);
 
         {
-            let _launching = sessions.launching(CONVERSATION, store::AgentType::Claude);
+            let _launching = sessions.launching(CONVERSATION, store::AgentType::CLAUDE);
 
             assert_eq!(
                 sessions.running_or_launching(),
@@ -6096,7 +5543,7 @@ exit 1
         );
 
         {
-            let launching = sessions.launching(CONVERSATION, store::AgentType::Claude);
+            let launching = sessions.launching(CONVERSATION, store::AgentType::CLAUDE);
 
             assert_eq!(
                 sessions.writing(CONVERSATION),

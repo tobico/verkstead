@@ -339,7 +339,7 @@ mod tests {
     /// was mid-sentence on the other machine.
     #[test]
     fn every_reason_says_which_one_it_was() {
-        let said = Instead::MemoryOff(AgentType::Claude).saying(Occasion::Arrived);
+        let said = Instead::MemoryOff(AgentType::CLAUDE).saying(Occasion::Arrived);
 
         assert!(
             said.contains("doesn't share its account's memory"),
@@ -351,8 +351,8 @@ mod tests {
         );
 
         let said = Instead::AnotherHarness {
-            ran: AgentType::Claude,
-            running: AgentType::Codex,
+            ran: AgentType::CLAUDE,
+            running: AgentType::CODEX,
         }
         .saying(Occasion::Arrived);
 
@@ -361,7 +361,7 @@ mod tests {
             "both harnesses are named, the record's and the session's: {said:?}",
         );
 
-        let said = Instead::NoRecord(AgentType::Grok).saying(Occasion::Arrived);
+        let said = Instead::NoRecord(AgentType::GROK).saying(Occasion::Arrived);
 
         assert!(
             said.contains("grok") && said.contains("isn't on this device"),
@@ -369,7 +369,7 @@ mod tests {
         );
 
         let said = Instead::Refused {
-            harness: AgentType::OpenCode,
+            harness: AgentType::OPENCODE,
             session: "ses_01".to_owned(),
         }
         .saying(Occasion::Arrived);
@@ -401,7 +401,7 @@ mod tests {
     #[test]
     fn a_widened_sandbox_names_the_question_set_rather_than_a_move() {
         let said = Instead::Refused {
-            harness: AgentType::Claude,
+            harness: AgentType::CLAUDE,
             session: "ses_01".to_owned(),
         }
         .saying(Occasion::Widened(7));
@@ -431,7 +431,7 @@ mod tests {
     /// is**: nothing moved and nothing arrived (ADR-0029).
     #[test]
     fn keeping_the_work_here_names_the_question_set_and_no_move() {
-        let said = Instead::NoRecord(AgentType::Claude).saying(Occasion::Kept(9));
+        let said = Instead::NoRecord(AgentType::CLAUDE).saying(Occasion::Kept(9));
 
         assert!(
             said.contains("Question set 9 kept the work here"),

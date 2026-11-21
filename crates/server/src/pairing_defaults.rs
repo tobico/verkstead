@@ -1,13 +1,12 @@
 //! The platform default: what a Pairing picker on a Repo nothing has grilled is
 //! filled with when there is no last start anywhere to copy either.
 //!
-//! The one place the server knows anything about which models are which. The
-//! viewer has a catalog of names to draw — see `web/src/models.ts` — and the
-//! server has never needed one, because every model a session runs on is one a
-//! human picked off a Profile's own list. A default is the exception: something
-//! has to say that Fable 5 is what interviews and Opus 5 is what builds, and
-//! that is a fact about the harnesses rather than about any saved account, so
-//! it is written down here as a table rather than asked of a Profile.
+//! Every model a session runs on is one a human picked off a Profile's own
+//! list. A default is the exception: something has to say that Fable 5 is what
+//! interviews and Opus 5 is what builds, and that is a fact about the harnesses
+//! rather than about any saved account — so it is asked of the harness, each of
+//! which declares a model per role (see [`crate::harness::Harness::model`]),
+//! rather than of a Profile.
 //!
 //! Frontier for the grilling and the value tier for everything after it, which
 //! is the split the work itself has: the interview is where a wrong reading is
@@ -15,7 +14,9 @@
 //! longest. Review takes the implementation model on every harness.
 //!
 //! **One candidate and no hunting.** A default is picked by rule — the first
-//! harness in [`HARNESSES`] with a Profile saved, that harness's unnamed Profile
+//! built-in harness with a Profile saved, in the order
+//! [`crate::harness::every`] lists them — or, past them, the plugin harness
+//! this server offers whose Profile was saved first — that harness's unnamed Profile
 //! or else its earliest, the table's model or else the first that Profile lists
 //! — and handed back whole, to be judged by the same reading a remembered
 //! Pairing gets. A candidate that fails the judging leaves its picker empty; it
@@ -24,18 +25,6 @@
 //! broken today.
 
 use crate::store::{self, AgentType, Picked, Profile, Role};
-
-/// The harnesses in the order a default prefers them, most preferred first.
-///
-/// Fixed rather than read off anything, so that saving a second harness's
-/// Profile does not quietly move every fresh Repo's default on to it.
-const HARNESSES: [AgentType; 5] = [
-    AgentType::Claude,
-    AgentType::Codex,
-    AgentType::Grok,
-    AgentType::OpenCode,
-    AgentType::Agy,
-];
 
 /// The model a harness's default Pairing runs for a role.
 ///
@@ -47,28 +36,25 @@ const HARNESSES: [AgentType; 5] = [
 /// read off `agy models` on agy 1.4.12 signed in to a Google account on its
 /// starter quota, which lists those three, two Claude models and GPT-OSS, and
 /// no Pro to grill on.
-fn model(harness: AgentType, role: Role) -> &'static str {
-    match (harness, role) {
-        (AgentType::Claude, Role::Grilling) => "claude-fable-5",
-        (AgentType::Claude, Role::Implementation | Role::Review) => "claude-opus-5",
-        (AgentType::Codex, _) => "gpt-5-codex",
-        (AgentType::Grok, _) => "grok-4.6",
-        (AgentType::OpenCode, Role::Grilling) => "opencode/gpt-5.1-codex",
-        (AgentType::OpenCode, Role::Implementation | Role::Review) => "minimax/minimax-m2.1",
-        (AgentType::Agy, Role::Grilling) => "gemini-3.8-flash-high",
-        (AgentType::Agy, Role::Implementation | Role::Review) => "gemini-3.8-flash-medium",
-    }
+fn model(harness: AgentType, role: Role) -> Option<&'static str> {
+    crate::harness::of(harness).map(|harness| harness.model(role))
 }
 
 /// The platform default for `role`, out of the Profiles in the order they were
 /// saved — or [`Picked::Nothing`] where there is no Profile to run one under.
+/// `offered` is the plugin harnesses this server offers: a disabled plugin's
+/// Profile is never a default (Set 1764, Q20).
+///
+/// **The built-ins in a fixed order** rather than one read off anything, so
+/// that saving a second harness's Profile does not quietly move every fresh
+/// Repo's default on to it.
 ///
 /// Unjudged: whether the Profile's account is still where it was left is the
 /// filesystem's question, and it is asked by whoever prefills with this.
-pub(crate) fn platform_default(profiles: &[Profile], role: Role) -> Picked {
-    let Some(profile) = HARNESSES
-        .iter()
-        .find_map(|&harness| account(profiles, harness))
+pub(crate) fn platform_default(profiles: &[Profile], role: Role, offered: &[AgentType]) -> Picked {
+    let Some(profile) = crate::harness::every()
+        .find_map(|(harness, _)| account(profiles, harness))
+        .or_else(|| account(profiles, plugged(profiles, offered)?))
     else {
         return Picked::Nothing;
     };
@@ -82,7 +68,7 @@ pub(crate) fn platform_default(profiles: &[Profile], role: Role) -> Picked {
     let model = profile
         .models
         .iter()
-        .find(|listed| *listed == wanted)
+        .find(|listed| Some(listed.as_str()) == wanted)
         .or_else(|| profile.models.first());
 
     match model {
@@ -92,6 +78,17 @@ pub(crate) fn platform_default(profiles: &[Profile], role: Role) -> Picked {
         }),
         None => Picked::Nothing,
     }
+}
+
+/// The plugin harness a default prefers once no built-in has a Profile: the
+/// one whose Profile was saved first, among those this server offers — after
+/// the built-ins, so that installing a plugin does not move a default that
+/// already stood.
+fn plugged(profiles: &[Profile], offered: &[AgentType]) -> Option<AgentType> {
+    profiles
+        .iter()
+        .map(Profile::agent_type)
+        .find(|harness| harness.built_in().is_none() && offered.contains(harness))
 }
 
 /// The one Profile of `harness` a default would run under: the unnamed one,

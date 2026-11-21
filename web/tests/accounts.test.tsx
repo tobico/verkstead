@@ -22,8 +22,8 @@ import type {
   ProfileEdit,
   ProfileEntry,
 } from "../src/api/types";
-import { AGENT_NAME } from "../src/agents";
-import { KNOWN_MODELS, prettify } from "../src/models";
+import { harnessName } from "../src/harnesses";
+import { offeredFor, prettify } from "../src/models";
 import { Accounts } from "../src/setup/Accounts";
 import styles from "../src/setup/Accounts.module.css";
 import { SetupPage } from "../src/setup/SetupPage";
@@ -136,12 +136,10 @@ function sent(fetching: ReturnType<typeof serving>): ProfileEdit {
   return JSON.parse(String(written![1]?.body)) as ProfileEdit;
 }
 
-/// Every model this build knows for one harness, which is what an autoconfigured
-/// Profile is given.
+/// Every model one harness declares, which is what an autoconfigured Profile
+/// is given.
 function models(agent: string): string[] {
-  return KNOWN_MODELS.filter((model) => model.agent === agent).map(
-    (model) => model.id,
-  );
+  return offeredFor(agent).map((model) => model.id);
 }
 
 afterEach(() => {
@@ -163,7 +161,7 @@ describe("the accounts that were found", () => {
 
     const claude = row(container, "Claude");
 
-    expect(claude.textContent).toContain(AGENT_NAME.Claude);
+    expect(claude.textContent).toContain(harnessName("Claude"));
     expect(claude.textContent).toContain("~/.claude");
     expect(claude.textContent).toContain("~/.claude.json");
   });
@@ -187,7 +185,7 @@ describe("the accounts that were found", () => {
       row(container, "Codex").querySelector(`.${styles.pill}`)!.textContent,
     ).toBe("Not installed");
     expect(row(container, "Codex").textContent).toContain(
-      `${AGENT_NAME.Codex} isn't on this machine.`,
+      `${harnessName("Codex")} isn't on this machine.`,
     );
   });
 

@@ -59,7 +59,7 @@ use tower::ServiceExt;
 use verkstead_render::{
     AgentOutputEvent, BriefSaved, Capture, ConversationStopped, ConversationView, GrillingStarted,
     ProfileSaved, Registered, Shown, Size, Started, TerminalClosed, TerminalOpened, TerminalView,
-    TerminalsView, TimelineEvent, Watching,
+    TerminalsView, TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
@@ -74,6 +74,8 @@ use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::terminal::COLUMNS;
 use verkstead_server::{Agents, Gh, Pace, open_database, router_running_sessions};
+
+use crate::stub_harness::{self, StubHarness};
 
 /// The Brief every Conversation here is started from, and what the stand-in is
 /// primed with.
@@ -517,6 +519,30 @@ impl Grilling {
     }
 
     /// The Worktree the grilling made, waited for.
+    /// The Transcript of the session printing into `event`, read back until it
+    /// has `turns` turns, or until it says it couldn't be read.
+    async fn spoken(&self, event: i64, turns: usize) -> TranscriptView {
+        let deadline = Instant::now() + PATIENCE;
+
+        loop {
+            let view: TranscriptView = get(
+                &self.app,
+                &format!("/api/ui/conversations/{}/transcript/{event}", self.id),
+            )
+            .await;
+
+            if view.turns.len() >= turns || view.unreadable.is_some() {
+                return view;
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "the Transcript never reached {turns} turns: {view:?}"
+            );
+            pause(Duration::from_millis(50)).await;
+        }
+    }
+
     async fn worktree(&self) -> PathBuf {
         PathBuf::from(
             self.until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
@@ -635,8 +661,32 @@ impl Grilling {
 /// `$line`, `$named` and `$prompt` already read, and `Note`, `Say` and `Idle`
 /// to say things with.
 async fn grilling(script: &str) -> Grilling {
-    grilling_caching(script, None, Builds::Nothing).await
+    grilling_caching(script, None, Builds::Nothing, On::Claude).await
 }
+
+/// The same with every role paired with a Profile of `harness`, the stub
+/// harness plugin installed off the Plugins page — so that what launches is
+/// the line its manifest declares and what reads the session's record is its
+/// component's `parse-transcript`.
+async fn grilling_on_a_plugin(harness: StubHarness, script: &str) -> Grilling {
+    grilling_caching(script, None, Builds::Nothing, On::Plugin(harness)).await
+}
+
+/// Which harness a fixture's Profiles are of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum On {
+    /// Claude, over the account [`account`] makes, on models named for each
+    /// role — every fixture here but the plugin's.
+    Claude,
+
+    /// A stub harness plugin, over the account `stub_harness::account` makes,
+    /// on the two models its manifest declares.
+    Plugin(StubHarness),
+}
+
+/// The two models a stub harness plugin here declares: its default, and the
+/// grilling role's.
+const STUB_MODELS: [&str; 2] = ["stub-default-1", "stub-grilling-1"];
 
 /// Where this machine's rustup keeps its toolchains, read the way rustup reads
 /// it: `%RUSTUP_HOME%` where the machine says one, and `%USERPROFILE%\.rustup`
@@ -686,7 +736,7 @@ fn joined(target: &Path, name: &Path) {
 /// manifest to compile, and the machine's own rustup home joined into the
 /// fixture's so that the toolchain is there to compile it with.
 async fn grilling_building(script: &str, cache: Option<&Path>) -> Grilling {
-    grilling_caching(script, cache, Builds::Rust).await
+    grilling_caching(script, cache, Builds::Rust, On::Claude).await
 }
 
 /// What the Repo a fixture registers holds, which is the one thing about it a
@@ -714,7 +764,7 @@ enum Builds {
 /// `CARGO_HOME`, a `RUSTC_WRAPPER` and a granted directory in every session's
 /// environment, and every other test in this file is about a session that
 /// builds nothing.
-async fn grilling_caching(script: &str, cache: Option<&Path>, builds: Builds) -> Grilling {
+async fn grilling_caching(script: &str, cache: Option<&Path>, builds: Builds, on: On) -> Grilling {
     // Before the server exists, because what is worth reading is what it says
     // as it starts a session — see [`LOGGING`].
     LazyLock::force(&LOGGING);
@@ -882,12 +932,25 @@ async fn grilling_caching(script: &str, cache: Option<&Path>, builds: Builds) ->
         panic!("expected the Conversation to start, got {started:?}");
     };
 
+    let plugged = match on {
+        On::Claude => None,
+        On::Plugin(harness) => Some(plugged(&app, elsewhere.path(), harness).await),
+    };
+
     for role in ["grilling", "implementation", "review"] {
-        let profile = profile(&app, &account, role).await;
-        let pairing = serde_json::json!({
-            "profile_id": profile,
-            "model": format!("claude-{role}-5"),
-        });
+        let pairing = match &plugged {
+            None => serde_json::json!({
+                "profile_id": profile(&app, &account, role).await,
+                "model": format!("claude-{role}-5"),
+            }),
+            Some(profile) => serde_json::json!({
+                "profile_id": profile,
+                "model": match role {
+                    "grilling" => STUB_MODELS[1],
+                    _ => STUB_MODELS[0],
+                },
+            }),
+        };
 
         // The review picker offers a row that is no account at all, so what it
         // sends is which of its rows was picked.
@@ -1076,8 +1139,10 @@ async fn profile(app: &Router, account: &Path, name: &str) -> String {
             "name": name,
             "account": {
                 "agent_type": "Claude",
-                "claude_dir": account.join(".claude"),
-                "config_file": account.join(".claude.json"),
+                "paths": {
+                    "claude_dir": account.join(".claude"),
+                    "config_file": account.join(".claude.json"),
+                },
             },
             "models": [format!("claude-{name}-5"), format!("claude-{name}-4.8")],
         }),
@@ -1089,6 +1154,34 @@ async fn profile(app: &Router, account: &Path, name: &str) -> String {
     profiles
         .into_iter()
         .find(|profile| profile.name.as_deref() == Some(name))
+        .expect("the Profile just saved should be on the list")
+        .id
+}
+
+/// `harness` installed on `app` from under `elsewhere`, and one Profile of it
+/// saved over an account made there: the Profile's id.
+async fn plugged(app: &Router, elsewhere: &Path, harness: StubHarness) -> String {
+    harness.installed(app, elsewhere, STUB_MODELS).await;
+
+    let saved: ProfileSaved = post(
+        app,
+        "/api/ui/profiles",
+        &serde_json::json!({
+            "name": "stubbed",
+            "account": {
+                "agent_type": harness.uuid(),
+                "paths": stub_harness::account(&elsewhere.join("stubbed")),
+            },
+            "models": STUB_MODELS,
+        }),
+    )
+    .await;
+    assert_eq!(saved, ProfileSaved::Saved);
+
+    let profiles: Vec<verkstead_render::ProfileEntry> = get(app, "/api/ui/profiles").await;
+    profiles
+        .into_iter()
+        .find(|profile| profile.name.as_deref() == Some("stubbed"))
         .expect("the Profile just saved should be on the list")
         .id
 }
@@ -1446,6 +1539,93 @@ async fn a_session_runs_the_grilling_profiles_agent_on_the_brief_in_the_worktree
         (Some("grilling"), Some("claude-grilling-5")),
         "the grilling Profile and the model it was launched on"
     );
+}
+
+/// A plugin harness's session on this platform: launched on the line its
+/// manifest declares, its record written into the account its Profile names
+/// through the junction its root was built with, and its Transcript drawn out
+/// of what its component's `parse-transcript` read of that record — while the
+/// session runs, and the rest of it once it ends.
+///
+/// **And the account's name inside the component.** The account is `C:\…`
+/// here, and the component is handed it as `/account`, as on every platform —
+/// so a Transcript read out of it is that name resolving.
+#[tokio::test]
+async fn a_plugin_harness_s_transcript_is_drawn_out_of_what_its_component_read() {
+    let fixture = grilling_on_a_plugin(
+        StubHarness::Silent,
+        r#"
+        $session = $args[[array]::IndexOf($args, '--session-id') + 1]
+        $log = Under (Under (Under $env:USERPROFILE '.stub') 'memory') ($session + '.jsonl')
+        function Record($line) { [System.IO.File]::AppendAllText($log, $line + "`n") }
+
+        Record '{"said":"agent","markdown":"Reading the **brief**."}'
+        Record '{"call":"shell","id":"c1","about":"List the tasks","input":"ls .tasks"}'
+        Say 'recorded'
+        while (-not [System.IO.File]::Exists((Under $evidence 'go'))) { Waiting 50 }
+        Record '{"result":"c1","failed":false,"text":"01-count.md"}'
+        Say 'done'
+        "#,
+    )
+    .await;
+
+    let argv = fixture.written("args").await;
+    assert_eq!(
+        argv.lines().next(),
+        Some("--model"),
+        "the line its manifest declares, model first: {argv:?}"
+    );
+    assert!(
+        argv.lines().any(|word| word == STUB_MODELS[1]),
+        "on the grilling role's model: {argv:?}"
+    );
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+
+    let live = fixture.spoken(event, 2).await;
+    assert_eq!(
+        live.unreadable, None,
+        "its component found the record under the name it was handed"
+    );
+    assert!(
+        output(&fixture.view().await).is_some_and(|output| output.running),
+        "drawn while the session was still running"
+    );
+    assert_eq!(
+        live.turns,
+        vec![
+            Turn::Prose(verkstead_render::Prose {
+                id: 1,
+                html: "<p>Reading the <strong>brief</strong>.</p>\n".to_owned(),
+            }),
+            Turn::ToolUse(verkstead_render::ToolUse {
+                id: 2,
+                name: "shell".to_owned(),
+                call: "c1".to_owned(),
+                about: "List the tasks".to_owned(),
+                input: "ls .tasks".to_owned(),
+            }),
+        ],
+    );
+
+    std::fs::write(fixture.evidence.path().join("go"), "").unwrap();
+    fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|_| ()))
+        .await;
+
+    let ended = fixture.spoken(event, 3).await;
+    assert_eq!(
+        ended.turns.last(),
+        Some(&Turn::ToolResult(verkstead_render::ToolResult {
+            id: 3,
+            call: "c1".to_owned(),
+            failed: false,
+            text: "01-count.md".to_owned(),
+        })),
+        "and what it wrote last is drawn once it ended: {:?}",
+        ended.turns,
+    );
+    assert_eq!(ended.unreadable, None);
 }
 
 /// And what it is started *on*, which on this platform is a file rather than an
@@ -2374,6 +2554,7 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         "#,
         Some(cache.path()),
         Builds::Nothing,
+        On::Claude,
     )
     .await;
 
