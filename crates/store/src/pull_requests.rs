@@ -512,6 +512,79 @@ pub async fn record_pull_request(
     Ok(Wrapping::Started)
 }
 
+/// What became of landing a Conversation on no Forge in Done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unforged {
+    /// Done, with the Notice saying why and the move on the Timeline.
+    Done,
+
+    /// It was in no state an ending reaches from — see
+    /// [`record_pull_request`] — so nothing was written.
+    NothingToEnd,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+}
+
+/// Land the Conversation whose work has just ended in Done, because its Repo is
+/// on no Forge: there is no pull request to record and no wrap-up to start, and
+/// `notice` is the Timeline's line saying so.
+///
+/// The ending [`record_pull_request`] is for every other Repo, from the same
+/// states, and one transaction for its reason: a Done with no line under it
+/// saying why would read as a wrap-up that finished over nothing.
+pub async fn land_on_no_forge(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    notice: &str,
+) -> Result<Unforged> {
+    let mut tx = super::writing(pool, "landing a conversation on no forge").await?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(conversation_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {conversation_id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Unforged::NoSuchConversation);
+    };
+
+    if !matches!(
+        Lifecycle::read(&state)?,
+        Lifecycle::Implementing | Lifecycle::Grilling | Lifecycle::FollowUp
+    ) {
+        return Ok(Unforged::NothingToEnd);
+    }
+
+    let event = Event::Notice(notice.to_owned());
+    sqlx::query(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?)",
+    )
+    .bind(conversation_id)
+    .bind(event.kind())
+    .bind(event.body().into_owned())
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("saying why Conversation {conversation_id} has no wrap-up"))?;
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind(Lifecycle::Done.stored())
+        .bind(conversation_id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("moving Conversation {conversation_id} to done"))?;
+
+    moved(&mut tx, conversation_id, Lifecycle::Done).await?;
+
+    tx.commit()
+        .await
+        .context("landing a conversation on no forge")?;
+
+    Ok(Unforged::Done)
+}
+
 /// Record another pull request of a wrap-up that is already under way, and say
 /// whether there was a Conversation to record it against.
 ///

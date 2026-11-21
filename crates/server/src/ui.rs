@@ -1271,10 +1271,17 @@ async fn repos(State(state): State<AppState>) -> HttpResponse {
     // Each row asks git for its origin, so the list is read off the runtime's
     // own threads.
     let authors = state.settings.config().authors().to_vec();
+    let enabled = match crate::forges::enabled(&state.pool).await {
+        Ok(enabled) => enabled,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading which forges are enabled failed");
+            return unavailable("The registered repos couldn't be read.");
+        }
+    };
     let rows = tokio::task::spawn_blocking(move || {
         repos
             .into_iter()
-            .map(|repo| crate::repos::listed(repo, &authors, &*state.github))
+            .map(|repo| crate::repos::listed(repo, &authors, &*state.github, &enabled))
             .collect::<Vec<RepoEntry>>()
     })
     .await;
@@ -2828,9 +2835,18 @@ pub(crate) async fn conversation_view(
     // if they were read at different times.
     let now = OffsetDateTime::now_utc();
 
+    // And the Forge its Repo is on, read off the remote now — what the card
+    // says *No forge for* where a pull request would have been.
+    let forge = crate::forges::of(&state.pool, &conversation.repo.path)
+        .await
+        .drawn();
+
     let view = ConversationView {
         id: conversation.id,
-        repo: crate::repos::entry(conversation.repo, config.authors()),
+        repo: RepoEntry {
+            forge: Some(forge),
+            ..crate::repos::entry(conversation.repo, config.authors())
+        },
         process: process(conversation.process),
         branch: conversation.branch,
         branch_named: conversation.branch_named,
@@ -3390,6 +3406,24 @@ async fn publishing(
     bundle: &SharedConversation,
 ) -> Result<Published, Unpublished> {
     let conversation_id = bundle.conversation.id;
+
+    // On no Forge there is nowhere to publish to, and nothing is asked.
+    match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => {
+            if let crate::forges::Matched::Unmatched { host } =
+                crate::forges::of(&state.pool, &conversation.repo.path).await
+            {
+                return Err(Unpublished::Refused(SharePublished::NoForge { host }));
+            }
+        }
+        Ok(None) => {}
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation to publish failed");
+            return Err(Unpublished::Broken(
+                "The share couldn't be published.".to_owned(),
+            ));
+        }
+    }
 
     let (name, file) = document(bundle).map_err(Unpublished::Broken)?;
 

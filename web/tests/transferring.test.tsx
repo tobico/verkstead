@@ -248,6 +248,7 @@ const CLONED_THERE: RepoEntry = {
   author_unpicked: false,
   github: null,
   origin: null,
+  forge: null,
 };
 
 const NO_HARNESS = {

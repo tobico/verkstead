@@ -635,6 +635,11 @@ async fn nothing_left(
             // above whatever stopped the run.
             crate::wrapping::opened(&state, conversation_id, None).await
         }
+        // On no Forge the backlog worked out is the work finished: there is no
+        // pull request to open or to wrap up.
+        Err(crate::forges::Trouble::NoForge(host)) => {
+            crate::wrapping::unforged(&state, conversation_id, host.as_deref()).await
+        }
         Err(crate::forges::Trouble::NoPullRequest) if wrote_a_backlog(working_in, base).await => {
             tracing::info!(
                 conversation_id,

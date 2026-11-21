@@ -3927,6 +3927,7 @@ describe("registering a repo from the Repo dropdown", () => {
     author_unpicked: false,
     github: null,
     origin: null,
+    forge: null,
   };
 
   /// The workbench with the registration answered however the test says.
@@ -4663,6 +4664,7 @@ describe("the two repo rows on the picked device", () => {
     author_unpicked: false,
     github: null,
     origin: null,
+    forge: null,
   };
 
   /// And one a create made there, in the same place and for the same reason.
@@ -6704,6 +6706,7 @@ describe("the repositories the cluster could clone", () => {
     author_unpicked: false,
     github: null,
     origin: null,
+    forge: null,
   };
 
   /// The cluster with the member offering one repository to clone, and whatever
@@ -6865,6 +6868,7 @@ describe("a brief that is one pull request url", () => {
     author_unpicked: false,
     github,
     origin: null,
+    forge: null,
   });
   const LISTED = [
     repo(1, null),

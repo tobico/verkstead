@@ -74,6 +74,26 @@ pub struct RepoEntry {
     /// clone from: refused on the card, with a sentence saying what to do.
     #[serde(default)]
     pub origin: Option<String>,
+
+    /// The Forge its `origin` remote is on, or that it is on none — read off
+    /// the remote's host as the Repo is drawn, and kept nowhere. `None` where
+    /// it was not read, which is the rows nothing draws a pull request beside.
+    #[serde(default)]
+    pub forge: Option<RepoForge>,
+}
+
+/// Which Forge a Repo is on, by its remote's host (ADR-0030, *Forge*).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+#[serde(tag = "kind")]
+pub enum RepoForge {
+    /// An enabled Forge answers for its remote's host: the plugin's uuid and
+    /// its name.
+    On { uuid: String, name: String },
+
+    /// None does: the host the remote names, which the row and the card say
+    /// *No forge for* — or no host, where no Forge is enabled at all.
+    Unmatched { host: Option<String> },
 }
 
 /// One registered Repo as a member across the link is told of it: the row, and

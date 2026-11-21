@@ -869,7 +869,7 @@ impl Event {
     /// Borrowed for every kind but one, which is what the `Cow` is for: a
     /// steer's body is the state it named with the instruction under it, which
     /// is two things joined rather than one thing held.
-    fn body(&self) -> Cow<'_, str> {
+    pub(crate) fn body(&self) -> Cow<'_, str> {
         match self {
             Self::Brief(markdown) => Cow::Borrowed(markdown),
             Self::Moved(state) => Cow::Borrowed(state.stored()),

@@ -222,6 +222,25 @@ describe("the card", () => {
   /// And none is said as none rather than as `0 repos` — and as a reading,
   /// not a warning: a Verkstead with nothing registered yet is waiting on
   /// nobody, the first Repo being registered from wherever it is wanted.
+  /// A Repo whose remote no forge answers for says so on its row, under the
+  /// path — and one on a forge says nothing about it.
+  it("says a repo on no forge is on none, naming the host", async () => {
+    const hosted: RepoEntry[] = [
+      {
+        ...FIRST,
+        forge: { kind: "Unmatched", host: "git.example.org" },
+      },
+    ];
+    serving(whenever("/api/ui/repos", json(hosted)));
+    mountPane();
+
+    await waitFor(() => screen.getByText(FIRST.name));
+
+    expect(theRow(FIRST.name).textContent).toBe(
+      `${FIRST.name}${FIRST.path}No forge for git.example.orgRemove`,
+    );
+  });
+
   it("says so plainly when none are registered", async () => {
     serving(whenever("/api/ui/repos", json([])));
     mountCard();
@@ -313,8 +332,8 @@ describe("the pane it opens", () => {
   /// would be a press somebody could only get right by luck.
   it("tells two repos of one name apart", async () => {
     const twins: RepoEntry[] = [
-      { id: 3, name: "api", path: "/srv/repos/api", default_branch: "main", author: null, author_unpicked: false, github: null, origin: null },
-      { id: 4, name: "api", path: "/work/api", default_branch: "main", author: null, author_unpicked: false, github: null, origin: null },
+      { id: 3, name: "api", path: "/srv/repos/api", default_branch: "main", author: null, author_unpicked: false, github: null, origin: null, forge: null },
+      { id: 4, name: "api", path: "/work/api", default_branch: "main", author: null, author_unpicked: false, github: null, origin: null, forge: null },
     ];
     serving(whenever("/api/ui/repos", json(twins)));
     const { container } = mountPane();

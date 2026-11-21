@@ -647,6 +647,9 @@ async fn unopened(state: &AppState, conversation_id: i64) -> Option<String> {
 
     match found {
         Ok(_) => None,
+        // A Repo on no Forge has no pull request to open, so the signal is
+        // taken as it stands.
+        Err(crate::forges::Trouble::NoForge(_)) => None,
         Err(crate::forges::Trouble::NoPullRequest) => Some(format!(
             "this session is not done yet: the branch `{branch}` has no open pull request. Push \
              it and open one the way the repository's own review process says, then run \
@@ -700,6 +703,13 @@ async fn uncovered(state: &AppState, conversation_id: i64) -> Option<String> {
     let mut missing = Vec::new();
 
     for companion in committed {
+        // On no Forge, there is no pull request to hold the signal for.
+        if let crate::forges::Matched::Unmatched { .. } =
+            crate::forges::of(&state.pool, &companion.path).await
+        {
+            continue;
+        }
+
         let asked = {
             let gh = state.github.as_author(companion.author.as_deref());
             let repo = companion.path.clone();

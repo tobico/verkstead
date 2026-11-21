@@ -289,13 +289,14 @@ pub fn providing(name: &str) -> Option<&'static Manifest> {
 
 /// Whether `manifest`'s built-in has a tick: a Language plugin's is whether
 /// sessions get its languages, an Agent plugin's whether its harness is
-/// offered, and every other built-in is always on.
+/// offered, a Forge's whether a Repo's remote is matched against it, and every
+/// other built-in is always on.
 pub fn switched(manifest: &Manifest) -> bool {
     languages(manifest).next().is_some()
         || manifest
             .provides
             .iter()
-            .any(|provision| provision.agent().is_some())
+            .any(|provision| provision.agent().is_some() || provision.forge().is_some())
 }
 
 /// The languages `manifest` provides, by the name `config.yaml` keys each by,

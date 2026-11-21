@@ -9044,6 +9044,78 @@ async fn worked_to_empty(fixture: &Grilling) {
         .await;
 }
 
+/// Give the fixture's repository a remote on a host no Forge declares.
+/// `.invalid` so that a fetch of it fails at once rather than going anywhere.
+fn on_an_undeclared_host(repo: &Path) {
+    let status = std::process::Command::new("git")
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://git.example.invalid/tobico/verkstead.git",
+        ])
+        .current_dir(repo)
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+/// A backlog worked to empty on a Repo whose remote no enabled Forge answers
+/// for lands Done at the finish, with nothing watching and the Timeline saying
+/// why — and the card saying the Repo is on no forge. The `gh` here would
+/// answer a pull request if it were asked, which is what says it was not.
+#[tokio::test]
+async fn a_backlog_on_a_repo_no_forge_answers_for_lands_done_with_nothing_watching() {
+    let fixture = grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        A_BACKLOG_OF_ONE,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::UnderEveryPairing,
+        Origin::None,
+        Seeded::Nothing,
+        None,
+    )
+    .await;
+
+    // Once the branch is cut, which fetches its remote: there is nothing at
+    // this host to fetch.
+    on_an_undeclared_host(&fixture.repo());
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    assert!(
+        pull_request(&view).is_none(),
+        "nothing was asked for a pull request"
+    );
+    assert!(
+        !view
+            .timeline
+            .iter()
+            .any(|event| matches!(event, TimelineEvent::Moved(moved) if moved.state == Lifecycle::Wrapping)),
+        "it never wrapped up"
+    );
+    assert!(
+        notices(&view)
+            .iter()
+            .any(|notice| notice.contains("No forge for git.example.invalid")),
+        "the Timeline says why: {:?}",
+        notices(&view),
+    );
+    assert_eq!(
+        view.repo.forge,
+        Some(verkstead_render::RepoForge::Unmatched {
+            host: Some("git.example.invalid".to_owned())
+        }),
+    );
+}
+
 /// The whole of what a finished backlog leaves behind: a pull request open on
 /// the branch, the Conversation wrapping it up, and the move on the Timeline —
 /// with nothing having asked for approval at any point.

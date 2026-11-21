@@ -181,6 +181,10 @@ pub(crate) async fn record(
 ) {
     let opened = match found {
         Ok(opened) => opened,
+        Err(crate::forges::Trouble::NoForge(host)) => {
+            unforged(state, conversation_id, host.as_deref()).await;
+            return;
+        }
         Err(trouble) => {
             tracing::warn!(
                 conversation_id,
@@ -620,6 +624,20 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
     let mut missing = Vec::new();
 
     for companion in committed {
+        // A companion on no Forge has no pull request to be missing: its work
+        // is committed, and there is nobody to open one on.
+        if let crate::forges::Matched::Unmatched { host } =
+            crate::forges::of(&state.pool, &companion.path).await
+        {
+            tracing::info!(
+                conversation_id,
+                repo = companion.name,
+                host,
+                "a companion the work committed in is on no forge, so no pull request is asked for",
+            );
+            continue;
+        }
+
         let asked = {
             let gh = state.github.as_author(companion.author.as_deref());
             let repo = companion.path.clone();
@@ -920,6 +938,43 @@ pub(crate) async fn stopped(
     }
 }
 
+/// Land the work of `conversation_id` in Done, its Repo being on no Forge:
+/// nothing is watching, because there is nothing to watch, and the Timeline
+/// says why — see [`crate::forges::unmatched`].
+///
+/// The ending [`record`] makes for every other Repo, reached the same way: a
+/// Repo whose remote's host no enabled Forge declares has no wrap-up, and the
+/// next Conversation on it wraps up once a Forge answers for that host.
+pub(crate) async fn unforged(state: &AppState, conversation_id: i64, host: Option<&str>) {
+    let said = crate::forges::unmatched(host);
+
+    match store::land_on_no_forge(&state.pool, conversation_id, &said).await {
+        Ok(store::Unforged::Done) => {
+            tracing::info!(
+                conversation_id,
+                host,
+                "the work is finished on a repo no forge answers for, so it is done with \
+                 nothing watching",
+            );
+
+            state.nudges.announce(Nudge::Conversation {
+                conversation: conversation_id,
+            });
+        }
+        Ok(store::Unforged::NothingToEnd | store::Unforged::NoSuchConversation) => {
+            tracing::info!(
+                conversation_id,
+                "the Conversation has nothing left to end, so nothing was recorded",
+            );
+        }
+        Err(error) => tracing::error!(
+            error = ?error,
+            conversation_id,
+            "landing a Conversation on no forge in Done failed"
+        ),
+    }
+}
+
 /// What a stop over a pull request nobody can find says the run was doing.
 const FINDING: &str = "finding the pull request the work ended on";
 
@@ -1101,6 +1156,13 @@ pub(crate) async fn asked(
 )> {
     let (repo_id, repo, author, branch) = branch(state, conversation_id).await?;
     let head = head_ref(conversation_id, &repo, &branch).await;
+
+    // On no Forge, nothing is asked at all: there is nobody to ask, and what
+    // meets this lands the work Done rather than stopping it — see [`record`].
+    if let crate::forges::Matched::Unmatched { host } = crate::forges::of(&state.pool, &repo).await
+    {
+        return Some((repo_id, head, Err(crate::forges::Trouble::NoForge(host))));
+    }
 
     let asked = {
         let gh = state.github.as_author(author.as_deref());

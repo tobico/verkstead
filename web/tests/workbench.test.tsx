@@ -11797,6 +11797,53 @@ describe("the share pane", () => {
       screen.getByText(/This conversation hasn't been published\./),
     ).toBeTruthy();
   });
+
+  /// A Repo whose remote no forge answers for has nowhere to publish to: the
+  /// download stands, the Publish goes, and the pane says why.
+  it("has no publish on a repo on no forge, and says why", async () => {
+    theGrillingStanding({
+      repo: {
+        ...GRILLING.repo,
+        forge: { kind: "Unmatched", host: "git.example.org" },
+      },
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openShare(container);
+
+    expect(container.querySelector(`.${sharePane.download}`)).not.toBeNull();
+    expect(container.querySelector(`.${sharePane.publish}`)).toBeNull();
+    expect(
+      screen.getByText(
+        "No forge for git.example.org, so there's nowhere to publish the share.",
+      ),
+    ).toBeTruthy();
+  });
+});
+
+describe("a repo on no forge", () => {
+  /// Said where a pull request's card would be, above the record.
+  it("says so where the pull request would be", async () => {
+    theGrillingStanding({
+      repo: {
+        ...GRILLING.repo,
+        forge: { kind: "Unmatched", host: "git.example.org" },
+      },
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const said = await drawn(container, `.${timeline.unforged}`);
+    expect(said.textContent).toBe("No forge for git.example.org");
+  });
+
+  /// And a Repo on a forge says nothing of the kind.
+  it("says nothing on a repo on a forge", async () => {
+    theGrillingStanding({});
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.timeline}`);
+    expect(container.querySelector(`.${timeline.unforged}`)).toBeNull();
+  });
 });
 
 describe("publishing a share", () => {
@@ -20486,6 +20533,7 @@ describe("the configuration on the brief's pane", () => {
       author_unpicked: false,
       github: null,
       origin: null,
+      forge: null,
     },
     mode: "ReadOnly",
     base_ref: null,
@@ -20507,6 +20555,7 @@ describe("the configuration on the brief's pane", () => {
       author_unpicked: false,
       github: null,
       origin: null,
+      forge: null,
     },
     mode: "ReadWrite",
     base_ref: "main",

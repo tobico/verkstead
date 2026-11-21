@@ -13,6 +13,15 @@ author:
 version: 0.1.0
 interface: 1
 description: Pull requests, checks, reviews, gists and repositories on github.com.
+# The hosts a self-hosted GitHub answers on, beside github.com: a Repo whose
+# remote names one is on this Forge, exactly as one on github.com is. Read at
+# the moment a Repo's Forge is asked, so a host added reaches the next
+# Conversation without a restart.
+settings:
+  - key: hosts
+    label: Other hosts
+    kind: list
+    description: A GitHub Enterprise host, like github.example.com, one per line.
 capabilities:
   - outbound: api.github.com
   - secrets: GH_TOKEN

@@ -176,6 +176,7 @@ import { inFlight, settled, stageState } from "./stages";
 import { STATE } from "./states";
 import { opensRoadmap, type Opening } from "./openings";
 import { windowed } from "./windowing";
+import { unforged } from "../forges";
 
 /// How much of a commit's hash the timeline shows.
 ///
@@ -1095,8 +1096,15 @@ function Pinned(props: {
   go?: (conversation: number) => void;
 }): JSX.Element {
   return (
-    <Show when={props.conversation.pinned.length > 0}>
-      <div class={styles.pinned}>
+    <>
+      {/* Where a pull request's card would have been, on a Repo whose remote
+          no forge answers for: said once, quietly, so a Done with nothing
+          pinned reads as the Repo's fact rather than as something missing. */}
+      <Show when={unforged(props.conversation.repo)}>
+        {(said) => <p class={styles.unforged}>{said()}</p>}
+      </Show>
+      <Show when={props.conversation.pinned.length > 0}>
+        <div class={styles.pinned}>
         <Show
           when={props.conversation.pinned.length > 1}
           fallback={
@@ -1119,8 +1127,9 @@ function Pinned(props: {
             go={props.go}
           />
         </Show>
-      </div>
-    </Show>
+        </div>
+      </Show>
+    </>
   );
 }
 

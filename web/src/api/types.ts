@@ -6062,7 +6062,18 @@ github: string | null,
  * `None` is a repository with no origin, which is one there is nothing to
  * clone from: refused on the card, with a sentence saying what to do.
  */
-origin: string | null, };
+origin: string | null, 
+/**
+ * The Forge its `origin` remote is on, or that it is on none — read off
+ * the remote's host as the Repo is drawn, and kept nowhere. `None` where
+ * it was not read, which is the rows nothing draws a pull request beside.
+ */
+forge: RepoForge | null, };
+
+/**
+ * Which Forge a Repo is on, by its remote's host (ADR-0030, *Forge*).
+ */
+export type RepoForge = { "kind": "On", uuid: string, name: string, } | { "kind": "Unmatched", host: string | null, };
 
 /**
  * What a Repo was last grilled with, as a Conversation started on it would
@@ -7126,7 +7137,7 @@ export type ShareCommented = { "Commented": { share: ShareView, on: Array<Commen
  * each is named rather than folded into one refusal. Two of the three are about
  * the token on the settings page, and the page is where they are answered.
  */
-export type SharePublished = { "Published": { share: ShareView, } } | "NoToken" | "NoGistScope" | { "Refused": { why: string, } };
+export type SharePublished = { "Published": { share: ShareView, } } | "NoToken" | "NoGistScope" | { "Refused": { why: string, } } | { "NoForge": { host: string | null, } };
 
 /**
  * One published share, as the workbench draws it: the link, the gist behind it,

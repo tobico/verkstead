@@ -3,6 +3,11 @@
     "author": null,
     "author_unpicked": false,
     "default_branch": "trunk",
+    "forge": {
+      "kind": "On",
+      "name": "GitHub",
+      "uuid": "b357e557-3716-4ea6-a3a8-d904c92c5eac"
+    },
     "github": null,
     "id": 2,
     "name": "askance",
@@ -13,6 +18,11 @@
     "author": null,
     "author_unpicked": false,
     "default_branch": "main",
+    "forge": {
+      "kind": "On",
+      "name": "GitHub",
+      "uuid": "b357e557-3716-4ea6-a3a8-d904c92c5eac"
+    },
     "github": null,
     "id": 1,
     "name": "verkstead",

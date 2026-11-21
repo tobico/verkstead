@@ -996,6 +996,20 @@ provides:
 
 A key not listed here is refused.
 
+**A Repo's Forge is read off its remote's host** at the moment it is needed —
+never stored, and never picked on the Repo's row — against the `hosts` of
+every enabled Forge, plus the hosts the human has added to one through a
+`list` setting keyed **`hosts`**: a self-hosted instance is a host added, not
+a plugin written. GitHub declares that setting as *Other hosts*, and a Forge
+has a tick on the Plugins page like a Language plugin's. A remote naming no
+host — a path on this machine, or no `origin` at all — is left to the first
+enabled Forge, as every Repo was before there was more than one.
+
+**A Repo on no Forge has no wrap-up.** Its work lands Done at the signal with
+nothing watching and the Timeline saying why, `verkstead done` takes the
+signal with no open pull request, the Share pane has no Publish, and the
+Repo's row and the Conversation's card say *No forge for* its host.
+
 ## Per-platform overrides
 
 A top-level `linux:`, `macos:` or `windows:` holds keys of the common

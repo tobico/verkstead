@@ -111,7 +111,7 @@
       "provides": [
         "forge"
       ],
-      "settings": 0,
+      "settings": 1,
       "source": {
         "kind": "BuiltIn"
       },

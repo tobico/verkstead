@@ -452,6 +452,7 @@ fn unpublished(why: &SharePublished) -> String {
         // The publish's own sentence, which says whose refusal it was: it can
         // be git's as well as GitHub's.
         SharePublished::Refused { why } => crate::stopping::sentence(why),
+        SharePublished::NoForge { host } => crate::forges::unpublishable(host.as_deref()),
         // Never arrives: this is the shape of a press that got no further than
         // the publish, and a publish that worked is not one of them.
         SharePublished::Published { .. } => "The publish worked.".to_owned(),

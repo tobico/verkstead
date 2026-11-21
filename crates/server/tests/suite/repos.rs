@@ -198,6 +198,100 @@ async fn a_repository_registers_and_appears_on_the_list() {
     assert_eq!(registered, repos[0]);
 }
 
+/// A Repo's Forge is its remote's host, read as the list is drawn: on a host
+/// no enabled Forge declares it is on none; the host added to GitHub's
+/// *Other hosts* puts it on GitHub; GitHub unticked puts it on none again.
+/// And a Repo on github.com reads as on GitHub throughout the first two.
+#[tokio::test]
+async fn a_repos_forge_is_read_off_its_remote_against_the_enabled_forges() {
+    use verkstead_render::RepoForge;
+    use verkstead_server::plugins::built_in::GITHUB;
+
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench().await;
+    let hosted = repository(src.path().join("hosted"));
+    git(
+        &hosted,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "git@git.example.invalid:tobico/hosted.git",
+        ],
+    );
+    let on_github = repository(src.path().join("verkstead"));
+    git(
+        &on_github,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/tobico/verkstead.git",
+        ],
+    );
+    added(register(&app, &hosted).await);
+    added(register(&app, &on_github).await);
+
+    let forges = |repos: Vec<RepoEntry>| -> Vec<(String, Option<RepoForge>)> {
+        repos
+            .into_iter()
+            .map(|repo| (repo.name, repo.forge))
+            .collect()
+    };
+    let github = Some(RepoForge::On {
+        uuid: GITHUB.to_owned(),
+        name: "GitHub".to_owned(),
+    });
+    let none = Some(RepoForge::Unmatched {
+        host: Some("git.example.invalid".to_owned()),
+    });
+
+    assert_eq!(
+        forges(listed(&app).await),
+        [
+            ("hosted".to_owned(), none.clone()),
+            ("verkstead".to_owned(), github.clone()),
+        ]
+    );
+
+    let _: serde_json::Value = post(
+        &app,
+        &format!("/api/ui/plugins/{GITHUB}/settings"),
+        &serde_json::json!({ "fields": [
+            { "key": "hosts", "value": { "kind": "List", "values": ["Git.Example.Invalid"] } },
+        ] }),
+    )
+    .await;
+
+    assert_eq!(
+        forges(listed(&app).await),
+        [
+            ("hosted".to_owned(), github.clone()),
+            ("verkstead".to_owned(), github.clone()),
+        ]
+    );
+
+    let _: serde_json::Value = post(
+        &app,
+        &format!("/api/ui/plugins/{GITHUB}/enabled"),
+        &serde_json::json!({ "enabled": false }),
+    )
+    .await;
+
+    assert_eq!(
+        forges(listed(&app).await),
+        [
+            ("hosted".to_owned(), none),
+            (
+                "verkstead".to_owned(),
+                Some(RepoForge::Unmatched {
+                    host: Some("github.com".to_owned())
+                })
+            ),
+        ]
+    );
+}
+
 #[tokio::test]
 async fn nothing_is_registered_to_begin_with() {
     let (_dir, app) = workbench().await;

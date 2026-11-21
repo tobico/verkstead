@@ -167,7 +167,7 @@ async fn registering(
     )
     .await?
     {
-        Some(repo) => Registered::Added(entry(repo, authors)),
+        Some(repo) => Registered::Added(forged(pool, entry(repo, authors)).await),
         None => {
             let held = store::registered_repo_at(pool, &facts.path)
                 .await?
@@ -183,7 +183,7 @@ async fn registering(
                     )
                 })?;
 
-            Registered::AlreadyRegistered(entry(held, authors))
+            Registered::AlreadyRegistered(forged(pool, entry(held, authors)).await)
         }
     };
 
@@ -250,6 +250,7 @@ pub(crate) fn entry(repo: store::Repo, authors: &[Author]) -> RepoEntry {
         author: repo.author,
         github: None,
         origin: None,
+        forge: None,
     }
 }
 
@@ -258,16 +259,40 @@ pub(crate) fn entry(repo: store::Repo, authors: &[Author]) -> RepoEntry {
 ///
 /// One `git remote get-url` per Repo, which is the list's cost and no other
 /// page's — see [`RepoEntry::github`].
+///
+/// And the Forge that origin is on, matched against `enabled` — the Forges
+/// enabled as the list is read — which is what the row says *No forge for*
+/// where none answers.
 pub(crate) fn listed(
     repo: store::Repo,
     authors: &[Author],
     forge: &dyn crate::forges::Forge,
+    enabled: &[crate::forges::Enabled],
 ) -> RepoEntry {
-    let github = origin(&repo.path).and_then(|origin| forge.repository_of(&origin));
+    let origin = origin(&repo.path);
+    let github = origin
+        .as_deref()
+        .and_then(|origin| forge.repository_of(origin));
+    let matched = crate::forges::matched(enabled, origin.as_deref());
 
     RepoEntry {
         github,
+        forge: Some(matched.drawn()),
         ..entry(repo, authors)
+    }
+}
+
+/// The same row with the Forge its origin is on read in — what the registry's
+/// own pane is handed back after a press on it, so the row it redraws says
+/// what the list does.
+async fn forged(pool: &SqlitePool, entry: RepoEntry) -> RepoEntry {
+    let forge = crate::forges::of(pool, Path::new(&entry.path))
+        .await
+        .drawn();
+
+    RepoEntry {
+        forge: Some(forge),
+        ..entry
     }
 }
 
@@ -659,7 +684,9 @@ pub(crate) async fn clone(
     if let Resolved::At(there) = resolve(&path)
         && let Some(held) = store::registered_repo_at(pool, &there).await?
     {
-        return Ok(Cloned::AlreadyRegistered(entry(held, authors)));
+        return Ok(Cloned::AlreadyRegistered(
+            forged(pool, entry(held, authors)).await,
+        ));
     }
 
     let into = path.clone();
@@ -985,7 +1012,9 @@ pub(crate) async fn repoint(
     }
 
     Ok(match store::repoint_repo(pool, id, author).await? {
-        store::Repointing::Repointed(repo) => Repointed::Repointed(entry(repo, config.authors())),
+        store::Repointing::Repointed(repo) => {
+            Repointed::Repointed(forged(pool, entry(repo, config.authors())).await)
+        }
         store::Repointing::NoSuchRepo => Repointed::NoSuchRepo,
         store::Repointing::InUse { on, beside } => Repointed::InUse { on, beside },
     })

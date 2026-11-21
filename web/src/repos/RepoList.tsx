@@ -126,6 +126,7 @@ import { Reaching, keyOf, useDevice, type Device } from "../reaching";
 import { Picker } from "../picking";
 import { rowPress } from "../rows";
 import { authorLabel, useAuthors } from "../authors";
+import { unforged } from "../forges";
 import { PaneHead } from "../workbench/PaneHead";
 import styles from "./RepoList.module.css";
 import { SettingsCard } from "../settings/SettingsCard";
@@ -540,6 +541,11 @@ export function ReposPane(props: {
                       <div class={styles.what}>
                         <span class={styles.name}>{repo.name}</span>
                         <span class={styles.path}>{repo.path}</span>
+                        {/* And where its remote is on no forge, which is a
+                            Repo whose work no pull request is opened for. */}
+                        <Show when={unforged(repo)}>
+                          {(said) => <span class={styles.forge}>{said()}</span>}
+                        </Show>
                       </div>
                       <button
                         type="button"

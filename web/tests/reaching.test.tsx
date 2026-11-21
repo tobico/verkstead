@@ -294,6 +294,7 @@ describe("a press on a conversation that lives on another device", () => {
       author_unpicked: false,
       github: null,
       origin: null,
+      forge: null,
     };
     const fetching = theMember(
       whenever(at("/repos"), json({ Added: opened }), "POST"),
@@ -355,6 +356,7 @@ describe("a press on a conversation that lives on another device", () => {
       author_unpicked: false,
       github: null,
       origin: null,
+      forge: null,
     };
     const fetching = theMember(
       whenever(
@@ -422,6 +424,7 @@ describe("a press on a conversation that lives on another device", () => {
       author_unpicked: false,
       github: null,
       origin: null,
+      forge: null,
     };
     const fetching = theMember(
       whenever("/api/ui/devices", json(KEEPING)),

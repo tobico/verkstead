@@ -450,7 +450,12 @@ async fn recompute(
 
                     if matches!(
                         asked,
-                        None | Some((_, _, Err(crate::forges::Trouble::NoPullRequest)))
+                        None | Some((
+                            _,
+                            _,
+                            Err(crate::forges::Trouble::NoPullRequest
+                                | crate::forges::Trouble::NoForge(_))
+                        ))
                     ) {
                         return Ok(Resumed::NothingToWork);
                     }

@@ -384,9 +384,15 @@ pub(crate) async fn follow_inline(state: AppState, conversation_id: i64, driving
             // A branch that could not be asked about at all falls the same way,
             // that being in the log already and no more of an answer than it
             // was.
-            Some((_, _, Err(crate::forges::Trouble::NoPullRequest))) | None => {
-                "The session ended without committing anything.".to_owned()
-            }
+            //
+            // And so does a Repo on no Forge, where there is no pull request to
+            // be asked about at all.
+            Some((
+                _,
+                _,
+                Err(crate::forges::Trouble::NoPullRequest | crate::forges::Trouble::NoForge(_)),
+            ))
+            | None => "The session ended without committing anything.".to_owned(),
             // Anything else is what the landed arm above makes of it, made in
             // the one place that knows how: a pull request found is a wrap-up,
             // and a `gh` that cannot answer at all is a halt naming what the
@@ -468,7 +474,9 @@ pub(crate) async fn inline_again(state: AppState, conversation_id: i64, driving:
             // Resume.
             crate::wrapping::opened(&state, conversation_id, None).await
         }
-        Err(crate::forges::Trouble::NoPullRequest) => {
+        // On no Forge there is no pull request to say the work is done, so it
+        // is built again, the session finding what the branch already holds.
+        Err(crate::forges::Trouble::NoPullRequest | crate::forges::Trouble::NoForge(_)) => {
             follow_inline(state, conversation_id, driving).await
         }
         Err(trouble) => {
@@ -697,6 +705,9 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
             );
 
             crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
+        }
+        Err(crate::forges::Trouble::NoForge(host)) => {
+            crate::wrapping::unforged(&state, conversation_id, host.as_deref()).await;
         }
         Err(crate::forges::Trouble::NoPullRequest) => {
             tracing::info!(

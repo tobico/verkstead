@@ -59,6 +59,7 @@ import { keyOf, useDevice } from "../reaching";
 import { PaneHead } from "./PaneHead";
 import styles from "./Share.module.css";
 import { onAPullRequest } from "./Steer";
+import { unforged, unpublishable } from "../forges";
 
 /// What a publish came back with, as the toast it is said in.
 ///
@@ -96,6 +97,10 @@ export function published(outcome: SharePublished): JSX.Element {
     // The server's own sentence, which says whose refusal it was: it can be
     // git's as well as GitHub's.
     return <>{ended(outcome.Refused.why)}</>;
+  }
+
+  if ("NoForge" in outcome) {
+    return <>{unpublishable(outcome.NoForge.host)}</>;
   }
 
   // Through the share viewer, which is what the server composed it as — see
@@ -280,18 +285,20 @@ export function Share(props: {
             rather than instead of it — one is a file to attach and the other is
             a link to paste, and which of the two a colleague wants is not this
             pane's to decide. */}
-        <button
-          type="button"
-          class={styles.publish}
-          disabled={publish.isPending}
-          onClick={() => publish.mutate(props.conversation.id)}
-        >
-          {publish.isPending
-            ? "Publishing…"
-            : props.conversation.shared
-              ? "Publish again"
-              : "Publish"}
-        </button>
+        <Show when={unforged(props.conversation.repo) === null}>
+          <button
+            type="button"
+            class={styles.publish}
+            disabled={publish.isPending}
+            onClick={() => publish.mutate(props.conversation.id)}
+          >
+            {publish.isPending
+              ? "Publishing…"
+              : props.conversation.shared
+                ? "Publish again"
+                : "Publish"}
+          </button>
+        </Show>
 
         {/* And the whole of it in one press, on a conversation whose work is on
             a pull request: the same publish, and a comment carrying the link
@@ -312,10 +319,25 @@ export function Share(props: {
         </Show>
       </div>
 
-      <Note>
-        Publishing takes a fresh snapshot every time. What was already sent stays
-        where it is.
-      </Note>
+      {/* And on a Repo no forge answers for, there is nowhere to publish
+          to: the download is the whole of it, and the pane says why. */}
+      <Show
+        when={unforged(props.conversation.repo) === null}
+        fallback={
+          <Note>
+            {unpublishable(
+              props.conversation.repo.forge?.kind === "Unmatched"
+                ? props.conversation.repo.forge.host
+                : null,
+            )}
+          </Note>
+        }
+      >
+        <Note>
+          Publishing takes a fresh snapshot every time. What was already sent
+          stays where it is.
+        </Note>
+      </Show>
     </>
   );
 }

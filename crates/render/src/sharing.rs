@@ -482,6 +482,10 @@ pub enum SharePublished {
 
     /// Something else, in `gh`'s or git's own words.
     Refused { why: String },
+
+    /// The Conversation's Repo is on no Forge — its remote names `host`, which
+    /// no enabled Forge answers for — so there is nowhere to publish to.
+    NoForge { host: Option<String> },
 }
 
 /// What became of sharing a Conversation to the pull requests its work is on.

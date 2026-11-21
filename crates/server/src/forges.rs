@@ -302,6 +302,12 @@ pub(crate) enum Trouble {
     /// Verkstead's own, so that none of it is passed off as a quotation. The
     /// host's, and never one of the kinds a Forge itself fails with.
     Ours(String),
+
+    /// The Repo is on no Forge: its remote names `host`, which no enabled
+    /// Forge answers for — see [`matched`]. The host's too, and asked before
+    /// any Forge is: there is nobody to ask. A Repo on none has no wrap-up, so
+    /// what meets this lands the work Done rather than stopping it.
+    NoForge(Option<String>),
 }
 
 /// Who a token is, and what it may do.
@@ -605,4 +611,217 @@ pub(crate) struct Details {
     /// sweeping, so it freshens every fact that is drawn off a card as well as
     /// the list it came for.
     pub(crate) landing: Landing,
+}
+
+/// A Forge enabled on this cluster, as a Repo's remote is matched against it:
+/// which plugin it is, and every host it answers for — the ones its manifest
+/// declares and the ones the human added in its settings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Enabled {
+    pub(crate) uuid: String,
+    pub(crate) name: String,
+    pub(crate) hosts: Vec<String>,
+}
+
+/// The key of the `list` setting a Forge's manifest declares for the hosts the
+/// human adds to it: a self-hosted instance is a host added, not a plugin
+/// written (ADR-0030, *Forge*).
+pub(crate) const HOSTS_SETTING: &str = "hosts";
+
+/// Which Forge a Repo is on, read off its remote at the moment it is asked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Matched {
+    /// The enabled Forge whose hosts the remote names.
+    On(Enabled),
+
+    /// None: the remote names `host`, and no enabled Forge answers for it —
+    /// or, with no host, there is no enabled Forge at all to leave it to.
+    Unmatched { host: Option<String> },
+}
+
+impl Matched {
+    /// What the viewer is handed of it.
+    pub(crate) fn drawn(&self) -> verkstead_render::RepoForge {
+        match self {
+            Matched::On(forge) => verkstead_render::RepoForge::On {
+                uuid: forge.uuid.clone(),
+                name: forge.name.clone(),
+            },
+            Matched::Unmatched { host } => {
+                verkstead_render::RepoForge::Unmatched { host: host.clone() }
+            }
+        }
+    }
+}
+
+/// The Forges enabled on this cluster, in the order the built-ins are listed.
+///
+/// **Only the built-in GitHub for now**: it is the one Forge the server has an
+/// implementation of, answered in-process. An installed plugin declaring a
+/// Forge is matched once its component can answer — until then a Repo on its
+/// host would be a Repo on a Forge nothing can ask.
+///
+/// Read off the Plugins records each time: a tick or a host added on any
+/// device reaches the next question without a restart.
+pub(crate) async fn enabled(pool: &sqlx::SqlitePool) -> anyhow::Result<Vec<Enabled>> {
+    use crate::replicating::plugins::{Plugins, SettingValue};
+
+    let records = crate::store::replicated::live_records::<Plugins>(pool).await?;
+
+    Ok(crate::plugins::built_in::listed()
+        .iter()
+        .filter(|manifest| manifest.uuid == crate::plugins::built_in::GITHUB)
+        .filter_map(|manifest| {
+            let declared = manifest
+                .provides
+                .iter()
+                .find_map(|provision| provision.forge())?;
+            let kept = records.iter().find(|record| record.uuid == manifest.uuid);
+            if kept.is_some_and(|record| !record.fields.enabled) {
+                return None;
+            }
+
+            let added = kept
+                .and_then(|record| record.fields.values.get(HOSTS_SETTING))
+                .map(|value| match value {
+                    SettingValue::Lines(lines) => lines.clone(),
+                    SettingValue::Line(line) => vec![line.clone()],
+                })
+                .unwrap_or_default();
+
+            let mut hosts: Vec<String> = Vec::new();
+            for host in declared.hosts.iter().chain(&added) {
+                let host = host.trim().to_ascii_lowercase();
+                if !host.is_empty() && !hosts.contains(&host) {
+                    hosts.push(host);
+                }
+            }
+
+            Some(Enabled {
+                uuid: manifest.uuid.clone(),
+                name: manifest.name.clone(),
+                hosts,
+            })
+        })
+        .collect())
+}
+
+/// The Forge of the Repo whose `origin` remote is this, among `enabled`.
+///
+/// **A remote with no host is left to the first enabled Forge**, as every
+/// Repo was before there was more than one: a path on this machine, a
+/// `file://` URL or no `origin` at all names nothing to match, and what the
+/// Forge then says about it — no remote, most likely — is what it always said.
+/// With nothing enabled it is on none.
+pub(crate) fn matched(enabled: &[Enabled], origin: Option<&str>) -> Matched {
+    let Some(host) = origin.and_then(crate::matching::host_of) else {
+        return match enabled.first() {
+            Some(forge) => Matched::On(forge.clone()),
+            None => Matched::Unmatched { host: None },
+        };
+    };
+
+    match enabled.iter().find(|forge| forge.hosts.contains(&host)) {
+        Some(forge) => Matched::On(forge.clone()),
+        None => Matched::Unmatched { host: Some(host) },
+    }
+}
+
+/// The Forge of the Repo at `repo`, read now: its `origin` asked of git and
+/// matched against the Forges enabled at this moment.
+///
+/// A store that cannot be read leaves the Repo to the first Forge there is,
+/// rather than to none: a Repo read as on no Forge lands its work Done with
+/// nothing watching, which is not a thing to do over a read that failed.
+pub(crate) async fn of(pool: &sqlx::SqlitePool, repo: &Path) -> Matched {
+    let enabled = match enabled(pool).await {
+        Ok(enabled) => enabled,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading which forges are enabled failed");
+            return Matched::On(Enabled {
+                uuid: crate::plugins::built_in::GITHUB.to_owned(),
+                name: "GitHub".to_owned(),
+                hosts: Vec::new(),
+            });
+        }
+    };
+
+    let repo = repo.to_owned();
+    let origin = tokio::task::spawn_blocking(move || crate::repos::origin(&repo))
+        .await
+        .unwrap_or_default();
+
+    matched(&enabled, origin.as_deref())
+}
+
+/// Why there is nothing for a Forge to say about a Repo on none, in a
+/// sentence for the Timeline.
+pub(crate) fn unmatched(host: Option<&str>) -> String {
+    match host {
+        Some(host) => format!(
+            "No forge for {host}, so there's no pull request to wrap up. Add {host} to a \
+             forge's hosts in Plugins to have it watched."
+        ),
+        None => "No forge is enabled, so there's no pull request to wrap up.".to_owned(),
+    }
+}
+
+/// Why a Share on a Repo on no Forge has no Publish, in a sentence.
+pub(crate) fn unpublishable(host: Option<&str>) -> String {
+    match host {
+        Some(host) => format!("No forge for {host}, so there's nowhere to publish the share."),
+        None => "No forge is enabled, so there's nowhere to publish the share.".to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn github(hosts: &[&str]) -> Enabled {
+        Enabled {
+            uuid: crate::plugins::built_in::GITHUB.to_owned(),
+            name: "GitHub".to_owned(),
+            hosts: hosts.iter().map(|host| (*host).to_owned()).collect(),
+        }
+    }
+
+    /// A remote on a host a Forge answers for is on it, whichever spelling
+    /// names the host; one on any other host is on none, naming it.
+    #[test]
+    fn a_remote_is_on_the_forge_its_host_names() {
+        let enabled = [github(&["github.com", "github.example.com"])];
+
+        for origin in [
+            "https://github.com/tobico/verkstead.git",
+            "git@github.example.com:tobico/verkstead.git",
+        ] {
+            assert_eq!(
+                matched(&enabled, Some(origin)),
+                Matched::On(enabled[0].clone()),
+                "{origin}"
+            );
+        }
+
+        assert_eq!(
+            matched(&enabled, Some("https://gitlab.com/tobico/verkstead")),
+            Matched::Unmatched {
+                host: Some("gitlab.com".to_owned())
+            }
+        );
+    }
+
+    /// A remote naming no host — a path, or none at all — is left to the first
+    /// enabled Forge, as every Repo was; with none enabled it is on none.
+    #[test]
+    fn a_remote_with_no_host_is_left_to_the_first_forge() {
+        let enabled = [github(&["github.com"])];
+
+        assert_eq!(
+            matched(&enabled, Some("/srv/upstream.git")),
+            Matched::On(enabled[0].clone())
+        );
+        assert_eq!(matched(&enabled, None), Matched::On(enabled[0].clone()));
+        assert_eq!(matched(&[], None), Matched::Unmatched { host: None });
+    }
 }

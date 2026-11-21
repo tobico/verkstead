@@ -657,6 +657,7 @@ impl Trouble {
                 format!("The gh command said: {}", crate::stopping::ended(said))
             }
             Trouble::Ours(said) => said.clone(),
+            Trouble::NoForge(host) => crate::forges::unmatched(host.as_deref()),
         }
     }
 }

@@ -544,6 +544,7 @@ function repo(id: number, name: string): RepoEntry {
     author_unpicked: false,
     github: null,
     origin: null,
+    forge: null,
   };
 }
 

@@ -177,6 +177,14 @@
   padding: 0 0 0.75rem;
 }
 
+/* A Repo on no forge, said where its pull request's card would be. */
+.unforged {
+  margin: 0;
+  padding: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
 /* The carousel, which is what more than one pinned card is: they are held above
    the record, so a stack of them is a stack the record is pushed down by — and a
    pinned card is worth having in view rather than worth having all of at once.
