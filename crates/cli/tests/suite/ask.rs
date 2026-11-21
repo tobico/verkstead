@@ -260,15 +260,43 @@ fn a_killed_wait_leaves_behind_the_id_of_the_set_it_was_on() {
     let server = Server::start(tmp.path().join("verkstead.db"));
 
     let mut waiting = ask(&server, tmp.path(), SET);
+
+    // Read as it is written, so the kill can wait on the CLI having said the
+    // Set is open. A Set in the store is not yet a reply to the submit:
+    // killed between the two, the CLI never heard the id, and there was
+    // nothing it could have said. What this pins is that it says the id as
+    // soon as it has it, rather than at the end of the wait.
+    let (opened, heard) = mpsc::channel();
+    let reading = {
+        let lines = BufReader::new(waiting.stderr.take().unwrap()).lines();
+        std::thread::spawn(move || {
+            let mut said = String::new();
+            for line in lines.map_while(Result::ok) {
+                // The last line of what it says, so the kill lands after all
+                // of it rather than between two of its writes.
+                if line.contains("verkstead answers") {
+                    let _ = opened.send(());
+                }
+                said.push_str(&line);
+                said.push('\n');
+            }
+            said
+        })
+    };
     server.await_asked_set(1);
+    let told = heard.recv_timeout(Duration::from_secs(30));
 
     // What a harness does to a background command it decides to stop, and the
     // whole of the case this is for: the Set is on the Timeline, answerable,
     // and the process that could have named it is gone.
     waiting.kill().unwrap();
     let output = finished(waiting);
+    let said = reading.join().unwrap();
+    assert!(
+        told.is_ok(),
+        "the CLI should have said the Set is open while it waited, got:\n{said}"
+    );
 
-    let said = stderr(&output);
     assert!(
         said.contains("Question Set 1 is open"),
         "the wait names the Set it is on as it opens, so a kill cannot take the \
