@@ -94,10 +94,15 @@ pub struct Launch {
     /// How the session Verkstead named is named, holding `{session}`, or
     /// `None` for a harness that takes no session id.
     pub session: Option<Vec<String>>,
-    /// How a conversation is carried on, or `None` where it is not.
+    /// How a conversation is carried on, or `None` where it is not: under the
+    /// id the session was named, or, where `session` is `None`, the one its
+    /// record gave.
     pub resume: Option<Resume>,
     /// What goes last.
     pub tail: Vec<String>,
+    /// How the Worktree is said, holding `{worktree}`: written after the tail,
+    /// and left off whole for a session with no Worktree.
+    pub worktree: Vec<String>,
     /// The settings for this session only, written as JSON to the file
     /// `{settings}` names.
     pub settings: Option<Value>,
@@ -109,8 +114,9 @@ pub enum Resume {
     /// Words, holding `{session}`, written where the session would have been
     /// named.
     Flag(Vec<String>),
-    /// Words, holding `{session}`, written straight after the binary, and what
-    /// else the resume needs on the end.
+    /// Words written straight after the binary, and what else the resume needs
+    /// on the end. Where the words hold no `{session}` the id is a positional
+    /// in front of the prompt.
     Subcommand {
         words: Vec<String>,
         also: Vec<String>,
@@ -138,8 +144,42 @@ pub struct AccountPath {
     /// The files in it that hold the login.
     pub credentials: Vec<PathBuf>,
     /// The directories in it that are the memory store.
-    pub memory: Vec<PathBuf>,
+    pub memory: Vec<Memory>,
 }
+
+/// One directory of an account's memory store, and what of it crosses to a
+/// device the Profile is not bound on.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Memory {
+    pub path: PathBuf,
+    /// `None` for memory that stays on the device it was written on.
+    pub synced: Option<Synced>,
+    /// What it is called on the link between devices, where that isn't its
+    /// path — see [`crate::sandbox::root::Part::label`]: the word a device on
+    /// an older release still sends it under.
+    pub part: Option<String>,
+}
+
+/// Which of a memory directory's files a session away from home is given and
+/// sends back: one of the host's own rules, named — see
+/// [`crate::sandbox::root::Whose`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Synced {
+    /// Every file under it.
+    Everything,
+    /// The rollouts — `rollout-*.jsonl`, opening with a
+    /// `session_meta` line — whose session worked in this Worktree.
+    Worktree,
+    /// The directories in it, or one level down, called by one of the
+    /// Conversation's session ids.
+    Sessions,
+    /// The SQLite database of this name directly in it, with its `-wal` and
+    /// `-shm`.
+    Database(String),
+}
+
+/// The words `synced` may be, in the order a refusal lists them.
+const SYNCED: &[&str] = &["everything", "worktree", "sessions", "database"];
 
 /// How a session is told to be idle from at work.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,6 +230,18 @@ pub struct Install {
     pub instructions: Option<String>,
     /// The lines that install it, run only on a press.
     pub commands: Vec<String>,
+    /// The package npm carries it as, which the wizard installs the way it
+    /// installs a built-in's: joined onto the one raised batch on a Linux,
+    /// with node in front where the machine has no npm, and raised with
+    /// winget's node in front on Windows.
+    pub npm: Option<String>,
+    /// The Homebrew formula it is, behind the Homebrew the wizard installs
+    /// first on a Mac that has none.
+    pub brew: Option<String>,
+    /// Or the Homebrew cask, the same way.
+    pub cask: Option<String>,
+    /// And the nixpkgs attribute, which NixOS's by-hand line names.
+    pub nix: Option<String>,
 }
 
 /// How Verkstead runs a login.
@@ -336,8 +388,8 @@ fn words(value: &Value, field: &str, needs: Option<&str>) -> Result<Vec<String>,
 /// Refused where `word` holds a `{name}` the host does not fill.
 ///
 /// **Only a bare name between braces is read as a placeholder.** Any other
-/// brace is the word's own: a harness taking an inline table on its line, as
-/// codex's `-c projects={"{worktree}"={trust_level="trusted"}}` does, writes
+/// brace is the word's own: a harness taking an inline table on its line, as a
+/// `-c projects={"{worktree}"={trust_level="trusted"}}` does, writes
 /// its braces as they are, and the `{worktree}` inside them is still filled.
 fn placeholders(word: &str, field: &str) -> Result<(), Refusal> {
     let mut rest = word;
@@ -372,7 +424,9 @@ fn launch(value: &Value, field: &str) -> Result<Launch, Refusal> {
     let map = entry(
         value,
         field,
-        &["model", "prompt", "session", "resume", "tail", "settings"],
+        &[
+            "model", "prompt", "session", "resume", "tail", "worktree", "settings",
+        ],
     )?;
     let at = |key: &str| format!("{field}.{key}");
     let optional = |key: &str, needs: Option<&str>| match map.get(key) {
@@ -403,24 +457,17 @@ fn launch(value: &Value, field: &str) -> Result<Launch, Refusal> {
             Some(value) => Some(resume(value, &at("resume"))?),
         },
         tail,
+        worktree: optional("worktree", Some("worktree"))?.unwrap_or_default(),
         settings,
     };
 
-    // A resume is said by the id the harness was told at launch, so a harness
-    // told none has none to be resumed by.
-    if launch.resume.is_some() && launch.session.is_none() {
-        return Err(Refusal::of(
-            &at("resume"),
-            format!(
-                "`{}` needs `{}`: a session is resumed by the id it was named at launch.",
-                at("resume"),
-                at("session")
-            ),
-        ));
-    }
-
     // `{settings}` may stand in any part of the line, the resume's among them.
-    let mut parts: Vec<&[String]> = vec![&launch.model, &launch.prompt, &launch.tail];
+    let mut parts: Vec<&[String]> = vec![
+        &launch.model,
+        &launch.prompt,
+        &launch.tail,
+        &launch.worktree,
+    ];
     parts.extend(launch.session.as_deref());
     match &launch.resume {
         Some(Resume::Flag(words)) => parts.push(words),
@@ -465,8 +512,10 @@ fn resume(value: &Value, field: &str) -> Result<Resume, Refusal> {
             }
             Ok(Resume::Flag(words(flag, &at("flag"), Some("session"))?))
         }
+        // A subcommand without `{session}` puts the id in front of the
+        // prompt.
         (None, Some(subcommand)) => Ok(Resume::Subcommand {
-            words: words(subcommand, &at("subcommand"), Some("session"))?,
+            words: words(subcommand, &at("subcommand"), None)?,
             also,
         }),
         _ => Err(Refusal::of(
@@ -526,6 +575,23 @@ fn account(value: &Value, field: &str) -> Result<Vec<AccountPath>, Refusal> {
                 ),
             ));
         }
+        // What crosses a link is said from the account's directory, which is
+        // the first path: a later path's memory stays where it was written.
+        if index > 0
+            && let Some(at) = path
+                .memory
+                .iter()
+                .position(|memory| memory.synced.is_some())
+        {
+            let synced_field = format!("{entry_field}.memory[{at}].synced");
+            return Err(Refusal::of(
+                &synced_field,
+                format!(
+                    "`{synced_field}` is on a later path. Only the first path's memory is synced \
+                     to another device."
+                ),
+            ));
+        }
         paths.push(path);
     }
     Ok(paths)
@@ -577,10 +643,10 @@ fn account_path(value: &Value, field: &str) -> Result<AccountPath, Refusal> {
     // The allowlist is files, read and handed over whole: one written as a
     // directory, or inside the memory store, is no configuration file.
     let allowlist = inside("allowlist")?;
-    let memory = inside("memory")?;
+    let memory = memory(map, &at("memory"), file)?;
     let written = texts(map, "allowlist", &at("allowlist"))?;
     for (index, (path, written)) in allowlist.iter().zip(&written).enumerate() {
-        if written.ends_with('/') || memory.iter().any(|memory| path.starts_with(memory)) {
+        if written.ends_with('/') || memory.iter().any(|memory| path.starts_with(&memory.path)) {
             let entry = format!("{}[{index}]", at("allowlist"));
             return Err(Refusal::of(
                 &entry,
@@ -606,6 +672,107 @@ fn account_path(value: &Value, field: &str) -> Result<AccountPath, Refusal> {
         credentials: inside("credentials")?,
         memory,
     })
+}
+
+/// The memory directories at `field`: each a path, which stays on the device
+/// it was written on, or a map of its `path` and how it is `synced`.
+fn memory(map: &Map<String, Value>, field: &str, file: bool) -> Result<Vec<Memory>, Refusal> {
+    let entries = match map.get("memory") {
+        Some(Value::Null) | None => return Ok(Vec::new()),
+        Some(Value::Array(entries)) => entries,
+        Some(_) => return Err(Refusal::of(field, format!("`{field}` should be a list."))),
+    };
+    if file && !entries.is_empty() {
+        return Err(Refusal::of(
+            field,
+            format!("`{field}` is only for a directory."),
+        ));
+    }
+
+    entries
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let entry_field = format!("{field}[{index}]");
+            if let Value::String(path) = value {
+                return Ok(Memory {
+                    path: relative(path, &entry_field)?,
+                    synced: None,
+                    part: None,
+                });
+            }
+
+            let entry = entry(value, &entry_field, &["path", "synced", "database", "part"])?;
+            let at = |key: &str| format!("{entry_field}.{key}");
+            let path = relative(
+                &text_of(within(entry, &entry_field, "path")?, &at("path"))?,
+                &at("path"),
+            )?;
+            let database = optional_within(entry, &entry_field, "database")?;
+            let word = optional_within(entry, &entry_field, "synced")?;
+            let part = optional_within(entry, &entry_field, "part")?;
+
+            if let Some(part) = &part
+                && (part.is_empty() || part.contains(['/', '\\']) || word.is_none())
+            {
+                let part_field = at("part");
+                return Err(Refusal::of(
+                    &part_field,
+                    format!(
+                        "`{part_field}` should be one word, and goes with `{}` only.",
+                        at("synced")
+                    ),
+                ));
+            }
+
+            if let Some(word) = word.as_deref()
+                && !SYNCED.contains(&word)
+            {
+                let synced_field = at("synced");
+                return Err(Refusal::of(
+                    &synced_field,
+                    format!(
+                        "`{synced_field}` is `{word}`, which isn't a way memory is synced. \
+                         It's one of everything, worktree, sessions, or database."
+                    ),
+                ));
+            }
+
+            let synced = match (word.as_deref(), database) {
+                (None, None) => None,
+                (Some("database"), Some(name)) => {
+                    let name_field = at("database");
+                    if name.is_empty() || name.contains(['/', '\\']) || name == "." || name == ".."
+                    {
+                        return Err(Refusal::of(
+                            &name_field,
+                            format!(
+                                "`{name_field}` should be the database file's name, directly \
+                                 in `{}`.",
+                                at("path")
+                            ),
+                        ));
+                    }
+                    Some(Synced::Database(name))
+                }
+                (Some("database"), None) => return Err(Refusal::missing(&at("database"))),
+                (_, Some(_)) => {
+                    let name_field = at("database");
+                    return Err(Refusal::of(
+                        &name_field,
+                        format!(
+                            "`{name_field}` goes with `{}: database` only.",
+                            at("synced")
+                        ),
+                    ));
+                }
+                (Some("worktree"), None) => Some(Synced::Worktree),
+                (Some("sessions"), None) => Some(Synced::Sessions),
+                (Some(_), None) => Some(Synced::Everything),
+            };
+            Ok(Memory { path, synced, part })
+        })
+        .collect()
 }
 
 fn idle(value: &Value, field: &str) -> Result<Idle, Refusal> {
@@ -795,7 +962,11 @@ fn tools(value: &Value, field: &str) -> Result<String, Refusal> {
 fn install(fields: &Map<String, Value>, field: &str) -> Result<Install, Refusal> {
     let map = match fields.get("install") {
         Some(Value::Null) | None => return Ok(Install::default()),
-        Some(value) => entry(value, field, &["instructions", "commands"])?,
+        Some(value) => entry(
+            value,
+            field,
+            &["instructions", "commands", "npm", "brew", "cask", "nix"],
+        )?,
     };
     let instructions = optional_within(map, field, "instructions")?;
     if let Some(link) = &instructions {
@@ -811,7 +982,35 @@ fn install(fields: &Map<String, Value>, field: &str) -> Result<Install, Refusal>
     Ok(Install {
         instructions,
         commands: texts(map, "commands", &format!("{field}.commands"))?,
+        npm: package(map, field, "npm")?,
+        brew: package(map, field, "brew")?,
+        cask: package(map, field, "cask")?,
+        nix: package(map, field, "nix")?,
     })
+}
+
+/// A package's name at `key`, where there is one.
+///
+/// **One word of a package name's own characters**, because the host writes
+/// it into a line it runs — on a Linux, raised — so a space, a `;` or a
+/// leading `-` would be a second command or a flag rather than a name.
+fn package(map: &Map<String, Value>, field: &str, key: &str) -> Result<Option<String>, Refusal> {
+    let Some(name) = optional_within(map, field, key)? else {
+        return Ok(None);
+    };
+    let named = !name.is_empty()
+        && !name.starts_with('-')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "@/._+-".contains(c));
+    if !named {
+        let at = format!("{field}.{key}");
+        return Err(Refusal::of(
+            &at,
+            format!("`{at}` should be one package name, such as `@scope/name`."),
+        ));
+    }
+    Ok(Some(name))
 }
 
 fn login(value: &Value, field: &str) -> Result<Login, Refusal> {
@@ -960,6 +1159,8 @@ provides:
     install:
       instructions: https://example.com/stub
       commands: [npm install -g stub]
+      npm: "@example/stub"
+      nix: stub
     login:
       line: [login]
       status: [status]
@@ -1021,6 +1222,9 @@ provides:
             [(store::Role::Review, "stub-small".to_owned())]
         );
         assert_eq!(agent.install.commands, ["npm install -g stub"]);
+        assert_eq!(agent.install.npm.as_deref(), Some("@example/stub"));
+        assert_eq!(agent.install.nix.as_deref(), Some("stub"));
+        assert_eq!(agent.install.brew, None);
         assert_eq!(agent.login.unwrap().line, ["login"]);
         assert_eq!(agent.environment, [("STUB_NO_UPDATE".into(), "1".into())]);
         assert_eq!(agent.instructions, PathBuf::from("STUB.md"));
@@ -1113,6 +1317,22 @@ provides:
         }
     }
 
+    /// A package name is written into a line the host runs, raised on a
+    /// Linux, so anything that is not one word of a name's own is refused.
+    #[test]
+    fn an_install_package_that_is_not_one_name_is_refused() {
+        for name in [
+            "\"stub; rm -rf /\"",
+            "\"--global\"",
+            "\"two words\"",
+            "\"\"",
+        ] {
+            let yaml = AGENT.replace("npm: \"@example/stub\"", &format!("npm: {name}"));
+
+            assert_eq!(refused_at(&yaml), "provides[0].install.npm", "{name}");
+        }
+    }
+
     #[test]
     fn a_second_agent_is_refused() {
         let (_, entry) = AGENT.split_once("provides:\n").unwrap();
@@ -1169,6 +1389,35 @@ provides:
         );
     }
 
+    /// The Worktree said apart from the tail, which the host leaves off whole
+    /// where a session has none — Codex's trust, a flag and a table.
+    #[test]
+    fn the_worktree_is_said_apart_where_it_is_written() {
+        let word = r#"projects={"{worktree}"={trust_level="trusted"}}"#;
+        let yaml = AGENT.replace(
+            "      settings:\n        quiet: true\n",
+            &format!("      worktree: [-c, '{word}']\n      settings:\n        quiet: true\n"),
+        );
+
+        let launch = agent_for(&yaml, Platform::Linux).launch;
+
+        assert_eq!(launch.worktree, ["-c", word]);
+        assert_eq!(
+            agent_for(AGENT, Platform::Linux).launch.worktree,
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn a_worktree_part_without_its_placeholder_is_refused() {
+        let yaml = AGENT.replace(
+            "      settings:\n        quiet: true\n",
+            "      worktree: [--trusted]\n      settings:\n        quiet: true\n",
+        );
+
+        assert_eq!(refused_at(&yaml), "provides[0].launch.worktree");
+    }
+
     #[test]
     fn a_line_part_without_its_placeholder_is_refused() {
         let yaml = AGENT.replace("prompt: [\"{prompt}\"]", "prompt: [--prompt]");
@@ -1206,11 +1455,153 @@ provides:
         assert_eq!(refused_at(&yaml), "provides[0].launch.settings");
     }
 
+    /// A harness told no id at launch names itself, and is resumed by the id
+    /// its record gave.
     #[test]
-    fn a_resume_without_a_session_is_refused() {
+    fn a_resume_without_a_session_is_read() {
         let yaml = AGENT.replace("      session: [--session-id, \"{session}\"]\n", "");
 
-        assert_eq!(refused_at(&yaml), "provides[0].launch.resume");
+        let launch = agent_for(&yaml, Platform::Linux).launch;
+
+        assert_eq!(launch.session, None);
+        assert!(launch.resume.is_some());
+    }
+
+    /// Codex's resume: a subcommand the id follows as a positional in front
+    /// of the prompt, and words of its own on the end.
+    #[test]
+    fn a_resume_subcommand_without_a_session_is_read() {
+        let yaml = AGENT.replace(
+            "flag: [--resume, \"{session}\"]",
+            "subcommand: [resume]\n        also: [--last-turn]",
+        );
+
+        assert_eq!(
+            agent_for(&yaml, Platform::Linux).launch.resume,
+            Some(Resume::Subcommand {
+                words: vec!["resume".into()],
+                also: vec!["--last-turn".into()],
+            })
+        );
+    }
+
+    #[test]
+    fn a_resume_flag_without_a_session_is_refused() {
+        let yaml = AGENT.replace("flag: [--resume, \"{session}\"]", "flag: [--continue]");
+
+        assert_eq!(refused_at(&yaml), "provides[0].launch.resume.flag");
+    }
+
+    #[test]
+    fn memory_is_read_with_each_way_it_is_synced() {
+        let yaml = AGENT.replace(
+            "        memory: [memory]\n",
+            "        memory:
+          - memory
+          - path: memories
+            synced: everything
+          - path: sessions
+            synced: worktree
+          - path: conversations
+            synced: sessions
+          - path: data
+            synced: database
+            database: store.db
+",
+        );
+
+        let memory = &agent_for(&yaml, Platform::Linux).account[0].memory;
+
+        assert_eq!(
+            memory
+                .iter()
+                .map(|memory| (memory.path.to_str().unwrap(), memory.synced.clone()))
+                .collect::<Vec<_>>(),
+            [
+                ("memory", None),
+                ("memories", Some(Synced::Everything)),
+                ("sessions", Some(Synced::Worktree)),
+                ("conversations", Some(Synced::Sessions)),
+                ("data", Some(Synced::Database("store.db".into()))),
+            ]
+        );
+    }
+
+    /// A synced directory may say what it is called on the link, where that
+    /// is not its path: one word, and only beside `synced`.
+    #[test]
+    fn a_synced_directory_may_name_its_part() {
+        let memory = |entry: &str| {
+            AGENT.replace(
+                "        memory: [memory]\n",
+                &format!("        memory:\n          - {entry}\n"),
+            )
+        };
+
+        let named = agent_for(
+            &memory("{path: memories, synced: everything, part: memory}"),
+            Platform::Linux,
+        );
+        assert_eq!(named.account[0].memory[0].part.as_deref(), Some("memory"));
+
+        for entry in [
+            "{path: memories, part: memory}",
+            "{path: memories, synced: everything, part: a/b}",
+            "{path: memories, synced: everything, part: ''}",
+        ] {
+            assert_eq!(
+                refused_at(&memory(entry)),
+                "provides[0].account[0].memory[0].part",
+                "{entry}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_way_of_syncing_is_refused_naming_it() {
+        let memory = |entry: &str| {
+            AGENT.replace(
+                "        memory: [memory]\n",
+                &format!("        memory:\n          - {entry}\n"),
+            )
+        };
+
+        for (entry, field) in [
+            (
+                "{path: memory, synced: always}",
+                "provides[0].account[0].memory[0].synced",
+            ),
+            (
+                "{path: memory, synced: database}",
+                "provides[0].account[0].memory[0].database",
+            ),
+            (
+                "{path: memory, synced: everything, database: store.db}",
+                "provides[0].account[0].memory[0].database",
+            ),
+            (
+                "{path: memory, synced: database, database: ../store.db}",
+                "provides[0].account[0].memory[0].database",
+            ),
+            (
+                "{path: ../memory, synced: everything}",
+                "provides[0].account[0].memory[0].path",
+            ),
+        ] {
+            assert_eq!(refused_at(&memory(entry)), field, "{entry}");
+        }
+    }
+
+    /// What crosses is said from the account's directory, which is the first
+    /// path.
+    #[test]
+    fn a_later_path_s_memory_synced_is_refused() {
+        let yaml = AGENT.replace(
+            "        kind: file\n        mounted: .stub.json\n",
+            "        kind: directory\n        mounted: .stub-data\n        memory:\n          - {path: notes, synced: everything}\n",
+        );
+
+        assert_eq!(refused_at(&yaml), "provides[0].account[1].memory[0].synced");
     }
 
     #[test]

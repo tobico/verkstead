@@ -6,7 +6,7 @@
 //! working out where the backend would have put it means reimplementing a
 //! private algorithm belonging to somebody else's program (ADR 0006).
 //!
-//! **Four of the five backends keep a file of lines, and one keeps a
+//! **Three of the four built in process keep a file of lines, and one keeps a
 //! database** — see [`Following`]. What that changes is the bookkeeping and
 //! nothing else: a file is followed by remembering how far into it the reading
 //! got, a store by remembering the last record taken, and both take what has
@@ -16,37 +16,36 @@
 //! the name Verkstead gave the session before it started it (see
 //! [`crate::sessions`]) and writes a file called that, so its log is a lookup
 //! inside the Agent Profile's `projects` directory, or the session root's own
-//! where the Profile shares no memory. Codex takes no session id at
-//! all, so nothing known before it starts names its log: what identifies a
-//! rollout is what the session wrote in it about itself, which is the Worktree
-//! it opened in — so the session's log is the one naming this Worktree that
-//! appeared after this session was launched. Grok Build takes one too, so its
+//! where the Profile shares no memory. Grok Build takes one too, so its
 //! log is a lookup again — of a directory called the name, inside a directory
 //! grok named by encoding the working directory, which is why the store is
 //! walked rather than the encoding reproduced. opencode takes none either and
 //! keeps no file: the session to follow is the row of its account's database
-//! that records this Worktree and was created after this session was launched,
-//! which is Codex's rule against a store of another shape. And the Antigravity
+//! that records this Worktree and was created after this session was launched.
+//! And the Antigravity
 //! CLI takes none and keeps both: an index of its conversations, asked as
 //! opencode's store is, and a file of lines per conversation named for the id
 //! the index answers — see [`Brain`] and [`crate::summaries`].
 //!
 //! **A harness a plugin declares finds and reads its own**: its component's
-//! `parse-transcript` is handed the account's root and the session id and
-//! answers with the record whole, in the kinds the Transcript pane draws, so
-//! what is followed is how many of those have been taken — see
-//! [`crate::harness::plugged::Entries`]. Those go to the store as lines the
-//! render crate wrote the shape of rather than any harness's own.
+//! `parse-transcript` is handed the account's root, the session id where the
+//! line named one, the Worktree and the launch, and a cursor, and answers with
+//! what is past the cursor in the kinds the Transcript pane draws and a cursor
+//! to carry on from — see [`crate::harness::plugged::Entries`]. Those go to
+//! the store as lines the render crate wrote the shape of rather than any
+//! harness's own. A Transcript stored before its harness was a plugin holds
+//! the record's raw lines, which the render crate still draws.
 //!
-//! **And what the search finds is what gives the two unnamed backends their
-//! names.** Codex and opencode each choose their own, so the Capture is opened
-//! under a name nothing ever uses — and a rollout names *itself*, in the line the
-//! finder is reading anyway, while a store answers with the id of the row the
-//! finder matched. So the moment the record is found, the id it turns out to be
+//! **And what the search finds is what gives the unnamed backends their
+//! names.** opencode chooses its own, so the Capture is opened under a name
+//! nothing ever uses — and a store answers with the id of the row the finder
+//! matched. A plugin harness taking none is the same again, its
+//! component answering with the id its record gives. So the moment the record
+//! is found, the id it turns out to be
 //! of goes on the record beside the session, where the id Verkstead picked would
 //! have gone for the backends that take one. Which is what lets a machine that
 //! never ran the session carry its conversation on: the resume is by that id and
-//! nothing else. See [`names_itself`] and [`found_in_the_store`].
+//! nothing else. See [`named_by_its_harness`] and [`found_in_the_store`].
 //!
 //! **And a session continuing an earlier one's conversation is followed from
 //! where that one left off.** A resumed session appends to the log it is resuming,
@@ -56,7 +55,7 @@
 //! the top would draw the same conversation twice across the two machines.
 //!
 //! **Which is the one thing here that writes into a harness's own store**, and it
-//! is two of the four that need it. A store keyed by the directory a session ran
+//! is two of them that need it. A store keyed by the directory a session ran
 //! in arrives from another machine still keyed by that machine's own path for it,
 //! and a harness that resolves a resume against that path would never look where
 //! the sync put the record — so before the log of a carried Grok session is
@@ -76,9 +75,8 @@
 //! to draw, and it can never lose what was said. What is read back out of a
 //! batch on its way past is the two things the Timeline row is summarised by —
 //! the last thing the agent said, and how many turns the batch was — and both
-//! are read by the crate with the parser in it rather than here. So is the one
-//! line of a rollout that says whose session it is, for the same reason: the
-//! shape of somebody else's file is known in one place.
+//! are read by the crate with the parser in it rather than here, for the reason
+//! that the shape of somebody else's file is known in one place.
 //!
 //! Both are kept as the log is followed rather than worked out when the row is
 //! read. A Timeline is read every time an open page hears the world moved, and
@@ -96,10 +94,10 @@
 //! which is a complete record on its own.
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use sqlx::SqlitePool;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader};
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use verkstead_schema::Nudge;
 
 use crate::nudge::Nudges;
@@ -157,18 +155,15 @@ pub(crate) struct Tail {
 
 /// How a session's own record of itself is found.
 ///
-/// Five backends, five answers, and the difference between them is not an
+/// Each backend its own answer, and the difference between them is not an
 /// implementation detail. Claude takes the name Verkstead gave the session and
-/// writes a file called that, so its log is a lookup. Codex takes no session id
-/// at launch at all — so nothing Verkstead knows before the session starts
-/// names its log, and what identifies it afterwards is what the session wrote
-/// about itself: the Worktree it opened in, in a file that appeared after it
-/// was launched. Grok Build takes one as Claude does, so its log is named again
+/// writes a file called that, so its log is a lookup. Grok Build takes one as
+/// Claude does, so its log is named again
 /// — but it is a file of a fixed name inside a directory called the name, and
 /// what that directory sits in is grok's own encoding of the working directory.
-/// opencode takes none either, and keeps no log at all: it writes its sessions
-/// into a database, and the one to follow is found in it the way a rollout is —
-/// see [`crate::records`]. The Antigravity CLI takes none and finds its
+/// opencode takes none, and keeps no log at all: it writes its sessions into a
+/// database, and the one to follow is the row naming this Worktree that
+/// appeared after the session was launched — see [`crate::records`]. The Antigravity CLI takes none and finds its
 /// conversation as opencode's is found, in an index, and then keeps a log
 /// named for it as Claude does — see [`Brain`].
 pub(crate) enum Search {
@@ -176,23 +171,14 @@ pub(crate) enum Search {
     /// gave the session, which is what the file is called.
     Named { projects: PathBuf, session: String },
 
-    /// Codex's: the account's store of rollouts, the Worktree this session is
-    /// working in, and the moment it was launched — see [`rollout`].
-    Rollout {
-        sessions: PathBuf,
-        worktree: PathBuf,
-        launched: SystemTime,
-    },
-
     /// Grok Build's: the account's store of sessions, and the name Verkstead
     /// gave this one, which is what the directory holding its log is called —
     /// see [`updates`].
     Updates { sessions: PathBuf, session: String },
 
     /// OpenCode's: the database its account or its root keeps its sessions in,
-    /// the Worktree this session is working in, and the moment it was launched.
-    /// Codex's rule against a store that is not a file of lines — see
-    /// [`crate::records`].
+    /// the Worktree this session is working in, and the moment it was launched
+    /// — see [`crate::records`].
     Records {
         database: PathBuf,
         worktree: PathBuf,
@@ -215,20 +201,12 @@ pub(crate) enum Search {
     Nowhere,
 }
 
-/// What codex calls the directory it keeps its rollouts under, inside the one
+/// What grok calls the directory it keeps its sessions under, inside the one
 /// directory its account is.
 ///
 /// Named because it is somebody else's spelling, the same bargain the
 /// usage-limit phrase and the idle signature make: one place to edit when it
 /// moves.
-const ROLLOUTS: &str = "sessions";
-
-/// And what grok calls the directory it keeps its sessions under, inside the one
-/// directory its account is.
-///
-/// The same word as [`ROLLOUTS`] and a constant of its own, because it is a
-/// second backend's spelling of its own store rather than the same store: one of
-/// the two moving is not both of them moving.
 const SESSIONS: &str = "sessions";
 
 /// What grok calls the log itself, inside the directory named for the session.
@@ -251,8 +229,9 @@ impl Tail {
     /// for `conversation` in `worktree`, and started at `launched`.
     ///
     /// The last two are what the two backends that take no session id are found
-    /// *by*, and are nothing to the two that name their own: a Codex or an
-    /// OpenCode session with neither is a session with nothing to look for —
+    /// *by*, and are nothing to those that name their own: an OpenCode session,
+    /// or a plugin harness's that names itself, with neither is a session with
+    /// nothing to look for —
     /// see [`Search`]. `home` is the Conversation's own, which is where a root
     /// a session was built is on the host — see [`crate::sandbox::Home`].
     ///
@@ -292,12 +271,16 @@ impl Tail {
                         taken,
                     } => Following::Records(records::Reader::resuming(database, session, taken)),
 
-                    // Read again by the export, past what it read before the
-                    // session started.
-                    Carried::Entries { taken } => {
-                        match search(profile, session, worktree, launched, home) {
+                    // Read again by the export, by the id it was found under
+                    // and past where it read to before the session started.
+                    Carried::Entries { session, cursor } => {
+                        match search(profile, &session, worktree, launched, home) {
                             Search::Parsed(reader) => Following::Entries(Box::new(
-                                crate::harness::plugged::Entries::of(reader, taken),
+                                crate::harness::plugged::Entries::resuming(
+                                    reader,
+                                    session,
+                                    Some(cursor),
+                                ),
                             )),
                             _ => Following::Looking,
                         }
@@ -338,20 +321,22 @@ impl Tail {
     pub(crate) async fn poll(&mut self, pool: &SqlitePool, nudges: &Nudges, event_id: i64) -> bool {
         if matches!(self.following, Following::Looking) {
             self.following = self.find(pool, event_id).await;
-
-            // And the moment a rollout is found is the moment its session has a
-            // name: codex takes none at launch, so the log is found rather than
-            // named, and the id it turns out to be of is written down here — see
-            // [`declares`]. Once, because a Tail looks only until it finds one.
-            if let (Search::Rollout { .. }, Following::Log(log)) = (&self.search, &self.following) {
-                names_itself(pool, event_id, &log.log).await;
-            }
         }
 
         let arrived = match &mut self.following {
             Following::Looking => Vec::new(),
             Following::Log(log) => log.take().await,
-            Following::Entries(entries) => entries.take().await,
+            Following::Entries(entries) => {
+                let arrived = entries.take().await;
+
+                // And a plugin harness that names itself has a name the
+                // moment its record says what it is — the same once.
+                if let Some(session) = entries.found_itself() {
+                    named_by_its_harness(pool, event_id, &session).await;
+                }
+
+                arrived
+            }
 
             Following::Records(records) => {
                 let arrived = records.take().await;
@@ -390,17 +375,12 @@ impl Tail {
         match &mut self.search {
             Search::Nowhere => Following::Looking,
             Search::Named { projects, session } => following(named(projects, session).await),
-            Search::Rollout {
-                sessions,
-                worktree,
-                launched,
-            } => following(rollout(sessions, worktree, *launched).await),
             Search::Updates { sessions, session } => following(updates(sessions, session).await),
             Search::Brain(brain) => following(brain.looked(pool, event_id).await),
             // Nothing to look for, the export doing its own finding on every
             // poll — as a store's reader does.
             Search::Parsed(reader) => Following::Entries(Box::new(
-                crate::harness::plugged::Entries::of(reader.clone(), 0),
+                crate::harness::plugged::Entries::of(reader.clone()),
             )),
             Search::Records {
                 database,
@@ -635,28 +615,31 @@ pub(crate) enum Carried {
         taken: i64,
     },
 
-    /// A plugin harness's record, read by its component, and how many entries
-    /// it held before the session started — see
+    /// A plugin harness's record, read by its component, and where its
+    /// reading of it had got to before the session started — see
     /// [`crate::harness::plugged::Entries`].
     Entries {
-        /// Which is where this session's Transcript opens.
-        taken: usize,
+        /// The id the record was found under, which is the one the harness is
+        /// told to resume.
+        session: String,
+
+        /// And the cursor its last answer gave, which is where this session's
+        /// Transcript opens.
+        cursor: String,
     },
 }
 
 /// The log of the session named `session`, as something a session launched under
 /// `profile` could carry on from — see [`Carried`].
 ///
-/// **Four harnesses, and each looks for its record the way its own resume does.**
+/// **Each harness looks for its record the way its own resume does.**
 /// Claude's lands where this device would have written one, so it is the lookup
 /// the Transcript makes. Grok Build's arrives still filed under the *sending*
 /// device's name for the *sending* device's Worktree, so it is relocated before
-/// there is anything here to resume against — see [`relocated`]. Codex's is filed
-/// by the date it was written rather than by anywhere, so it crosses to the same
-/// relative path it left and nothing has to be put right — but nothing names it
-/// either, codex having taken no session id at launch, so it is **searched for by
-/// the id it gives itself**: see [`declares`], and [`in_the_store`]. And
-/// OpenCode's is not a log at all but a row of the one database its account keeps,
+/// there is anything here to resume against — see [`relocated`]. A plugin
+/// harness's is its component's to find, by the id the session was named or gave
+/// itself — a store filed by date crossing to the same relative path it left.
+/// And OpenCode's is not a log at all but a row of the one database its account keeps,
 /// which crosses whole — so what is looked for is the row, and what has to be put
 /// right is the directory it records, opencode resuming a session in the directory
 /// its row names rather than in the one it was started in. See
@@ -678,11 +661,7 @@ pub(crate) enum Carried {
 /// is being started in (checked against claude 2.1.278, which resumes a log filed
 /// under another directory's entry). Grok is the other way about, and that is what
 /// the relocation is for: it resolves a resume against the directory it is started
-/// in, so a log filed anywhere else in the store is a log it will not find. Codex
-/// is Claude's way again and further: a rollout named on its line is read out of
-/// the store wherever it sits and whatever directory it records — checked against
-/// codex 0.155.1, which resumed a rollout recording another machine's path from a
-/// directory that machine never had.
+/// in, so a log filed anywhere else in the store is a log it will not find.
 ///
 /// `worktree` is the directory the session about to be launched runs in, which is
 /// the path the relocation names its destination by. A Conversation with none never
@@ -728,18 +707,6 @@ pub(crate) async fn grok_carried(
 ) -> Option<Carried> {
     as_far_as_it_got(relocated(&grok_sessions(account, memory, home), session, worktree).await?)
         .await
-}
-
-/// Codex's, searched for in its store by the id it gave itself — see
-/// [`in_the_store`].
-pub(crate) async fn codex_carried(
-    account: &Path,
-    memory: bool,
-    session: &str,
-    _worktree: &Path,
-    home: &crate::sandbox::Home,
-) -> Option<Carried> {
-    as_far_as_it_got(in_the_store(&codex_rollouts(account, memory, home), session).await?).await
 }
 
 /// OpenCode's, a row of its one database — see [`records::carried`].
@@ -967,38 +934,9 @@ pub(crate) fn claude_search(
     }
 }
 
-/// And where codex keeps its rollouts: under the one directory its account is
-/// where the Profile shares its memory, and under the session's own root on the
-/// host where it does not — for Claude's reason above, `sessions/` being joined
-/// whole rather than by entry.
-///
-/// A Codex session with no Worktree has nothing to match a rollout against,
-/// and a session with no Worktree never starts — see
-/// [`crate::sessions::Sessions::start`]. So that is a case that cannot happen
-/// rather than one that is given up on, and it is given up on rather than
-/// guessed at.
-pub(crate) fn codex_search(
-    account: &Path,
-    memory: bool,
-    home: &crate::sandbox::Home,
-    _session: &str,
-    worktree: Option<&Path>,
-    launched: SystemTime,
-) -> Search {
-    let Some(worktree) = worktree else {
-        return Search::Nowhere;
-    };
-
-    Search::Rollout {
-        sessions: codex_rollouts(account, memory, home),
-        worktree: worktree.to_owned(),
-        launched: to_the_second(launched),
-    }
-}
-
 /// And where grok keeps its sessions: under the one directory its account is
 /// where the Profile shares its memory, and under the session's own root on the
-/// host where it does not, for Codex's reason. Grok Build names its session at
+/// host where it does not, for Claude's reason. Grok Build names its session at
 /// launch, so the log is named rather than found — the Worktree and the moment
 /// are nothing to it.
 pub(crate) fn grok_search(
@@ -1021,13 +959,14 @@ pub(crate) fn grok_search(
 /// And where opencode keeps its sessions, which is one database under the data
 /// half of the two directories its account is where the Profile shares its
 /// memory, and in the session's own root on the host where it does not — the
-/// data directory being joined whole, for Codex's reason. The name of the file
+/// data directory being joined whole, for Claude's reason. The name of the file
 /// is the one the sandbox pinned rather than the one opencode would have chosen
 /// for itself — see [`crate::sandbox`].
 ///
 /// And an OpenCode session with no Worktree has nothing to match a session in
-/// that store against, which is the Codex case word for word: it cannot
-/// happen, and it is given up on rather than guessed at.
+/// that store against, and a session with no Worktree never starts — see
+/// [`crate::sessions::Sessions::start`]. So it cannot happen, and it is given
+/// up on rather than guessed at.
 pub(crate) fn opencode_search(
     account: &Path,
     memory: bool,
@@ -1049,10 +988,10 @@ pub(crate) fn opencode_search(
 
 /// And where agy keeps its conversations: under the one directory of the
 /// account it writes in where the Profile shares its memory, and under the
-/// session's own root on the host where it does not, for Codex's reason. Found
+/// session's own root on the host where it does not, for Claude's reason. Found
 /// by Worktree and moment, as opencode's are.
 ///
-/// An agy session with no Worktree is the Codex case word for word.
+/// An agy session with no Worktree is the OpenCode case word for word.
 pub(crate) fn agy_search(
     account: &Path,
     memory: bool,
@@ -1087,15 +1026,6 @@ fn claude_projects(claude_dir: &Path, memory: bool, home: &crate::sandbox::Home)
     match memory {
         true => claude_dir.join("projects"),
         false => home.claude_projects(),
-    }
-}
-
-/// And where Codex keeps its rollouts for one, which is the same two answers for
-/// the same reason — see [`claude_projects`].
-fn codex_rollouts(account: &Path, memory: bool, home: &crate::sandbox::Home) -> PathBuf {
-    match memory {
-        true => account.join(ROLLOUTS),
-        false => home.codex_sessions(),
     }
 }
 
@@ -1162,7 +1092,7 @@ fn agy_log(store: &Path, conversation: &str) -> PathBuf {
 /// transcript under `brain/<id>/`, appended to as each step finishes.
 ///
 /// **The id goes on the record the moment it is found**, before the log is,
-/// for the reason Codex's and opencode's do: it is what a device that never ran
+/// for the reason opencode's does: it is what a device that never ran
 /// this session resumes by, and a conversation can be resumed whether or not
 /// its log was ever written.
 pub(crate) struct Brain {
@@ -1280,283 +1210,40 @@ async fn named(projects: &Path, session: &str) -> Option<PathBuf> {
     None
 }
 
-/// The rollout a Codex session is keeping of itself: the log under the
-/// account's session store whose first line names `worktree` and which has been
-/// written to since `launched`.
-///
-/// Two tests rather than one, because neither is enough on its own. The
-/// Worktree alone would find whatever earlier session last worked in it, and
-/// the moment alone would find whichever Conversation happened to start a
-/// session at the same time — Verkstead runs as many at once as the machine
-/// will take. Together they are one session: one Conversation per Worktree and
-/// one session per Conversation, so a rollout that names this Worktree and
-/// appeared after this session started is this session's.
-///
-/// The newest of them where there is more than one, because the moment is only
-/// as fine as the filesystem's clock — see [`to_the_second`].
-async fn rollout(sessions: &Path, worktree: &Path, launched: SystemTime) -> Option<PathBuf> {
-    let mut found: Option<(SystemTime, PathBuf)> = None;
-
-    for day in days(sessions, launched).await {
-        let Ok(mut entries) = tokio::fs::read_dir(&day).await else {
-            continue;
-        };
-
-        while let Ok(Some(entry)) = entries.next_entry().await {
-            let log = entry.path();
-
-            if !is_rollout(&log) {
-                continue;
-            }
-
-            let Some(written) = written(&log).await.filter(|written| *written >= launched) else {
-                continue;
-            };
-
-            // The two cheap tests first, and the file opened only for what
-            // survives them: reading somebody else's first line is the
-            // expensive one, and by here it is being read of this session's own
-            // log and hardly anything else.
-            if found.as_ref().is_some_and(|(newest, _)| *newest >= written) {
-                continue;
-            }
-
-            if names(&log, worktree).await {
-                found = Some((written, log));
-            }
-        }
-    }
-
-    found.map(|(_, log)| log)
-}
-
-/// The day directories of `sessions` written into since `launched`, which is
-/// everywhere a log of a session launched then can be.
-///
-/// Codex files its rollouts by date, `sessions/YYYY/MM/DD`, and creating a file
-/// touches the directory it lands in — so the day this session's log was
-/// written in is a directory at least as new as the log, and every other day in
-/// the store is a day the log is not in. The dates themselves are never read:
-/// which day codex thinks it is, in which timezone, is codex's business.
-///
-/// The years and the months above them are walked whole, because the same trick
-/// does not work on them: a day directory created this morning left this
-/// month's directory older than a session launched this afternoon. There are
-/// twelve months in a year and a handful of years in a store, so what that
-/// costs is a directory listing of a directory of directories.
-async fn days(sessions: &Path, launched: SystemTime) -> Vec<PathBuf> {
-    let mut days = Vec::new();
-
-    for year in directories(sessions).await {
-        for month in directories(&year).await {
-            for day in directories(&month).await {
-                if written(&day)
-                    .await
-                    .is_some_and(|written| written >= launched)
-                {
-                    days.push(day);
-                }
-            }
-        }
-    }
-
-    days
-}
-
-/// The rollout under `sessions` that says it is the session called `session`, as
-/// something a resume could be asked against.
-///
-/// **The one search here with nothing but a name to go on.** The Transcript's own
-/// finder has a Worktree and a moment, because it is looking for the log of a
-/// session it just launched; this is looking for the log of a session that ran on
-/// another machine, whose Worktree was that machine's path and whose moment was
-/// before the move. What is left is the id, which is the id codex chose and wrote
-/// in its own opening line — so every rollout in the store is asked what it is
-/// until one of them answers to it. See [`declares`].
-///
-/// **Its own line rather than its name.** A rollout's filename carries the id too,
-/// and reading it off there would be resting on codex's spelling of a filename
-/// rather than on what the file says about itself (ADR 0006) — and on a store that
-/// has compressed or renamed a log it would be reading a name that is no longer
-/// the one codex would write.
-///
-/// What it costs is one small read per rollout, once per arrival: the opening line
-/// and no more of a file that runs to megabytes. The store it is walked on is
-/// nearly always the arriving one, which holds this Conversation's rollouts and
-/// nothing else — the memory sync picks them out by the Worktree they name — and on
-/// the way home it is an account's whole store, read once as the session starts.
-///
-/// `None` is every way the log is not here: a store the sync did not reach, a
-/// rollout that was never written, and an id nothing in the store answers to —
-/// which is what a session whose own name was never found has. Each of them is
-/// Verkstead's own Resume.
-async fn in_the_store(sessions: &Path, session: &str) -> Option<PathBuf> {
-    for year in directories(sessions).await {
-        for month in directories(&year).await {
-            for day in directories(&month).await {
-                let Ok(mut entries) = tokio::fs::read_dir(&day).await else {
-                    continue;
-                };
-
-                while let Ok(Some(entry)) = entries.next_entry().await {
-                    let log = entry.path();
-
-                    if !is_rollout(&log) {
-                        continue;
-                    }
-
-                    if declares(&log).await.as_deref() == Some(session) {
-                        return Some(log);
-                    }
-                }
-            }
-        }
-    }
-
-    None
-}
-
-/// Whether the first line of `log` says its session was working in `worktree`.
-///
-/// A rollout opens with the session's own metadata, and in it is the directory
-/// codex was launched in — which for a Verkstead session is the Conversation's
-/// Worktree, bound into the sandbox at the path it has outside one so that the
-/// two are the same string.
-///
-/// One line rather than the file, because one line is the whole of what
-/// identifies a rollout and the rest of it is the Transcript's to keep and the
-/// renderer's to read. Bounded, because this runs against a file somebody else
-/// is writing: a poll can land before the first line has its newline, which is
-/// a rollout that is not identifiable *yet* and the next poll asks again. A
-/// first line longer than the bound is one that never becomes identifiable, and
-/// that session stays Capture-only — the same answer as a log that never
-/// appeared.
-async fn names(log: &Path, worktree: &Path) -> bool {
-    let Some(opening) = opening(log).await else {
-        return false;
-    };
-
-    verkstead_render::rollout_cwd(&opening).is_some_and(|cwd| Path::new(&cwd) == worktree)
-}
-
-/// And the id that same line gives the session, which is what `codex resume`
-/// takes — see [`verkstead_render::rollout_session`].
-///
-/// `None` for a rollout whose opening line has not been written yet, one that is
-/// not a rollout at all, and one whose line this build cannot read. Each of them
-/// is a session with no name on the record, which is Verkstead's own Resume
-/// wherever that session's conversation is asked to be carried on.
-async fn declares(log: &Path) -> Option<String> {
-    verkstead_render::rollout_session(&opening(log).await?)
-}
-
-/// The line a rollout opens with, which is the whole of what says what it is.
-///
-/// One line rather than the file, for [`names`]'s reason, and bounded for its
-/// reason too: this runs against a file somebody else is writing, and a poll can
-/// land before the first line has its newline.
-async fn opening(log: &Path) -> Option<String> {
-    let file = tokio::fs::File::open(log).await.ok()?;
-    let mut first = Vec::new();
-
-    BufReader::new(file.take(FIRST_LINE))
-        .read_until(b'\n', &mut first)
-        .await
-        .ok()?;
-
-    Some(String::from_utf8_lossy(&first).into_owned())
-}
-
-/// Put the id a found rollout gives itself on the record beside the session that
-/// wrote it — see [`store::found_as`].
-///
-/// **Which is the only moment Verkstead learns a Codex session's name.** It takes
-/// no session id at launch, so the Capture was opened under a name nothing ever
-/// used; what the log turns out to be of is read out of the log itself, and from
-/// here on it is a name like any other — the id a device that never ran this
-/// session is told to resume by.
-///
-/// Every way of failing is the same one: the session keeps the name the Capture
-/// opened with, which no harness answers to, and a resume of it finds no log and
-/// falls through to Verkstead's own Resume. Said in the log rather than to the
-/// human, this being about a Transcript rather than about the work.
-async fn names_itself(pool: &SqlitePool, event_id: i64, log: &Path) {
-    let Some(session) = declares(log).await else {
-        tracing::info!(
-            event_id,
-            log = %log.display(),
-            "the rollout this session's Transcript is read from does not say which session \
-             it is of, so nothing on another device could carry its conversation on",
-        );
-
-        return;
-    };
-
-    if let Err(error) = store::found_as(pool, event_id, &session).await {
-        tracing::error!(error = ?error, event_id, session, "writing down what a Codex session calls itself failed, so nothing on another device could carry its conversation on");
-    }
-}
-
-/// And the same for an OpenCode session, whose name is the id its own row in the
+/// Put the id an OpenCode session turns out to be on the record beside it —
+/// see [`store::found_as`]: the id its own row in the
 /// store turned out to be under — see [`records::Reader::found_itself`].
 ///
-/// **The other backend Verkstead cannot name**, and the same answer as Codex's
-/// for the same reason: the session id is opencode's own, so the Capture was
-/// opened under a name nothing ever uses and the row found in the store is where
-/// the real one is read. From here on it is a name like any other — the id
+/// **A backend Verkstead cannot name**: the session id is opencode's own, so
+/// the Capture was opened under a name nothing ever uses and the row found in
+/// the store is where the real one is read. From here on it is a name like any other — the id
 /// `opencode --session` takes, and the one a device that never ran this session
 /// is told to resume by.
 ///
 /// No reading of somebody else's format, which is the difference: the finder
 /// asked the store which session this is and the store answered with its id, so
-/// there is nothing here to fail at. What can fail is the write, and it fails the
-/// way Codex's does — the session keeps a name no harness answers to, and a
-/// resume of it finds no row and falls through to Verkstead's own Resume.
+/// there is nothing here to fail at. What can fail is the write: the session
+/// keeps a name no harness answers to, and a resume of it finds no row and
+/// falls through to Verkstead's own Resume.
 async fn found_in_the_store(pool: &SqlitePool, event_id: i64, session: &str) {
     if let Err(error) = store::found_as(pool, event_id, session).await {
         tracing::error!(error = ?error, event_id, session, "writing down which session of its store an OpenCode session is failed, so nothing on another device could carry its conversation on");
     }
 }
 
-/// How much of a rollout is read to identify it. Generous against the eighteen
-/// kilobytes codex 0.149.0 opens one with — the session's whole system prompt
-/// is in there — and small against a log that runs to megabytes.
-const FIRST_LINE: u64 = 256 * 1024;
-
-/// Whether `log` is a rollout being written rather than one of the other things
-/// codex keeps beside them.
+/// And the same for a plugin harness that names itself, whose name is the id
+/// its component's `parse-transcript` answered with — see
+/// [`crate::harness::plugged::Entries::found_itself`].
 ///
-/// The store holds more than the live logs: codex compresses the older ones,
-/// and it is moving its index of them into SQLite in the same tree. What this
-/// needs is to ignore whatever is not a plain JSONL rollout, rather than to keep
-/// up with either.
-fn is_rollout(log: &Path) -> bool {
-    log.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with(ROLLOUT) && name.ends_with(ROLLOUT_SUFFIX))
-}
-
-/// What codex calls one: `rollout-<timestamp>-<uuid>.jsonl`. Named for the
-/// reason [`ROLLOUTS`] is.
-const ROLLOUT: &str = "rollout-";
-const ROLLOUT_SUFFIX: &str = ".jsonl";
-
-/// A moment as the coarsest filesystem would have recorded it — the whole
-/// second it fell in.
-///
-/// What the finder compares a rollout's modification time against, and that
-/// comparison is only as fine as the clock the filesystem stamped it with. A
-/// store on a filesystem keeping whole seconds would stamp a rollout written a
-/// moment after launch with the second the session started in, and the
-/// session's own log would then look older than the session.
-///
-/// A second of slack costs nothing. What it can let in is the rollout of an
-/// earlier session in the same Worktree that ended in the very second this one
-/// started, and [`rollout`] takes the newest of what it finds anyway.
-fn to_the_second(moment: SystemTime) -> SystemTime {
-    match moment.duration_since(SystemTime::UNIX_EPOCH) {
-        Ok(since) => SystemTime::UNIX_EPOCH + Duration::from_secs(since.as_secs()),
-        Err(_) => moment,
+/// **Which is the only moment Verkstead learns such a session's name** — one
+/// that takes none at launch: the component finds the record and
+/// says what it is of, and from here on that is the session's name, which a
+/// device that never ran the session is told to resume by. A write that fails
+/// leaves the name the Capture opened with, which no harness answers to, and a
+/// resume of it falls through to Verkstead's own Resume.
+async fn named_by_its_harness(pool: &SqlitePool, event_id: i64, session: &str) {
+    if let Err(error) = store::found_as(pool, event_id, session).await {
+        tracing::error!(error = ?error, event_id, session, "writing down what a plugin harness's session calls itself failed, so nothing on another device could carry its conversation on");
     }
 }
 
@@ -1617,12 +1304,6 @@ async fn directories(under: &Path) -> Vec<PathBuf> {
     directories
 }
 
-/// When `path` was last written to, asked without blocking the loop doing the
-/// asking.
-async fn written(path: &Path) -> Option<SystemTime> {
-    tokio::fs::metadata(path).await.ok()?.modified().ok()
-}
-
 /// The newest thing the agent said in a batch of Transcript lines, or `None`
 /// where the batch was all tools, thinking and bookkeeping.
 ///
@@ -1657,6 +1338,8 @@ async fn is_directory(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::time::Duration;
 
     /// An agent writes what it is about to do, does it, and says how it went.
     /// The row reads the last of those, and the end of it: what a session is
@@ -1707,6 +1390,58 @@ mod tests {
         std::fs::write(&log, format!("{}\n", meta(uuid, cwd))).unwrap();
 
         log
+    }
+
+    /// The id Codex's plugin — its component's `parse-transcript` — names the
+    /// session launched in `worktree` at `launched` by, out of the rollouts in
+    /// `sessions`: what a Tail following that session writes down. None where
+    /// it finds no rollout of it.
+    async fn rollout(sessions: &Path, worktree: &Path, launched: SystemTime) -> Option<String> {
+        let mut entries =
+            crate::harness::plugged::Entries::of(crate::harness::plugged::Reader::of_built_in(
+                store::AgentType::CODEX,
+                sessions.parent().unwrap(),
+                None,
+                Some(worktree),
+                launched,
+            ));
+        entries.take().await;
+        entries.found_itself()
+    }
+
+    /// Whether Codex's plugin finds the rollout of the session called
+    /// `session` in `sessions` by that id alone, as a resume on a device that
+    /// never ran it does — answering the id where it does.
+    async fn in_the_store(sessions: &Path, session: &str) -> Option<String> {
+        let lines =
+            crate::harness::plugged::Entries::of(crate::harness::plugged::Reader::of_built_in(
+                store::AgentType::CODEX,
+                sessions.parent().unwrap(),
+                Some(session),
+                None,
+                SystemTime::UNIX_EPOCH,
+            ))
+            .take()
+            .await;
+
+        (!lines.is_empty()).then(|| session.to_owned())
+    }
+
+    /// The id Codex's plugin reads off `log`, a rollout in a day directory of
+    /// a store whose sessions all worked in [`RATE_LIMITING`].
+    async fn declares(log: &Path) -> Option<String> {
+        let sessions = log.ancestors().nth(4).unwrap();
+        rollout(sessions, Path::new(RATE_LIMITING), SystemTime::UNIX_EPOCH).await
+    }
+
+    const RATE_LIMITING: &str = "/srv/worktrees/rate-limiting";
+
+    /// A moment as the coarsest filesystem would have recorded it — the
+    /// whole second it fell in — which is what a rollout's modification time
+    /// is compared against.
+    fn to_the_second(moment: SystemTime) -> SystemTime {
+        let since = moment.duration_since(SystemTime::UNIX_EPOCH).unwrap();
+        SystemTime::UNIX_EPOCH + Duration::from_secs(since.as_secs())
     }
 
     /// A moment before anything the test wrote, which is what a session
@@ -1760,18 +1495,18 @@ mod tests {
         let rate = PathBuf::from("/srv/worktrees/rate-limiting");
         let tables = PathBuf::from("/srv/worktrees/tables");
 
-        let of_rate = wrote(&sessions, "2026/08/30", "aaaa", &rate);
-        let of_tables = wrote(&sessions, "2026/08/30", "bbbb", &tables);
+        wrote(&sessions, "2026/08/30", "aaaa", &rate);
+        wrote(&sessions, "2026/08/30", "bbbb", &tables);
 
         assert_eq!(
-            rollout(&sessions, &rate, launched).await,
-            Some(of_rate),
+            rollout(&sessions, &rate, launched).await.as_deref(),
+            Some("aaaa"),
             "the session in the rate-limiting Worktree should follow the rollout \
              naming it"
         );
         assert_eq!(
-            rollout(&sessions, &tables, launched).await,
-            Some(of_tables),
+            rollout(&sessions, &tables, launched).await.as_deref(),
+            Some("bbbb"),
             "and the one beside it should follow the other"
         );
     }
@@ -1800,11 +1535,11 @@ mod tests {
              the session is writing"
         );
 
-        let now = wrote(&sessions, "2026/08/30", "bbbb", &worktree);
+        wrote(&sessions, "2026/08/30", "bbbb", &worktree);
 
         assert_eq!(
-            rollout(&sessions, &worktree, launched).await,
-            Some(now),
+            rollout(&sessions, &worktree, launched).await.as_deref(),
+            Some("bbbb"),
             "and the one that appeared after it is"
         );
     }
@@ -1857,8 +1592,10 @@ mod tests {
         std::fs::write(&log, format!("{whole}\n")).unwrap();
 
         assert_eq!(
-            rollout(&sessions, &worktree, a_moment_ago()).await,
-            Some(log)
+            rollout(&sessions, &worktree, a_moment_ago())
+                .await
+                .as_deref(),
+            Some("aaaa")
         );
     }
 
@@ -1882,11 +1619,11 @@ mod tests {
             aged(&day, a_day);
         }
 
-        let tomorrow = wrote(&sessions, "2026/08/31", "aaaa", &worktree);
+        wrote(&sessions, "2026/08/31", "aaaa", &worktree);
 
         assert_eq!(
-            rollout(&sessions, &worktree, launched).await,
-            Some(tomorrow)
+            rollout(&sessions, &worktree, launched).await.as_deref(),
+            Some("aaaa")
         );
     }
 
@@ -1969,17 +1706,17 @@ mod tests {
         // this device does not have — and which nothing here reads.
         let over_there = PathBuf::from("/var/lib/verkstead/worktrees/rate-limiting");
 
-        let beside = wrote(&sessions, "2026/08/29", "aaaa", &over_there);
-        let carried = wrote(&sessions, "2026/08/30", "bbbb", &over_there);
+        wrote(&sessions, "2026/08/29", "aaaa", &over_there);
+        wrote(&sessions, "2026/08/30", "bbbb", &over_there);
 
         assert_eq!(
-            in_the_store(&sessions, "bbbb").await,
-            Some(carried),
+            in_the_store(&sessions, "bbbb").await.as_deref(),
+            Some("bbbb"),
             "the rollout naming that session is the one to resume against",
         );
         assert_eq!(
-            in_the_store(&sessions, "aaaa").await,
-            Some(beside),
+            in_the_store(&sessions, "aaaa").await.as_deref(),
+            Some("aaaa"),
             "and the one beside it under another day is found the same way",
         );
     }

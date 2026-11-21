@@ -234,6 +234,7 @@ describe("the Built-in group", () => {
     expect(PLUGINS.built_in.map((row) => row.name)).toEqual([
       "Verkstead",
       "Activities",
+      "Codex",
       ".NET",
       "Go",
       "JVM",
@@ -241,6 +242,33 @@ describe("the Built-in group", () => {
       "Python",
       "Rust & C/C++",
     ]);
+  });
+});
+
+describe("Codex's row", () => {
+  /// A built-in Agent plugin: ticked, whose tick is the one switch for
+  /// Codex, and with nothing else on its row.
+  it("has a tick and nothing else", async () => {
+    const codex = PLUGINS.built_in.find((row) => row.name === "Codex")!;
+    const fetching = serving(
+      whenever("/api/ui/plugins", json(PLUGINS)),
+      whenever(`/api/ui/plugins/${codex.uuid}/enabled`, json(PLUGINS), "POST"),
+    );
+    pane();
+
+    const row = await theRow("Codex");
+    const tick = row.querySelector("input[type=checkbox]") as HTMLInputElement;
+    expect(tick.checked).toBe(true);
+    expect(row.querySelectorAll("button")).toHaveLength(0);
+
+    fireEvent.click(tick);
+    await waitFor(() =>
+      expect(
+        fetching.mock.calls.some(([asked]) =>
+          String(asked).endsWith(`/plugins/${codex.uuid}/enabled`),
+        ),
+      ).toBe(true),
+    );
   });
 });
 

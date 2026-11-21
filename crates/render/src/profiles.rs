@@ -171,6 +171,19 @@ pub struct HarnessInstall {
     /// The lines that install it, which the wizard's install run runs on a
     /// press and at no other time.
     pub commands: Vec<String>,
+
+    /// The package npm carries it as, which the wizard installs as it does a
+    /// built-in's npm package.
+    pub npm: Option<String>,
+
+    /// The Homebrew formula it is.
+    pub brew: Option<String>,
+
+    /// Or the Homebrew cask.
+    pub cask: Option<String>,
+
+    /// And the nixpkgs attribute, which the NixOS tab's line names.
+    pub nix: Option<String>,
 }
 
 /// One model a harness declares: what it travels as, and what a human reads

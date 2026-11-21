@@ -103,9 +103,9 @@ export type Guide = {
   /// tab with a gap in it is a row somebody is left staring at.
   rows: Record<"Sandbox" | "Git" | "Gh" | "Wsl", Instruction>;
 
-  /// And one per built-in harness, by its id: what the five hold today. A
-  /// plugin's harness is not here, its instruction being what its manifest
-  /// declares for the machine the server is on — see [`declared`].
+  /// And one per harness built into the server, by its id. A plugin's
+  /// harness is not here, Codex's included, its instruction being what its
+  /// manifest declares for the machine the server is on — see [`declared`].
   harnesses: Record<BuiltIn, Instruction>;
 
   /// And what every command on this tab wants first, where they all want the
@@ -129,10 +129,15 @@ export type Guide = {
   /// line, and a sentence rather than an instruction, because there is nothing
   /// here to run.
   about?: string;
+
+  /// And what a Linux tab installs npm with, which a plugin harness that npm
+  /// carries is told it wants first — the same words the built-ins' npm lines
+  /// say on that tab.
+  node?: string;
 };
 
 /// The harnesses built into Verkstead, by the ids the wire spells them as.
-type BuiltIn = "Claude" | "Codex" | "Grok" | "OpenCode" | "Agy";
+type BuiltIn = "Claude" | "Grok" | "OpenCode" | "Agy";
 
 /// The nine tabs, in the order they are drawn — the order
 /// `verkstead_render::Distro` is written in, which is the two Macs beside each
@@ -429,10 +434,6 @@ export const GUIDES: Record<Distro, Guide> = {
 
     harnesses: {
       Claude: CLAUDE_ON_A_MAC,
-      Codex: {
-        command: "brew install --cask codex",
-        note: "A cask rather than a formula.",
-      },
       Grok: GROK_UNIX,
       OpenCode: { command: "brew install opencode" },
       Agy: AGY_ON_A_MAC,
@@ -486,17 +487,6 @@ export const GUIDES: Record<Distro, Guide> = {
 
       Claude: CLAUDE_ON_A_MAC,
 
-      // Neither a script nor a package this machine can use: the npm the other
-      // Unix tabs install it from wants a node this Mac has no package manager
-      // to fetch, and the cask beside it is Homebrew's.
-      Codex: {
-        link: "https://github.com/openai/codex/releases",
-        note:
-          "Codex has no installer script, and the other tabs' package needs " +
-          "npm. Put the binary in ~/.local/bin, which is on every Mac " +
-          "session's PATH.",
-      },
-
       Grok: GROK_UNIX,
       OpenCode: OPENCODE_NATIVE,
       Agy: AGY_ON_A_MAC,
@@ -525,7 +515,6 @@ export const GUIDES: Record<Distro, Guide> = {
         CLAUDE_NATIVE_WINDOWS,
         windowsNpm("@anthropic-ai/claude-code"),
       ),
-      Codex: windowsNpm("@openai/codex"),
       Grok: GROK_WINDOWS,
       OpenCode: windowsNpm("opencode-ai"),
       Agy: AGY_WINDOWS,
@@ -548,7 +537,6 @@ export const GUIDES: Record<Distro, Guide> = {
 
     harnesses: {
       Claude: orElse(CLAUDE_NATIVE, nixos("claude-code")),
-      Codex: nixos("codex"),
       Grok: GROK_UNIX,
       OpenCode: nixos("opencode"),
       Agy: AGY_UNIX,
@@ -557,6 +545,7 @@ export const GUIDES: Record<Distro, Guide> = {
 
   Ubuntu: {
     title: "Ubuntu",
+    node: "sudo apt install nodejs npm",
     rows: {
       Sandbox: { command: "sudo apt install bubblewrap" },
       Git: { command: "sudo apt install git" },
@@ -569,7 +558,6 @@ export const GUIDES: Record<Distro, Guide> = {
         CLAUDE_NATIVE,
         npm("@anthropic-ai/claude-code", "sudo apt install nodejs npm"),
       ),
-      Codex: npm("@openai/codex", "sudo apt install nodejs npm"),
       Grok: GROK_UNIX,
       OpenCode: npm("opencode-ai", "sudo apt install nodejs npm"),
       Agy: AGY_UNIX,
@@ -578,6 +566,7 @@ export const GUIDES: Record<Distro, Guide> = {
 
   Fedora: {
     title: "Fedora",
+    node: "sudo dnf install nodejs npm",
     rows: {
       Sandbox: { command: "sudo dnf install bubblewrap" },
       Git: { command: "sudo dnf install git" },
@@ -590,7 +579,6 @@ export const GUIDES: Record<Distro, Guide> = {
         CLAUDE_NATIVE,
         npm("@anthropic-ai/claude-code", "sudo dnf install nodejs npm"),
       ),
-      Codex: npm("@openai/codex", "sudo dnf install nodejs npm"),
       Grok: GROK_UNIX,
       OpenCode: npm("opencode-ai", "sudo dnf install nodejs npm"),
       Agy: AGY_UNIX,
@@ -599,6 +587,7 @@ export const GUIDES: Record<Distro, Guide> = {
 
   Debian: {
     title: "Debian",
+    node: "sudo apt install nodejs npm",
     rows: {
       Sandbox: { command: "sudo apt install bubblewrap" },
       Git: { command: "sudo apt install git" },
@@ -611,7 +600,6 @@ export const GUIDES: Record<Distro, Guide> = {
         CLAUDE_NATIVE,
         npm("@anthropic-ai/claude-code", "sudo apt install nodejs npm"),
       ),
-      Codex: npm("@openai/codex", "sudo apt install nodejs npm"),
       Grok: GROK_UNIX,
       OpenCode: npm("opencode-ai", "sudo apt install nodejs npm"),
       Agy: AGY_UNIX,
@@ -620,6 +608,7 @@ export const GUIDES: Record<Distro, Guide> = {
 
   Arch: {
     title: "Arch",
+    node: "sudo pacman -S npm",
     rows: {
       Sandbox: { command: "sudo pacman -S bubblewrap" },
       Git: { command: "sudo pacman -S git" },
@@ -632,7 +621,6 @@ export const GUIDES: Record<Distro, Guide> = {
         CLAUDE_NATIVE,
         npm("@anthropic-ai/claude-code", "sudo pacman -S npm"),
       ),
-      Codex: npm("@openai/codex", "sudo pacman -S npm"),
       Grok: GROK_UNIX,
       OpenCode: npm("opencode-ai", "sudo pacman -S npm"),
       Agy: AGY_UNIX,
@@ -643,6 +631,7 @@ export const GUIDES: Record<Distro, Guide> = {
   /// command that would be wrong on the machine it was pasted into.
   OtherLinux: {
     title: "Other Linux",
+    node: "install your distribution's nodejs and npm",
     rows: {
       Sandbox: {
         note:
@@ -667,7 +656,6 @@ export const GUIDES: Record<Distro, Guide> = {
           "install your distribution's nodejs and npm",
         ),
       ),
-      Codex: npm("@openai/codex", "install your distribution's nodejs and npm"),
       Grok: GROK_UNIX,
       OpenCode: npm("opencode-ai", "install your distribution's nodejs and npm"),
       Agy: AGY_UNIX,
@@ -702,14 +690,20 @@ function theAccount(directory: string | null): Instruction {
 }
 
 /// What a plugin's harness is told, out of what its manifest declares: the
-/// commands that install it, the link to its own instructions, or — where it
-/// declares neither — that it has to be found by hand.
+/// package a tab's own package manager carries it as, said the way that tab
+/// says a built-in's — see [`packaged`] — or else the commands that install
+/// it, the link to its own instructions, or, where it declares none of those,
+/// that it has to be found by hand.
 ///
-/// **The same on every tab.** A manifest's commands are read for the platform
-/// the server is on, so another tab has no other commands to show; and they are
+/// **Read for the platform the server is on.** A manifest's install is, so
+/// another platform's tab has only what this one's says to show; and it is
 /// what the run would have run, which is what this screen is the by-hand
 /// version of.
-function declared(install: HarnessInstall | null | undefined): Instruction {
+function declared(
+  install: HarnessInstall | null | undefined,
+  distro: Distro,
+  name: string,
+): Instruction {
   const commands = install?.commands ?? [];
   // A web page and nothing else, as the server reads a manifest's: what is
   // drawn here is a link the human presses, and a plugin is not to put one in
@@ -717,6 +711,12 @@ function declared(install: HarnessInstall | null | undefined): Instruction {
   const link = /^https?:\/\//i.test(install?.instructions ?? "")
     ? (install?.instructions ?? undefined)
     : undefined;
+
+  const byPackage = install ? packaged(install, distro, name, link) : undefined;
+
+  if (byPackage !== undefined) {
+    return byPackage;
+  }
 
   if (commands.length === 0 && link === undefined) {
     return { note: "Its plugin doesn't say how to install it." };
@@ -729,6 +729,63 @@ function declared(install: HarnessInstall | null | undefined): Instruction {
     ...(link !== undefined ? { link } : {}),
     note: "As its plugin declares it for the machine Verkstead runs on.",
   };
+}
+
+/// A plugin harness's package, as `distro`'s tab says a built-in's: npm's
+/// with the tab's own node line, a formula or a cask on the Mac with a
+/// Homebrew, the nixpkgs attribute on NixOS — or `undefined` where the
+/// manifest names none this tab installs from.
+///
+/// **And the Intel Mac's sentence**, where it names a Homebrew one: Homebrew
+/// has dropped that Mac, so what is left is the binary its own instructions
+/// offer, in the directory every Mac session looks in — the words the
+/// server's run says on the row.
+function packaged(
+  install: HarnessInstall,
+  distro: Distro,
+  name: string,
+  link: string | undefined,
+): Instruction | undefined {
+  switch (distro) {
+    case "MacOs":
+      if (install.cask) {
+        return {
+          command: `brew install --cask ${install.cask}`,
+          note: "A cask rather than a formula.",
+        };
+      }
+      return install.brew
+        ? { command: `brew install ${install.brew}` }
+        : undefined;
+
+    case "MacOsIntel":
+      return install.cask || install.brew
+        ? {
+            ...(link !== undefined ? { link } : {}),
+            note:
+              `${name} installs with Homebrew, which no longer supports Intel ` +
+              "Macs. Put its binary in ~/.local/bin, which every Mac session " +
+              "looks in.",
+          }
+        : undefined;
+
+    case "Windows":
+      return install.npm ? windowsNpm(install.npm) : undefined;
+
+    case "NixOs":
+      return install.nix ? nixos(install.nix) : undefined;
+
+    case "Ubuntu":
+    case "Fedora":
+    case "Debian":
+    case "Arch":
+    case "OtherLinux": {
+      const node = GUIDES[distro].node;
+      return install.npm && node !== undefined
+        ? npm(install.npm, node)
+        : undefined;
+    }
+  }
 }
 
 /// The instruction for one row on one tab, as this machine reads it.
@@ -761,5 +818,6 @@ export function instructionFor(
     return guide.harnesses[dependency as BuiltIn];
   }
 
-  return declared(harness(dependency)?.install);
+  const entry = harness(dependency);
+  return declared(entry?.install, distro, entry?.name ?? "It");
 }

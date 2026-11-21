@@ -711,9 +711,9 @@ fn built_in<'a>(view: &'a PluginsView, name: &str) -> &'a PluginRow {
         .unwrap_or_else(|| panic!("{name} is listed under Built-in in {view:?}"))
 }
 
-/// The six Language plugins are listed under Built-in, each saying the
-/// languages it provides, on with nothing written; the fixture isn't listed,
-/// and a built-in has no Remove or Update.
+/// The six Language plugins are listed under Built-in beside the pack and
+/// Codex, each saying the languages it provides, on with nothing written; the
+/// fixture isn't listed, and a built-in has no Remove or Update.
 #[tokio::test]
 async fn the_language_plugins_are_listed_under_built_in() {
     let (app, _dir) = kept().await;
@@ -723,8 +723,8 @@ async fn the_language_plugins_are_listed_under_built_in() {
     let names: Vec<&str> = view.built_in.iter().map(|row| row.name.as_str()).collect();
     assert_eq!(
         names.len(),
-        8,
-        "the pack, the Activities and six languages: {names:?}"
+        9,
+        "the pack, the Activities, Codex and six languages: {names:?}"
     );
     assert!(!view.built_in.iter().any(|row| row.uuid == FIXTURE));
 

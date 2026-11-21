@@ -88,25 +88,23 @@ use crate::remote::{Elevate, Raised};
 use crate::settings::Settings;
 
 /// Every row of the step a run knows by name, in the order the wizard draws
-/// them — a plugin's harness, which the wizard draws after the built-ins, is
-/// placed there by [`place`].
+/// them: the two it gates on, every built-in harness in
+/// [`crate::harness::every`]'s order — a built-in plugin's among them — and
+/// the two optional rows. A harness an installed plugin declares, which the
+/// wizard draws after the built-ins, is placed there by [`place`].
 ///
 /// Which is the order a run works through them in and the order the packages
 /// are named in. The same order [`Machine::rows`] probes in, held to it by
 /// `the_rows_are_worked_in_the_order_the_wizard_draws_them`: a run installing in
 /// one order under a page listing in another would be two accounts of one
 /// press.
-const ROWS: &[Row] = &[
-    Row::Sandbox,
-    Row::Git,
-    Row::CLAUDE,
-    Row::CODEX,
-    Row::GROK,
-    Row::OPENCODE,
-    Row::AGY,
-    Row::Gh,
-    Row::Wsl,
-];
+fn rows() -> Vec<Row> {
+    [Row::Sandbox, Row::Git]
+        .into_iter()
+        .chain(crate::harness::every().map(|(agent_type, _)| Row::Harness(agent_type)))
+        .chain([Row::Gh, Row::Wsl])
+        .collect()
+}
 
 /// The program an npm harness is installed with, and the name whose absence
 /// puts node into the elevated batch.
@@ -311,15 +309,15 @@ const XCODE_TOOLS: &str = "Git comes with Apple's command line tools. Run \
                            xcode-select --install on that Mac and agree to Apple's own dialog, \
                            which is on its screen rather than a command Verkstead can run for you.";
 
-/// And what the Codex row there says.
-///
-/// Its npm package is what every other Unix tab installs it from and its cask
-/// is what the other Mac's does; a Mac with no Homebrew and no node has
-/// neither, and the binary on its releases page is what is left.
-const CODEX_ON_INTEL: &str = "Codex has no installer script, and the package the other tabs use \
-                              wants an npm this Mac has no package manager to install. Its \
-                              binary is on its releases page, and it goes in ~/.local/bin, \
-                              which every Mac session looks in.";
+/// And what a plugin harness's row there says, where its manifest's macOS
+/// install is a Homebrew package: Homebrew has dropped this Mac, so there is
+/// nothing to run, and the binary its own instructions offer is what is left.
+fn on_an_intel_mac_by_hand(name: &str) -> String {
+    format!(
+        "{name} installs with Homebrew, which no longer supports Intel Macs. Put its binary \
+         in ~/.local/bin, which every Mac session looks in."
+    )
+}
 
 /// And GitHub's own release, which is what a ticked `gh` row runs on the Mac
 /// with no Homebrew to `brew install gh` with.
@@ -456,7 +454,7 @@ struct Run {
 /// The half of a run a reading is drawn from.
 #[derive(Debug)]
 struct Going {
-    /// Every ticked row and where it has got to, in [`ROWS`] order.
+    /// Every ticked row and where it has got to, in [`rows`] order.
     rows: Vec<(Row, Progress)>,
 
     phase: RunPhase,
@@ -1494,14 +1492,18 @@ fn plan(machine: &Machine, ticked: &[Row]) -> Plan {
 
     // The WSL row is the box's rather than any package manager's, so it is
     // worked here and none of the arms below ever sees it — see [`annexing`].
-    // And a plugin's harness is its manifest's, so it is worked here too — see
-    // [`plugging`].
+    // And a plugin's harness is its manifest's commands, so it is worked here
+    // too — see [`plugging`] — unless what its manifest declares is a package
+    // this machine's arm installs, which it then installs as a built-in's.
     let wsl = ticked.contains(&Row::Wsl);
     let (plugged, rows): (Vec<Row>, Vec<Row>) = ticked
         .iter()
         .copied()
         .filter(|row| *row != Row::Wsl)
-        .partition(|row| row.plugged().is_some());
+        .partition(|row| {
+            (row.plugged().is_some() || declared(*row, machine.platform).is_some())
+                && !packaged(distro, *row)
+        });
     let ticked = rows.as_slice();
 
     let mut plan = match distro {
@@ -1527,6 +1529,67 @@ fn plan(machine: &Machine, ticked: &[Row]) -> Plan {
     }
 
     plan
+}
+
+/// How a plugin's harness is installed on `platform`, where `row` is one that
+/// says: a built-in plugin's as its manifest reads for `platform` — see
+/// [`crate::plugins::built_in::agent_install`] — and an installed one's off
+/// its harness.
+fn declared(row: Row, platform: Platform) -> Option<crate::harness::Install<'static>> {
+    let Row::Harness(agent_type) = row else {
+        return None;
+    };
+
+    match agent_type
+        .built_in()
+        .and_then(|built_in| crate::plugins::built_in::agent_install(built_in.uuid, platform))
+    {
+        Some(install) => crate::harness::plugged::installing(install),
+        None => crate::harness::of(agent_type)?.install(),
+    }
+}
+
+/// Whether a plugin's `row` is a package `distro`'s own arm installs, the way
+/// it installs a built-in's: an npm package on a Linux or a Windows, and a
+/// Homebrew one on either Mac — the Intel one sending it to the hint screen,
+/// Homebrew having dropped it. On the two Linuxes with no command at all,
+/// anything packaged goes there too, with that sentence.
+fn packaged(distro: Distro, row: Row) -> bool {
+    let platform = match distro {
+        Distro::MacOs | Distro::MacOsIntel => Platform::MacOs,
+        Distro::Windows => Platform::Windows,
+        _ => Platform::Linux,
+    };
+
+    declared(row, platform).is_some_and(|install| match distro {
+        Distro::MacOs | Distro::MacOsIntel => install.brew.is_some() || install.cask.is_some(),
+        Distro::Windows | Distro::Ubuntu | Distro::Fedora | Distro::Debian | Distro::Arch => {
+            install.npm.is_some()
+        }
+        Distro::NixOs | Distro::OtherLinux => install.npm.is_some() || install.nix.is_some(),
+    })
+}
+
+/// The npm package a plugin's `row` was routed to `platform`'s arm for.
+fn npm_package(row: Row, platform: Platform) -> &'static str {
+    declared(row, platform)
+        .and_then(|install| install.npm)
+        .expect("a plugin's row reaches an npm arm only for its npm package — see `packaged`")
+}
+
+/// And the Homebrew one, a cask before a formula.
+fn brew_package(row: Row) -> Brew {
+    let install = declared(row, Platform::MacOs);
+    match (
+        install.and_then(|install| install.cask),
+        install.and_then(|install| install.brew),
+    ) {
+        (Some(name), _) => Brew { name, cask: true },
+        (None, Some(name)) => Brew { name, cask: false },
+        (None, None) => {
+            unreachable!("a plugin's row reaches a Mac's arm only for its Homebrew package")
+        }
+    }
 }
 
 /// What each ticked harness a plugin declares adds to `plan`, after the
@@ -1993,13 +2056,6 @@ fn on_a_mac(dependency: Row) -> OnAMac {
             cask: false,
         }),
 
-        // Which ships as an application rather than as a formula, so it is a
-        // cask rather than a plain `brew install`.
-        Row::CODEX => OnAMac::Brew(Brew {
-            name: "codex",
-            cask: true,
-        }),
-
         // And the two rows that are their vendors' own installers here, the
         // way they are on a Linux. Claude Code's cask was the row for as long
         // as `~/.local/bin` was somewhere a Mac session could not look; the
@@ -2010,7 +2066,10 @@ fn on_a_mac(dependency: Row) -> OnAMac {
         Row::AGY => OnAMac::Vendor(AGY),
 
         Row::Wsl => unreachable!("the WSL row is worked by `annexing`"),
-        Row::Harness(_) => unreachable!("a plugin's harness is worked by `plugging`"),
+
+        // A plugin's, whose manifest names its formula or its cask — see
+        // [`packaged`].
+        Row::Harness(_) => OnAMac::Brew(brew_package(dependency)),
     }
 }
 
@@ -2036,9 +2095,10 @@ fn on_a_mac(dependency: Row) -> OnAMac {
 ///
 /// **And two rows go to the hint screen**, which is what a row with nothing to
 /// run has always done: `git` is Apple's command line tools and the dialog that
-/// installs them is on that machine's screen, and Codex has neither a script
-/// nor a package a Mac without Homebrew can use. Each carries the sentence that
-/// says so — see [`XCODE_TOOLS`] and [`CODEX_ON_INTEL`].
+/// installs them is on that machine's screen, and a plugin's harness whose
+/// manifest names a Homebrew package has nothing a Mac without Homebrew can
+/// use. Each carries the sentence that says so — see [`XCODE_TOOLS`] and
+/// [`on_an_intel_mac_by_hand`].
 ///
 /// **The sandbox row is neither**, as it is on the other Mac: `sandbox-exec` is
 /// Apple's own and the probe ticks it.
@@ -2063,7 +2123,7 @@ fn intel(machine: &Machine, ticked: &[Row]) -> Plan {
                 None => beyond.push((*row, no_home(*row))),
             },
 
-            OnAnIntelMac::Beyond(why) => beyond.push((*row, why.to_owned())),
+            OnAnIntelMac::Beyond(why) => beyond.push((*row, why)),
         }
     }
 
@@ -2076,7 +2136,7 @@ fn intel(machine: &Machine, ticked: &[Row]) -> Plan {
 
 /// How one row is installed on an Intel Mac: the vendor's own installer,
 /// GitHub's own release, nothing at all, or nothing that can be done from here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum OnAnIntelMac {
     /// The sandbox row, and only it: `sandbox-exec` is Apple's own.
     Nothing,
@@ -2090,7 +2150,7 @@ enum OnAnIntelMac {
 
     /// Or a row this machine has nothing to run for, with the sentence that
     /// goes under it on the hint screen.
-    Beyond(&'static str),
+    Beyond(String),
 }
 
 /// Which of the four one row is.
@@ -2104,11 +2164,13 @@ fn on_an_intel_mac(dependency: Row) -> OnAnIntelMac {
         Row::OPENCODE => OnAnIntelMac::Vendor(OPENCODE),
         Row::Gh => OnAnIntelMac::Release,
 
-        Row::Git => OnAnIntelMac::Beyond(XCODE_TOOLS),
-        Row::CODEX => OnAnIntelMac::Beyond(CODEX_ON_INTEL),
+        Row::Git => OnAnIntelMac::Beyond(XCODE_TOOLS.to_owned()),
 
         Row::Wsl => unreachable!("the WSL row is worked by `annexing`"),
-        Row::Harness(_) => unreachable!("a plugin's harness is worked by `plugging`"),
+
+        // A plugin's whose manifest names a Homebrew package — see
+        // [`packaged`].
+        Row::Harness(_) => OnAnIntelMac::Beyond(on_an_intel_mac_by_hand(named(dependency))),
     }
 }
 
@@ -2316,7 +2378,6 @@ fn on_windows(dependency: Row) -> OnWindows {
         Row::Git => OnWindows::Winget("Git.Git"),
         Row::Gh => OnWindows::Winget("GitHub.cli"),
 
-        Row::CODEX => OnWindows::FromNpm("@openai/codex"),
         Row::OPENCODE => OnWindows::FromNpm("opencode-ai"),
 
         Row::CLAUDE => OnWindows::Vendor(CLAUDE_ON_WINDOWS),
@@ -2324,7 +2385,9 @@ fn on_windows(dependency: Row) -> OnWindows {
         Row::AGY => OnWindows::Vendor(AGY_ON_WINDOWS),
 
         Row::Wsl => unreachable!("the WSL row is worked by `annexing`"),
-        Row::Harness(_) => unreachable!("a plugin's harness is worked by `plugging`"),
+
+        // A plugin's whose manifest names its npm package — see [`packaged`].
+        Row::Harness(_) => OnWindows::FromNpm(npm_package(dependency, Platform::Windows)),
     }
 }
 
@@ -2410,7 +2473,6 @@ fn installs(packager: Packager, dependency: Row) -> Installs {
         Row::Git => Installs::Package("git"),
         Row::Gh => Installs::Package(packager.gh),
 
-        Row::CODEX => Installs::FromNpm("@openai/codex"),
         Row::OPENCODE => Installs::FromNpm("opencode-ai"),
 
         Row::CLAUDE => Installs::Vendor(CLAUDE),
@@ -2418,7 +2480,9 @@ fn installs(packager: Packager, dependency: Row) -> Installs {
         Row::AGY => Installs::Vendor(AGY),
 
         Row::Wsl => unreachable!("the WSL row is worked by `annexing`"),
-        Row::Harness(_) => unreachable!("a plugin's harness is worked by `plugging`"),
+
+        // A plugin's whose manifest names its npm package — see [`packaged`].
+        Row::Harness(_) => Installs::FromNpm(npm_package(dependency, Platform::Linux)),
     }
 }
 
@@ -2483,19 +2547,18 @@ fn no_home(dependency: Row) -> String {
 /// What a row is called in a sentence.
 fn named(dependency: Row) -> &'static str {
     match dependency {
-        Row::Harness(agent_type) if agent_type.built_in().is_none() => {
-            crate::harness::of(agent_type).map_or("The harness", |harness| harness.named())
-        }
         Row::Sandbox => "bubblewrap",
         Row::Git => "git",
         Row::CLAUDE => "Claude Code",
-        Row::CODEX => "Codex",
         Row::GROK => "Grok Build",
         Row::OPENCODE => "OpenCode",
         Row::AGY => "The Antigravity CLI",
         Row::Gh => "The GitHub CLI",
         Row::Wsl => "WSL",
-        Row::Harness(_) => "The harness",
+        // A plugin's, by the name its manifest gives it.
+        Row::Harness(agent_type) => {
+            crate::harness::of(agent_type).map_or("The harness", |harness| harness.named())
+        }
     }
 }
 
@@ -2603,17 +2666,18 @@ fn ordered(ticked: &[Row]) -> Vec<Row> {
 /// Where one row is in that order: a plugin's harness after the built-ins and
 /// before `gh`, which is where the wizard draws it.
 fn place(dependency: Row) -> usize {
-    let after_the_built_ins = ROWS
+    let rows = rows();
+    let after_the_built_ins = rows
         .iter()
         .position(|row| *row == Row::Gh)
-        .unwrap_or(ROWS.len());
+        .unwrap_or(rows.len());
 
     match dependency.plugged() {
         Some(_) => after_the_built_ins,
-        None => ROWS
+        None => rows
             .iter()
             .position(|row| *row == dependency)
-            .map_or(ROWS.len(), |place| {
+            .map_or(rows.len(), |place| {
                 place + usize::from(place >= after_the_built_ins)
             }),
     }
@@ -2931,7 +2995,23 @@ mod tests {
             .map(|row| Row::of(&row.dependency))
             .collect();
 
-        assert_eq!(drawn, ROWS);
+        assert_eq!(drawn, rows());
+    }
+
+    /// A built-in plugin's install is read for the platform the plan is for,
+    /// not the one the suite runs on: Codex is an npm package on Linux and
+    /// Windows and a cask on a Mac, which is what lets a Mac runner plan the
+    /// other platforms' installs.
+    #[test]
+    fn a_built_in_plugins_install_is_read_for_the_platform_planned_for() {
+        for platform in [Platform::Linux, Platform::Windows] {
+            let install = declared(Row::CODEX, platform).expect("Codex declares an install");
+            assert_eq!(install.npm, Some("@openai/codex"), "{platform:?}");
+            assert_eq!(install.cask, None, "{platform:?}");
+        }
+
+        let mac = declared(Row::CODEX, Platform::MacOs).expect("and one on a Mac");
+        assert_eq!((mac.npm, mac.cask), (None, Some("codex")));
     }
 
     /// Each of the three package managers is its own line, and every ticked
@@ -3470,43 +3550,42 @@ mod tests {
         assert_eq!(beyond(&plan), []);
     }
 
-    /// And the two rows an Intel Mac has nothing to run for go to the hint
-    /// screen with a sentence apiece, naming what each of them wants.
+    /// And git, which an Intel Mac has nothing to run for, goes to the hint
+    /// screen with the sentence naming what it wants.
     #[test]
     fn an_intel_mac_sends_the_rows_it_cannot_install_to_the_hint_screen() {
-        let plan = plan(&machine(Distro::MacOsIntel), &[Row::Git, Row::CODEX]);
+        let plan = plan(&machine(Distro::MacOsIntel), &[Row::Git]);
 
-        assert!(
-            plan.units.is_empty(),
-            "nothing to run for either of them: {plan:?}"
-        );
-        assert_eq!(beyond(&plan), [Row::Git, Row::CODEX]);
+        assert!(plan.units.is_empty(), "nothing to run for it: {plan:?}");
+        assert_eq!(beyond(&plan), [Row::Git]);
 
-        let said = |row: Row| {
-            plan.beyond
-                .iter()
-                .find(|(dependency, _)| *dependency == row)
-                .map(|(_, why)| why.clone())
-                .expect("every row that installs nothing carries a sentence")
+        let [(_, said)] = plan.beyond.as_slice() else {
+            panic!("one row: {plan:?}");
         };
-
+        assert!(said.contains("xcode-select --install"), "{said}");
         assert!(
-            said(Row::Git).contains("xcode-select --install"),
-            "{}",
-            said(Row::Git),
+            !said.contains("brew") && !said.contains("Homebrew"),
+            "nothing on this machine is Homebrew's: {said}",
         );
-        assert!(
-            said(Row::CODEX).contains("~/.local/bin"),
-            "{}",
-            said(Row::CODEX),
-        );
+    }
 
-        for row in [Row::Git, Row::CODEX] {
-            assert!(
-                !said(row).contains("brew") && !said(row).contains("Homebrew"),
-                "nothing on this machine is Homebrew's: {}",
-                said(row),
-            );
+    /// And a plugin's harness whose manifest names a Homebrew package goes
+    /// there too, saying where its binary goes instead.
+    ///
+    /// Codex's is one only as a Mac reads its manifest — every other
+    /// platform reads its npm package — so the plan is a Mac's to prove,
+    /// and the sentence everybody's.
+    #[test]
+    fn an_intel_mac_sends_a_plugins_homebrew_package_to_the_hint_screen() {
+        let said = on_an_intel_mac_by_hand("Codex");
+        assert!(said.starts_with("Codex "), "{said}");
+        assert!(said.contains("~/.local/bin"), "{said}");
+
+        if Platform::HERE == Platform::MacOs {
+            let plan = plan(&machine(Distro::MacOsIntel), &[Row::CODEX]);
+
+            assert!(plan.units.is_empty(), "nothing to run for it: {plan:?}");
+            assert_eq!(plan.beyond, [(Row::CODEX, said)]);
         }
     }
 

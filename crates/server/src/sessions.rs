@@ -697,6 +697,11 @@ impl Agents {
 
         argv.extend(fill(&line.tail));
 
+        // And the Worktree, where the line says it apart and there is one.
+        if worktree.is_some() {
+            argv.extend(fill(&line.worktree));
+        }
+
         // And what the continuation itself needs said, which the ordinary line has
         // no business carrying: a setting about how a resume is resolved means
         // nothing to a launch that is opening a conversation.
@@ -1062,8 +1067,8 @@ enum Judged {
 /// - one whose waiting frame is indistinguishable from its working frame says so
 ///   by its at-work line *going*.
 ///
-/// Codex is the second, and it is the reason there are two — see
-/// [`crate::harness::Harness::at_work`], where the frames it draws are set out.
+/// A plugin harness declaring an `idle.signature` is the second — see
+/// [`crate::harness::Harness::at_work`].
 ///
 /// **The two read the silence differently, and they have to.** A prompt standing
 /// is a whole answer: the backend has drawn the thing it draws only when it is
@@ -3279,10 +3284,10 @@ struct Continuing {
 ///   so it is proved rather than assumed. Grok's store crosses keyed by the
 ///   *sending* device's name for the sending device's Worktree, so the same call
 ///   files it under this one's first, and answers no where it cannot — a device
-///   that has never run grok in this Worktree being the plain case of that. Codex's
-///   crosses to the path it left and needs nothing moved, but nothing names it
-///   either: the rollout the id belongs to is searched for in the store, and a
-///   rollout that never crossed is a no like the rest. And OpenCode's crosses
+///   that has never run grok in this Worktree being the plain case of that. A plugin
+///   harness's is its component's to find by the id: a store filed by date
+///   crosses to the path it left and needs nothing moved, and a record that never
+///   crossed is a no like the rest. And OpenCode's crosses
 ///   as one database with a row per session, so the same call looks for the row
 ///   and brings the directory it records onto this device's Worktree — a store
 ///   that did not cross, a row of that id that is not in it and a shape this
@@ -3306,8 +3311,8 @@ struct Continuing {
 /// session inside the directory per working directory, and what the name the Capture
 /// opened with buys is nothing, there being no session of that name anywhere. Nothing
 /// to Claude's either way, whose parts are the two `projects/` entries, and nothing
-/// to Codex's, whose rollouts are picked out by the Worktree they name rather than
-/// by any id at all — nor to OpenCode's, which crosses as the one database and has
+/// to a plugin harness's synced by `worktree`, whose logs are picked out by the
+/// Worktree they name rather than by any id at all — nor to OpenCode's, which crosses as the one database and has
 /// no part narrower than that to ask for.
 ///
 /// **And this is where a relaunch's holding off is made good**, which is the one

@@ -654,7 +654,7 @@ mod tests {
         assert!(!enabled(&pool, GO_PLUGIN).await);
         for listed in built_in::listed()
             .iter()
-            .filter(|listed| built_in::switched(listed))
+            .filter(|listed| built_in::languages(listed).next().is_some())
         {
             let off = listed.uuid == GO_PLUGIN;
             assert_eq!(enabled(&pool, &listed.uuid).await, !off, "{}", listed.name);

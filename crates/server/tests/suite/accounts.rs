@@ -59,6 +59,8 @@ use verkstead_server::{
 };
 use verkstead_store::{Linking, record_member};
 
+use crate::stub_harness::{self, StubHarness};
+
 /// The device the account is at home on.
 const A: &str = "aa00bb11cc22dd33ee44ff5566778899";
 
@@ -127,6 +129,20 @@ for dir in "$HOME"/.claude/projects/*; do
     *) printf 'what the session learned\n' > "$dir/learned.jsonl" ;;
   esac
 done
+
+printf 'ran\n'
+"#;
+
+/// And what stands where the **stub harness plugin** goes when the question is
+/// its memory sync: a session that reads out what its store holds and what its
+/// configuration file says, and writes a memory of its own beside them.
+const STUB_PRINTS_AND_WRITES_ITS_MEMORY: &str = r#"
+for file in "$HOME"/.stub/memory/*; do
+  [ -f "$file" ] || continue
+  printf 'memory: %s\n' "$(cat "$file")"
+done
+
+printf 'what the session learned\n' > "$HOME/.stub/memory/learned.jsonl"
 
 printf 'ran\n'
 "#;
@@ -430,6 +446,42 @@ impl Verkstead {
         assert_eq!(said, "\"Saved\"", "switching {name}'s memory off");
 
         profile
+    }
+
+    /// An account of the **stub harness plugin**, really on disk, its memory
+    /// declared synced whole, with a Profile saved over it — see
+    /// [`linked_up_on_the_stub_harness`].
+    async fn stub_account(&self, name: &str) -> String {
+        let under = self.elsewhere.path().join(name);
+        let paths = stub_harness::account(&under);
+        std::fs::write(under.join(".stub/auth.json"), "{\"access\":\"the-desk\"}").unwrap();
+
+        let said = press(
+            &self.workbench,
+            PROFILES,
+            Some(
+                &serde_json::json!({
+                    "name": name,
+                    "account": { "agent_type": StubHarness::Silent.uuid(), "paths": paths },
+                    "models": [MODEL],
+                    "memory": true,
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+
+        assert_eq!(said, "\"Saved\"", "saving {name}");
+
+        called(&self.profiles().await, name)
+            .expect("the Profile that was just saved is on the list")
+            .id
+            .clone()
+    }
+
+    /// The stub harness account's memory directory.
+    fn stub_memory(&self, name: &str) -> PathBuf {
+        self.elsewhere.path().join(name).join(".stub/memory")
     }
 
     /// A repository of this device's own, registered — which is what makes it one
@@ -923,7 +975,7 @@ fn probing(dir: &Path) -> Machine {
     let bin = dir.join("probed");
     std::fs::create_dir_all(&bin).unwrap();
 
-    for harness in ["claude", "codex", "grok", "opencode", "agy"] {
+    for harness in ["claude", "codex", "grok", "opencode", "agy", "stub-harness"] {
         let at = bin.join(harness);
 
         std::fs::write(&at, "#!/bin/sh\nexit 0\n").unwrap();
@@ -970,6 +1022,33 @@ async fn linked_up_running(stub: &str) -> (Verkstead, Verkstead, Holding) {
 async fn linked_up_at_home_too(stub: &str) -> (Verkstead, Verkstead, Holding) {
     let a = Verkstead::running(A, NOTHING_RUNS).await;
     let b = Verkstead::running(B, stub).await;
+
+    joined(&a, &b).await;
+
+    let holding = b.holding();
+
+    (a, b, holding)
+}
+
+/// The same with the **stub harness plugin** installed on both devices before
+/// they are linked, as it is on every device a Profile of it runs on.
+///
+/// Before rather than after: an install replicates to the other members, and
+/// one made on both ends of a link at once races the record arriving from the
+/// other end.
+async fn linked_up_on_the_stub_harness(stub: &str) -> (Verkstead, Verkstead, Holding) {
+    let a = Verkstead::running(A, NOTHING_RUNS).await;
+    let b = Verkstead::running(B, stub).await;
+
+    for device in [&a, &b] {
+        StubHarness::Silent
+            .installed(
+                &device.workbench,
+                device.elsewhere.path(),
+                [MODEL, "stub-grilling"],
+            )
+            .await;
+    }
 
     joined(&a, &b).await;
 
@@ -1321,6 +1400,31 @@ async fn nothing_lands_in_the_mirror_but_the_files_a_root_is_made_of() {
         ],
         "the login and what the written configuration is composed from, and \
          nothing else of an account that holds plenty else",
+    );
+}
+
+/// And a **plugin harness's** mirror holds what its `write-configuration`
+/// answers handed the account's configuration and no servers — not the file as
+/// the account has it, whose own MCP servers are the human's.
+#[tokio::test]
+async fn a_plugin_harness_s_mirror_holds_what_its_component_writes() {
+    let (a, b, _holding) = linked_up_on_the_stub_harness(NOTHING_RUNS).await;
+
+    a.stub_account("work").await;
+
+    let mirror = b.mirror_of("work").await;
+    let under = b.mirror_directory(&mirror.id);
+
+    b.fetches(&mirror).await.expect("A answered");
+
+    let held: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(under.join(".stub/settings.json")).unwrap()).unwrap();
+
+    assert_eq!(
+        held,
+        serde_json::json!({ "theme": "dark" }),
+        "what the stub's component wrote back for the account's settings, with the \
+         account's own servers taken out before it was handed them",
     );
 }
 
@@ -1688,6 +1792,48 @@ async fn no_repo_match_is_said_on_the_timeline_and_starts_the_session_anyway() {
             .await,
         "a transcript of the session\n",
         "and the session ran, and its transcript came home",
+    );
+}
+
+/// A session on B under A's **plugin harness** Profile starts with what A's
+/// account remembered, in the memory directory its manifest declares synced,
+/// and a memory it writes is in A's account afterwards.
+#[tokio::test]
+async fn a_plugin_harness_s_memory_crosses_to_a_session_away_from_home_and_back() {
+    let (a, b, _holding) = linked_up_on_the_stub_harness(STUB_PRINTS_AND_WRITES_ITS_MEMORY).await;
+
+    a.repo().await;
+    a.stub_account("work").await;
+    std::fs::write(
+        a.stub_memory("work").join("remembered.jsonl"),
+        "what this account remembers\n",
+    )
+    .unwrap();
+
+    let mirror = b.mirror_of("work").await;
+    let conversation = b.grilling_under(&mirror.id).await;
+    let said = b.printed(conversation, "ran").await;
+
+    assert!(
+        said.contains("memory: what this account remembers"),
+        "the session started with what A remembered. It printed: {said:?}",
+    );
+
+    let learned = a.stub_memory("work").join("learned.jsonl");
+    let deadline = Instant::now() + WAITING;
+    while !learned.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "what the session wrote never reached the account on {A_MACHINE}. It holds: {:?}",
+            walked(&a.stub_memory("work")),
+        );
+        tokio::time::sleep(LOOKING).await;
+    }
+
+    assert_eq!(
+        std::fs::read_to_string(&learned).unwrap(),
+        "what the session learned\n",
+        "and what it wrote is in the account on {A_MACHINE}",
     );
 }
 

@@ -1,4 +1,5 @@
-//! A built root: the `.claude`, the `.codex` or the `.grok` a session is given in
+//! A built root: the `.claude`, the `.grok` or a plugin harness's mounted
+//! directory a session is given in
 //! place of the account's whole one — or the two XDG directories an OpenCode
 //! session is given in place of its account's.
 //!
@@ -36,14 +37,14 @@
 //!
 //! **Every path a root says is said from HOME**, which is where it is put. The
 //! account's own path is the same one with the account's directory in place of
-//! HOME's `.claude`, `.codex` or `.grok`. An OpenCode account is a whole home,
+//! HOME's `.claude`, `.grok` or a plugin harness's mounted directory. An OpenCode account is a whole home,
 //! so its paths are the same on both sides — see [`Root::built`].
 //!
 //! **Beside a Claude root, `.claude.json` is copied rather than joined**, so the
 //! trust seeded into it is not written straight into the account, and what a
-//! session changes in it is merged back as it ends — see [`merged_back`]. Codex
-//! has no such file: its Worktree trust is said on the launch line (ADR-0011).
-//! Nor has Grok Build.
+//! session changes in it is merged back as it ends — see [`merged_back`]. A plugin
+//! harness has no such file: its Worktree trust is said on the launch line, in
+//! its manifest's `worktree` words. Nor has Grok Build.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -67,8 +68,8 @@ pub(crate) const SETTINGS: &str = "settings.json";
 /// The file Claude reads as its global instructions, inside `~/.claude`.
 pub(crate) const CLAUDE_INSTRUCTIONS: &str = "CLAUDE.md";
 
-/// The file the other three read as their global instructions: Codex's and
-/// Grok Build's inside the account's own directory, and OpenCode's inside its
+/// The file the other two read as their global instructions: Grok Build's
+/// inside the account's own directory, and OpenCode's inside its
 /// config directory.
 pub(crate) const AGENTS: &str = "AGENTS.md";
 
@@ -82,52 +83,15 @@ pub(crate) const AGENTS: &str = "AGENTS.md";
 /// `statusLine` — and none of it is a session's.
 const CARRIED: [&str; 2] = ["apiKeyHelper", "env"];
 
-/// The file Codex keeps a login in, inside `~/.codex`.
-///
-/// **Written in place**, which is what makes a link of it the account's file
-/// for a session's whole life: read off codex 0.154, whose `codex login` over
-/// an `auth.json` already there leaves the same inode behind. The launch line
-/// says `cli_auth_credentials_store=file`, so this file is where the login is.
+/// The file Grok Build keeps a login in, inside `~/.grok`.
 pub(crate) const AUTH: &str = "auth.json";
 
-/// The configuration file Codex reads for the user, inside `~/.codex`.
-pub(crate) const CODEX_CONFIG: &str = "config.toml";
-
-/// What Codex and Grok Build both call the directory their sessions write their
-/// logs under, inside the account's directory.
+/// What Grok Build calls the directory its sessions write their logs under,
+/// inside the account's directory.
 pub(crate) const SESSIONS: &str = "sessions";
 
 /// The configuration file Grok Build reads for the user, inside `~/.grok`.
 pub(crate) const GROK_CONFIG: &str = "config.toml";
-
-/// The two directories Codex's memory is kept in, inside `~/.codex`: the
-/// rollouts every session writes, and the memory files — `MEMORY.md` and
-/// `memory_summary.md` — its memories feature writes and reads.
-///
-/// **And not the rest of what is beside them.** `archived_sessions/` is the
-/// human's, and so is every SQLite database at the top of `~/.codex` —
-/// `state_5.sqlite`, `memories_1.sqlite`, `thread_history_1.sqlite`,
-/// `logs_2.sqlite`, `goals_1.sqlite`, `queue_1.sqlite` in codex 0.154. A
-/// database linked a file at a time loses its write-ahead-log siblings and
-/// will not open, so each is the session's own and starts empty.
-///
-/// **A fresh state database beside shared `sessions/` does no paid work**,
-/// checked on codex 0.154. Codex fills a fresh `state_5.sqlite` from the
-/// rollouts under `sessions/` as it starts (its `backfill_state`), which reads
-/// files and calls no model. What would summarise those rollouts is the
-/// memories feature's two phases, and `codex features list` says `memories` is
-/// off unless `[features]` in `config.toml` turns it on — which the file a root
-/// is written never carries, see [`CODEX_CARRIED`].
-pub(crate) const CODEX_MEMORY: [&str; 2] = [SESSIONS, "memories"];
-
-/// Of the account's own `config.toml`, the keys a root's carries over.
-///
-/// **An allowlist**, for [`CARRIED`]'s reason. These two are how an account on
-/// a provider of its own reaches the model: `model_provider` names it, and
-/// `model_providers` says where it is. Everything else is how the human works —
-/// `mcp_servers`, `profiles`, `projects`, hooks, `notify`, `[features]` — and
-/// none of it is a session's.
-pub(crate) const CODEX_CARRIED: [&str; 2] = ["model_provider", "model_providers"];
 
 /// The two directories Grok Build's memory is kept in, inside `~/.grok`: the
 /// sessions every run writes, and the memory files its memory feature writes
@@ -196,7 +160,7 @@ pub(crate) const OPENCODE_DATA: &str = super::OPENCODE_DATA_INSIDE_HOME;
 
 /// The file OpenCode keeps a login in, inside its home.
 ///
-/// **Written in place**, like Codex's: read off opencode 1.18.30, whose
+/// **Written in place**: read off opencode 1.18.30, whose
 /// `opencode auth logout` leaves the same inode behind. So a link of it stays
 /// the account's file for the session's whole life.
 pub(crate) const OPENCODE_AUTH: &str = ".local/share/opencode/auth.json";
@@ -330,7 +294,7 @@ pub(crate) const AGY_ONBOARDED_AS: &str = "{\"onboardingComplete\":true}\n";
 /// alone. Nothing about it has to be asked for: the fallback is agy's own.
 ///
 /// **Written in place**, opened for writing and truncated rather than renamed
-/// over, so a bind of it on Linux takes the write the way a Codex login's does.
+/// over, so a bind of it on Linux takes the write the way any login written in place does.
 pub(crate) const AGY_LOGIN: &str = "antigravity-cli/antigravity-oauth-token";
 
 /// Of the account's `.claude.json`, the key its MCP servers are under: at the top
@@ -374,40 +338,22 @@ const TYPE: &str = "type";
 /// configuration whatever this file did — see ADR-0021. What keeps it is the
 /// root, which is no more readable than the login beside it.
 ///
-/// **Four of the five harnesses spell it this way** — Claude Code here, Grok
-/// Build in its `config.toml`, OpenCode in its `opencode.json` and the
-/// Antigravity CLI in its `mcp_config.json`. Codex alone
-/// spells it something else, which is the whole of what its form differs in:
-/// see [`CODEX_HEADERS`].
+/// **Every harness built in process spells it this way** — Claude Code here,
+/// Grok Build in its `config.toml`, OpenCode in its `opencode.json` and the
+/// Antigravity CLI in its `mcp_config.json`. A plugin harness spells it its own
+/// way, in its component.
 pub(crate) const HEADERS: &str = "headers";
 
-/// Of a Codex or a Grok Build `config.toml`, the table the Conversation's
+/// Of a Grok Build `config.toml`, the table the Conversation's
 /// servers are written under: one sub-table apiece, `[mcp_servers.<name>]`,
 /// holding the URL it is reached at and the headers it is spoken to with.
 ///
 /// **The account's own key of the same name is still left out**, which is
-/// [`MCP_SERVERS`]'s rule said about these two files: it is in neither
-/// [`CODEX_CARRIED`] nor [`GROK_CARRIED`], so what a root holds under this is
-/// Verkstead's own and nothing else.
+/// [`MCP_SERVERS`]'s rule said about this file: it is not in [`GROK_CARRIED`],
+/// so what a root holds under this is Verkstead's own and nothing else.
 ///
-/// The two harnesses agree on the spelling — read off codex 0.155.1 and grok
-/// 1.0.34 — so the difference between their forms is the header key alone.
+/// Read off grok 1.0.34.
 const MCP_SERVERS_TOML: &str = "mcp_servers";
-
-/// What Codex calls the headers of a streamable-HTTP server, inside that table.
-///
-/// Read off codex 0.155.1, whose server configuration takes `http_headers` and
-/// nothing else for a header typed once — and **proved on the wire**, against a
-/// server that recorded what it received: `initialize`, `tools/list` and
-/// `tools/call` each arrive carrying them.
-///
-/// **And nothing is said about approvals**, which was the other thing to find
-/// out: codex has a per-server `default_tools_approval_mode`, and a session
-/// launched the way Verkstead launches one — `--dangerously-bypass-approvals-
-/// and-sandbox`, which is *YOLO mode* on its own header — called an attached
-/// server's tool with no prompt and the key absent. A key that changes nothing
-/// is a key not written.
-pub(crate) const CODEX_HEADERS: &str = "http_headers";
 
 /// Of an OpenCode `opencode.json`, the key the Conversation's servers are
 /// written under, one entry apiece.
@@ -470,7 +416,7 @@ const LONGEST: usize = 200;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Root {
     /// The account's own directory, which the Profile names: `~/.claude`,
-    /// `~/.codex`, `~/.grok`, or the home an OpenCode account is kept in.
+    /// `~/.grok`, a plugin harness's mounted directory, or the home an OpenCode account is kept in.
     account: PathBuf,
 
     /// Which harness's allowlist this is.
@@ -730,7 +676,7 @@ impl Root {
     }
 
     /// Where the account's directory lands inside HOME, which is what every
-    /// path of the account's is under there: `.claude`, `.codex` or `.grok`,
+    /// path of the account's is under there: `.claude`, `.grok` or a plugin harness's mounted directory,
     /// and HOME itself for OpenCode, whose account is a home.
     fn landing(&self) -> &'static Path {
         Path::new(self.harness.0.landing())
@@ -740,7 +686,7 @@ impl Root {
     /// HOME. Each is emptied and made on the host as a session starts, in the
     /// Conversation's own directory, and is put at the same path inside.
     ///
-    /// One for Claude, Codex, Grok Build and the Antigravity CLI: the account's
+    /// One for Claude, a plugin harness, Grok Build and the Antigravity CLI: the account's
     /// directory, the last with two of its own inside it — see
     /// [`Root::furnished_in`]. Two for
     /// OpenCode where memory is not shared: its config directory and its data
@@ -772,8 +718,7 @@ impl Root {
         root.join(PROJECTS)
     }
 
-    /// Where a Codex root at `root` keeps its rollouts, and a Grok Build root its
-    /// sessions.
+    /// Where a Grok Build root at `root` keeps its sessions.
     pub(crate) fn sessions_in(root: &Path) -> PathBuf {
         root.join(SESSIONS)
     }
@@ -831,7 +776,7 @@ impl Root {
     /// [`Harness::configuration`] — so a key the human changes reaches the next
     /// session, and composed by the harness out of what was found — see
     /// [`Harness::configured`]. Claude's is a `settings.json` — see
-    /// [`settings`]. Codex's and Grok Build's is a `config.toml` — see
+    /// [`settings`]. Grok Build's is a `config.toml` — see
     /// [`toml_carrying`]. OpenCode's is an `opencode.json` — see
     /// [`opencode_config`]. The Antigravity CLI's is a `settings.json` — see
     /// [`agy_settings`] — and, where the Conversation attached any, an
@@ -897,8 +842,7 @@ impl Root {
     /// allowlist.
     ///
     /// Each harness names its own, and each is inside a directory the root
-    /// already builds: `.claude/CLAUDE.md` for Claude, `.codex/AGENTS.md` for
-    /// Codex, `.grok/AGENTS.md` for Grok Build, and the config directory's
+    /// already builds: `.claude/CLAUDE.md` for Claude, `.grok/AGENTS.md` for Grok Build, and the config directory's
     /// `AGENTS.md` for OpenCode, and `.gemini/GEMINI.md` for the Antigravity
     /// CLI — see [`AGY_INSTRUCTIONS`].
     ///
@@ -937,8 +881,8 @@ impl Root {
     /// when the disk is full. A bind refuses the rename — `grok logout` inside
     /// bubblewrap over a bound `auth.json` fails with *Resource busy* — so a
     /// session given one could never save a login or a refreshed token. Claude
-    /// falls back to writing in place whenever the rename is refused, and Codex
-    /// writes in place to begin with, so a bind serves both of them.
+    /// falls back to writing in place whenever the rename is refused, and a
+    /// harness that writes in place to begin with is served by a bind too.
     ///
     /// **A copy, merged back as the session ends**, the way Claude's
     /// `.claude.json` is — see [`merged_back`]. The top-level keys of Grok's
@@ -980,8 +924,8 @@ impl Root {
     /// **Made in the account rather than in the root**, because what is written
     /// under one is the account's: memory a later session reads, and the
     /// transcript Verkstead follows. A directory that is not there is the
-    /// ordinary case — a Repo nobody has run Claude in yet, a Codex account
-    /// that has never written a memory — and a join of nothing is a session
+    /// ordinary case — a Repo nobody has run Claude in yet, a plugin harness's
+    /// account that has never written a memory — and a join of nothing is a session
     /// that will not start.
     ///
     /// **Nothing at all where memory is off**: nothing is joined, so nothing of
@@ -1081,8 +1025,8 @@ impl Root {
     /// store's, where memory is not shared, and none where it is.
     ///
     /// Claude's is the whole of `projects/`, the entries being named inside it
-    /// as the session writes them. Codex's are `sessions/` and `memories/`, and
-    /// Grok Build's `sessions/` and `memory/`. OpenCode's is none: its data
+    /// as the session writes them. Grok Build's are `sessions/` and
+    /// `memory/`, and a plugin harness's what its manifest's `memory` declares. OpenCode's is none: its data
     /// directory is then one of the root's own directories already — see
     /// [`Root::built`].
     pub(crate) fn unshared_in(&self, built: &Path) -> Vec<PathBuf> {
@@ -1180,7 +1124,11 @@ pub(crate) const BRAIN: &str = "brain";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Part {
     /// What it is called on the link — [`REPO`] and the four beside it.
-    pub(crate) label: &'static str,
+    ///
+    /// **Borrowed for a built-in**, whose labels are the constants above, and
+    /// owned for a plugin harness, whose are the memory paths its manifest
+    /// declares.
+    pub(crate) label: std::borrow::Cow<'static, str>,
 
     /// And where it is inside the account's own directory on this machine.
     pub(crate) inside: PathBuf,
@@ -1230,7 +1178,7 @@ pub(crate) enum Whose {
     ///
     /// A sibling that is not there is nothing to carry rather than a failure,
     /// which is a database whose log has been folded back into it.
-    Database(&'static str),
+    Database(String),
 
     /// And a database apiece directly under the part, `<id>.db` for each of
     /// these ids, with the two siblings SQLite keeps beside each.
@@ -1553,21 +1501,19 @@ fn in_string(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, onto: &mut St
     }
 }
 
-/// The `config.toml` a Codex or a Grok Build root is given, out of the
-/// account's own where there is one to read.
+/// The `config.toml` a Grok Build root is given, out of the account's own
+/// where there is one to read.
 ///
 /// The `carried` keys of the account's own, as they are there, and nothing
-/// else — [`CODEX_CARRIED`] or [`GROK_CARRIED`]. A key written `table.key` is
+/// else — [`GROK_CARRIED`]. A key written `table.key` is
 /// that one key of the table, in a table of the same name. An account with no
 /// such file, or one that does not read as TOML, is given an empty file: a
 /// session on the vendor's own provider needs nothing said.
 ///
 /// **And `servers` under [`MCP_SERVERS_TOML`]**, one `[mcp_servers.<name>]`
 /// apiece holding the URL it is reached at, and the headers it is spoken to
-/// with under `headers` where it has any. That key is the one thing the two
-/// harnesses' forms differ in, which is why it is handed in rather than
-/// chosen here — `http_headers` for Codex and `headers` for Grok Build, see
-/// [`CODEX_HEADERS`].
+/// with under `headers` where it has any — [`HEADERS`] for Grok Build, handed
+/// in rather than chosen here.
 ///
 /// A Conversation with none attached is no table at all, which is the file as
 /// it was written before there were any.
@@ -2872,6 +2818,19 @@ mod tests {
         std::str::from_utf8(bytes).unwrap().parse().unwrap()
     }
 
+    /// The `config.toml` Codex's harness — its plugin's `write-configuration`
+    /// — gives a root, out of the account's own `account` and the
+    /// Conversation's `servers`.
+    fn codex_carrying(account: Option<&str>, servers: &[AttachedServer]) -> Vec<u8> {
+        crate::harness::of(crate::store::AgentType::CODEX)
+            .expect("Codex's plugin loads")
+            .configured(vec![account.map(|text| text.as_bytes().to_vec())], servers)
+            .into_iter()
+            .find(|(path, _)| path == Path::new("config.toml"))
+            .map(|(_, bytes)| bytes)
+            .unwrap_or_default()
+    }
+
     /// The two keys a custom provider needs come over as they are, and nothing
     /// else of the account's does.
     #[test]
@@ -2900,12 +2859,7 @@ mod tests {
         "#;
 
         assert_eq!(
-            table(&toml_carrying(
-                Some(account),
-                &CODEX_CARRIED,
-                NONE,
-                CODEX_HEADERS
-            )),
+            table(&codex_carrying(Some(account), NONE)),
             toml::toml! {
                 model_provider = "proxy"
 
@@ -2938,9 +2892,8 @@ mod tests {
         "#;
 
         assert_eq!(
-            table(&toml_carrying(
+            table(&codex_carrying(
                 Some(account),
-                &CODEX_CARRIED,
                 &[
                     AttachedServer::of(
                         "docs",
@@ -2954,7 +2907,6 @@ mod tests {
                     // before there were headers to write.
                     AttachedServer::of("tickets", "https://mcp.example.com/tickets", &[]),
                 ],
-                CODEX_HEADERS
             )),
             toml::toml! {
                 model_provider = "proxy"
@@ -2999,25 +2951,9 @@ mod tests {
     /// empty one.
     #[test]
     fn an_account_with_no_codex_config_to_read_is_given_an_empty_one() {
-        assert!(toml_carrying(None, &CODEX_CARRIED, NONE, CODEX_HEADERS).is_empty());
-        assert!(
-            toml_carrying(
-                Some("model_provider = "),
-                &CODEX_CARRIED,
-                NONE,
-                CODEX_HEADERS
-            )
-            .is_empty()
-        );
-        assert!(
-            toml_carrying(
-                Some("model = \"gpt-5-codex\"\n"),
-                &CODEX_CARRIED,
-                NONE,
-                CODEX_HEADERS
-            )
-            .is_empty()
-        );
+        assert!(codex_carrying(None, NONE).is_empty());
+        assert!(codex_carrying(Some("model_provider = "), NONE).is_empty());
+        assert!(codex_carrying(Some("model = \"gpt-5-codex\"\n"), NONE).is_empty());
     }
 
     /// A Grok Build root joins the login and its two memory directories, made

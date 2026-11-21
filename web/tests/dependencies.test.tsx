@@ -1434,24 +1434,11 @@ describe("what each machine is told to run", () => {
 
   it("names an exact command for each harness the OS packages", () => {
     for (const distro of DISTROS) {
-      for (const harness of ["Claude", "Codex", "OpenCode"] as const) {
-        // Except the one machine that packages nothing: an Intel Mac has no
-        // Homebrew, and Codex is the row there with neither a script of its
-        // own nor a package this Mac can use — so it is a link, the way Grok
-        // Build is on every tab.
-        if (distro === "MacOsIntel" && harness === "Codex") {
-          expect(GUIDES[distro].harnesses[harness].command).toBeUndefined();
-          expect(GUIDES[distro].harnesses[harness].link).toBeTruthy();
-          continue;
-        }
-
+      for (const harness of ["Claude", "OpenCode"] as const) {
         expect(GUIDES[distro].harnesses[harness].command).toBeTruthy();
       }
     }
 
-    // The cask Homebrew keeps Codex under, which a plain `brew install` would
-    // not find.
-    expect(GUIDES.MacOs.harnesses.Codex.command).toBe("brew install --cask codex");
     expect(GUIDES.MacOs.harnesses.OpenCode.command).toBe("brew install opencode");
 
     // And OpenCode's own installer on the Mac that has no Homebrew to install
@@ -1914,6 +1901,10 @@ describe("what the WSL row is told to run", () => {
   });
 });
 
+/// A manifest's install that names no package, which is the whole of what
+/// the commands-only cases below declare.
+const NO_PACKAGES = { npm: null, brew: null, cask: null, nix: null };
+
 describe("a plugin's harness", () => {
   /// The stub harness an enabled Agent plugin declares, as the harness list
   /// says it: its name, its mark, its binary, and the command its manifest
@@ -1930,6 +1921,7 @@ describe("a plugin's harness", () => {
     install: {
       instructions: "https://example.com/stub-harness",
       commands: ["npm install -g stub-harness"],
+      ...NO_PACKAGES,
     },
   };
 
@@ -1983,6 +1975,7 @@ describe("a plugin's harness", () => {
         install: {
           instructions: null,
           commands: ["npm install -g stub-harness  # global", "stub-harness --setup"],
+          ...NO_PACKAGES,
         },
       },
     ]);
@@ -1997,7 +1990,11 @@ describe("a plugin's harness", () => {
       ...(harnesses as HarnessEntry[]),
       {
         ...entry,
-        install: { instructions: "javascript:alert(1)", commands: ["stub-harness --setup"] },
+        install: {
+          instructions: "javascript:alert(1)",
+          commands: ["stub-harness --setup"],
+          ...NO_PACKAGES,
+        },
       },
     ]);
 
@@ -2010,12 +2007,72 @@ describe("a plugin's harness", () => {
   it("says so where its manifest declares nothing to run", () => {
     knowHarnesses([
       ...(harnesses as HarnessEntry[]),
-      { ...entry, install: { instructions: null, commands: [] } },
+      { ...entry, install: { instructions: null, commands: [], ...NO_PACKAGES } },
     ]);
 
     const told = instructionFor("Ubuntu", STUB, null);
 
     expect(told.command).toBeUndefined();
     expect(told.note).toBe("Its plugin doesn't say how to install it.");
+  });
+
+  /// A package its manifest names is said the way each tab says a
+  /// built-in's: npm's with that tab's node, the nixpkgs line, a cask on the
+  /// Mac with Homebrew — and on the Intel Mac, which has none, where its
+  /// binary goes instead, under the link to its own instructions.
+  it("is told its package the way each tab tells a built-in's", () => {
+    const packaged = (install: Partial<HarnessEntry["install"]>) =>
+      knowHarnesses([
+        ...(harnesses as HarnessEntry[]),
+        {
+          ...entry,
+          install: {
+            instructions: "https://example.com/stub-harness",
+            commands: [],
+            ...NO_PACKAGES,
+            ...install,
+          },
+        },
+      ]);
+
+    packaged({ npm: "@example/stub", nix: "stub" });
+
+    expect(instructionFor("Ubuntu", STUB, null).command).toBe(
+      "sudo npm install -g @example/stub",
+    );
+    expect(instructionFor("Arch", STUB, null).note).toContain("sudo pacman -S npm");
+    expect(instructionFor("Windows", STUB, null).command).toBe(
+      "npm install -g @example/stub",
+    );
+    expect(instructionFor("NixOs", STUB, null).command).toBe(
+      "environment.systemPackages = [ pkgs.stub ];",
+    );
+
+    packaged({ cask: "stub" });
+
+    expect(instructionFor("MacOs", STUB, null)).toEqual({
+      command: "brew install --cask stub",
+      note: "A cask rather than a formula.",
+    });
+
+    const intel = instructionFor("MacOsIntel", STUB, null);
+    expect(intel.command).toBeUndefined();
+    expect(intel.link).toBe("https://example.com/stub-harness");
+    expect(intel.note).toContain("Stub Harness installs with Homebrew");
+    expect(intel.note).toContain("~/.local/bin");
+  });
+
+  /// And Codex is one: its row's lines come from its manifest, as the
+  /// server's harness list carries it, rather than from the tables.
+  it("is how Codex is told what to run", () => {
+    expect(instructionFor("Ubuntu", "Codex", null).command).toBe(
+      "sudo npm install -g @openai/codex",
+    );
+    expect(instructionFor("NixOs", "Codex", null).command).toBe(
+      "environment.systemPackages = [ pkgs.codex ];",
+    );
+    expect(instructionFor("Windows", "Codex", null).command).toBe(
+      "npm install -g @openai/codex",
+    );
   });
 });
