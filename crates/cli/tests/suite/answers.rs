@@ -10,9 +10,11 @@
 //! rather than served — see
 //! [`a_deferred_ask_is_refused_because_its_answers_are_the_next_prompts`].
 
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
+use std::time::Duration;
 
 use super::support::server::{ASKING_FROM, Server, finished, stderr, stdout};
 use verkstead_schema::{Response, SetCreated};
@@ -421,16 +423,36 @@ fn a_blocking_ask_whose_wait_was_killed_is_fetched_like_a_stored_one() {
     let server = Server::start(dir.join("verkstead.db"));
 
     let mut waiting = blocking(&server, dir, SET);
+
+    // Read as it is written, so the kill waits on the CLI having said the id.
+    // A Set in the store is not yet a reply to the submit: killed between the
+    // two, the CLI never heard the id and had nothing it could have left.
+    let (opened, heard) = mpsc::channel();
+    let reading = {
+        let lines = BufReader::new(waiting.stderr.take().unwrap()).lines();
+        std::thread::spawn(move || {
+            let mut said = String::new();
+            for line in lines.map_while(Result::ok) {
+                if line.contains("verkstead answers") {
+                    let _ = opened.send(());
+                }
+                said.push_str(&line);
+                said.push('\n');
+            }
+            said
+        })
+    };
     server.await_asked_set(1);
+    let told = heard.recv_timeout(Duration::from_secs(30));
 
     // The harness stopping the background command, which is the failure this
     // whole path exists for.
     waiting.kill().unwrap();
-    let stopped = finished(waiting);
+    finished(waiting);
+    let said = reading.join().unwrap();
     assert!(
-        stderr(&stopped).contains("verkstead answers 1"),
-        "the killed wait should have left the id and the command behind, got:\n{}",
-        stderr(&stopped)
+        told.is_ok() && said.contains("verkstead answers 1"),
+        "the killed wait should have left the id and the command behind, got:\n{said}"
     );
 
     // And the human answers it, knowing nothing about any of that.
