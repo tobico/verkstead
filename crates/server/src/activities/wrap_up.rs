@@ -40,9 +40,10 @@ use crate::store;
 ///   always ended a wrap-up — see [`crate::settling::settled`]. A rule that is
 ///   no longer true by the time it is applied starts the component again.
 /// - **`merged`** is the same Done without the rule: every pull request has
-///   landed, and nothing is left for the wrap-up to wait on.
+///   landed, and nothing is left for the wrap-up to wait on — so a session it
+///   still had running is ended and its Set closed first, see [`landed`].
 /// - **`closed`** is a stop: a pull request closed unmerged is the human's to
-///   decide about.
+///   decide about. A session still running is seen out the same way.
 /// - **`given-up`** writes the stop the host gave up with, which is exactly the
 ///   stop it always wrote — see [`crate::wrapping::give_up`].
 /// - **`steered`**, or a stop, has said where the Conversation went already.
@@ -152,8 +153,12 @@ pub(crate) async fn run(
 
     match outcome.as_deref() {
         Some("settled") => crate::settling::settled(&state, conversation_id, true).await,
-        Some("merged") => crate::settling::settled(&state, conversation_id, false).await,
+        Some("merged") => {
+            landed(&state, conversation_id).await;
+            crate::settling::settled(&state, conversation_id, false).await
+        }
         Some("closed") => {
+            landed(&state, conversation_id).await;
             stop(
                 &state,
                 conversation_id,
@@ -168,6 +173,22 @@ pub(crate) async fn run(
         Some("given-up") => crate::wrapping::given_up(&state, conversation_id).await,
         _ => {}
     }
+}
+
+/// See out whatever the wrap-up still had going as its pull requests landed:
+/// the session it dispatched, ended, and the Set that session left open,
+/// closed unanswered.
+///
+/// A merge or a close is looked for every round, a session running or not —
+/// the human merges from GitHub whenever they like, the review's Set standing
+/// or not — and once the wrap-up has answered it nothing is waiting on that
+/// session any more. Left running it would hold the Worktree for nobody, and
+/// its Set would carry an answer to a session that pushes to a branch already
+/// merged or closed. Ended before the move, so the Conversation never reads as
+/// Done, or stopped, with a session still working in it.
+async fn landed(state: &AppState, conversation_id: i64) {
+    state.sessions.end(conversation_id).await;
+    crate::activities::follow_up_rounds::left_open(state, conversation_id).await;
 }
 
 /// The id the **Wrap-up** Activity has in the built-in Activities plugin's
