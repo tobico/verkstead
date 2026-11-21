@@ -43,6 +43,13 @@ import type {
   CompanionModeChosen,
   CompanionRemoved,
   ComponentsView,
+  PluginCapability,
+  PluginConsent,
+  PluginFieldEdit,
+  PluginSettingsSaved,
+  PluginSettingsView,
+  PluginUpdated,
+  PluginsView,
   Confirming,
   ConversationArchived,
   ConversationClosed,
@@ -2098,6 +2105,71 @@ export function updateAll(): Promise<DevicesView> {
 /// disk a file's size on this machine.
 export function loadComponents(): Promise<ComponentsView> {
   return get<ComponentsView>("/api/ui/components");
+}
+
+/// The Plugins section: the installed above the built-in, each with its trouble
+/// where it didn't load on this device.
+export function loadPlugins(): Promise<PluginsView> {
+  return get<PluginsView>("/api/ui/plugins");
+}
+
+/// The consent card for the plugin at `source` — a directory's path, or a git
+/// URL the server clones and takes back once it is read — with nothing
+/// written: who it is, what it provides and every capability it asks for.
+/// Refused where it isn't a plugin, can't be cloned, or its uuid is taken.
+export function readPlugin(source: string): Promise<PluginConsent> {
+  return post<PluginConsent>("/api/ui/plugins/read", { source });
+}
+
+/// **Install**: the plugin at `source`, granted what its card showed.
+export function installPlugin(
+  source: string,
+  granted: PluginCapability[],
+): Promise<PluginsView> {
+  return post<PluginsView>("/api/ui/plugins", { source, granted });
+}
+
+/// **Update** on a row: a local plugin's manifest read again, a git plugin's
+/// default branch pulled. Answered with the consent card
+/// where it now asks for more than was granted, and the press made again with
+/// what that card showed lands it.
+export function updatePlugin(
+  uuid: string,
+  granted: PluginCapability[] | null,
+): Promise<PluginUpdated> {
+  return post<PluginUpdated>(`/api/ui/plugins/${uuid}/update`, { granted });
+}
+
+/// A row's checkbox, which is the cluster's.
+export function enablePlugin(
+  uuid: string,
+  enabled: boolean,
+): Promise<PluginsView> {
+  return post<PluginsView>(`/api/ui/plugins/${uuid}/enabled`, { enabled });
+}
+
+/// **Remove** on an installed row: its record taken off the cluster, and every
+/// device's clone of a git one deleted. Refused, counting and naming them,
+/// while installed plugins depend on it.
+export function removePlugin(uuid: string): Promise<PluginsView> {
+  return post<PluginsView>(`/api/ui/plugins/${uuid}/remove`);
+}
+
+/// A plugin's settings pane: the fields its manifest declares, each with the
+/// cluster's value, and only whether a secret is set.
+export function loadPluginSettings(uuid: string): Promise<PluginSettingsView> {
+  return get<PluginSettingsView>(`/api/ui/plugins/${uuid}/settings`);
+}
+
+/// A save of a plugin's pane: the fields it changed. Refused fields come back
+/// in the answer, by key, and nothing is written where any is.
+export function savePluginSettings(
+  uuid: string,
+  fields: PluginFieldEdit[],
+): Promise<PluginSettingsSaved> {
+  return post<PluginSettingsSaved>(`/api/ui/plugins/${uuid}/settings`, {
+    fields,
+  });
 }
 
 /// **Install** on the Components pane's Annex row: the wizard's install run

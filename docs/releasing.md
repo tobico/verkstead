@@ -142,8 +142,13 @@ Each of these waits on the one above it.
 3. **The viewer**, built once. `rust-embed` reads `web/dist` at compile time
    and what vite writes does not vary by platform, so building it per leg would
    cost eight times over and let the legs disagree about what they embedded.
+   Beside it, **the built-in plugins' wasm components**, built once for
+   `wasm32-wasip2` for the same reason: a component is platform-neutral bytes,
+   so every CLI leg embeds this one build — see
+   [Development](development.md#built-in-plugins).
 4. **Eight legs**, each building its artifact and then running it: five bare
-   CLI binaries, and beside them one desktop app per desktop platform — the
+   CLI binaries, each of which must load every built-in plugin it embedded as
+   it starts, and beside them one desktop app per desktop platform — the
    Linux one as `Verkstead-x86_64.AppImage`, the macOS one as
    `Verkstead-universal.dmg` with `Verkstead-universal.zip` beside it, the
    Windows one as `Verkstead-x86_64.exe`. Each desktop leg uploads what

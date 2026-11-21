@@ -85,7 +85,7 @@ const BETWEEN: u8 = b';';
 /// And the three characters that say a name is a place rather than something to
 /// go looking for: both separators Windows accepts, and the colon a drive
 /// letter ends with.
-const A_PLACE: [u8; 3] = [b'\\', b'/', b':'];
+const A_PLACE: [u8; 3] = *b"\\/:";
 
 /// The variable naming the shell a batch file is run by, and the shell where
 /// nothing named one.

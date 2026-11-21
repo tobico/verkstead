@@ -17,6 +17,9 @@
 //! mcp_headers:
 //!   9c1d7e52-4b3a-5f08-8e6d-2a7c0b9f3e14:
 //!     Authorization: Bearer ...
+//! plugin_secrets:
+//!   0b6f6b7e-5c3a-4d0e-9a51-2f7d8c1e4a90:
+//!     token: glpat-...
 //! ```
 //!
 //! and `config.yaml` is the one that could be read over anybody's shoulder:
@@ -841,6 +844,25 @@ impl Settings {
         self.save_secrets(&secrets.with_mcp_headers_of(server, values))
     }
 
+    /// Set the `secret` settings of the plugin whose uuid is `plugin` in
+    /// `secrets.yaml`, or take them away with `None`, every other secret as it
+    /// stands — and an error where the file will not parse, for the token's
+    /// reason — see [`Settings::setting_author_token`].
+    pub(crate) fn setting_plugin_secrets(
+        &self,
+        plugin: &str,
+        values: Option<BTreeMap<String, String>>,
+    ) -> std::io::Result<()> {
+        let secrets = Self::parsed(&self.secrets_path(), Secrets::read)
+            .ok_or_else(|| std::io::Error::other("secrets.yaml won't parse"))?;
+
+        if values.is_none() && secrets.plugin_secrets_of(plugin).is_none() {
+            return Ok(());
+        }
+
+        self.save_secrets(&secrets.with_plugin_secrets_of(plugin, values))
+    }
+
     /// What the settings file at `path` says read by `read`, nothing written
     /// counting as the empty file — or `None` where it will not parse.
     fn parsed<T: Default>(
@@ -1117,6 +1139,14 @@ pub struct Secrets {
     /// twice over.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     mcp_headers: BTreeMap<String, BTreeMap<String, String>>,
+
+    /// And the values of the `secret` settings each installed Plugin declares,
+    /// by the plugin's uuid and then by the setting's key — where MCP header
+    /// values go, and for their reason (ADR-0030, Set 1769, Q43). The plugin's
+    /// record carries a digest of each, never the value, and nothing here is
+    /// returned to the viewer, which learns only whether one is set.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    plugin_secrets: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 impl Secrets {
@@ -1149,6 +1179,8 @@ impl Secrets {
             // that a file written by hand and a file written by the page read
             // alike.
             mcp_headers: headers_kept(secrets.mcp_headers),
+            // The same of a plugin's secrets: one emptied by hand is unset.
+            plugin_secrets: headers_kept(secrets.plugin_secrets),
         })
     }
 
@@ -1271,6 +1303,33 @@ impl Secrets {
         }
     }
 
+    /// And these secrets with the `secret` settings of the plugin whose uuid
+    /// is `plugin` replaced: `values` by key, or `None` where every one was
+    /// cleared or the plugin removed — every other plugin's as it stands. What
+    /// a save of a plugin's pane and the copying of a member's values write.
+    pub fn with_plugin_secrets_of(
+        &self,
+        plugin: &str,
+        values: Option<BTreeMap<String, String>>,
+    ) -> Secrets {
+        let mut plugin_secrets = self.plugin_secrets.clone();
+
+        match values.map(|values| {
+            values
+                .into_iter()
+                .filter_map(|(key, value)| Some((key, blank_is_nothing(value)?)))
+                .collect::<BTreeMap<_, _>>()
+        }) {
+            Some(values) if !values.is_empty() => plugin_secrets.insert(plugin.to_owned(), values),
+            _ => plugin_secrets.remove(plugin),
+        };
+
+        Secrets {
+            plugin_secrets,
+            ..self.clone()
+        }
+    }
+
     /// The whole of `secrets.yaml` as these secrets write it: an empty text
     /// where nothing is set — see [`Settings::save_secrets`].
     ///
@@ -1315,6 +1374,12 @@ impl Secrets {
         self.mcp_headers.get(server)
     }
 
+    /// And every `secret` setting kept for the plugin whose uuid is `plugin`,
+    /// by key, or `None` where none is.
+    pub fn plugin_secrets_of(&self, plugin: &str) -> Option<&BTreeMap<String, String>> {
+        self.plugin_secrets.get(plugin)
+    }
+
     /// Whether anything at all is configured here, which is what says a save
     /// writes a file rather than empties one.
     ///
@@ -1327,9 +1392,13 @@ impl Secrets {
             author_tokens,
             session_account_password,
             mcp_headers,
+            plugin_secrets,
         } = self;
 
-        !author_tokens.is_empty() || session_account_password.is_some() || !mcp_headers.is_empty()
+        !author_tokens.is_empty()
+            || session_account_password.is_some()
+            || !mcp_headers.is_empty()
+            || !plugin_secrets.is_empty()
     }
 }
 

@@ -16,6 +16,7 @@ mod guide;
 mod launcher_windows;
 mod memo;
 mod pipe_windows;
+mod plugin;
 mod preview;
 mod repo;
 mod sandbox;

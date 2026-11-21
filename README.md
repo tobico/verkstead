@@ -148,6 +148,10 @@ every string on a screen, and the reasons behind them.
 **[Development](docs/development.md)** — the dev shell, building the viewer,
 and the loop for working on Verkstead itself.
 
+**[Plugins](docs/plugins.md)** — the `plugin.yaml` grammar a plugin's author
+writes, and `verkstead plugin check`, which says whether Verkstead would load
+one.
+
 **[Releasing](docs/releasing.md)** — the one workflow that turns a version
 number into the published binaries, the AppImage, the dmg and the Windows
 installer.

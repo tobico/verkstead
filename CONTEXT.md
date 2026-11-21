@@ -2583,6 +2583,10 @@ the later of this device's now and one past the stamp it holds for the record,
 so a device whose clock runs behind never has its own edit reverted by the next
 pull. Removed records are kept, never pruned: the deletion stamp is what tells a
 device that was off when the removal happened that its edit stays removed.
+**The installed Plugins are the one exception**
+([ADR-0030](docs/adr/0030-plugins.md)): a plugin's uuid is its author's, so
+installing a removed one again makes its record again, and the merge for that
+kind keeps the newest write, a removal included.
 _Avoid_: mirror (the home-device model this replaces), synced row, tombstone
 (which is a Conversation that moved away; this is a deletion stamp)
 

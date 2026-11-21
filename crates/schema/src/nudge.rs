@@ -180,6 +180,14 @@ pub enum Nudge {
     /// [`Nudge::Authors`] is for the Authors.
     McpServers,
 
+    /// The installed Plugins moved: one installed, updated or ticked here, a
+    /// member's records of them merged into the table (ADR-0028), or what
+    /// loading them here came to.
+    ///
+    /// **What a member hears to pull this device's installed list again**, as
+    /// [`Nudge::Authors`] is for the Authors.
+    Plugins,
+
     /// Where a Profile's login has got to moved: the harness printed the
     /// address, took a code, finished, or was killed.
     ///

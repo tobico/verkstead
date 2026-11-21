@@ -1,0 +1,42 @@
+/// What a Plugin's wasm component is written against (ADR-0030).
+///
+/// The package's major version is the manifest's `interface:` — a component
+/// built against a newer one is a plugin for a newer Verkstead, and the
+/// manifest says so before anything here is read.
+///
+/// **WASI is not named here.** The host links WASI 0.2 and WASI HTTP beside
+/// these worlds whatever a component imports of them, and what any of it can
+/// reach is what the manifest's `capabilities:` granted at Install: a path
+/// never granted is a directory the component has no handle on, and a host
+/// never named is a request refused.
+package verkstead:plugin@1.0.0;
+
+/// What every plugin component may target, and the one a component that
+/// provides nothing in code is checked against.
+world plugin {}
+
+/// One world per Category, each the base and, once the stage that gives the
+/// Category its grammar lands, what a component providing it exports.
+world agent {
+  include plugin;
+}
+
+world process {
+  include plugin;
+}
+
+world forge {
+  include plugin;
+}
+
+world language {
+  include plugin;
+}
+
+world activity {
+  include plugin;
+}
+
+world skills {
+  include plugin;
+}

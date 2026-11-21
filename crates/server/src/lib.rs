@@ -260,6 +260,10 @@ mod placing;
 /// the product's business rather than an endpoint's, and the default is one rule
 /// for every binary that parses a [`Config`] rather than the server's alone.
 pub mod platform;
+/// Plugins: a directory with a `plugin.yaml` at its root, and the reading of
+/// one (ADR-0030). Public for `verkstead plugin check`, which reads a manifest
+/// with no server running.
+pub mod plugins;
 pub mod preflight;
 /// Suggesting a Preview for trying the work by hand, from a building session
 /// alone (ADR-0024).
@@ -603,6 +607,11 @@ pub(crate) struct AppState {
     /// the moment they are wanted, so the settings page and the next session to
     /// spawn see the same thing — see [`settings`].
     settings: settings::Settings,
+
+    /// What loading the installed Plugins on this device came to — see
+    /// [`plugins::installed`]. The list is the cluster's record; each device's
+    /// reading of its own copies is held here.
+    plugins: plugins::installed::Installed,
 
     /// What each language's store held when it was last measured — see
     /// [`disk_use`].
@@ -1643,6 +1652,7 @@ fn standing(
         // at the moment they are wanted, so what the settings page saves reaches
         // the next session without a restart — see [`settings`].
         settings: settings::Settings::in_data_dir(&data_dir),
+        plugins: plugins::installed::Installed::default(),
         disk_use: disk_use::DiskUse::default(),
         sweeps: eviction::Sweeps::default(),
         nudges,
@@ -1810,9 +1820,15 @@ fn standing(
     // And every member's Replicated records pulled and merged into this
     // device's, beside it and on the same channel: read once now, and again
     // whenever a member says its records moved or the membership itself does,
-    // so every device holds the cluster's Authors, Agent Profiles, Instructions
-    // and MCP servers (ADR-0028) — see [`replicating`].
+    // so every device holds the cluster's Authors, Agent Profiles, Instructions,
+    // MCP servers and Plugins (ADR-0028) — see [`replicating`].
     replicating::pulling(&state);
+
+    // And the Plugins installed here loaded, each through the manifest reader
+    // and the wasm component loader, once now and again whenever their records
+    // move — see [`plugins::installed`]. One that fails to load is trouble on
+    // its row, and nothing else (Set 1762, Q15).
+    plugins::installed::loading(&state);
 
     // And the stages this device holds away from their home, each telling that
     // device where it stands, on the same channel again and on a slow clock for
@@ -2494,6 +2510,26 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     let skills = skills::Skills::installed(platform::Platform::HERE, &data_dir)
         .context("installing the skills every sandbox is given")?;
 
+    // And the Plugins this binary ships, each read and its wasm component
+    // started through the loader an installed plugin goes through — see
+    // [`plugins::built_in`]. One that fails to load is trouble, said here, and
+    // never a start that stops (Set 1762, Q15).
+    let built_ins =
+        plugins::built_in::started(platform::Platform::HERE, Some(homes.servers())).await;
+    for started in &built_ins {
+        if let Some(trouble) = &started.trouble {
+            tracing::warn!(
+                plugin = started.name(),
+                %trouble,
+                "a built-in plugin didn't load, and is left out",
+            );
+        }
+    }
+    let built_ins_loaded = built_ins
+        .iter()
+        .filter(|started| started.trouble.is_none())
+        .count();
+
     // And where the credentials are read from, which is the same directory
     // again — both the ones a session runs with and the one the server's own
     // `gh` authenticates as. Nothing is read here: the files are read as each
@@ -2705,6 +2741,7 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
         build_cache = ?cache.dir(),
         caches_compiles = cache.caches_compiles(),
         skills = %skills.path().display(),
+        built_in_plugins = built_ins_loaded,
         verkstead = ?verkstead.as_ref().map(sandbox::Executable::path),
         "verkstead is listening",
     );
