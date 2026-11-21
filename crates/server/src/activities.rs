@@ -227,6 +227,13 @@ pub(crate) struct Seen {
     /// on with the wait's `picked` to whatever the Direction sets going — see
     /// [`Lent::wait`].
     pub(crate) driving: Option<Driving>,
+
+    /// Whether a host function ended the component for a stop it found
+    /// standing — see [`Hosted::ended_by_a_stop`]. The stop is whoever's put it
+    /// there to say, so the run writes none of its own over it: a move that is
+    /// failing forgets its request before it writes its stop, and a run that
+    /// ended inside that gap would otherwise say the Activity stopped.
+    pub(crate) stopped_under: bool,
 }
 
 /// [`run`], and what the newest session the component launched came to — lent
@@ -296,8 +303,9 @@ pub(crate) async fn run_seeing(
     let seen = std::mem::take(&mut *seen.lock().expect("nothing panics holding it"));
 
     // Whatever it answered, a stop that landed while it ran is the last word:
-    // its own `stop`, or the human's.
-    if already_stopped(state, conversation_id).await {
+    // its own `stop`, or the human's — or a move's, whose stop may still be on
+    // its way when the component it ended has already returned.
+    if seen.stopped_under || already_stopped(state, conversation_id).await {
         return (None, seen);
     }
 
@@ -605,6 +613,11 @@ impl Hosted {
     /// Trap the component where the Conversation has stopped under it.
     async fn ended_by_a_stop(&self) -> wasmtime::Result<()> {
         if !self.beside && already_stopped(&self.state, self.conversation_id).await {
+            self.seen
+                .lock()
+                .expect("nothing panics holding it")
+                .stopped_under = true;
+
             return Err(wasmtime::Error::new(Ended(
                 "The conversation was stopped.".to_owned(),
             )));
