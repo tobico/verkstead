@@ -51,7 +51,7 @@ fn manifest(uuid: &str, name: &str, capabilities: &[&str]) -> String {
          author:\n  name: Ada Lovelace\n  email: ada@example.com\n\
          version: 1.4.0\n\
          interface: 1\n\
-         provides:\n  - category: forge\n  - category: process\n  - category: forge\n\
+         provides:\n  - category: forge\n    hosts: [git.example.com]\n    noun: merge request\n    credential:\n      username: oauth2\n  - category: process\n  - category: forge\n    hosts: [git.example.com]\n    noun: merge request\n    credential:\n      username: oauth2\n\
          {capabilities}"
     )
 }
@@ -149,7 +149,7 @@ async fn kept() -> (Router, tempfile::TempDir) {
 /// the Skill Pack `pack` holding the one skill `reviewing`.
 fn packing(dir: &Path, uuid: &str, name: &str, pack: &str) -> String {
     let text = manifest(uuid, name, &[]).replace(
-        "provides:\n  - category: forge\n  - category: process\n  - category: forge\n",
+        "provides:\n  - category: forge\n    hosts: [git.example.com]\n    noun: merge request\n    credential:\n      username: oauth2\n  - category: process\n  - category: forge\n    hosts: [git.example.com]\n    noun: merge request\n    credential:\n      username: oauth2\n",
         &format!("provides:\n  - category: skills\n    name: {pack}\n    directory: skills\n"),
     );
     let at = plugin(dir, name, &text);
@@ -198,9 +198,9 @@ fn activity_component() -> Vec<u8> {
 /// already, its component `rounds.wasm` and launching each of `skills`.
 fn acting(text: &str, skills: &str) -> String {
     text.replace(
-        "  - category: forge\n  - category: process\n  - category: forge\n",
+        "  - category: forge\n    hosts: [git.example.com]\n    noun: merge request\n    credential:\n      username: oauth2\n  - category: process\n  - category: forge\n    hosts: [git.example.com]\n    noun: merge request\n    credential:\n      username: oauth2\n",
         &format!(
-            "  - category: forge\n  - category: process\n  - category: forge\n  \
+            "  - category: forge\n    hosts: [git.example.com]\n    noun: merge request\n    credential:\n      username: oauth2\n  - category: process\n  - category: forge\n    hosts: [git.example.com]\n    noun: merge request\n    credential:\n      username: oauth2\n  \
              - category: activity\n    id: review-rounds\n    name: Review rounds\n    \
              component: rounds.wasm\n    outcomes: [approved, abandoned]\n    \
              skills: {skills}\n"
@@ -761,8 +761,8 @@ async fn the_language_plugins_are_listed_under_built_in() {
     let names: Vec<&str> = view.built_in.iter().map(|row| row.name.as_str()).collect();
     assert_eq!(
         names.len(),
-        9,
-        "the pack, the Activities, Codex and six languages: {names:?}"
+        10,
+        "the pack, the Activities, Codex, GitHub and six languages: {names:?}"
     );
     assert!(!view.built_in.iter().any(|row| row.uuid == FIXTURE));
 
@@ -1052,7 +1052,7 @@ async fn an_installers_own_language_is_a_row_of_its_own() {
 /// `size` setting.
 fn languaging(dir: &Path, uuid: &str, name: &str, language: &str) -> String {
     let text = manifest(uuid, name, &[]).replace(
-        "provides:\n  - category: forge\n  - category: process\n  - category: forge\n",
+        "provides:\n  - category: forge\n    hosts: [git.example.com]\n    noun: merge request\n    credential:\n      username: oauth2\n  - category: process\n  - category: forge\n    hosts: [git.example.com]\n    noun: merge request\n    credential:\n      username: oauth2\n",
         &format!(
             "settings:\n  - key: size\n    label: Store size limit\n    kind: size\n\
              provides:\n  - category: language\n    language: {language}\n    label: Zig\n    \

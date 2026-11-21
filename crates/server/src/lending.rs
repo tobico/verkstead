@@ -1642,9 +1642,9 @@ impl host::Host for Lent {
             return Ok(Vec::new());
         };
 
-        let said: Vec<crate::github::Comment> = comments
+        let said: Vec<crate::forges::Comment> = comments
             .into_iter()
-            .map(|comment| crate::github::Comment {
+            .map(|comment| crate::forges::Comment {
                 which: comment.which,
                 author: comment.author,
                 at: comment.at,

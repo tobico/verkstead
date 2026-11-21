@@ -104,6 +104,28 @@
       "elsewhere": null,
       "enabled": true,
       "harness": null,
+      "languages": [],
+      "name": "GitHub",
+      "needs": [],
+      "profiles": 0,
+      "provides": [
+        "forge"
+      ],
+      "settings": 0,
+      "source": {
+        "kind": "BuiltIn"
+      },
+      "trouble": null,
+      "uuid": "b357e557-3716-4ea6-a3a8-d904c92c5eac",
+      "version": "0.1.0"
+    },
+    {
+      "activities": [],
+      "author": "Tobias Cohen",
+      "dependents": [],
+      "elsewhere": null,
+      "enabled": true,
+      "harness": null,
       "languages": [
         "Go"
       ],
@@ -289,7 +311,7 @@
       "settings": 0,
       "source": {
         "kind": "Git",
-        "revision": "d9327cd7b48cc94021a562334dea4377b6560097",
+        "revision": "f23bae92a757a9d149bd44310a15ea0d4a1d796a",
         "url": "file:///home/you/src/sources/skills"
       },
       "trouble": null,

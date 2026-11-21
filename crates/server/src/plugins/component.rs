@@ -948,6 +948,9 @@ fn grant(capabilities: &[Capability], home: Option<&Path>) -> Result<Grant, Trou
             // Nothing of WASI's: the host functions that start a Conversation
             // ask the grant themselves — see [`crate::activities`].
             Capability::Conversations => {}
+            // Nothing at the start either: the host sets the secret in the
+            // component's environment for the call that needs it.
+            Capability::Secrets { .. } => {}
         }
     }
 

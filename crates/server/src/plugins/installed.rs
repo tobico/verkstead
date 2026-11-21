@@ -70,7 +70,7 @@ use super::component;
 use super::git::{self, Staged};
 use super::manifest::{Access, Capability, Dependency, Files, Manifest, Mark};
 use crate::AppState;
-use crate::github::Credential;
+use crate::forges::Credential;
 use crate::platform::Platform;
 use crate::replicating::plugins::{Declared, Fields, Plugins, Source};
 use crate::store::replicated::{self, Record, Written};
@@ -773,6 +773,7 @@ fn capabilities(manifest: &Manifest) -> Vec<PluginCapability> {
                 PluginCapability::Environment { name: name.clone() }
             }
             Capability::Conversations => PluginCapability::Conversations,
+            Capability::Secrets { name } => PluginCapability::Secrets { name: name.clone() },
         })
         .collect()
 }

@@ -41,7 +41,7 @@
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use crate::github::{self, Credential, Gh, Trouble};
+use crate::forges::{Credential, Trouble};
 use crate::settings::{Author, GitAuthor, Settings};
 use crate::unseen::Unseen;
 
@@ -72,7 +72,7 @@ pub(crate) enum Publishing {
 /// Blocking from end to end — a `gh`, a clone and a push. The caller is on
 /// `spawn_blocking`.
 pub(crate) fn publish(
-    gh: &Gh,
+    gh: &dyn crate::forges::Forge,
     token: Option<&str>,
     author: &GitAuthor,
     description: &str,
@@ -87,18 +87,18 @@ pub(crate) fn publish(
     // named refusal rather than a gist half made and taken back. The same call
     // the settings page verifies with, which is why the answer is the account's
     // scopes rather than a yes or a no.
-    let account = match github::authenticates_as(gh, token) {
+    let account = match gh.verify(token) {
         Ok(account) => account,
         Err(trouble) => return Publishing::Refused(trouble.why()),
     };
 
-    if account.scopes.known_to_lack(github::GIST) {
+    if account.scopes.known_to_lack(crate::forges::GIST) {
         return Publishing::NoGistScope;
     }
 
-    let gist = match github::create_gist(gh, token, description, name, PLACEHOLDER) {
+    let gist = match gh.create_gist(token, description, name, PLACEHOLDER) {
         Ok(gist) => gist,
-        Err(trouble) => return refusal(trouble),
+        Err(trouble) => return refusal(gh, trouble),
     };
 
     match written(&gist, token, author, name, document) {
@@ -109,7 +109,7 @@ pub(crate) fn publish(
             // failure's business — what is reported is what went wrong with the
             // publish, and a delete that also failed is logged where the rest of
             // the trouble is.
-            if let Err(trouble) = github::delete_gist(gh, token, &gist.id) {
+            if let Err(trouble) = gh.delete_gist(token, &gist.id) {
                 tracing::error!(
                     error = ?trouble,
                     gist = gist.id,
@@ -131,7 +131,7 @@ pub(crate) fn publish(
 /// of them reads them late. The token comes back because the comments that
 /// follow a publish are left as whoever the gist belongs to.
 pub(crate) fn publish_as(
-    gh: &Gh,
+    gh: &dyn crate::forges::Forge,
     settings: &Settings,
     recorded: Option<&str>,
     description: &str,
@@ -146,7 +146,7 @@ pub(crate) fn publish_as(
     // An Author whose token's copy has not arrived is refused by that name
     // rather than as an Author with no token, which it is not.
     if author.is_some_and(|author| config.token_awaited(author.id())) {
-        return (Publishing::Refused(crate::github::awaited()), None);
+        return (Publishing::Refused(crate::forges::awaited()), None);
     }
 
     let token = author.and_then(|author| config.token_of(author, &secrets));
@@ -180,7 +180,7 @@ const PLACEHOLDER: &str = "The share is on its way.\n";
 /// went on showing the placeholder because the branch it displays was the other
 /// one.
 fn written(
-    gist: &github::Gist,
+    gist: &crate::forges::Gist,
     token: &str,
     author: &GitAuthor,
     name: &str,
@@ -267,37 +267,20 @@ pub(crate) fn said(stderr: &str) -> String {
         .to_owned()
 }
 
-/// A `gh` refusal, as a publish reports it.
+/// A refusal to make a gist, as a publish reports it.
 ///
-/// The one worth telling apart is a token GitHub itself turned down for the
+/// The one worth telling apart is a token the Forge itself turned down for the
 /// scope, which is what a *classic* token missing `gist` never reaches — its
 /// scopes are read before anything is made — and what a fine-grained one whose
 /// permissions were never checked lands on. Same answer either way, because it
-/// is the same thing for the human to go and do.
-fn refusal(trouble: Trouble) -> Publishing {
-    match &trouble {
-        Trouble::Refused(said) if unscoped(said) => Publishing::NoGistScope,
-        _ => Publishing::Refused(trouble.why()),
+/// is the same thing for the human to go and do. Which refusal that is, is the
+/// Forge's to say — see [`crate::forges::Forge::lacks_scope`].
+fn refusal(forge: &dyn crate::forges::Forge, trouble: Trouble) -> Publishing {
+    if forge.lacks_scope(&trouble) {
+        return Publishing::NoGistScope;
     }
-}
 
-/// Whether what `gh` said is GitHub refusing the token rather than the request.
-///
-/// Two shapes, because GitHub has two ways of saying it. A fine-grained token
-/// without the permission is told so — *not accessible by* — and a classic one
-/// gets a `404`, which is GitHub's habit everywhere: telling somebody a resource
-/// exists but is not theirs is telling them it exists.
-///
-/// The `404` is safe to read that way *here* and would not be anywhere else:
-/// what was asked for is `POST /gists`, which is a collection rather than a
-/// thing, and there is nothing about it for GitHub to have lost. Everything else
-/// stays whatever it was.
-fn unscoped(said: &str) -> bool {
-    let said = said.to_lowercase();
-
-    said.contains("not accessible by")
-        || said.contains("requires authentication")
-        || said.contains("not found")
+    Publishing::Refused(trouble.why())
 }
 
 /// The same shell-script `gh` [`crate::github`]'s own tests run, and asked on
@@ -308,6 +291,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::github::Gh;
 
     /// The document a share is, standing in for the several megabytes a real one
     /// runs to. What matters about it here is that it arrives byte for byte, so

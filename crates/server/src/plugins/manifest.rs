@@ -41,8 +41,10 @@ use crate::languages::Provided;
 use crate::platform::Platform;
 
 pub mod agent;
+pub mod forge;
 
 pub use agent::Agent;
+pub use forge::Forge;
 
 /// The newest interface version this build knows. A manifest naming a higher
 /// one was written for a newer Verkstead and is refused at load, rather than
@@ -153,6 +155,7 @@ pub struct Provision {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Body {
     Agent(Box<Agent>),
+    Forge(Box<Forge>),
     Unread(Map<String, Value>),
 }
 
@@ -161,7 +164,15 @@ impl Provision {
     pub fn agent(&self) -> Option<&Agent> {
         match &self.body {
             Body::Agent(agent) => Some(agent),
-            Body::Unread(_) => None,
+            Body::Forge(_) | Body::Unread(_) => None,
+        }
+    }
+
+    /// The Forge this provides, where it is a forge.
+    pub fn forge(&self) -> Option<&Forge> {
+        match &self.body {
+            Body::Forge(forge) => Some(forge),
+            Body::Agent(_) | Body::Unread(_) => None,
         }
     }
 }
@@ -258,11 +269,21 @@ pub enum Capability {
     /// host (ADR-0030, *Activity*): written `conversations: start`, the one
     /// thing there is to do with them.
     Conversations,
+    /// A secret the host sets for it, call by call, in the environment
+    /// variable named — a Forge's token, read where secrets are kept and never
+    /// where the component could find the file.
+    Secrets { name: String },
 }
 
 impl Capability {
     /// The words a manifest writes for each kind, in the order they are offered.
-    const KINDS: [&'static str; 4] = ["filesystem", "outbound", "environment", "conversations"];
+    const KINDS: [&'static str; 5] = [
+        "filesystem",
+        "outbound",
+        "environment",
+        "conversations",
+        "secrets",
+    ];
 }
 
 /// How much of a granted path a component may do.
@@ -683,6 +704,10 @@ impl Walk<'_> {
                         agents += 1;
                         Body::Agent(Box::new(self.agent(&body, &format!("provides[{index}]"))?))
                     }
+                    Category::Forge => Body::Forge(Box::new(forge::forge(
+                        &body,
+                        &format!("provides[{index}]"),
+                    )?)),
                     _ => Body::Unread(body),
                 };
                 Ok(Provision {
@@ -1440,7 +1465,7 @@ fn capability(value: &Value, field: &str) -> Result<Capability, Refusal> {
                 field,
                 format!(
                     "`{field}` asks for {named}, which isn't a capability Verkstead knows. \
-                     It's one of filesystem, outbound, environment, or conversations."
+                     It's one of filesystem, outbound, environment, conversations, or secrets."
                 ),
             ));
         }
@@ -1489,8 +1514,30 @@ fn capability(value: &Value, field: &str) -> Result<Capability, Refusal> {
                 ),
             ));
         }
+        "secrets" if is_variable(&named) => Capability::Secrets { name: named },
+        "secrets" => {
+            let field = format!("{field}.secrets");
+            return Err(Refusal::of(
+                &field,
+                format!(
+                    "`{field}` should be the name of the environment variable the secret is \
+                     set in, like `GH_TOKEN`."
+                ),
+            ));
+        }
         _ => Capability::Environment { name: named },
     })
+}
+
+/// Whether `text` is shaped like an environment variable's name: letters,
+/// digits and underscores, not starting with a digit.
+fn is_variable(text: &str) -> bool {
+    text.bytes()
+        .next()
+        .is_some_and(|first| !first.is_ascii_digit())
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
 fn settings(fields: &Map<String, Value>) -> Result<Vec<Setting>, Refusal> {
@@ -1666,15 +1713,158 @@ provides: []
     fn a_provision_keeps_its_body() {
         let yaml = MINIMAL.replace(
             "provides: []",
-            "provides:\n  - category: forge\n    noun: merge request\n",
+            "provides:\n  - category: process\n    states: [open]\n",
         );
 
         let provision = &read(&yaml).unwrap().provides[0];
-        assert_eq!(provision.category, Category::Forge);
+        assert_eq!(provision.category, Category::Process);
         let Body::Unread(body) = &provision.body else {
-            panic!("a forge's body has no grammar yet");
+            panic!("a process's body has no grammar yet");
         };
-        assert_eq!(body["noun"], "merge request");
+        assert_eq!(body["states"][0], "open");
+    }
+
+    /// A manifest providing one forge, whose entry goes on with `rest` —
+    /// written at the entry's own indentation.
+    fn forging(rest: &str) -> String {
+        MINIMAL.replace(
+            "provides: []",
+            &format!("provides:\n  - category: forge\n{rest}"),
+        )
+    }
+
+    const CREDENTIAL: &str = "    credential:\n      username: oauth2\n";
+
+    #[test]
+    fn a_forge_is_read() {
+        let yaml = forging(&format!(
+            "    hosts: [gitlab.com]\n    noun: merge request\n{CREDENTIAL}    \
+             tool:\n      name: glab\n      token: GITLAB_TOKEN\n    \
+             capabilities: [checks, review]\n    scopes: [api]\n"
+        ));
+
+        let manifest = read(&yaml).unwrap();
+        let forge = manifest.provides[0].forge().expect("a forge");
+        assert_eq!(forge.hosts, ["gitlab.com"]);
+        assert_eq!(forge.noun, "merge request");
+        assert_eq!(forge.credential.username, "oauth2");
+        assert_eq!(
+            forge.credential.hosts,
+            ["gitlab.com"],
+            "the credential covers the forge's hosts where it names none"
+        );
+        assert_eq!(forge.tool.as_ref().unwrap().token, "GITLAB_TOKEN");
+        assert_eq!(
+            forge.capabilities,
+            [forge::Capability::Checks, forge::Capability::Review]
+        );
+        assert_eq!(forge.scopes, ["api"]);
+    }
+
+    #[test]
+    fn a_forge_capability_that_is_not_one_of_the_five_is_refused() {
+        let yaml = forging(&format!(
+            "    hosts: [gitlab.com]\n    noun: merge request\n{CREDENTIAL}    \
+             capabilities: [checks, pipelines]\n"
+        ));
+
+        let refusal = read(&yaml).unwrap_err();
+        assert_eq!(
+            refusal.field.as_deref(),
+            Some("provides[0].capabilities[1]")
+        );
+        assert!(refusal.why.contains("`pipelines`"), "{}", refusal.why);
+        assert!(
+            refusal
+                .why
+                .contains("checks, review, publish, stacks, or create"),
+            "{}",
+            refusal.why
+        );
+    }
+
+    #[test]
+    fn a_forge_capability_named_twice_is_refused() {
+        let yaml = forging(&format!(
+            "    hosts: [gitlab.com]\n    noun: merge request\n{CREDENTIAL}    \
+             capabilities: [checks, checks]\n"
+        ));
+
+        assert_eq!(refused_at(&yaml), "provides[0].capabilities[1]");
+    }
+
+    #[test]
+    fn a_forge_without_hosts_or_a_noun_is_refused() {
+        let refusal =
+            read(&forging(&format!("    noun: merge request\n{CREDENTIAL}"))).unwrap_err();
+        assert_eq!(refusal.field.as_deref(), Some("provides[0].hosts"));
+        assert_eq!(refusal.why, "`provides[0].hosts` is missing.");
+
+        let refusal = read(&forging(&format!(
+            "    hosts: []\n    noun: merge request\n{CREDENTIAL}"
+        )))
+        .unwrap_err();
+        assert_eq!(refusal.field.as_deref(), Some("provides[0].hosts"));
+
+        let refusal =
+            read(&forging(&format!("    hosts: [gitlab.com]\n{CREDENTIAL}"))).unwrap_err();
+        assert_eq!(refusal.field.as_deref(), Some("provides[0].noun"));
+        assert_eq!(refusal.why, "`provides[0].noun` is missing.");
+
+        assert_eq!(
+            refused_at(&forging(
+                "    hosts: [gitlab.com]\n    noun: merge request\n"
+            )),
+            "provides[0].credential"
+        );
+    }
+
+    #[test]
+    fn a_key_a_forge_has_not_is_refused() {
+        let yaml = forging(&format!(
+            "    hosts: [gitlab.com]\n    noun: merge request\n{CREDENTIAL}    colour: orange\n"
+        ));
+
+        assert_eq!(refused_at(&yaml), "provides[0].colour");
+    }
+
+    #[test]
+    fn a_forge_tool_token_that_is_no_variable_is_refused() {
+        let yaml = forging(&format!(
+            "    hosts: [gitlab.com]\n    noun: merge request\n{CREDENTIAL}    \
+             tool:\n      name: glab\n      token: gitlab token\n"
+        ));
+
+        assert_eq!(refused_at(&yaml), "provides[0].tool.token");
+    }
+
+    #[test]
+    fn a_secrets_capability_is_read() {
+        let yaml = format!("{MINIMAL}capabilities:\n  - secrets: GH_TOKEN\n");
+
+        assert_eq!(
+            read(&yaml).unwrap().capabilities,
+            [Capability::Secrets {
+                name: "GH_TOKEN".to_owned()
+            }]
+        );
+    }
+
+    #[test]
+    fn a_malformed_secrets_capability_is_refused() {
+        for (written, field) in [
+            ("secrets: gh token", "capabilities[0].secrets"),
+            ("secrets: 1TOKEN", "capabilities[0].secrets"),
+            ("secrets: \"\"", "capabilities[0].secrets"),
+            ("secrets: [GH_TOKEN]", "capabilities[0].secrets"),
+            (
+                "{secrets: GH_TOKEN, access: read-only}",
+                "capabilities[0].access",
+            ),
+        ] {
+            let yaml = format!("{MINIMAL}capabilities:\n  - {written}\n");
+            assert_eq!(refused_at(&yaml), field, "{written}");
+        }
     }
 
     /// A manifest providing one language, `rust`, whose entry goes on with

@@ -107,12 +107,11 @@ use verkstead_render::{
 };
 
 use crate::annex::{self, Backend};
-use crate::github::Gh;
 use crate::platform::{Environment, Platform, hostname};
 use crate::remote::Elevate;
 use crate::settings::Settings;
 use crate::unseen::Unseen;
-use crate::{github, profiles, sandbox, sessions, store};
+use crate::{profiles, sandbox, sessions, store};
 
 mod install;
 
@@ -1033,7 +1032,7 @@ impl Machine {
     ///
     /// Blocks: a `git config` apiece for the two fields that are wanted, and at
     /// most one `gh` for the third.
-    fn prefilled(&self, gh: &Gh, wanted: Wanted) -> PrefillView {
+    fn prefilled(&self, gh: &dyn crate::forges::Forge, wanted: Wanted) -> PrefillView {
         PrefillView {
             name: self.configured(wanted.name, "user.name"),
             email: self.configured(wanted.email, "user.email"),
@@ -1091,7 +1090,7 @@ impl Machine {
     /// nothing and running `gh` is a process — and because a token put in the
     /// environment of the thing that is running is the more deliberate of the
     /// two.
-    fn token(&self, gh: &Gh) -> Option<Prefilled> {
+    fn token(&self, gh: &dyn crate::forges::Forge) -> Option<Prefilled> {
         let said = |held: &Option<String>| {
             held.as_deref()
                 .map(str::trim)
@@ -1107,7 +1106,8 @@ impl Machine {
             return Some(prefilled(token, Source::GithubToken));
         }
 
-        github::host_token(gh).map(|token| prefilled(token, Source::HostGh))
+        gh.host_token()
+            .map(|token| prefilled(token, Source::HostGh))
     }
 }
 
@@ -1431,7 +1431,11 @@ impl Onboarding {
     /// business running `git config` twice and `gh` once — or handing a GitHub
     /// token to a page that is drawing a sidebar. This is asked for by the step
     /// that has the fields, while they stand empty.
-    pub(crate) async fn prefill(&self, settings: &Settings, gh: &Gh) -> Result<PrefillView> {
+    pub(crate) async fn prefill(
+        &self,
+        settings: &Settings,
+        gh: &dyn crate::forges::Forge,
+    ) -> Result<PrefillView> {
         // What is wanted is decided here, off the settings, and the probes are
         // made for that alone — see [`Wanted`].
         //
@@ -1452,9 +1456,9 @@ impl Onboarding {
         // Off the runtime, for the reason the probes above are: every one of
         // these is a process.
         let machine = self.machine.clone();
-        let gh = gh.clone();
+        let gh = gh.as_author(None);
 
-        Ok(tokio::task::spawn_blocking(move || machine.prefilled(&gh, wanted)).await?)
+        Ok(tokio::task::spawn_blocking(move || machine.prefilled(&*gh, wanted)).await?)
     }
 
     /// The wizard is over: the mode is off for the rest of this run.
@@ -1941,6 +1945,7 @@ fn shown(platform: Platform) -> verkstead_render::Platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::github::Gh;
     use crate::stand_ins::program;
     use verkstead_render::RunPhase;
 

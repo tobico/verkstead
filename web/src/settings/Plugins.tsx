@@ -762,6 +762,12 @@ function asked(capability: PluginCapability): JSX.Element {
       );
     case "Conversations":
       return <>Start conversations of its own</>;
+    case "Secrets":
+      return (
+        <>
+          Read a secret Verkstead keeps for it, as <code>{capability.name}</code>
+        </>
+      );
   }
 }
 

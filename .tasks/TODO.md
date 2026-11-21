@@ -18,7 +18,7 @@ Roadmap stage: [12: The Forge interface and GitHub across](docs/roadmaps/plugins
 
 ## Tasks
 
-- [ ] 01: The Forge trait and the `forge` block — [details](01-forge-trait-and-block.md)
+- [x] 01: The Forge trait and the `forge` block — [details](01-forge-trait-and-block.md)
 - [ ] 02: A Repo's Forge — [details](02-a-repos-forge.md)
 - [ ] 03: Tokens per Forge per Author — [details](03-tokens-per-forge.md)
 - [ ] 04: The noun — [details](04-the-noun.md)

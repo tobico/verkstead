@@ -1,4 +1,6 @@
-//! Verkstead's own reach into GitHub: the *host's* `gh`, run against a Repo.
+//! Verkstead's own reach into GitHub: the *host's* `gh`, run against a Repo —
+//! the one implementation of [`crate::forges::Forge`] there is yet, and the one
+//! module of the server that runs `gh` or reads what it prints.
 //!
 //! Not the sandbox's. The sessions keep using their own `gh` inside their
 //! sandboxes to push and to open a pull request — that is the repository's
@@ -55,112 +57,20 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 
 use serde::Deserialize;
 
+use crate::forges::{
+    Account, AsWhom, Check, Checked, Comment, Credential, Details, Forge, Gist, Landing, Mergeable,
+    Numbered, Opening, Scopes, Stands, Suite, Trouble, awaited,
+};
 use crate::platform::Platform;
 use crate::sandbox::MacFloor;
 use crate::settings::Settings;
 use crate::store;
+use crate::targets::NamedPullRequest;
 use crate::unseen::Unseen;
-
-/// What a git of Verkstead's own presents to a remote: an Author's token, or
-/// nothing at all, which leaves git to the host's own credentials.
-///
-/// Every git that reaches a remote on a Repo goes through this — the fetch
-/// before a cut, the fetch that draws a page, the checks' `ls-remote` and a
-/// share's clone and push — so that a private repository under the second
-/// Author's account is fetched as that Author, exactly as `gh` already asks
-/// about it. See [`Gh::credential`].
-#[derive(Clone)]
-pub(crate) struct Credential(AsWhom);
-
-/// Who a git or a `gh` of Verkstead's own authenticates as.
-#[derive(Clone)]
-enum AsWhom {
-    /// Whatever the host is logged in as: an Author with no token, or no
-    /// Author at all.
-    Host,
-
-    /// This token and no other.
-    Token(String),
-
-    /// Nobody: the Repo's Author's record says a token is held for it, and
-    /// this device's copy has not arrived. The host's login
-    /// in its place is the mistake an Author per Repo exists to stop
-    /// (ADR-0025), so a git asks as nobody and a `gh` is not run.
-    Awaited,
-}
-
-impl Credential {
-    /// The host's own, which is what an Author with no token leaves git to:
-    /// nothing is overridden, exactly as before there were Authors.
-    #[cfg(test)]
-    pub(crate) fn host() -> Credential {
-        Credential(AsWhom::Host)
-    }
-
-    /// This token and no other — see [`crate::publishing`], which has read one
-    /// itself.
-    pub(crate) fn token(token: &str) -> Credential {
-        Credential(AsWhom::Token(token.to_owned()))
-    }
-
-    /// Have `git` authenticate as it, and never stop to ask.
-    ///
-    /// **The token goes through the environment.** The helper is a shell
-    /// function that reads `GH_TOKEN`, so what appears in the process list is
-    /// the shape of the helper and never the credential — which is exactly what
-    /// putting the token in the remote URL would do instead. The empty
-    /// `credential.helper=` in front of it clears whatever the machine has
-    /// configured, so that a git given a token authenticates as that token and
-    /// never as the host's stored login.
-    ///
-    /// Declared on every call rather than only on the ones that talk to the
-    /// network, because which of them does is git's business: a clone may
-    /// fetch, a push may re-fetch, and a helper that is there and unasked costs
-    /// nothing. And so `command` is expected to be a `git` with no arguments
-    /// yet: `-c` goes in front of the subcommand.
-    ///
-    /// Where there is no token the machine's configuration stands untouched —
-    /// and the prompt is turned off all the same: a terminal prompt from a
-    /// credential helper that found nothing would be a server thread waiting
-    /// for ever. Where a token is awaited the machine's helpers are cleared
-    /// and none put in their place, so git asks as nobody rather than as the
-    /// host.
-    pub(crate) fn on<'c>(&self, command: &'c mut Command) -> &'c mut Command {
-        const HELPER: &str = r#"!f() { if test "$1" = get; then printf 'username=x-access-token\npassword=%s\n' "$GH_TOKEN"; fi; }; f"#;
-
-        match &self.0 {
-            AsWhom::Host => {}
-            AsWhom::Token(token) => {
-                command
-                    .args(["-c", "credential.helper=", "-c"])
-                    .arg(format!("credential.helper={HELPER}"))
-                    .env("GH_TOKEN", token);
-            }
-            AsWhom::Awaited => {
-                command
-                    .args(["-c", "credential.helper="])
-                    .env_remove("GH_TOKEN");
-            }
-        }
-
-        command.env("GIT_TERMINAL_PROMPT", "0")
-    }
-}
-
-/// Never the token: a `Credential` in a log line says whose it is not, and
-/// whether there is one is all a reader needs.
-impl std::fmt::Debug for Credential {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.0 {
-            AsWhom::Token(_) => f.write_str("Credential(an Author's token)"),
-            AsWhom::Host => f.write_str("Credential(the host's)"),
-            AsWhom::Awaited => f.write_str("Credential(nobody's, a token awaited)"),
-        }
-    }
-}
 
 /// The host's `gh`, as Verkstead runs it.
 #[derive(Debug, Clone)]
@@ -215,7 +125,7 @@ impl Gh {
     ///
     /// The first word as it stands where there is no floor to look over, or
     /// where the floor has none of it: that is a program that is not there,
-    /// which is what [`Trouble::NoGh`] is read off.
+    /// which is what [`no_gh`] is said for.
     ///
     /// Blocks, for a handful of `stat` calls — fewer than the process it is
     /// looking for costs to start.
@@ -419,7 +329,7 @@ impl Gh {
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Err(Trouble::NoGh);
+                return Err(Trouble::Ours(no_gh()));
             }
             Err(error) => {
                 return Err(Trouble::Ours(format!(
@@ -532,7 +442,7 @@ impl Gh {
         let output = match command.output() {
             Ok(output) => output,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Err(Trouble::NoGh);
+                return Err(Trouble::Ours(no_gh()));
             }
             Err(error) => {
                 return Err(Trouble::Ours(format!(
@@ -548,50 +458,144 @@ impl Gh {
     }
 }
 
-/// What a `gh` or a git about a Repo says in place of running, where the
-/// Repo's Author holds a token on another device and the copy of it has not
-/// reached this one.
-pub(crate) fn awaited() -> String {
-    "This repo's author has a token on another device, and it hasn't reached this one yet."
-        .to_owned()
+/// Whether what `gh` said is GitHub refusing the token rather than the request.
+///
+/// Two shapes, because GitHub has two ways of saying it. A fine-grained token
+/// without the permission is told so — *not accessible by* — and a classic one
+/// gets a `404`, which is GitHub's habit everywhere: telling somebody a resource
+/// exists but is not theirs is telling them it exists.
+///
+/// The `404` is safe to read that way *here* and would not be anywhere else:
+/// what was asked for is `POST /gists`, which is a collection rather than a
+/// thing, and there is nothing about it for GitHub to have lost. Everything else
+/// stays whatever it was.
+fn unscoped(said: &str) -> bool {
+    let said = said.to_lowercase();
+
+    said.contains("not accessible by")
+        || said.contains("requires authentication")
+        || said.contains("not found")
 }
 
-/// Why `gh` could not answer.
-///
-/// Each of these is a different thing for the human to go and do, which is the
-/// whole reason they are told apart: a machine with no `gh` installed and an
-/// account that was never logged in are the same failure to a caller and two
-/// different afternoons to a person.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Trouble {
-    /// There is no `gh` on the host's PATH.
-    NoGh,
+/// What a `gh` that could not be found is answered with: a failure of
+/// Verkstead's machine rather than of GitHub, so the host's own kind.
+fn no_gh() -> String {
+    "There's no gh on this machine's PATH, so Verkstead can't ask GitHub anything.".to_owned()
+}
 
-    /// There is, and it is not logged in to anything.
-    NotLoggedIn,
+/// GitHub as the [`Forge`] the server asks, over the host's `gh`.
+impl Forge for Gh {
+    fn as_author(&self, recorded: Option<&str>) -> Arc<dyn Forge> {
+        Arc::new(Gh::as_author(self, recorded))
+    }
 
-    /// The repository has no remote for `gh` to work out which GitHub
-    /// repository it is.
-    NoRemote,
+    fn credential(&self) -> Credential {
+        Gh::credential(self)
+    }
 
-    /// GitHub has nothing under what it was asked about: no pull request on the
-    /// branch, or none under the number.
-    ///
-    /// Two sentences out of `gh` and one reason, because the selector is the
-    /// caller's and not GitHub's: asked with a branch it says there are no pull
-    /// requests found, and asked with a number it says it could not resolve one.
-    /// Every caller already knows which it asked with — see [`Self::why`], which
-    /// words it for the branch, and [`crate::conversations::resolve`], which
-    /// words it for the number.
-    NoPullRequest,
+    fn tokened(&self) -> bool {
+        Gh::tokened(self)
+    }
 
-    /// Something else, in `gh`'s own words.
-    Refused(String),
+    fn host_token(&self) -> Option<String> {
+        host_token(self)
+    }
 
-    /// Something else that `gh` did not put into words — it could not be run,
-    /// said nothing, or answered what could not be read — in a sentence of
-    /// Verkstead's own, so that none of it is passed off as a quotation.
-    Ours(String),
+    fn verify(&self, token: &str) -> Result<Account, Trouble> {
+        authenticates_as(self, token)
+    }
+
+    fn pull_request(&self, repo: &Path, branch: &str) -> Result<store::PullRequest, Trouble> {
+        pull_request(self, repo, branch)
+    }
+
+    fn pull_request_numbered(&self, repo: &Path, number: i64) -> Result<Numbered, Trouble> {
+        pull_request_numbered(self, repo, number)
+    }
+
+    fn open_pull_request(&self, repo: &Path, opening: &Opening) -> Result<Numbered, Trouble> {
+        open_pull_request(self, repo, opening)
+    }
+
+    fn open_pull_requests(&self, repo: &Path) -> Result<Vec<Numbered>, Trouble> {
+        open_pull_requests(self, repo)
+    }
+
+    fn details(&self, repo: &Path, number: i64) -> Result<Details, Trouble> {
+        details(self, repo, number)
+    }
+
+    fn checks(&self, repo: &Path, number: i64) -> Result<Suite, Trouble> {
+        checks(self, repo, number)
+    }
+
+    fn landing(&self, repo: &Path, number: i64) -> Result<Landing, Trouble> {
+        landing(self, repo, number)
+    }
+
+    fn comments(&self, repo: &Path, number: i64) -> Result<Vec<Comment>, Trouble> {
+        comments(self, repo, number)
+    }
+
+    fn comment(
+        &self,
+        repo: &Path,
+        token: &str,
+        number: i64,
+        body: &str,
+    ) -> Result<String, Trouble> {
+        comment(self, repo, token, number, body)
+    }
+
+    fn reply(&self, repo: &Path, number: i64, body: &str) -> Result<String, Trouble> {
+        reply(self, repo, number, body)
+    }
+
+    fn create_gist(
+        &self,
+        token: &str,
+        description: &str,
+        name: &str,
+        content: &str,
+    ) -> Result<Gist, Trouble> {
+        create_gist(self, token, description, name, content)
+    }
+
+    fn delete_gist(&self, token: &str, id: &str) -> Result<(), Trouble> {
+        delete_gist(self, token, id)
+    }
+
+    fn create_repository(&self, repo: &Path, name: &str) -> Result<(), Trouble> {
+        create_repository(self, repo, name)
+    }
+
+    fn tool_extension(
+        &self,
+        name: &str,
+        environment: &[(String, OsString)],
+    ) -> Result<(), Trouble> {
+        self.extension(name, environment)
+    }
+
+    fn lacks_scope(&self, trouble: &Trouble) -> bool {
+        matches!(trouble, Trouble::Refused(said) if unscoped(said))
+    }
+
+    fn target_in(&self, prose: &str) -> Option<NamedPullRequest> {
+        crate::targets::pull_request_in(prose)
+    }
+
+    fn target_named(&self, target: &str) -> Option<NamedPullRequest> {
+        crate::targets::pull_request_named(target)
+    }
+
+    fn repository_in(&self, url: &str) -> Option<String> {
+        crate::targets::repository_in(url)
+    }
+
+    fn repository_of(&self, origin: &str) -> Option<String> {
+        crate::matching::github_repository(origin)
+    }
 }
 
 impl Trouble {
@@ -639,10 +643,6 @@ impl Trouble {
     /// it is set as `code`: a backtick there would be drawn as a backtick.
     pub(crate) fn why(&self) -> String {
         match self {
-            Trouble::NoGh => {
-                "There's no gh on this machine's PATH, so Verkstead can't ask GitHub anything."
-                    .to_owned()
-            }
             Trouble::NotLoggedIn => {
                 "This machine's gh isn't logged in and no GitHub token is set, \
                  so Verkstead can't ask GitHub anything. Put one in on the settings page."
@@ -726,52 +726,6 @@ pub(crate) fn authenticates_as(gh: &Gh, token: &str) -> Result<Account, Trouble>
     })
 }
 
-/// Who a token is, and what it may do.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Account {
-    /// The login GitHub answered with.
-    pub(crate) login: String,
-
-    /// And the scopes it says the token carries.
-    pub(crate) scopes: Scopes,
-}
-
-/// What GitHub said about a token's scopes, which has three answers rather than
-/// two.
-///
-/// The third is the one worth the type: a **fine-grained** token has permissions
-/// rather than scopes, and GitHub answers for one with no scopes header at all.
-/// A missing header read as an empty list would have Verkstead refuse to publish
-/// with a token that publishes perfectly well, and send the human to re-issue it
-/// — so *nothing said* is kept apart from *said, and `gist` was not among them*.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Scopes {
-    /// GitHub named them. Empty is a classic token with no scopes ticked, which
-    /// really can do nothing.
-    Named(Vec<String>),
-
-    /// GitHub named none, which says nothing either way.
-    Unsaid,
-}
-
-impl Scopes {
-    /// Whether this token is known *not* to carry `scope`.
-    ///
-    /// The question asked in the negative, and deliberately: what a caller wants
-    /// to know is whether to refuse, and a token GitHub said nothing about is
-    /// not one to refuse — it is one to try.
-    pub(crate) fn known_to_lack(&self, scope: &str) -> bool {
-        match self {
-            Scopes::Named(named) => !named.iter().any(|named| named == scope),
-            Scopes::Unsaid => false,
-        }
-    }
-}
-
-/// The scope publishing a share needs, which is the one Verkstead's own writes
-/// to GitHub turn on.
-pub(crate) const GIST: &str = "gist";
-
 /// One `gh api -i` response, split into its headers and its body at the blank
 /// line between them.
 ///
@@ -816,21 +770,6 @@ fn scopes(headers: &str) -> Scopes {
     }
 
     Scopes::Unsaid
-}
-
-/// A gist Verkstead has just made: where a reader goes, where git puts the file
-/// in, and what to take back if it never gets one.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Gist {
-    /// GitHub's id for it, which is what deleting one names.
-    pub(crate) id: String,
-
-    /// The page a link to a share points at.
-    pub(crate) url: String,
-
-    /// And the git remote behind that page, as GitHub gave it — a gist is a
-    /// repository, and this is how the file that matters gets into one.
-    pub(crate) push: String,
 }
 
 /// Make a secret gist holding `name`, and answer where it is.
@@ -1160,41 +1099,62 @@ pub(crate) fn open_pull_requests(gh: &Gh, repo: &Path) -> Result<Vec<Numbered>, 
         .collect())
 }
 
-/// One pull request of a repository, by its number, as the host's `gh` answers
-/// for that repository's origin.
+/// Open `opening` as a draft pull request, and answer it as GitHub has it.
 ///
-/// What a **Review** is started on: the Target names a number — see
-/// [`crate::targets`] — and this is the whole of what GitHub has to say about
-/// it before the take-up can run. Nothing about the pull request's own words is
-/// here: the Brief is the human's, and nothing of a pull request is ever read
-/// into it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Numbered {
-    pub(crate) number: i64,
-    pub(crate) title: String,
+/// `gh pr create` prints the new pull request's URL and nothing else on
+/// stdout, so the number is read off the end of it and the pull request then
+/// read back by that number — the one shape [`pull_request_numbered`] already
+/// reads, rather than a second reading of the same thing. The body goes in on
+/// stdin, for [`create_gist`]'s reason: a description is a document, and one on
+/// the command line is one every shell has an opinion about.
+///
+/// As the Repo's Author, read at the moment of the call — see [`Gh::ask`].
+///
+/// Blocking, like everything else here — see [`Gh::run`].
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "`verkstead pull-request open` is its first caller"
+    )
+)]
+pub(crate) fn open_pull_request(
+    gh: &Gh,
+    repo: &Path,
+    opening: &Opening,
+) -> Result<Numbered, Trouble> {
+    let said = gh.written(
+        Some(repo),
+        gh.token()?,
+        &[
+            "pr",
+            "create",
+            "--draft",
+            "--head",
+            &opening.head,
+            "--base",
+            &opening.base,
+            "--title",
+            &opening.title,
+            "--body-file",
+            "-",
+        ],
+        Some(&opening.body),
+    )?;
 
-    /// Where it is — and, with it, which repository `gh` answered about: a pull
-    /// request's URL carries its owner and its repository, which is what a URL
-    /// the human named is checked against. See [`crate::targets::repository_in`].
-    pub(crate) url: String,
+    let number = said
+        .lines()
+        .map(str::trim)
+        .rfind(|line| !line.is_empty())
+        .and_then(|url| url.trim_end_matches('/').rsplit('/').next())
+        .and_then(|number| number.parse::<i64>().ok())
+        .ok_or_else(|| {
+            Trouble::Ours(
+                "The gh command opened a pull request and didn't say where it is.".to_owned(),
+            )
+        })?;
 
-    /// The branch the work is on, unqualified — `tobi/steer` rather than
-    /// `origin/tobi/steer`.
-    pub(crate) head: String,
-
-    /// And the branch it goes into.
-    pub(crate) base: String,
-
-    /// Whether the head branch is in another repository — a fork. Such a pull
-    /// request cannot be pushed to over `origin`, so a wrap-up over it would
-    /// have nowhere to put a fix.
-    pub(crate) fork: bool,
-
-    /// Whether GitHub still has it open. A merged or closed pull request is
-    /// answered by number exactly as an open one is, and it is nothing to wrap
-    /// up: the caller refuses it by the same name a number nothing is open
-    /// under is refused by.
-    pub(crate) open: bool,
+    pull_request_numbered(gh, repo, number)
 }
 
 /// The pull request `number` names in `repo`, as the host's `gh` answers.
@@ -1258,43 +1218,6 @@ pub(crate) fn pull_request_numbered(
         fork: viewed.is_cross_repository,
         open: viewed.state.eq_ignore_ascii_case("open"),
     })
-}
-
-/// One check GitHub is running against a pull request's head commit.
-///
-/// The name is what a human calls it by and what Verkstead counts fix attempts
-/// against — see [`store::fix_attempts`]. The link is where the run itself is,
-/// which is the one thing a stop over a red check cannot be read without.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Check {
-    pub(crate) name: String,
-    pub(crate) how: Checked,
-
-    /// Where the run is, as GitHub gives it. Empty where it gave none.
-    pub(crate) link: String,
-}
-
-/// How one check is getting on.
-///
-/// Three answers rather than GitHub's dozen, because three is what wrap-up
-/// decides between: a green check settles, a red one dispatches a fix session,
-/// and one still running is nothing to do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Checked {
-    /// It finished and it is green. A check that was skipped or that reported
-    /// nothing either way counts here: neither is something to fix.
-    Passed,
-
-    /// It finished and it is not green.
-    ///
-    /// Cancelled counts here, which is the one reading worth saying out loud: a
-    /// cancelled run is not passing and is not going to start passing on its
-    /// own, so reading it as *still running* would be a wrap-up that waited for
-    /// ever rather than one that eventually asks the human.
-    Failed,
-
-    /// It has not finished.
-    Running,
 }
 
 /// Every check on pull request `number`, as the host's `gh` finds them now.
@@ -1365,97 +1288,6 @@ pub(crate) fn checks(gh: &Gh, repo: &Path, number: i64) -> Result<Suite, Trouble
     })
 }
 
-/// Whether GitHub can merge the pull request into its base as it stands.
-///
-/// Three answers, and each of them is its own thing to a wrap-up: a conflicting
-/// pull request is one nothing can land, and one GitHub has not made its mind up
-/// about yet is neither that nor a clean merge — see [`crate::checks`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Mergeable {
-    /// It merges: `MERGEABLE`.
-    Cleanly,
-
-    /// It does not: `CONFLICTING`, which is the branch and its base having
-    /// changed the same lines since they parted.
-    Conflicting,
-
-    /// GitHub has not worked it out — `UNKNOWN`, which is what it answers while
-    /// it is still computing, and what an answer carrying no `mergeable` at all
-    /// comes to.
-    ///
-    /// A word this does not know is read as *not known* rather than as a
-    /// conflict, which is the way round that matters: not knowing changes
-    /// nothing at all, and a conflict holds a wrap-up up. The opposite of
-    /// [`read_check`], where green is the reading that has to be earned — the
-    /// two are different questions, and the honest answer to each is the one
-    /// that concludes nothing from a word nobody here has seen before.
-    Unknown,
-}
-
-impl Mergeable {
-    /// The one GitHub's word names.
-    fn read(said: &str) -> Self {
-        match said.to_ascii_uppercase().as_str() {
-            "MERGEABLE" => Self::Cleanly,
-            "CONFLICTING" => Self::Conflicting,
-            _ => Self::Unknown,
-        }
-    }
-}
-
-/// Where a pull request has got to, and whether it merges — the two facts one
-/// look at a pull request that nobody is wrapping up any more comes back with.
-///
-/// One question rather than two, `gh` taking a list of fields: a pull request
-/// whose base has moved and one somebody has merged are the two things a sweep
-/// after Done is looking for, and asking them separately would be two round
-/// trips over somebody else's network for one answer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Landing {
-    /// Whether GitHub can merge it into its base as it stands.
-    pub(crate) mergeable: Mergeable,
-
-    /// And where it has got to, which is what says whether there is any point
-    /// asking again.
-    pub(crate) stands: Stands,
-}
-
-/// Where GitHub says a pull request has got to.
-///
-/// Three answers and a fourth for not knowing, exactly as [`Mergeable`] has: the
-/// two endings are final, and *open* and *not known* are each a reason to ask
-/// again. Which way an unreadable word falls matters here for [`Mergeable`]'s
-/// reason turned around — reading one as an ending would stop the asking for
-/// good, so nothing but GitHub's own two words for an ending is one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Stands {
-    /// It is open: `OPEN`.
-    Open,
-
-    /// Somebody merged it: `MERGED`.
-    Merged,
-
-    /// Somebody closed it without merging it: `CLOSED`.
-    Closed,
-
-    /// GitHub said nothing this knows how to read, which includes an answer
-    /// carrying no `state` at all. Nothing is concluded from it, the way nothing
-    /// is concluded from a `gh` that would not answer.
-    Unknown,
-}
-
-impl Stands {
-    /// The one GitHub's word names.
-    fn read(said: &str) -> Self {
-        match said.to_ascii_uppercase().as_str() {
-            "OPEN" => Self::Open,
-            "MERGED" => Self::Merged,
-            "CLOSED" => Self::Closed,
-            _ => Self::Unknown,
-        }
-    }
-}
-
 /// Whether pull request `number` merges into its base, and where it has got to.
 ///
 /// What the sweep after Done asks, and the only question it asks: a Conversation
@@ -1499,36 +1331,6 @@ pub(crate) fn landing(gh: &Gh, repo: &Path, number: i64) -> Result<Landing, Trou
         mergeable: Mergeable::read(&read.mergeable),
         stands: Stands::read(&read.state),
     })
-}
-
-/// What GitHub says about a pull request's checks, and which commit it is
-/// saying it about.
-///
-/// The two together rather than the checks alone: a rollup is a fact about one
-/// commit, and a wrap-up that read it as a fact about the branch would finish
-/// over whatever had been pushed since — see [`crate::checks`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Suite {
-    /// The commit GitHub has the pull request's branch on, which is the commit
-    /// the checks below are about.
-    ///
-    /// Empty where `gh` answered without one, which is a question that came back
-    /// short rather than a head of nothing: nothing is concluded from it and the
-    /// checks stand on their own, as they did before this was asked for.
-    pub(crate) head: String,
-
-    /// Every check GitHub reported against that commit, which is empty for a
-    /// commit nothing has run against.
-    pub(crate) checks: Vec<Check>,
-
-    /// And whether GitHub can merge the pull request into its base, which is a
-    /// fact about the branch rather than about the commit above: a base that has
-    /// moved under a branch nobody has touched is what puts a pull request in
-    /// conflict.
-    ///
-    /// Here rather than in an answer of its own because it rides the same call —
-    /// see [`checks`].
-    pub(crate) mergeable: Mergeable,
 }
 
 /// One entry of `statusCheckRollup`, which is one of two different things.
@@ -1616,33 +1418,6 @@ fn read_check(status: &str, conclusion: &str, state: &str) -> Checked {
         "SUCCESS" | "NEUTRAL" | "SKIPPED" => Checked::Passed,
         _ => Checked::Failed,
     }
-}
-
-/// One thing said on a pull request, as the wrap-up's comment watcher reads it.
-///
-/// Not [`verkstead_render::Comment`], which is the details pane's and arrives
-/// rendered: this one is read by an agent rather than by a browser, so it keeps
-/// the markdown it was written in — and it carries the identity, which is the
-/// whole of how a comment already dispatched for is told from a new one.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Comment {
-    /// What this comment is, for as long as it exists. GitHub's node id where
-    /// there is one, its URL where there is not — see [`identity`].
-    pub(crate) which: String,
-
-    /// Who said it, empty for an account that has since gone.
-    pub(crate) author: String,
-
-    /// When, RFC 3339, as GitHub gives it.
-    pub(crate) at: String,
-
-    /// Where on the branch they said it: the file and the line, for a comment
-    /// left on the diff. Empty for one said about the pull request as a whole,
-    /// which is what the conversation and a review's own words are.
-    pub(crate) about: String,
-
-    /// And what they said, in the markdown they wrote.
-    pub(crate) markdown: String,
 }
 
 /// Everything said on pull request `number`, as the host's `gh` finds it now.
@@ -1868,26 +1643,6 @@ fn identity(id: &str, url: &str, author: &str, at: &str) -> String {
     format!("{author} at {at}")
 }
 
-/// What one reading of a pull request comes back with.
-///
-/// Two things out of the one question: what the details pane draws, and the
-/// checks as [`checks`] would have read them. The second is not a second copy of
-/// the first — it is what the rollup written down beside the Conversation is
-/// taken from, and the caller wants the checks in the shape the aggregate is
-/// read out of rather than in the shape a page draws.
-pub(crate) struct Details {
-    pub(crate) pane: verkstead_render::PullRequestDetails,
-    pub(crate) checks: Vec<Check>,
-
-    /// And where the pull request has got to and whether it merges, which ride
-    /// the same question for the reason the checks do — see [`Landing`]. What
-    /// they are for is the recording rather than the pane: opening it is the one
-    /// thing that asks GitHub about a pull request nothing is watching or
-    /// sweeping, so it freshens every fact that is drawn off a card as well as
-    /// the list it came for.
-    pub(crate) landing: Landing,
-}
-
 /// What is on the pull request now: the commits it carries, what GitHub is
 /// running against it and what has been said about it.
 ///
@@ -2017,6 +1772,7 @@ fn drawn(check: &Check) -> verkstead_render::PullRequestCheck {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use crate::forges::GIST;
 
     /// A `gh` that says `said` on stdout, or `wrong` on stderr and exits 1.
     ///
@@ -2182,12 +1938,12 @@ mod tests {
 
         assert_eq!(
             pull_request(&gh, dir.path(), "rate-limiting"),
-            Err(Trouble::NoGh),
+            Err(Trouble::Ours(no_gh())),
         );
         assert!(
-            Trouble::NoGh.why().contains("PATH"),
+            Trouble::Ours(no_gh()).why().contains("PATH"),
             "and says where it looked: {}",
-            Trouble::NoGh.why(),
+            Trouble::Ours(no_gh()).why(),
         );
     }
 
@@ -2230,7 +1986,7 @@ printf '%s' '{"number":41,"title":"Rate limiting","url":"https://github.com/tobi
 
         assert_eq!(
             pull_request(&on_a_mac(empty.path()), dir.path(), "rate-limiting"),
-            Err(Trouble::NoGh),
+            Err(Trouble::Ours(no_gh())),
         );
     }
 
@@ -3000,6 +2756,57 @@ printf '%s' '{"number":41,"title":"Rate limiting","url":"https://github.com/tobi
         );
     }
 
+    /// A draft is opened with its body on stdin, and answered as the pull
+    /// request it became: the number off the URL `gh pr create` printed, read
+    /// back by that number.
+    #[test]
+    fn a_draft_is_opened_and_read_back_by_its_number() {
+        let dir = tempfile::tempdir().unwrap();
+        let told = dir.path().join("told");
+        let script = format!(
+            r#"case "$1 $2" in
+                "pr create") printf '%s\n' "$*" > {told}; cat >> {told};
+                    printf 'https://github.com/tobico/verkstead/pull/57\n' ;;
+                "pr view") printf '{{"number":57,"title":"Stage 12","url":"https://github.com/tobico/verkstead/pull/57","headRefName":"stage-12","baseRefName":"stage-11","isCrossRepository":false,"state":"OPEN"}}' ;;
+                *) exit 1 ;;
+            esac"#,
+            told = told.display(),
+        );
+        let gh = Gh::running(vec![
+            "/bin/sh".to_owned(),
+            "-c".to_owned(),
+            script,
+            "gh".to_owned(),
+        ]);
+
+        let opened = Forge::open_pull_request(
+            &gh,
+            dir.path(),
+            &Opening {
+                head: "stage-12".to_owned(),
+                base: "stage-11".to_owned(),
+                title: "Stage 12".to_owned(),
+                body: "What it does.\n".to_owned(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(opened.number, 57);
+        assert_eq!(opened.base, "stage-11");
+
+        let told = std::fs::read_to_string(told).unwrap();
+        assert!(
+            told.starts_with(
+                "pr create --draft --head stage-12 --base stage-11 --title Stage 12 --body-file -\n"
+            ),
+            "opened as a draft against the base it was given: {told:?}",
+        );
+        assert!(
+            told.ends_with("What it does.\n"),
+            "the body on stdin: {told:?}"
+        );
+    }
+
     /// A `gh` that prints what it is told to, headers and body alike.
     fn answering(said: &str) -> Gh {
         Gh::running(vec![
@@ -3074,6 +2881,9 @@ printf '%s' '{"number":41,"title":"Rate limiting","url":"https://github.com/tobi
     fn a_machine_with_no_gh_cannot_verify_a_token_and_says_which() {
         let gh = Gh::running(vec!["verkstead-has-no-such-program".to_owned()]);
 
-        assert_eq!(authenticates_as(&gh, "ghp_thetoken"), Err(Trouble::NoGh));
+        assert_eq!(
+            authenticates_as(&gh, "ghp_thetoken"),
+            Err(Trouble::Ours(no_gh()))
+        );
     }
 }

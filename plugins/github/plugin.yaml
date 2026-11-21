@@ -1,0 +1,32 @@
+# GitHub, as a Forge plugin: the hosts it answers for, what it calls a pull
+# request, how git in the sandbox signs in, the tool a session is lent and what
+# it can do. The grammar of a `forge` entry is `docs/plugins.md`'s *Forge*.
+#
+# No component yet: the server still answers for GitHub in-process, over the
+# host's `gh`. The capabilities below are what the component will ask for —
+# the REST and GraphQL host, and the Author's token set for each call.
+uuid: b357e557-3716-4ea6-a3a8-d904c92c5eac
+name: GitHub
+author:
+  name: Tobias Cohen
+  email: tobi@tobico.net
+version: 0.1.0
+interface: 1
+description: Pull requests, checks, reviews, gists and repositories on github.com.
+capabilities:
+  - outbound: api.github.com
+  - secrets: GH_TOKEN
+provides:
+  - category: forge
+    hosts: [github.com]
+    noun: pull request
+    credential:
+      username: x-access-token
+      hosts: [github.com]
+    tool:
+      name: gh
+      token: GH_TOKEN
+    capabilities: [checks, review, publish, stacks, create]
+    # `repo` for pull requests, checks, comments and creating a repository;
+    # `gist` for publishing a Share.
+    scopes: [repo, gist]

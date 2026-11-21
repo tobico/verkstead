@@ -39,7 +39,7 @@ use std::time::Duration;
 use verkstead_schema::Nudge;
 
 use crate::AppState;
-use crate::github::{Check, Checked, Credential, Mergeable};
+use crate::forges::{Check, Checked, Credential, Mergeable};
 use crate::plugins::component::worlds::category::activity::verkstead::plugin::activity_types as world;
 use crate::repos::git;
 use crate::store;

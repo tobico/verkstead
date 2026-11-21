@@ -835,7 +835,8 @@ impl Verkstead {
             format!(
                 "uuid: {uuid}\nname: {name}\nauthor:\n  name: Ada Lovelace\n  email: \
                  ada@example.com\nversion: 1.4.0\ninterface: 1\nprovides:\n  - category: \
-                 forge\n"
+                 forge\n    hosts: [gitlab.com]\n    noun: merge request\n    \
+                 credential:\n      username: oauth2\n"
             ),
         )
         .unwrap();
@@ -2314,7 +2315,8 @@ async fn a_git_plugin_is_cloned_by_another_device_at_the_pinned_revision() {
         origin.join("plugin.yaml"),
         format!(
             "uuid: {PLUGIN}\nname: GitLab\nauthor:\n  name: Ada Lovelace\n  email: \
-             ada@example.com\nversion: 1.4.0\ninterface: 1\nprovides:\n  - category: forge\n"
+             ada@example.com\nversion: 1.4.0\ninterface: 1\nprovides:\n  - category: forge\n    hosts: [gitlab.com]\n    noun: merge request\n    \
+             credential:\n      username: oauth2\n"
         ),
     )
     .unwrap();

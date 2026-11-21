@@ -87,7 +87,6 @@ use verkstead_schema::Direction;
 use crate::AppState;
 use crate::activities::one_session::{asked_for_a_pull_request, inline_again, to_a_pull_request};
 use crate::drivers::Driving;
-use crate::github;
 use crate::lending::Lent;
 use crate::repos::git;
 use crate::sessions::Idle;
@@ -580,7 +579,7 @@ pub(crate) async fn implementing_again(state: AppState, conversation_id: i64, dr
 ///
 /// - a pull request, and [`crate::wrapping::opened`] records it and starts the
 ///   wrap-up, finishing the ending that did not finish;
-/// - [`github::Trouble::NoPullRequest`], which is the ending that got nowhere
+/// - [`crate::forges::Trouble::NoPullRequest`], which is the ending that got nowhere
 ///   near as far, and what happens about it is below;
 /// - anything else, which is `gh` unable to answer at all, and that stops,
 ///   saying which trouble it was.
@@ -636,7 +635,7 @@ async fn nothing_left(
             // above whatever stopped the run.
             crate::wrapping::opened(&state, conversation_id, None).await
         }
-        Err(github::Trouble::NoPullRequest) if wrote_a_backlog(working_in, base).await => {
+        Err(crate::forges::Trouble::NoPullRequest) if wrote_a_backlog(working_in, base).await => {
             tracing::info!(
                 conversation_id,
                 "the backlog was written, worked out and left on no pull request, so a \
@@ -645,7 +644,7 @@ async fn nothing_left(
 
             asked_for_a_pull_request(&state, conversation_id).await
         }
-        Err(github::Trouble::NoPullRequest) => {
+        Err(crate::forges::Trouble::NoPullRequest) => {
             tracing::info!(
                 conversation_id,
                 "there is no backlog left to work, none was ever written here, and the \

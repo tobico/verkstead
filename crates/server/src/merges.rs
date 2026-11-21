@@ -49,7 +49,7 @@
 //! about the pull request on its way to listing the checks, and both readings
 //! ride that question — so a human who opens the pane freshens what is written
 //! down here in the same act, whatever state the Conversation is in and whether
-//! or not anything is sweeping it. See [`crate::github::details`] and
+//! or not anything is sweeping it. See [`crate::forges::Forge::details`] and
 //! [`remember`].
 
 use std::time::Duration;
@@ -57,7 +57,7 @@ use std::time::Duration;
 use verkstead_schema::Nudge;
 
 use crate::AppState;
-use crate::github::{Landing, Mergeable, Stands};
+use crate::forges::{Landing, Mergeable, Stands};
 use crate::store;
 
 /// How often a Done Conversation's pull requests are asked about, as
@@ -120,7 +120,7 @@ async fn sweep(state: &AppState) {
 
             // Off the runtime's threads: this is a process, and one that goes to
             // the network.
-            tokio::task::spawn_blocking(move || crate::github::landing(&gh, &repo, number)).await
+            tokio::task::spawn_blocking(move || gh.landing(&repo, number)).await
         };
 
         let landing = match asked {
@@ -139,7 +139,7 @@ async fn sweep(state: &AppState) {
                 continue;
             }
             Err(error) => {
-                tracing::error!(error = ?error, conversation_id = pull_request.conversation_id, "asking gh about a pull request that has not landed failed");
+                tracing::error!(error = ?error, conversation_id = pull_request.conversation_id, "asking the Forge about a pull request that has not landed failed");
                 continue;
             }
         };

@@ -2075,7 +2075,7 @@ impl Sessions {
     /// directory inside the home `gh` is run under, and a session's home is
     /// Verkstead's own rather than whoever started the server — so the answer
     /// has to be asked under that home or it is an answer about somebody else.
-    /// See [`crate::github::Gh::extension`], which is the one caller.
+    /// See [`crate::forges::Forge::tool_extension`], which is the one caller.
     ///
     /// **Both halves are the ones a sandbox is built with** rather than read
     /// again beside it: the home is [`Homes::for_conversation`]'s, which is the

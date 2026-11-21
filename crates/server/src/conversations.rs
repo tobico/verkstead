@@ -53,7 +53,6 @@ use verkstead_schema::{Direction, Nudge};
 use crate::AppState;
 use crate::attachments::{self, Attachments};
 use crate::boundaries;
-use crate::github::Gh;
 
 use crate::handoffs::Handoffs;
 use crate::merging;
@@ -736,6 +735,7 @@ async fn take_handoff(state: &AppState, conversation_id: i64) -> Result<()> {
 pub(crate) async fn save_brief(
     pool: &SqlitePool,
     config: &Config,
+    forge: &std::sync::Arc<dyn crate::forges::Forge>,
     id: i64,
     markdown: &str,
 ) -> Result<BriefSaved> {
@@ -749,14 +749,15 @@ pub(crate) async fn save_brief(
         return Ok(saved);
     }
 
-    if let Some(named) = crate::targets::pull_request_in(markdown) {
+    if let Some(named) = forge.target_in(markdown) {
         store::fill_target(pool, id, &written(&named)).await?;
     }
 
-    if let Some(repository) =
-        crate::targets::pull_request_named(markdown).and_then(|named| named.repository)
+    if let Some(repository) = forge
+        .target_named(markdown)
+        .and_then(|named| named.repository)
     {
-        fill_repo(pool, config, id, &repository).await?;
+        fill_repo(pool, config, forge, id, &repository).await?;
         store::fill_process(pool, id, store::Process::FixMergeIssues).await?;
     }
 
@@ -775,19 +776,26 @@ pub(crate) async fn save_brief(
 /// refusal a move would meet — a companion under another Author, an adoption, a
 /// branch already made — without a word: Start names a mismatch between the
 /// Repo and the pull request by itself, should the human press on regardless.
-async fn fill_repo(pool: &SqlitePool, config: &Config, id: i64, repository: &str) -> Result<()> {
+async fn fill_repo(
+    pool: &SqlitePool,
+    config: &Config,
+    forge: &std::sync::Arc<dyn crate::forges::Forge>,
+    id: i64,
+    repository: &str,
+) -> Result<()> {
     let Some(standing) = store::repo_to_fill(pool, id).await? else {
         return Ok(());
     };
 
     let registered = store::registered_repos(pool).await?;
     let repository = repository.to_owned();
+    let forge = std::sync::Arc::clone(forge);
     let matching: Vec<i64> = tokio::task::spawn_blocking(move || {
         registered
             .into_iter()
             .filter(|repo| {
                 crate::repos::origin(&repo.path)
-                    .and_then(|origin| crate::matching::github_repository(&origin))
+                    .and_then(|origin| forge.repository_of(&origin))
                     .is_some_and(|theirs| theirs.eq_ignore_ascii_case(&repository))
             })
             .map(|repo| repo.id)
@@ -1981,7 +1989,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             }];
 
             for companion in companions {
-                let beside = plan(&data_dir, &gh, id, &branch, companion, &planned)
+                let beside = plan(&data_dir, &*gh, id, &branch, companion, &planned)
                     .map_err(Unmade::grilling)?;
 
                 planned.push(beside);
@@ -2405,7 +2413,7 @@ fn refusal(why: &CompanionRefusal) -> String {
 /// companions being handed one directory — see [`worktrees::unclaimed_path`].
 fn plan(
     data: &Path,
-    gh: &Gh,
+    gh: &dyn crate::forges::Forge,
     id: i64,
     branch: &str,
     companion: store::Companion,
@@ -2876,7 +2884,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
             }];
 
             for companion in companions {
-                let beside = plan(&data_dir, &gh, id, &branch, companion, &planned)
+                let beside = plan(&data_dir, &*gh, id, &branch, companion, &planned)
                     .map_err(Unmade::adopting)?;
 
                 planned.push(beside);
@@ -3206,7 +3214,7 @@ async fn alongside(
             }];
 
             for companion in companions {
-                let beside = plan(&data_dir, &gh, id, &branch, companion, &planned)?;
+                let beside = plan(&data_dir, &*gh, id, &branch, companion, &planned)?;
 
                 planned.push(beside);
             }
@@ -3928,7 +3936,7 @@ pub(crate) async fn take_up(state: &AppState, id: i64, confirming: &Confirming) 
             // presses use: a Conversation taking something up drafts like any
             // other, so its setup card put those rows there like any other's.
             for companion in companions {
-                let beside = plan(&data_dir, &gh, id, &head, companion, &planned)
+                let beside = plan(&data_dir, &*gh, id, &head, companion, &planned)
                     .map_err(Unmade::taking_up)?;
 
                 planned.push(beside);
@@ -4640,7 +4648,7 @@ async fn standing_on(
     state: &AppState,
     taking_up: i64,
     repo: &store::Repo,
-    links: &[&crate::github::Numbered],
+    links: &[&crate::forges::Numbered],
     already: &[Box<store::Conversation>],
 ) -> Result<Standing> {
     let pool = &state.pool;
@@ -4739,7 +4747,7 @@ pub(crate) async fn neighbours_give_way(
     state: &AppState,
     id: i64,
     repo: &store::Repo,
-    links: &[&crate::github::Numbered],
+    links: &[&crate::forges::Numbered],
 ) -> std::result::Result<Vec<i64>, String> {
     let standing = match standing_on(state, id, repo, links, &[]).await {
         Ok(standing) => standing,
@@ -4954,16 +4962,16 @@ async fn resolve(
     // And a target that is not a pull request is a branch, which is the whole of
     // the reading: origin is what says whether there is anything under the name,
     // and that is asked with the rest of git below.
-    let Some(named) = crate::targets::pull_request_named(target) else {
+    let Some(named) = state.github.target_named(target) else {
         return Ok(Ok(Target::Branch(target.to_owned())));
     };
 
-    // Off the runtime's threads: `gh` is a process, and running one blocks.
+    // Off the runtime's threads: a Forge call blocks.
     let asked = tokio::task::spawn_blocking({
         let gh = state.github.as_author(conversation.repo.author.as_deref());
         let repo = conversation.repo.path.clone();
 
-        move || crate::github::pull_request_numbered(&gh, &repo, named.number)
+        move || gh.pull_request_numbered(&repo, named.number)
     })
     .await?;
 
@@ -4975,7 +4983,7 @@ async fn resolve(
         // human's number to correct and the second is their machine's to fix,
         // which is why they are told apart rather than both read as *no such
         // pull request*.
-        Err(crate::github::Trouble::NoPullRequest) => {
+        Err(crate::forges::Trouble::NoPullRequest) => {
             return Ok(Err(TakenUp::NoSuchPullRequest {
                 number: named.number,
             }));
@@ -4985,7 +4993,7 @@ async fn resolve(
                 conversation_id = conversation.id,
                 number = named.number,
                 why = trouble.why(),
-                "a Review's pull request could not be read through the host gh",
+                "a Review's pull request could not be read through the Forge",
             );
 
             return Ok(Err(TakenUp::GitHubRefused { why: trouble.why() }));
@@ -4996,7 +5004,9 @@ async fn resolve(
     // case-insensitively, GitHub's owners and repositories being spelled
     // whichever way whoever typed the URL spelled them.
     if let Some(wanted) = named.repository
-        && !crate::targets::repository_in(&found.url)
+        && !state
+            .github
+            .repository_in(&found.url)
             .is_some_and(|answered| answered.eq_ignore_ascii_case(&wanted))
     {
         return Ok(Err(TakenUp::AnotherRepository { named: wanted }));
@@ -5046,25 +5056,25 @@ async fn opened_on(
     conversation: &store::Conversation,
     branch: &str,
 ) -> Result<std::result::Result<Option<i64>, TakenUp>> {
-    // Off the runtime's threads, as [`resolve`]'s own call is: `gh` is a process.
+    // Off the runtime's threads, as [`resolve`]'s own call is: a Forge call blocks.
     let asked = tokio::task::spawn_blocking({
         let gh = state.github.as_author(conversation.repo.author.as_deref());
         let repo = conversation.repo.path.clone();
         let branch = branch.to_owned();
 
-        move || crate::github::pull_request(&gh, &repo, &branch)
+        move || gh.pull_request(&repo, &branch)
     })
     .await?;
 
     Ok(match asked {
         Ok(opened) => Ok(Some(opened.number)),
-        Err(crate::github::Trouble::NoPullRequest) => Ok(None),
+        Err(crate::forges::Trouble::NoPullRequest) => Ok(None),
         Err(trouble) => {
             tracing::debug!(
                 conversation_id = conversation.id,
                 branch,
                 why = trouble.why(),
-                "a Review's branch could not be asked about through the host gh",
+                "a Review's branch could not be asked about through the Forge",
             );
 
             Err(TakenUp::GitHubRefused { why: trouble.why() })

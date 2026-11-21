@@ -19,7 +19,6 @@
 //! is published either way: the human's next move is to paste the link
 //! themselves, and they can only do that if they are told where it did not go.
 
-use crate::github::{self, Gh};
 use crate::store;
 
 /// What became of the comment on one pull request.
@@ -46,7 +45,7 @@ pub(crate) struct Landing {
 /// Blocking from end to end: one `gh` per pull request, and a Conversation ends
 /// on one per repository it was worked in. The caller is on `spawn_blocking`.
 pub(crate) fn on_each(
-    gh: &Gh,
+    gh: &dyn crate::forges::Forge,
     token: &str,
     pulls: &[(store::Repo, store::PullRequest)],
     body: &str,
@@ -56,7 +55,8 @@ pub(crate) fn on_each(
         .map(|(repo, pull)| Landing {
             number: pull.number,
             repo: pull.repo.clone(),
-            landed: github::comment(gh, &repo.path, token, pull.number, body)
+            landed: gh
+                .comment(&repo.path, token, pull.number, body)
                 .map_err(|trouble| trouble.why()),
         })
         .collect()
@@ -70,6 +70,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::github::Gh;
 
     /// The comment as a share leaves one, cut down to what this module does with
     /// it: it is written once and said everywhere, byte for byte.

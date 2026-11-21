@@ -360,6 +360,7 @@ capabilities:
   - outbound: gitlab.com              # a host it may connect to
   - environment: GITLAB_HOST          # a variable it may read
   - conversations: start              # an Activity starting Conversations
+  - secrets: GITLAB_TOKEN             # a secret the host sets for a call
 ```
 
 - **`filesystem`** — a directory on the host, with `access` either
@@ -377,6 +378,12 @@ capabilities:
 - **`conversations`** — `start`, and nothing else: an Activity may start
   Conversations of its own and read them back, through the host functions
   above. Nothing of WASI's comes with it.
+- **`secrets`** — the name of an environment variable, such as `GH_TOKEN`,
+  that the host sets a secret in for the call that needs it: a Forge's token,
+  read out of `secrets.yaml` at the moment of the call. The component is never
+  told where that file is, and the secret is never returned to the viewer.
+  Letters, digits and underscores, not starting with a digit; anything else is
+  refused.
 
 Any other kind is refused, and so is an entry naming two.
 
@@ -941,6 +948,53 @@ not export all three of:
   written since the last call: the address to show the human, that the harness
   is waiting for the code they bring back, words to say to them, or done. The
   host runs the harness and owns its console; the export only reads it.
+
+### Forge
+
+An entry of category **`forge`** is a **Forge**: where a Repo's pull requests
+live. What about it is data is written here — the hosts it answers for, what
+it calls a pull request, how git inside the Sandbox signs in to it, the tool a
+session is lent and what it can do. GitHub is the one Verkstead ships, as the
+built-in plugin *GitHub*.
+
+```yaml
+capabilities:
+  - outbound: gitlab.com
+  - secrets: GITLAB_TOKEN
+provides:
+  - category: forge
+    hosts: [gitlab.com]
+    noun: merge request
+    credential:
+      username: oauth2
+      hosts: [gitlab.com]           # optional: the forge's hosts by default
+    tool:                           # optional
+      name: glab
+      token: GITLAB_TOKEN
+    capabilities: [checks, review, publish, create]
+    scopes: [api]
+```
+
+- **`hosts`** — required, a list of at least one host. A Repo is on this
+  Forge when its remote names one of them.
+- **`noun`** — required. What the Forge calls a pull request, *merge
+  request* say, drawn wherever a Repo on it is.
+- **`credential`** — required. The **`username`** git's credential helper
+  answers with inside the Sandbox, the Author's token being the password, and
+  the **`hosts`** it answers for, which are `hosts` above where it names none.
+- **`tool`** — optional. The command-line tool a session is lent, by its
+  **`name`**, and the environment variable it reads the token from,
+  **`token`**.
+- **`capabilities`** — optional, a list of what the Forge can do, each once:
+  **`checks`**, checks run against a pull request; **`review`**, comments and
+  reviews on one; **`publish`**, publishing a Share; **`stacks`**, stacked pull
+  requests; and **`create`**, creating a repository. Anything else is refused,
+  naming the entry. A Forge without one is not failed for it: what would have
+  waited on it is settled at once.
+- **`scopes`** — optional, a list: the scopes a token needs for everything
+  Verkstead asks of the Forge.
+
+A key not listed here is refused.
 
 ## Per-platform overrides
 

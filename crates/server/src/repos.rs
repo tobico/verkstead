@@ -39,7 +39,6 @@ use verkstead_render::{
 };
 
 use crate::device::Devices;
-use crate::github::Gh;
 use crate::relaying::{self, Call, Streamed, as_json};
 use crate::resolved::{Resolved, resolve};
 use crate::settings::{Author, Config, Signature};
@@ -259,8 +258,12 @@ pub(crate) fn entry(repo: store::Repo, authors: &[Author]) -> RepoEntry {
 ///
 /// One `git remote get-url` per Repo, which is the list's cost and no other
 /// page's — see [`RepoEntry::github`].
-pub(crate) fn listed(repo: store::Repo, authors: &[Author]) -> RepoEntry {
-    let github = origin(&repo.path).and_then(|origin| crate::matching::github_repository(&origin));
+pub(crate) fn listed(
+    repo: store::Repo,
+    authors: &[Author],
+    forge: &dyn crate::forges::Forge,
+) -> RepoEntry {
+    let github = origin(&repo.path).and_then(|origin| forge.repository_of(&origin));
 
     RepoEntry {
         github,
@@ -296,7 +299,7 @@ fn unpicked(author: Option<&str>, authors: &[Author]) -> bool {
 /// **And where `github` is asked for, a fifth thing: the same repository on
 /// GitHub.** `gh repo create`, private, sourced from the directory it has just
 /// made, with `origin` written and `main` pushed — see
-/// [`crate::github::create_repository`]. Run after the first commit, there being
+/// [`crate::forges::Forge::create_repository`]. Run after the first commit, there being
 /// nothing to push before it, and before the registration, so that what is read
 /// back is a Repo with its remote on it.
 ///
@@ -315,7 +318,7 @@ fn unpicked(author: Option<&str>, authors: &[Author]) -> bool {
 pub(crate) async fn create(
     pool: &SqlitePool,
     config: &Config,
-    gh: &Gh,
+    gh: &dyn crate::forges::Forge,
     creation: &Creation,
     at_once: usize,
 ) -> Result<Created> {
@@ -378,14 +381,12 @@ pub(crate) async fn create(
             let awaited = picked.is_some_and(|author| config.token_awaited(author.id()));
 
             if awaited {
-                Some(crate::github::awaited())
+                Some(crate::forges::awaited())
             } else if gh.tokened() {
-                tokio::task::spawn_blocking(move || {
-                    crate::github::create_repository(&gh, &dir, &called)
-                })
-                .await?
-                .err()
-                .map(|trouble| trouble.why())
+                tokio::task::spawn_blocking(move || gh.create_repository(&dir, &called))
+                    .await?
+                    .err()
+                    .map(|trouble| trouble.why())
             } else {
                 Some(untokened(authors, picked))
             }
@@ -618,7 +619,7 @@ fn is_a_name(name: &str) -> bool {
 pub(crate) async fn clone(
     pool: &SqlitePool,
     config: &Config,
-    gh: &Gh,
+    gh: &dyn crate::forges::Forge,
     cloning: &verkstead_render::Cloning,
 ) -> Result<Cloned> {
     let authors = config.authors();
@@ -629,7 +630,7 @@ pub(crate) async fn clone(
     };
 
     if picked.is_some_and(|author| config.token_awaited(author.id())) {
-        return Ok(Cloned::Refused(crate::github::awaited()));
+        return Ok(Cloned::Refused(crate::forges::awaited()));
     }
 
     let credential = gh.as_author(picked.map(Author::id)).credential();
@@ -724,13 +725,13 @@ pub(crate) async fn clone(
 /// `\\?\C:\…`, which the process can stand in and git cannot be handed.
 ///
 /// **Authenticated the way the rest of Verkstead's own git is** — see
-/// [`crate::github::Credential`]: the Author's token and no other, the host's
+/// [`crate::forges::Credential`]: the Author's token and no other, the host's
 /// login where it holds none. And GitHub's SSH spellings rewritten to HTTPS, as
 /// a session's are — see [`crate::sandbox::github_credentials`] — so an origin a
 /// member cloned over SSH is fetched here with the token rather than with keys
 /// this machine may not have. Only the rewrites of those: the helper there
 /// answers out of `gh`'s own login where `GH_TOKEN` is missing, which is the
-/// host's login a [`Credential`](crate::github::Credential) exists to keep out.
+/// host's login a [`Credential`](crate::forges::Credential) exists to keep out.
 /// Said as `-c` on the command line rather than in the environment, which may
 /// be carrying counted pairs of its own.
 ///
@@ -740,7 +741,7 @@ fn cloned_by(
     origin: &str,
     parent: &Path,
     name: &str,
-    credential: &crate::github::Credential,
+    credential: &crate::forges::Credential,
 ) -> Command {
     let mut command = Command::new("git");
 
@@ -760,7 +761,7 @@ fn cloned_by(
 /// are. A plugin's clone and pull go the same way (ADR-0030).
 pub(crate) fn reaching_as<'c>(
     command: &'c mut Command,
-    credential: &crate::github::Credential,
+    credential: &crate::forges::Credential,
 ) -> &'c mut Command {
     for (key, value) in crate::sandbox::github_credentials() {
         if key.ends_with(".insteadOf") {
@@ -1447,14 +1448,14 @@ mod tests {
     /// SSH rewrites a session's sandbox configures, with nobody asked for
     /// anything — and never `gh`'s own helper, which would answer as the host.
     ///
-    /// [`Credential`]: crate::github::Credential
+    /// [`Credential`]: crate::forges::Credential
     #[test]
     fn a_clone_authenticates_as_its_author() {
         let command = cloned_by(
             "git@github.com:you/widgets.git",
             Path::new("/srv/repos"),
             "widgets",
-            &crate::github::Credential::token("ghp_thetoken"),
+            &crate::forges::Credential::token("ghp_thetoken"),
         );
 
         assert_eq!(
@@ -1505,7 +1506,7 @@ mod tests {
             "https://github.com/you/widgets",
             Path::new("/srv"),
             "w",
-            &crate::github::Credential::host(),
+            &crate::forges::Credential::host(),
         );
 
         assert_eq!(set(&command, "GH_TOKEN"), None);

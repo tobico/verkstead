@@ -78,7 +78,6 @@ use std::path::{Path, PathBuf};
 use verkstead_schema::Nudge;
 
 use crate::AppState;
-use crate::github;
 use crate::store;
 
 /// Find the pull request `conversation_id`'s last session opened, and move the
@@ -176,7 +175,7 @@ pub(crate) async fn record(
     conversation_id: i64,
     repo_id: i64,
     branch: &str,
-    found: Result<store::PullRequest, github::Trouble>,
+    found: Result<store::PullRequest, crate::forges::Trouble>,
     writing: Option<i64>,
     door: Door,
 ) {
@@ -626,13 +625,13 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
             let repo = companion.path.clone();
             let head = companion.head.clone();
 
-            tokio::task::spawn_blocking(move || github::pull_request(&gh, &repo, &head)).await
+            tokio::task::spawn_blocking(move || gh.pull_request(&repo, &head)).await
         };
 
         let found = match asked {
             Ok(found) => found,
             Err(error) => {
-                tracing::error!(error = ?error, conversation_id, repo = companion.name, "asking gh for a companion's pull request failed");
+                tracing::error!(error = ?error, conversation_id, repo = companion.name, "asking the Forge for a companion's pull request failed");
                 return;
             }
         };
@@ -738,7 +737,7 @@ pub(crate) struct Committed {
     pub(crate) path: PathBuf,
 
     /// And the uuid of the Author it records, which is whose token `gh` is
-    /// run with — see [`github::Gh::as_author`].
+    /// run with — see [`crate::forges::Forge::as_author`].
     pub(crate) author: Option<String>,
 
     /// The branch the work is on there, mirroring resolved.
@@ -1095,7 +1094,11 @@ async fn write_the_stop(state: &AppState, conversation_id: i64, gave_up: GaveUp)
 pub(crate) async fn asked(
     state: &AppState,
     conversation_id: i64,
-) -> Option<(i64, String, Result<store::PullRequest, github::Trouble>)> {
+) -> Option<(
+    i64,
+    String,
+    Result<store::PullRequest, crate::forges::Trouble>,
+)> {
     let (repo_id, repo, author, branch) = branch(state, conversation_id).await?;
     let head = head_ref(conversation_id, &repo, &branch).await;
 
@@ -1105,13 +1108,13 @@ pub(crate) async fn asked(
 
         // Off the runtime's threads: this is a process, and one that goes to the
         // network.
-        tokio::task::spawn_blocking(move || github::pull_request(&gh, &repo, &head)).await
+        tokio::task::spawn_blocking(move || gh.pull_request(&repo, &head)).await
     };
 
     match asked {
         Ok(found) => Some((repo_id, head, found)),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "asking gh for a pull request failed");
+            tracing::error!(error = ?error, conversation_id, "asking the Forge for a pull request failed");
             None
         }
     }
@@ -1195,7 +1198,7 @@ async fn branch(
             None
         }
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading the Conversation to ask gh about failed");
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation to ask the Forge about failed");
             None
         }
     }

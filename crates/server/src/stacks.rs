@@ -13,7 +13,7 @@
 //! there is nothing in it to read; the chain itself is plain GitHub — an open
 //! pull request's base is another open pull request's head — and one
 //! `gh pr list` is the whole of what it takes to assemble. See
-//! [`crate::github::open_pull_requests`].
+//! [`crate::forges::Forge::open_pull_requests`].
 //!
 //! **The neighbours are recorded without being claimed.** The pull request the
 //! Conversation was pointed at is the one it is on: its head is the branch, its
@@ -73,7 +73,7 @@
 //! sessions that cannot do what they were told. See [`missing`].
 
 use crate::AppState;
-use crate::github::{self, Numbered};
+use crate::forges::Numbered;
 use crate::store;
 
 /// The `gh` extension a stack is synced with, as `gh` is asked for it and as
@@ -103,7 +103,7 @@ pub(crate) const INSTALL: &str = "gh extension install github/gh-stack";
 /// the only reason the answer is worth having: an extension lives inside the
 /// home `gh` is run under, and a session's home is Verkstead's own. See
 /// [`crate::sessions::Sessions::session_environment`], which composes it, and
-/// [`github::Gh::extension`], which runs it.
+/// [`crate::forges::Forge::tool_extension`], which runs it.
 ///
 /// A server that runs no session answers as though the extension were there:
 /// there is nothing here to equip, so there is nothing for this to be in front
@@ -120,7 +120,7 @@ pub(crate) async fn missing(state: &AppState, conversation_id: i64) -> Option<St
     let author = match store::load_conversation(&state.pool, conversation_id).await {
         Ok(conversation) => conversation.and_then(|conversation| conversation.repo.author),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading the Conversation to ask gh about its extension failed");
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation to ask the Forge about its extension failed");
             None
         }
     };
@@ -130,7 +130,7 @@ pub(crate) async fn missing(state: &AppState, conversation_id: i64) -> Option<St
     let asked = tokio::task::spawn_blocking({
         let gh = state.github.as_author(author.as_deref());
 
-        move || gh.extension(EXTENSION, &environment)
+        move || gh.tool_extension(EXTENSION, &environment)
     })
     .await;
 
@@ -138,9 +138,9 @@ pub(crate) async fn missing(state: &AppState, conversation_id: i64) -> Option<St
         Ok(Ok(())) => None,
         Ok(Err(trouble)) => Some(trouble.why()),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "asking gh whether it has the stack extension failed");
+            tracing::error!(error = ?error, conversation_id, "asking the Forge whether it has the stack extension failed");
 
-            Some("Verkstead couldn't run `gh` to find out.".to_owned())
+            Some("Verkstead couldn't ask the Forge to find out.".to_owned())
         }
     }
 }
@@ -197,7 +197,7 @@ impl Walked {
 ///
 /// One `gh pr list` is the whole of it: a stack is plain GitHub, an open pull
 /// request's base being another open pull request's head. See
-/// [`github::open_pull_requests`] and [`chain`].
+/// [`crate::forges::Forge::open_pull_requests`] and [`chain`].
 pub(crate) async fn walk(state: &AppState, repo: &store::Repo, own: i64) -> Walked {
     // Off the runtime's threads, as every other reach into GitHub is: `gh` is a
     // process, and running one blocks.
@@ -205,7 +205,7 @@ pub(crate) async fn walk(state: &AppState, repo: &store::Repo, own: i64) -> Walk
         let gh = state.github.as_author(repo.author.as_deref());
         let path = repo.path.clone();
 
-        move || github::open_pull_requests(&gh, &path)
+        move || gh.open_pull_requests(&path)
     })
     .await;
 
@@ -223,9 +223,9 @@ pub(crate) async fn walk(state: &AppState, repo: &store::Repo, own: i64) -> Walk
             return Walked::Unread(trouble.why());
         }
         Err(error) => {
-            tracing::error!(error = ?error, repo = repo.name, "asking gh for the Repo's open pull requests failed");
+            tracing::error!(error = ?error, repo = repo.name, "asking the Forge for the Repo's open pull requests failed");
 
-            return Walked::Unread("Verkstead couldn't run `gh` to find out.".to_owned());
+            return Walked::Unread("Verkstead couldn't ask the Forge to find out.".to_owned());
         }
         Ok(Ok(open)) => open,
     };

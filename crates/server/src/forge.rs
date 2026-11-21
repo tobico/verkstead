@@ -1,12 +1,11 @@
 //! The Forge as an Activity reaches it: the `forge-*` host functions of the
-//! `activity` world, wrapping [`crate::github`] (ADR-0030, *Forge*).
+//! `activity` world, over [`crate::forges::Forge`] (ADR-0030, *Forge*).
 //!
-//! **A wrapper and no more, until stage 12.** Every call here asks what the
-//! in-process watchers ask — [`crate::checks`], [`crate::comments`],
-//! [`crate::merges`] — in the same words, as the Repo's Author and off the
-//! runtime's threads, and answers it in the world's shapes. Stage 12 puts the
-//! Forge interface behind these calls, and the component calling them does not
-//! change.
+//! **A wrapper and no more.** Every call here asks what the in-process
+//! watchers ask — [`crate::checks`], [`crate::comments`], [`crate::merges`] —
+//! through the same interface, as the Repo's Author and off the runtime's
+//! threads, and answers it in the world's shapes. The component calling them
+//! does not know which Forge answered.
 //!
 //! **A capability the Forge lacks is settled at once.** A Forge declares what
 //! it can do — checks, review, create — and a wrap-up watcher over one it has
@@ -24,7 +23,7 @@ use std::sync::{Arc, Mutex};
 use verkstead_store as store;
 
 use crate::AppState;
-use crate::github::{self, Checked, Mergeable, Stands};
+use crate::forges::{Checked, Mergeable, Stands};
 use crate::plugins::component::worlds::category::activity::verkstead::plugin::activity_types as world;
 
 /// Something a Forge may or may not be able to do, in ADR-0030's words.
@@ -145,7 +144,10 @@ pub(crate) async fn standing(
         .await
         .map_err(world::Unforged::Unasked)?;
 
-    let landing = asked(state, &named, github::landing).await?;
+    let landing = asked(state, &named, |forge, repo, number| {
+        forge.landing(repo, number)
+    })
+    .await?;
 
     Ok(world::PullRequestStanding {
         mergeable: mergeable(landing.mergeable),
@@ -176,7 +178,10 @@ pub(crate) async fn checks(
         .await;
     }
 
-    let suite = asked(state, &named, github::checks).await?;
+    let suite = asked(state, &named, |forge, repo, number| {
+        forge.checks(repo, number)
+    })
+    .await?;
 
     // Written down before the component decides anything about it, because the
     // card draws both and outlives the wrap-up: this is the one place anything
@@ -231,7 +236,10 @@ pub(crate) async fn comments(
         return lacking(state, conversation_id, &named, comments_on).await;
     }
 
-    let said = asked(state, &named, github::comments).await?;
+    let said = asked(state, &named, |forge, repo, number| {
+        forge.comments(repo, number)
+    })
+    .await?;
 
     Ok(said
         .into_iter()
@@ -261,7 +269,7 @@ pub(crate) async fn reply(
     }
 
     asked(state, &named, move |gh, repo, number| {
-        github::reply(gh, repo, number, &markdown)
+        gh.reply(repo, number, &markdown)
     })
     .await
 }
@@ -285,7 +293,7 @@ pub(crate) async fn opened(
     let gh = state.github.as_author(repo.author.as_deref());
     let path = repo.path.clone();
 
-    let found = tokio::task::spawn_blocking(move || github::pull_request(&gh, &path, &branch))
+    let found = tokio::task::spawn_blocking(move || gh.pull_request(&path, &branch))
         .await
         .map_err(|_| world::Unforged::Unasked("The Forge couldn't be asked.".to_owned()))?;
 
@@ -306,13 +314,19 @@ pub(crate) async fn opened(
 async fn asked<T, F>(state: &AppState, named: &Named, asking: F) -> Result<T, world::Unforged>
 where
     T: Send + 'static,
-    F: FnOnce(&github::Gh, &std::path::Path, i64) -> Result<T, github::Trouble> + Send + 'static,
+    F: FnOnce(
+            &dyn crate::forges::Forge,
+            &std::path::Path,
+            i64,
+        ) -> Result<T, crate::forges::Trouble>
+        + Send
+        + 'static,
 {
     let gh = state.github.as_author(named.repo.author.as_deref());
     let path: PathBuf = named.repo.path.clone();
     let number = named.number;
 
-    match tokio::task::spawn_blocking(move || asking(&gh, &path, number)).await {
+    match tokio::task::spawn_blocking(move || asking(&*gh, &path, number)).await {
         Ok(Ok(answered)) => Ok(answered),
         Ok(Err(trouble)) => Err(world::Unforged::Unasked(trouble.why())),
         Err(_) => Err(world::Unforged::Unasked(

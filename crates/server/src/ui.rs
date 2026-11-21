@@ -1274,7 +1274,7 @@ async fn repos(State(state): State<AppState>) -> HttpResponse {
     let rows = tokio::task::spawn_blocking(move || {
         repos
             .into_iter()
-            .map(|repo| crate::repos::listed(repo, &authors))
+            .map(|repo| crate::repos::listed(repo, &authors, &*state.github))
             .collect::<Vec<RepoEntry>>()
     })
     .await;
@@ -1426,7 +1426,7 @@ async fn create_repo(
     match crate::repos::create(
         &state.pool,
         &config,
-        &state.github,
+        &*state.github,
         &creation,
         // What the Repo pane this comes back with says is waiting in it, which is
         // bounded by the same setting the notice is — see [`crate::stages::waiting`].
@@ -1454,7 +1454,7 @@ async fn create_repo(
 async fn clone_repo(State(state): State<AppState>, Json(cloning): Json<Cloning>) -> HttpResponse {
     let config = state.settings.config();
 
-    match crate::repos::clone(&state.pool, &config, &state.github, &cloning).await {
+    match crate::repos::clone(&state.pool, &config, &*state.github, &cloning).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "cloning a Repo failed");
@@ -1577,7 +1577,7 @@ async fn edit_author(
                     settings
                         .secrets()
                         .author_token(&id)
-                        .map(|token| verifying(&gh, token))
+                        .map(|token| verifying(&*gh, token))
                 })
                 .await?
             }
@@ -3300,9 +3300,10 @@ pub(crate) async fn commented(
 
     // One blocking hop for the lot: a `gh` per pull request, and a Conversation
     // ends on one per repository it was worked in.
-    let landings =
-        tokio::task::spawn_blocking(move || crate::commenting::on_each(&gh, &token, &pulls, &body))
-            .await;
+    let landings = tokio::task::spawn_blocking(move || {
+        crate::commenting::on_each(&*gh, &token, &pulls, &body)
+    })
+    .await;
 
     let landings = match landings {
         Ok(landings) => landings,
@@ -3409,7 +3410,7 @@ async fn publishing(
     // runtime's threads.
     let published = tokio::task::spawn_blocking(move || {
         crate::publishing::publish_as(
-            &gh,
+            &*gh,
             &settings,
             recorded.as_deref(),
             &description,
@@ -4863,7 +4864,7 @@ async fn pull_request(
     let asked = {
         let path = repo.path.clone();
 
-        tokio::task::spawn_blocking(move || crate::github::details(&gh, &path, number)).await
+        tokio::task::spawn_blocking(move || gh.details(&path, number)).await
     };
 
     match asked {
@@ -4891,13 +4892,13 @@ async fn pull_request(
                 conversation_id = id,
                 event_id = event,
                 why = trouble.why(),
-                "a pull request could not be read through the host gh",
+                "a pull request could not be read through the Forge",
             );
 
             refused(StatusCode::BAD_GATEWAY, ApiError::new(trouble.why()))
         }
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, event_id = event, "asking gh about a pull request failed");
+            tracing::error!(error = ?error, conversation_id = id, event_id = event, "asking the Forge about a pull request failed");
             unavailable("The pull request couldn't be read.")
         }
     }
@@ -4914,7 +4915,9 @@ async fn save_brief(
     };
 
     let config = state.settings.config();
-    match crate::conversations::save_brief(&state.pool, &config, id, &edit.markdown).await {
+    match crate::conversations::save_brief(&state.pool, &config, &state.github, id, &edit.markdown)
+        .await
+    {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "saving a Brief failed");
@@ -7380,7 +7383,7 @@ async fn save_settings(
         // write a gist is a token whose failure would otherwise be found by a
         // human pressing Share — and the answer to it is on this page, which is
         // where they already are.
-        let verified = verifying.map(|token| self::verifying(&gh, &token));
+        let verified = verifying.map(|token| self::verifying(&*gh, &token));
 
         // And the declarations this save wrote down, each with the header values
         // just written beside it — which is what is spoken to below. Read back
@@ -7470,8 +7473,8 @@ async fn save_settings(
 }
 
 /// What GitHub made of a token just saved: whose it is, and what it may do.
-fn verifying(gh: &crate::github::Gh, token: &str) -> Verified {
-    match crate::github::authenticates_as(gh, token) {
+fn verifying(gh: &dyn crate::forges::Forge, token: &str) -> Verified {
+    match gh.verify(token) {
         Ok(account) => Verified::Account {
             login: account.login,
             missing: needed(&account.scopes),
@@ -7488,11 +7491,11 @@ fn verifying(gh: &crate::github::Gh, token: &str) -> Verified {
 /// the repository's review process rather than anything checked here.
 ///
 /// Empty where GitHub said nothing about scopes at all — see
-/// [`crate::github::Scopes`], where a fine-grained token's silence is kept
+/// [`crate::forges::Scopes`], where a fine-grained token's silence is kept
 /// apart from a classic one's answer.
-fn needed(scopes: &crate::github::Scopes) -> Vec<String> {
-    match scopes.known_to_lack(crate::github::GIST) {
-        true => vec![crate::github::GIST.to_owned()],
+fn needed(scopes: &crate::forges::Scopes) -> Vec<String> {
+    match scopes.known_to_lack(crate::forges::GIST) {
+        true => vec![crate::forges::GIST.to_owned()],
         false => Vec::new(),
     }
 }
@@ -8063,7 +8066,7 @@ async fn onboarding(State(state): State<AppState>) -> HttpResponse {
 async fn onboarding_git(State(state): State<AppState>) -> HttpResponse {
     match state
         .onboarding
-        .prefill(&state.settings, &state.github)
+        .prefill(&state.settings, &*state.github)
         .await
     {
         Ok(prefill) => Json(prefill).into_response(),

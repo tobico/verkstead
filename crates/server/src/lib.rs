@@ -127,6 +127,7 @@ mod follow_ups;
 mod followers;
 /// The Forge as an Activity reaches it, wrapping [`github`] until stage 12.
 pub mod forge;
+mod forges;
 /// The ports of members' terminals held on this device's own `localhost`, from
 /// the first time the terminal's tab is opened here until the server stops or
 /// the terminal ends.
@@ -551,9 +552,10 @@ pub(crate) struct AppState {
     /// there is and says which of the two places said each one — see [`paths`].
     binds: sandbox::SandboxConfig,
 
-    /// How Verkstead itself asks GitHub about a pull request — the host's `gh`,
-    /// authenticating as the configured token.
-    github: Gh,
+    /// How Verkstead itself asks the Forge about a pull request — GitHub, the
+    /// one Forge there is yet, authenticating as the configured token. See
+    /// [`forges`].
+    github: Arc<dyn forges::Forge>,
 
     /// And what the Forge an Activity reaches through is said to lack — see
     /// [`forge`].
@@ -1735,7 +1737,7 @@ fn standing(
         // the file holds at the moment it spawns — see [`sandbox`].
         binds,
 
-        github,
+        github: Arc::new(github),
         forge: forge::Forge::new(),
         wrap_ups: wrapping::WrapUps::new(),
 

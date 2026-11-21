@@ -18,7 +18,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::github::Credential;
+use crate::forges::Credential;
 use crate::unseen::Unseen;
 
 /// Where this device keeps its plugin clones.
