@@ -797,7 +797,7 @@ async fn a_harness_only_a_newer_member_knows_is_passed_over() {
     let harness = |role| Lacking::Harness {
         role,
         profile: Some("work".to_owned()),
-        agent_type: verkstead_render::AgentType::Claude,
+        agent_type: verkstead_render::AgentType::CLAUDE,
     };
 
     assert_eq!(
