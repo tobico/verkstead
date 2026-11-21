@@ -91,9 +91,15 @@ const BRANCH: &str = "pwa-and-push";
 /// The port the workbench is taken to be on, which nothing here asks about.
 const PORT: u16 = 8422;
 
-/// How long one address has to answer here, rather than the two seconds a running
-/// server gives one. Spent only where a dial is meant to reach nobody.
-const PATIENCE: Duration = Duration::from_millis(300);
+/// How long one address has to answer here: the two seconds a running server
+/// gives one to connect.
+///
+/// **Not shorter, because the member answers all along.** On a loaded machine a
+/// third of a second was short enough for the dial carrying B's news to A to
+/// time out, and the news is not sent again, so A's phone was never lit. Nothing
+/// here waits the patience out: the member that is switched off is a port
+/// nothing listens on, which refuses at once.
+const PATIENCE: Duration = Duration::from_secs(2);
 
 /// How long a test will wait for a push to arrive: generous, because it is only
 /// ever paid in full when the assertion is about to fail.
