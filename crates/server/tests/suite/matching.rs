@@ -54,9 +54,16 @@ const B: &str = "0011223344556677889900aabbccddee";
 const A_MACHINE: &str = "the-workstation";
 const A_OS: &str = "macOS 15.1";
 
-/// How long one address has to answer here, rather than the two seconds a running
-/// server gives one.
-const PATIENCE: std::time::Duration = std::time::Duration::from_millis(300);
+/// How long one address has to answer here: the two seconds a running server
+/// gives one to connect.
+///
+/// **Not shorter, because every member here that answers is meant to read as
+/// answering.** On a loaded runner a third of a second was short enough for a
+/// clone relayed to B, answering all along, to come back as a device that
+/// answered at none of its addresses — the same thing `relaying.rs` met. The
+/// one test that waits a patience out, the member that takes the connection and
+/// says nothing, spends it once, inside its five-second bound.
+const PATIENCE: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// One Verkstead: its store, its identity, and its Peer Listener up behind the
 /// Member Gate — the cluster handle beside them, because that is what the reading

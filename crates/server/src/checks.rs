@@ -1,163 +1,36 @@
-//! Watching a wrapping Conversation's pull requests go green, and fixing them
-//! when they do not.
+//! What the host still does for the wrap-up's **checks** watcher, which runs
+//! inside the Wrap-up component (`plugins/activities/wrap-up`) and reaches the
+//! server through the `activity` world's host functions alone.
 //!
-//! The finish step opened the pull requests and pushed the branches; GitHub is
-//! now running whatever each repository runs. Nobody is watching them. So
-//! Verkstead asks the host's `gh` how the checks are getting on, for as long as
-//! the Conversation is Wrapping and no longer — see [`crate::github::checks`].
-//!
-//! **One watcher per pull request**, because a suite is a fact about a pull
-//! request rather than about a Conversation: a Conversation ends on one per
-//! repository it was worked in and as many in one repository as its stack is
-//! deep, each with its own checks running against its own branch, and each asked
-//! about by its own number in its own repository — `#7` means something else in
-//! another one, or nothing. [`watching`] starts one for every pull request on the
-//! record, and [`crate::wrapping::covering`] starts one for each companion's as
-//! it finds it. Which pull request a watcher is for is the Repo and the number
-//! together, and everything it writes down is keyed by both.
-//!
-//! Three answers and three different things to do. Checks still running are
-//! nothing to do at all. Checks that pass settle one of the things wrap-up is
-//! waiting on. A check that fails dispatches a **fix session**: a fresh session
-//! under the Conversation's implementation Profile, inside the bundled
-//! addressing skill, given the failure as its feedback. It commits and pushes as
-//! that skill says, with no gate in front of either, and the branch watcher puts
-//! what it committed on the Timeline.
-//!
-//! **The fix session is told which repository, which pull request and where to
-//! work.** A session starts in the Conversation's own worktree and `gh` reads
-//! its repository from wherever it runs, so one sent at a companion's pull
-//! request would otherwise ask the wrong repository how its checks were getting
-//! on. Every companion's worktree is bound into the sandbox already, so the
-//! directory the feedback names is one the session can simply work in — see
-//! [`feedback`], and the bundled addressing skill, which is written for a
-//! session that may be sent outside the worktree it starts in.
+//! **The component decides; the host remembers and words.** Every round the
+//! component asks the Forge for each pull request's checks, settles the wrap-up
+//! on them, dispatches a fix session at a red one and a resolution session at a
+//! conflict, and gives the wrap-up up once the machine has had its goes. What
+//! is here is what only the host can do for it: the readings written down for
+//! the card ([`remember`], [`marked`]), what origin holds a branch at
+//! ([`pushed`]), the conflict's goes counted in the store, what a resolution
+//! session is told ([`resolution`]), and whether a stop would spend another
+//! pull request's goes ([`give_up`]).
 //!
 //! **Two attempts per check per pull request, then it stops asking the machine
-//! and starts asking the human.** A check that is still red after [`ATTEMPTS`]
-//! fix sessions stops the run and nothing further is dispatched for it: the
-//! human reads which pull request would not go green, which checks failed and
-//! what the last session said, off the Notice. The count is per check rather
-//! than per Conversation — a suite where one job fails and is fixed and then a
-//! different one fails has not spent its attempts — and per pull request beside
-//! it, the same check name red on two of them being two different failures. It
-//! is kept in the store, so a restarted server does not start the counting
-//! again.
+//! and starts asking the human** — [`ATTEMPTS`], which the host hands the
+//! component as its `attempts` option. The count is kept in the store, per
+//! check name and per pull request, so a restarted server does not start the
+//! counting again. A conflict's goes are counted per repository, which for a
+//! stack is per stack.
 //!
 //! **And the stop waits for the rest of them.** A stop is the Conversation's
-//! rather than one pull request's — nothing is dispatched past one — so a
-//! watcher that wrote one the moment its own pull request ran out would spend
-//! the other's goes for it, which is the thing counting per pull request exists
-//! to stop. Whichever of them got the Turn first would be the one that got its
-//! two. So a pull request out of goes waits, and the human is asked once every
-//! one of them has gone green or run out as well — see [`owed_elsewhere`].
+//! rather than one pull request's, so a pull request out of goes waits until
+//! every other one has gone green or run out as well — see [`owed_elsewhere`],
+//! read off what has been counted, which a restarted server has too.
 //!
-//! **Sessions still run one at a time.** Two red pull requests do not collide:
-//! a fix session takes the Conversation's Turn, and the watcher that cannot get
-//! it comes back to its pull request on the next poll rather than queueing
-//! behind whatever is in there.
-//!
-//! **A check that goes red while the review holds the Worktree is the review's
-//! to fix**, not a session of its own. The review session takes the Worktree
-//! before it asks and keeps it until it ends — which is across the human's
-//! answering — so a fix session dispatched at a red check would find nothing to
-//! take and queue behind hours of waiting. It does not queue: the reviewing
-//! skill sends the woken session to read the pull request's own check state once
-//! the answers arrive and fix whatever is failing beside the findings they
-//! accepted, before its push. That spends none of the check's [`ATTEMPTS`],
-//! because nothing here dispatched it: the count is what stops an unattended
-//! loop, and this fix rides work the human just approved. Whatever is still red
-//! after that push is red in front of a free Worktree, and the flow below is
-//! the flow it meets.
-//!
-//! **The same poll reads whether the pull request merges at all.** GitHub says
-//! it in the answer the rollup comes back in, so it costs no second call — and
-//! a branch its base has moved under conflicts however green its suite is. Three
-//! words again, and three different things: *MERGEABLE* settles one of the
-//! things wrap-up waits on, *CONFLICTING* puts it back to waiting, and *UNKNOWN*
-//! — GitHub still working it out, which is most of the first moments after a
-//! push — does neither. So a conflicted pull request holds its Conversation in
-//! Wrapping, which is also what closes the race where a conflict appears just as
-//! the last suite goes green. See [`merging`].
-//!
-//! **And a conflict gets a session of its own**, the check fixes' shape end to
-//! end: the same dispatch under the same Pairing, the Conversation's Turn taken
-//! before anything is counted, [`ATTEMPTS`] goes counted in the store as each
-//! session starts, and the same waiting for every other pull request before a
-//! stop is written. What it is told is to put the base branch's work on the
-//! branch, resolve the conflicts, run the tests and push — by merging, which is
-//! what a Verkstead nobody has configured does, so that nothing is force-pushed
-//! and nothing stacked on the branch breaks. The human can ask for a rebase
-//! instead, in the settings file, and then the session is told to rebase and
-//! force-push with a lease. See [`resolve`] and [`resolving`].
-//!
-//! **A stack gets one session for the whole of it**, and that is the one place
-//! the strategy is not read. A Fix Merge Issues Conversation walks GitHub's
-//! chain at Start and records every pull request of it — see [`crate::stacks`]
-//! — and a fix low in a stack moves every branch above it, so a conflict
-//! anywhere in one dispatches a single session told the ordered branches from
-//! the bottom and told to sync them with `gh stack sync`. The goes are counted
-//! per stack without anything new being counted, the conflict's count being
-//! kept against the Conversation and the Repo already. And because that
-//! extension is a separate install of a `gh` running under a home of
-//! Verkstead's own, it is asked for in the environment a session gets *before*
-//! a go is spent on one: a Sandbox without it stops the run with a Notice
-//! naming it, and the checks and the merge go on being read and written down
-//! either way. See [`syncing`], [`unsyncable`] and [`crate::stacks::missing`].
-//!
-//! A conflict is the whole of what such a poll *dispatches*. A branch nothing
-//! can land is not a branch worth getting a check green on, and the resolution's
-//! own push is what puts the suite in front of the next poll anyway. The suite
-//! is still read and still settled on either way, though — the two are different
-//! facts about the same branch, and a green one left unsettled through a
-//! conflict would be one another pull request's stop went on waiting for.
-//!
-//! A `gh` that cannot answer changes nothing at all — it does not settle, it
-//! does not unsettle, and it dispatches nothing. That is the only honest reading
-//! of it: Verkstead does not know how the checks are, and neither *green* nor
-//! *red* is a thing to conclude from not knowing. Nor whether it merges: that is
-//! the same *UNKNOWN* by another route.
-//!
-//! **And a green suite is only ever green about one commit.** GitHub answers a
-//! pull request as its own record stands, and that record runs behind the branch
-//! for a while after a push: a rollup read in that window is the suite of the
-//! commit before it, reported green, and a wrap-up that took it for the branch's
-//! would reach Done over work nothing has ever checked. So the one answer that
-//! ends something is the one that has to earn it. Green settles the wrap-up only
-//! where the head GitHub named beside it is what origin is holding, and only
-//! where a pull request that has reported a suite before is still reporting one —
-//! GitHub takes a commit a moment before it creates the runs for it, and in
-//! between it names the new commit and reports nothing against it, which is the
-//! same answer a repository with no CI gives. Both are readings of the same fact:
-//! *the run for what was pushed has not been reported yet* is not *there is
-//! nothing to wait for*. Neither holds anything up where it cannot be told —
-//! a `gh` that answered without a head and a checkout with no origin to ask are
-//! the third thing again, and the rollup stands on its own.
-//!
-//! **What origin is asked about is this pull request's own branch**, off the row
-//! rather than off the checkout. A repository wrapping up a stack has a branch
-//! per pull request through the one Worktree, so a rollup held against whatever
-//! `HEAD` points at would be two suites out of three measured by another branch's
-//! commit — one refused for being about the wrong commit and one believed for a
-//! commit it was never about. See [`pushed_head`], and
-//! [`store::PullRequest::head`], which is why the branch is written down.
-//!
-//! **And a review that has just ended is a push.** The head above tells a stale
-//! rollup by what origin is holding, which works from the moment the push lands
-//! and not before it: while the review is still in the Worktree, what it has
-//! agreed to land is a commit in hand, both sides name the same head, and a
-//! green read there is one written down before a push it knew nothing about. So
-//! the review puts every pull request's checks back to waiting as it settles,
-//! the two in one act — see [`store::review_over`] — and this watcher earns the
-//! green again against the run that push started. A review that pushed nothing
-//! costs a poll and nothing else: nothing could have finished in the meantime,
-//! the review being what the wrap-up was waiting on.
+//! **A green suite is only ever green about one commit.** GitHub's record runs
+//! behind the branch for a while after a push, so the component holds the head
+//! a green rollup names against what origin is holding this pull request's own
+//! branch at — [`pushed`] — and settles nothing where the two differ.
 //!
 //! **All of this stops at Done**, which is where [`crate::merges`] takes over:
-//! a base goes on moving under a branch waiting to be merged, and there is
-//! nothing here left watching for it. What that sweep does with a conflict is
-//! write it down, nothing more — the dispatching above is a wrap-up's, and a
-//! wrap-up is over.
+//! what that sweep does with a conflict is write it down, nothing more.
 
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -167,450 +40,239 @@ use verkstead_schema::Nudge;
 
 use crate::AppState;
 use crate::github::{Check, Checked, Credential, Mergeable};
+use crate::plugins::component::worlds::category::activity::verkstead::plugin::activity_types as world;
 use crate::repos::git;
 use crate::store;
 use crate::unseen::Unseen;
 use crate::wrapping::{Watched, named};
 
-/// How many fix sessions one check gets before the human is asked instead.
+/// How many fix sessions one check gets before the human is asked instead, and
+/// how many resolution sessions a conflict gets. The Wrap-up component is
+/// handed it as its `attempts` option.
 ///
 /// Two, which is one automatic go and one more after it did not work. A third
 /// would be a machine spending an account on the same failure with nobody
 /// watching, which is the whole thing a stop exists instead of.
-const ATTEMPTS: i64 = 2;
+pub(crate) const ATTEMPTS: i64 = 2;
 
-/// Watch every pull request `conversation_id` is on, one watcher each.
-///
-/// What a wrap-up starts with, and what a server coming back up and a Resume
-/// start again — each of which starts the whole of a wrap-up rather than some of
-/// it. The pull requests are read here rather than passed in, for the reason
-/// every other watcher reads the record: what this is looking at is a wrap-up
-/// with nothing running, whatever put it there.
-///
-/// One task each, so that a suite nobody can ask about holds up nothing else,
-/// and awaited together, so that the whole of this counts as one driver of the
-/// Conversation for as long as any of them is going — see
-/// [`crate::wrapping::watching`].
-///
-/// A companion's pull request found after this started gets its own watcher
-/// where it is recorded, that being the moment there is one to watch: see
-/// [`crate::wrapping::covering`].
-pub(crate) async fn watching(state: AppState, conversation_id: i64) {
-    let opened = match store::pull_requests(&state.pool, conversation_id).await {
-        Ok(opened) => opened,
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading which pull requests to watch failed");
-            return;
-        }
-    };
-
-    let watchers: Vec<_> = opened
-        .into_iter()
-        .map(|(repo, opened)| {
-            tokio::spawn(watch(
-                state.clone(),
-                conversation_id,
-                repo.id,
-                opened.number,
-            ))
-        })
-        .collect();
-
-    for watcher in watchers {
-        if let Err(error) = watcher.await {
-            tracing::error!(error = ?error, conversation_id, "a checks watcher ended badly");
-        }
-    }
-}
-
-/// Watch the checks on pull request `number` of Repo `repo_id`, until the
-/// Conversation stops wrapping up.
-///
-/// Told which pull request rather than which repository, because that is what a
-/// suite is a fact about: a stack is several in the one repository, each running
-/// its own checks against its own branch.
-///
-/// Returns when there is nothing left to watch: the Conversation has moved on or
-/// gone, that pull request is not on the record any more, or driving stopped.
-/// Idle rather than looping, for the runner's reason — a watcher that kept
-/// dispatching sessions at a check nothing was going to fix would be spending an
-/// account on the same failure over and over.
-///
-/// Nothing here is refused for. This runs unattended with nobody watching, and
-/// what it has to say it says on the Timeline or in the log.
-pub(crate) async fn watch(state: AppState, conversation_id: i64, repo_id: i64, number: i64) {
-    // The Timeline Event the last fix session printed into, so that a stop
-    // written here carries the tail of what it said — which is where the reason
-    // it could not fix the check is usually written down.
-    let mut writing = None;
-
-    // Whether this pull request has ever reported a check, which is what tells a
-    // repository with no CI from a run that has not been created yet — see
-    // [`once`].
-    let mut reported = false;
-
-    loop {
-        match once(
-            &state,
-            conversation_id,
-            repo_id,
-            number,
-            writing,
-            &mut reported,
-        )
-        .await
-        {
-            Watching::Again(said) => writing = said,
-            Watching::Done(why) => {
-                tracing::info!(
-                    conversation_id,
-                    repo_id,
-                    number,
-                    why,
-                    "a pull request's checks are no longer being watched"
-                );
-                return;
-            }
-        }
-
-        tokio::time::sleep(state.sessions.pace().checks).await;
-    }
-}
-
-/// Forget what a Conversation's checks and conflicts have already been tried,
-/// and watch them again.
-///
-/// What Resume does to a wrap-up that stopped. The attempts go first: the human
-/// has read the Notice of what stopped and asked for another go, and a count
-/// left standing would be a watcher that stopped all over again on its next poll
-/// without dispatching anything.
-///
-/// **Both counts**, because either of them is what the Notice they read could
-/// have been about: a wrap-up stops on the checks that would not go green or on
-/// the pull request that would not merge, and a press that forgave only one of
-/// them would be a Resume that stopped again on the other. See
-/// [`store::forget_fix_attempts`], which is where the two are taken away
-/// together.
-pub(crate) async fn afresh(state: AppState, conversation_id: i64) {
-    if let Err(error) = store::forget_fix_attempts(&state.pool, conversation_id).await {
-        tracing::error!(error = ?error, conversation_id, "forgetting what a Conversation's checks and conflicts had been given failed");
-        return;
-    }
-
-    tracing::info!(
-        conversation_id,
-        "the checks and the conflicts are being tried again from no attempts spent"
-    );
-
-    // The whole wrap-up rather than the checks alone: the review stopped being
-    // run when the stop was written, because nothing advances past one, and a
-    // Conversation that came back with its checks watched and nobody reading its
-    // branch would wait on a review that was never going to happen.
-    //
-    // And its review from the start, which is the same forgetting as the
-    // attempts above: a review found already asking is what the press is an
-    // answer to, so it is read past rather than stopped over a second time. See
-    // [`crate::review::afresh`].
-    crate::wrapping::watching(&state, conversation_id, crate::wrapping::Reviewing::Afresh);
-}
-
-/// What one look at the checks decided.
-enum Watching {
-    /// Look again after the interval, carrying whichever Timeline Event the last
-    /// fix session printed into.
-    Again(Option<i64>),
-
-    /// Stop watching, for this reason.
-    Done(&'static str),
-}
-
-/// Take one look: ask GitHub how the checks are, and do whatever that means.
-async fn once(
+/// `pull_request`, as the wrap-up watches it: the Repo it is in, the branch the
+/// record says its work is on, and the checkout that work is done in — or the
+/// sentence a call naming it is refused with.
+async fn watched(
     state: &AppState,
     conversation_id: i64,
-    repo_id: i64,
-    number: i64,
-    writing: Option<i64>,
-    reported: &mut bool,
-) -> Watching {
+    pull_request: &world::PullRequest,
+) -> Result<Watched, String> {
+    let named = crate::forge::named(state, conversation_id, pull_request).await?;
+
     let conversation = match store::load_conversation(&state.pool, conversation_id).await {
         Ok(Some(conversation)) => conversation,
-        Ok(None) => return Watching::Done("there is no Conversation left to watch"),
+        Ok(None) => return Err("There is no Conversation left to ask about.".to_owned()),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading the Conversation to watch failed");
-            return Watching::Again(writing);
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation a pull request is watched on failed");
+            return Err("The Conversation couldn't be read.".to_owned());
         }
     };
 
-    // The one thing that ends the watching by itself. Everything a Conversation
-    // leaves Wrapping for — Done, or closed from the menu — arrives here as the
-    // same fact: this is not a wrap-up any more.
-    if conversation.state != store::Lifecycle::Wrapping {
-        return Watching::Done("the Conversation is not wrapping up any more");
-    }
-
-    // Asked before anything is dispatched, for the runner's reason: *the run does
-    // not advance past a stop* means no session is launched while the human is
-    // the only thing that can start one. However the run stopped — the stop
-    // written here included, and an account out of window included — it is the
-    // one question [`crate::stopping::stopped`] answers.
-    if crate::stopping::stopped(state, conversation_id).await {
-        return Watching::Done("driving has stopped");
-    }
-
-    let opened = match store::pull_request_numbered(&state.pool, conversation_id, repo_id, number)
-        .await
+    let opened = match store::pull_request_numbered(
+        &state.pool,
+        conversation_id,
+        named.repo.id,
+        named.number,
+    )
+    .await
     {
         Ok(Some(opened)) => opened,
-        // A Conversation wrapping up is on the pull request whose watcher this
-        // is — a watcher is started where one is recorded and never before — so
-        // this is a record that has been got at rather than a wrap-up to carry
-        // on with.
-        Ok(None) => return Watching::Done("that pull request is not on the record to watch"),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, repo_id, number, "reading the pull request to watch failed");
-            return Watching::Again(writing);
-        }
-    };
-
-    // Which repository to ask in, which branch the suite has to be about and
-    // which checkout its work is done in — read off the record every poll rather
-    // than held: a companion taken away is one there is nowhere left to ask
-    // about, and a branch renamed under a pull request is one GitHub has already
-    // been told about.
-    let Some(watched) = crate::wrapping::watched(&conversation, repo_id, &opened) else {
-        return Watching::Done("there is no repository left to ask about that pull request in");
-    };
-
-    let asked = {
-        let gh = state.github.as_author(watched.repo.author.as_deref());
-        let repo = watched.repo.path.clone();
-        let number = watched.number;
-
-        // Off the runtime's threads: this is a process, and one that goes to the
-        // network.
-        tokio::task::spawn_blocking(move || crate::github::checks(&gh, &repo, number)).await
-    };
-
-    let suite = match asked {
-        Ok(Ok(suite)) => suite,
-        // GitHub could not be asked. Nothing is concluded from that and nothing is
-        // touched — not the settlement either way, and certainly not a fix
-        // session: *Verkstead does not know* is a third thing beside green and
-        // red, and each of the two ways of guessing at it is wrong on its own
-        // terms. The next poll asks again, of a `gh` that may by then have been
-        // logged in.
-        Ok(Err(trouble)) => {
-            tracing::warn!(
-                conversation_id,
-                repo = watched.repo.name,
-                number = watched.number,
-                why = trouble.why(),
-                "the checks could not be asked about, so the wrap-up goes on waiting",
-            );
-
-            return Watching::Again(writing);
+        Ok(None) => {
+            return Err(format!(
+                "Pull request #{} of `{}` isn't on the record.",
+                named.number, named.repo.name
+            ));
         }
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "asking gh about the checks failed");
-            return Watching::Again(writing);
+            tracing::error!(error = ?error, conversation_id, repo = named.repo.name, number = named.number, "reading a watched pull request failed");
+            return Err("The pull request couldn't be read.".to_owned());
         }
     };
 
-    // Written down before anything is decided about it, because the card draws
-    // it and the card outlives the watching: this is the one place anything asks
-    // GitHub how the checks are while a wrap-up is running, and what it learned
-    // would otherwise go no further than the settle below.
-    remember(
-        state,
-        conversation_id,
-        watched.repo.id,
-        watched.number,
-        &suite.checks,
-    )
-    .await;
-
-    // And whether the pull request merges at all, which came back in the same
-    // answer. Read before the checks rather than after, because it is a fact
-    // about the branch rather than about the suite: every way the reading of the
-    // checks below ends — green, red, still running, a rollup about the wrong
-    // commit — is one this has to have been said on.
-    let merges = merging(state, conversation_id, &watched, suite.mergeable).await;
-
-    // The suite read and settled on, and nothing dispatched about it yet.
-    // Settled whatever the merge said, because the two are different facts about
-    // the same branch: a green suite left unsettled through a conflict is one
-    // another pull request's stop would go on waiting for long after this
-    // pull request had run out of anywhere to go — see [`owed_elsewhere`].
-    let checked = checking(state, conversation_id, &watched, &suite, reported).await;
-
-    // And a conflict is the whole of what this look dispatches, whatever the
-    // suite turned out to be. A branch nothing can land is not one worth getting
-    // a check green on — that fix would be work nobody could use — and the
-    // resolution's own push is what puts the suite in front of the next poll
-    // anyway.
-    if merges == Some(store::Merging::Conflicting) {
-        return resolve(state, conversation_id, &watched, writing).await;
-    }
-
-    match checked {
-        Checking::NothingToDo => Watching::Again(writing),
-        Checking::Failed(failed) => fix(state, conversation_id, &watched, &failed, writing).await,
-    }
+    crate::wrapping::watched(&conversation, named.repo.id, &opened).ok_or_else(|| {
+        format!(
+            "There's no checkout left to work on pull request #{} of `{}` in.",
+            named.number, named.repo.name
+        )
+    })
 }
 
-/// What one reading of the checks came to, once the wrap-up has been settled or
-/// unsettled on it.
-///
-/// Reading the suite and acting on it are two steps rather than one so that a
-/// conflicted pull request gets the first without the second: its checks are
-/// read and written down like any other pull request's, and what is dispatched
-/// at it is a resolution rather than a fix.
-enum Checking {
-    /// Nothing to dispatch about: green, still running, or a rollup about a
-    /// commit that is not what origin is holding.
-    NothingToDo,
-
-    /// These checks are red.
-    Failed(Vec<Check>),
-}
-
-/// Read how the suite is getting on and settle the wrap-up on it, without
-/// dispatching anything.
-///
-/// `reported` is whether this pull request has ever reported a check, which the
-/// watcher remembers across polls and this updates — see the green branch below,
-/// which is the one place it changes an answer.
-async fn checking(
+/// What origin holds `pull_request`'s branch at, where that can be told — the
+/// `pushed-head` host function. See [`pushed_head`].
+pub(crate) async fn pushed(
     state: &AppState,
     conversation_id: i64,
-    watched: &Watched,
-    suite: &crate::github::Suite,
-    reported: &mut bool,
-) -> Checking {
-    // Whether anything has ever run against this pull request, which is the one
-    // thing that tells a repository with no CI from a run that has not been
-    // created yet — see the green branch below.
-    *reported |= !suite.checks.is_empty();
+    pull_request: world::PullRequest,
+) -> Option<String> {
+    let watched = watched(state, conversation_id, &pull_request).await.ok()?;
+    let credential = state
+        .github
+        .as_author(watched.repo.author.as_deref())
+        .credential();
 
-    let failed: Vec<Check> = suite
-        .checks
-        .iter()
-        .filter(|check| check.how == Checked::Failed)
-        .cloned()
-        .collect();
+    // Off the runtime's threads: this is a process, and one that goes to the
+    // network.
+    tokio::task::spawn_blocking(move || {
+        pushed_head(&watched.worktree, watched.head.as_deref(), &credential)
+    })
+    .await
+    .unwrap_or_default()
+}
 
-    let running = suite
-        .checks
-        .iter()
-        .any(|check| check.how == Checked::Running);
+/// How many resolution sessions the conflicts in `pull_request`'s Repo have
+/// had — the `conflict-attempts` host function.
+pub(crate) async fn conflict_attempts(
+    state: &AppState,
+    conversation_id: i64,
+    pull_request: world::PullRequest,
+) -> Result<i64, String> {
+    let named = crate::forge::named(state, conversation_id, &pull_request).await?;
 
-    // Green, which includes a pull request with no checks on it at all: a
-    // repository with no CI is nothing for a wrap-up to wait on, and waiting for
-    // a check that is never coming would be a Conversation that never finished.
-    //
-    // Which is the one answer here that ends anything, so it is the one that is
-    // held to what the two below ask. A red suite and one still running each
-    // leave the wrap-up where it was, and a poll that read either of them of the
-    // wrong commit costs a look rather than a Conversation.
-    if failed.is_empty() && !running {
-        // A pull request that has reported a check does not go back to reporting
-        // none. GitHub creates the runs for a commit a moment after it takes the
-        // commit itself, so *nothing is running against this* is also what the
-        // gap between the two looks like — and it is the one gap the head below
-        // cannot catch, both sides naming the same commit throughout it. What
-        // tells them apart is whether anything has ever run here: a repository
-        // with no CI has reported nothing from the first poll to the last, and
-        // this one reported a suite a moment ago.
-        //
-        // Remembered for as long as this watcher runs rather than written down.
-        // A server that came back up mid-wrap-up reads the gap as no CI again,
-        // which is the trade the rest of a wrap-up makes about a restart too:
-        // the record says what was settled rather than what was seen on the way.
-        if suite.checks.is_empty() && *reported {
-            tracing::debug!(
-                conversation_id,
-                repo = watched.repo.name,
-                number = watched.number,
-                "the checks have gone from a pull request that had them, so the \
-                 run for the last push has not been created yet",
-            );
+    store::conflict_fix_attempts(&state.pool, conversation_id, named.repo.id)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = ?error, conversation_id, repo = named.repo.name, "reading what a conflict had been given failed");
+            "The resolution attempts couldn't be read.".to_owned()
+        })
+}
 
-            unsettle(state, conversation_id, watched).await;
-            return Checking::NothingToDo;
-        }
+/// Count one more, as a resolution session is dispatched — the
+/// `count-conflict-attempt` host function. Counted as the session is
+/// dispatched rather than as it ends, so that an attempt spent by a server
+/// that then restarted is one the next server does not spend again.
+pub(crate) async fn count_conflict_attempt(
+    state: &AppState,
+    conversation_id: i64,
+    pull_request: world::PullRequest,
+) -> Result<i64, String> {
+    let named = crate::forge::named(state, conversation_id, &pull_request).await?;
 
-        // And a rollup is a fact about one commit, which is not always the one
-        // that was pushed. GitHub answers this pull request as its own record
-        // stands, and that record runs behind the branch for a while after a push
-        // — long enough for a green suite belonging to the commit before the last
-        // one to carry a wrap-up to Done over work nothing has ever checked. So
-        // the head it named is held against what origin is holding, and a rollup
-        // about anything else is not this branch's suite at all.
-        //
-        // Asked here rather than every poll, because this is the only poll whose
-        // answer it changes — and it goes to the network, which the rest of a
-        // look does not.
-        //
-        // Both halves have to be known for the question to mean anything: a `gh`
-        // that answered without a head, and a checkout with no origin to ask, are
-        // each *Verkstead cannot tell*. Neither is a reason to distrust a rollup
-        // that is very probably the right one, so neither holds a wrap-up up.
-        let pushed = {
-            let worktree = watched.worktree.clone();
-            let head = watched.head.clone();
-            let credential = state
-                .github
-                .as_author(watched.repo.author.as_deref())
-                .credential();
+    store::record_conflict_fix_attempt(&state.pool, conversation_id, named.repo.id)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = ?error, conversation_id, repo = named.repo.name, "counting a resolution session failed");
+            "The resolution attempt couldn't be counted.".to_owned()
+        })
+}
 
-            // Off the runtime's threads: this is a process, and one that goes
-            // to the network.
-            tokio::task::spawn_blocking(move || {
-                pushed_head(&worktree, head.as_deref(), &credential)
-            })
-            .await
-            .unwrap_or_default()
-        };
+/// What a session sent at `pull_request`'s conflict is told — the
+/// `resolution` host function.
+///
+/// **A stack gets one session for the whole of it**, and that is the one place
+/// the configured strategy is not read: a fix low in a stack moves every branch
+/// above it, so the session is told the ordered branches from the bottom and
+/// told to sync them with `gh stack sync` — see [`syncing`]. And because that
+/// extension is a separate install, it is asked for *before* a go is spent: a
+/// Sandbox without it stops the run with a Notice naming it, and the answer is
+/// that stop's sentence. See [`unsyncable`] and [`crate::stacks::missing`].
+///
+/// A lone pull request is told the strategy the settings file names, read as
+/// the session is dispatched rather than held from anywhere: a resolution
+/// configured a minute ago is what the next conflict is resolved by. See
+/// [`resolving`].
+pub(crate) async fn resolution(
+    state: &AppState,
+    conversation_id: i64,
+    pull_request: world::PullRequest,
+    writing: Option<i64>,
+) -> Result<String, String> {
+    let watched = watched(state, conversation_id, &pull_request).await?;
 
-        if let (false, Some(pushed)) = (suite.head.is_empty(), pushed.as_deref())
-            && pushed != suite.head
-        {
-            tracing::debug!(
-                conversation_id,
-                repo = watched.repo.name,
-                number = watched.number,
-                reported = suite.head,
-                pushed,
-                "the checks GitHub reported are about a commit that is not \
-                     what origin is holding, so the run for what was pushed has \
-                     not been reported yet",
-            );
+    // Which pull requests of this repository the Conversation holds, in order
+    // from the bottom — one where nothing was walked, and the chain where one
+    // was.
+    let stack = store::stack(&state.pool, conversation_id, watched.repo.id)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, "reading the stack a conflicting pull request is one of failed");
+            "The stack couldn't be read.".to_owned()
+        })?;
 
-            unsettle(state, conversation_id, watched).await;
-            return Checking::NothingToDo;
-        }
-
-        settle(state, conversation_id, watched, suite.checks.len()).await;
-        return Checking::NothingToDo;
+    match chained(&stack) {
+        Some(branches) => match crate::stacks::missing(state, conversation_id).await {
+            Some(why) => Err(unsyncable(state, conversation_id, &watched, &why, writing).await),
+            None => Ok(syncing(&watched, &stack, &branches)),
+        },
+        None => Ok(resolving(
+            &watched,
+            state.settings.config().conflict_resolution(),
+        )),
     }
+}
 
-    // Not green, whether that is a red check or a suite that has not finished.
-    // Said before anything is dispatched, because a fix session pushes a commit
-    // and a commit is a new run to wait on.
-    unsettle(state, conversation_id, watched).await;
+/// Give the wrap-up up over `pull_request` — the `give-up` host function —
+/// unless another of the Conversation's pull requests still has a go coming,
+/// which is `false` and nothing written. See [`owed_elsewhere`].
+///
+/// [`crate::wrapping::give_up`] writes the stop as the Activity answers
+/// `given-up`, with the tail of `writing` — the last session dispatched, which
+/// is where the reason it could not fix the thing is usually written down.
+pub(crate) async fn give_up(
+    state: &AppState,
+    conversation_id: i64,
+    pull_request: world::PullRequest,
+    what: String,
+    how: String,
+    writing: Option<i64>,
+) -> bool {
+    let Ok(watched) = watched(state, conversation_id, &pull_request).await else {
+        return false;
+    };
 
-    if failed.is_empty() {
+    if owed_elsewhere(state, conversation_id, &watched).await {
         tracing::debug!(
             conversation_id,
             repo = watched.repo.name,
             number = watched.number,
-            "the checks are still running, which is nothing to do",
+            "this pull request has had its goes and another still has one, so the run is \
+             not stopped over it yet",
         );
-        return Checking::NothingToDo;
+
+        return false;
     }
 
-    Checking::Failed(failed)
+    crate::wrapping::give_up(
+        state,
+        conversation_id,
+        crate::wrapping::GaveUp { what, how, writing },
+    )
+    .await;
+
+    true
+}
+
+/// Write down whether GitHub can merge this pull request, for the card's mark,
+/// telling the open pages where that is news. `UNKNOWN` — GitHub still
+/// working it out — writes nothing, and what stands is the last thing it did
+/// say. Settling the wrap-up on it is the component's.
+pub(crate) async fn marked(
+    state: &AppState,
+    conversation_id: i64,
+    repo_id: i64,
+    number: i64,
+    mergeable: Mergeable,
+) {
+    let merging = match mergeable {
+        Mergeable::Cleanly => store::Merging::Cleanly,
+        Mergeable::Conflicting => store::Merging::Conflicting,
+        Mergeable::Unknown => return,
+    };
+
+    match store::record_merging(&state.pool, conversation_id, repo_id, number, merging).await {
+        Ok(true) => state.nudges.announce(Nudge::Conversation {
+            conversation: conversation_id,
+        }),
+        Ok(false) => {}
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, repo_id, number, "recording whether the pull request merges failed");
+        }
+    }
 }
 
 /// What origin is holding this pull request's branch on, asked as part of the
@@ -726,7 +388,7 @@ pub(crate) async fn remember(
 /// The one word a whole suite comes to, or nothing where there is no suite.
 ///
 /// Red first, then unfinished, then green — see [`store::Rollup`], which is
-/// where that order is argued. The same reading [`once`] above makes of the same
+/// where that order is argued. The same reading the Wrap-up component makes of the same
 /// checks, so the icon on the card and the wrap-up's own patience cannot come to
 /// disagree about a suite they are both looking at.
 fn rollup(checks: &[Check]) -> Option<store::Rollup> {
@@ -741,113 +403,6 @@ fn rollup(checks: &[Check]) -> Option<store::Rollup> {
     // Green, and only where there was something to be green: an empty suite
     // falls through to nothing at all.
     (!checks.is_empty()).then_some(store::Rollup::Passed)
-}
-
-/// Dispatch a fix session for the failed checks that have attempts left, or ask
-/// the human where none has.
-async fn fix(
-    state: &AppState,
-    conversation_id: i64,
-    watched: &Watched,
-    failed: &[Check],
-    writing: Option<i64>,
-) -> Watching {
-    let mut fixable = Vec::new();
-
-    for check in failed {
-        match store::fix_attempts(
-            &state.pool,
-            conversation_id,
-            watched.repo.id,
-            watched.number,
-            &check.name,
-        )
-        .await
-        {
-            Ok(spent) if spent < ATTEMPTS => fixable.push(check),
-            Ok(_) => {}
-            Err(error) => {
-                tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, check = check.name, "reading what a check had been given failed");
-                return Watching::Again(writing);
-            }
-        }
-    }
-
-    // Every failed check has had its two goes, so the machine has nothing left to
-    // try here — and the human is asked once it has nothing left to try anywhere.
-    // See [`owed_elsewhere`], which is what keeps a pull request out of goes from
-    // spending another one's.
-    if fixable.is_empty() {
-        if owed_elsewhere(state, conversation_id, watched).await {
-            tracing::debug!(
-                conversation_id,
-                repo = watched.repo.name,
-                number = watched.number,
-                "this pull request has had its goes and another still has one, so the \
-                 run is not stopped over it yet",
-            );
-
-            return Watching::Again(writing);
-        }
-
-        return ask(state, conversation_id, watched, failed, writing).await;
-    }
-
-    // One agent in one Worktree. Tried rather than waited for, and taken before
-    // an attempt is counted: what else is in there is the review session or a
-    // finding the human accepted, both of which take as long as they take, and a
-    // fix session queued behind one would be dispatched about a suite nobody has
-    // looked at since. Looking again in half a minute costs nothing and asks
-    // GitHub afresh.
-    //
-    // Which is also why nothing is counted for a check the review ends up fixing
-    // itself: an attempt is spent where a session is dispatched, and none is
-    // here. The turn being taken is the whole of what folds this check into the
-    // woken session, and the two attempts are still there for it afterwards.
-    // Which is also what keeps two red pull requests from colliding: the second
-    // watcher finds the Turn taken, and comes back to its own suite on the next
-    // poll rather than queueing behind a session about somebody else's.
-    let Some(_turn) = state.sessions.try_turn(conversation_id) else {
-        tracing::debug!(
-            conversation_id,
-            repo = watched.repo.name,
-            "something else is working in the Worktree, so the checks are looked at again later",
-        );
-        return Watching::Again(writing);
-    };
-
-    // Counted as the session is dispatched rather than as it ends, so that an
-    // attempt spent by a server that then restarted is one the next server does
-    // not spend again.
-    for check in &fixable {
-        if let Err(error) = store::record_fix_attempt(
-            &state.pool,
-            conversation_id,
-            watched.repo.id,
-            watched.number,
-            &check.name,
-        )
-        .await
-        {
-            tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, check = check.name, "counting a fix session failed");
-            return Watching::Again(writing);
-        }
-    }
-
-    tracing::info!(
-        conversation_id,
-        repo = watched.repo.name,
-        number = watched.number,
-        checks = ?fixable.iter().map(|check| &check.name).collect::<Vec<_>>(),
-        "a check failed, so a fix session is starting on it",
-    );
-
-    // One session for however many checks are red, rather than one each. They are
-    // one run of one suite over one branch, and two agents in one Worktree would
-    // be two agents editing each other's files.
-    let said = crate::runner::address(state, conversation_id, &feedback(watched, &fixable)).await;
-
-    Watching::Again(said.or(writing))
 }
 
 /// Whether another of this Conversation's pull requests still has a go coming to
@@ -954,376 +509,11 @@ async fn owed_elsewhere(state: &AppState, conversation_id: i64, watched: &Watche
     false
 }
 
-/// Stop asking the machine: stop the run, and put what failed on the Timeline.
-///
-/// The evidence is what makes the stop readable without opening a terminal —
-/// which pull request would not go green, which of its checks failed, where
-/// their runs are, and the tail of what the last fix session said, which
-/// [`crate::stopping::stop`] reads off `writing`.
-///
-/// The pull request is named in the step as well as in the reason, a Conversation
-/// having more than one: what stopped is *this* suite rather than the checks in
-/// general, and the Notice's own first line is where that is read.
-///
-/// [`store::Decision::Verkstead`]: every fix session the branch was allowed has
-/// been spent, and Verkstead stopping there is a decision. A restart that
-/// started the fixing over would spend them all again on checks that are still
-/// red for whatever reason they were red the first time.
-async fn ask(
-    state: &AppState,
-    conversation_id: i64,
-    watched: &Watched,
-    failed: &[Check],
-    writing: Option<i64>,
-) -> Watching {
-    let how = format!(
-        "{} on {} after {ATTEMPTS} fix sessions each:\n\n{}",
-        match failed.len() {
-            1 => "A check is still failing".to_owned(),
-            many => format!("{many} checks are still failing"),
-        },
-        named(watched),
-        listed(failed),
-    );
-
-    if let Err(error) = crate::stopping::stop(
-        &state.pool,
-        &state.nudges,
-        conversation_id,
-        crate::stopping::Decided::Verkstead,
-        &format!("getting the checks green on {}", named(watched)),
-        &how,
-        writing,
-    )
-    .await
-    {
-        tracing::error!(
-            error = ?error,
-            conversation_id,
-            "the checks would not go green and the stop saying so could not be recorded"
-        );
-    }
-
-    Watching::Done("the checks would not go green, so the human is being asked")
-}
-
-/// The failed checks as the fix session is told about them.
-///
-/// The names and the links and nothing else about what they said. What a check
-/// actually complained about is in its run rather than in anything `gh pr view`
-/// will hand over, and the addressing skill sends the session to run the failing
-/// thing itself — a fix written from a summary of a log is a guess.
-///
-/// What it *is* told beside them is where to work. A session starts in the
-/// Conversation's own worktree and both `git` and `gh` read their repository from
-/// wherever they run, so one sent at a companion's pull request would otherwise
-/// ask the wrong repository how its checks were getting on. Every worktree is
-/// bound into the sandbox at the path named here, so it is a directory the
-/// session can simply work in.
-///
-/// Named the same way whichever repository it is, the Conversation's own
-/// included: a session is told where it is working rather than left to infer
-/// that it has not been sent anywhere.
-fn feedback(watched: &Watched, failed: &[&Check]) -> String {
-    let failed: Vec<Check> = failed.iter().map(|check| (*check).clone()).collect();
-
-    format!(
-        "These checks are failing on {}. Work in that repository's worktree, at `{}` — both \
-         `git` and `gh` read the repository from wherever they are run, so a check asked about \
-         anywhere else is a different repository's.\n\nFind out what each of them is actually \
-         complaining about, fix the cause, and push the fix so they run again.\n\n{}",
-        named(watched),
-        watched.worktree.display(),
-        listed(&failed),
-    )
-}
-
-/// One check per line: what it is called, and where its run is.
-fn listed(checks: &[Check]) -> String {
-    checks
-        .iter()
-        .map(|check| match check.link.is_empty() {
-            true => format!("- {}", check.name),
-            false => format!("- {} — {}", check.name, check.link),
-        })
-        .collect::<Vec<String>>()
-        .join("\n")
-}
-
-/// Record that this pull request's checks are green, so wrap-up has one less
-/// thing to wait on.
-///
-/// One of however many it is waiting on: a Conversation ends on a pull request
-/// per repository it was worked in and as many in one repository as its stack is
-/// deep, and every one of them has to be green before the wrap-up is over — see
-/// [`store::finish_wrap_up`].
-async fn settle(state: &AppState, conversation_id: i64, watched: &Watched, checks: usize) {
-    if let Err(error) = store::settle_wrap_up(
-        &state.pool,
-        conversation_id,
-        store::WaitingOn::Checks {
-            repo_id: watched.repo.id,
-            number: watched.number,
-        },
-    )
-    .await
-    {
-        tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, "recording that the checks are green failed");
-        return;
-    }
-
-    tracing::debug!(
-        conversation_id,
-        repo = watched.repo.name,
-        number = watched.number,
-        checks,
-        "the checks are green",
-    );
-}
-
-/// And that they are not, which is a red suite, one still running, and a `gh`
-/// that could not say.
-async fn unsettle(state: &AppState, conversation_id: i64, watched: &Watched) {
-    if let Err(error) = store::unsettle_wrap_up(
-        &state.pool,
-        conversation_id,
-        store::WaitingOn::Checks {
-            repo_id: watched.repo.id,
-            number: watched.number,
-        },
-    )
-    .await
-    {
-        tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, "putting the checks back to waiting failed");
-    }
-}
-
-/// Write down whether GitHub can merge this pull request, and settle or unsettle
-/// the wrap-up on the strength of it.
-///
-/// Three answers and three different things, exactly as the checks are three:
-/// **MERGEABLE** settles one of the things the wrap-up waits on, **CONFLICTING**
-/// puts it back to waiting, and **UNKNOWN** does neither. GitHub says the third
-/// while it is still working the answer out, which is most of the first moments
-/// after a push — and *not yet computed* is no more a conflict than a `gh` that
-/// would not answer is a red check. So it writes nothing down either, and what
-/// stands is the last thing GitHub did say.
-///
-/// What GitHub said, for the caller to act on — and `None` where it said
-/// *UNKNOWN*, which is nothing to act on at all.
-async fn merging(
-    state: &AppState,
-    conversation_id: i64,
-    watched: &Watched,
-    mergeable: Mergeable,
-) -> Option<store::Merging> {
-    let merging = match mergeable {
-        Mergeable::Cleanly => store::Merging::Cleanly,
-        Mergeable::Conflicting => store::Merging::Conflicting,
-        Mergeable::Unknown => {
-            tracing::debug!(
-                conversation_id,
-                repo = watched.repo.name,
-                number = watched.number,
-                "GitHub has not worked out whether the pull request merges, which is \
-                 nothing to conclude",
-            );
-
-            return None;
-        }
-    };
-
-    // Written down before it is acted on, for the reason the rollup is: the
-    // watching stops when the wrap-up is over and this is the one place that
-    // asks, so a reading that went no further than the settle would be one
-    // nothing could draw afterwards.
-    //
-    // And Nudged where the word changed, as the rollup is: the card draws a mark
-    // off this, and a pull request that merged cleanly on the last poll merges
-    // cleanly on this one — a page told so every thirty seconds would be a page
-    // re-reading a Timeline nothing had happened on.
-    match store::record_merging(
-        &state.pool,
-        conversation_id,
-        watched.repo.id,
-        watched.number,
-        merging,
-    )
-    .await
-    {
-        Ok(true) => state.nudges.announce(Nudge::Conversation {
-            conversation: conversation_id,
-        }),
-        Ok(false) => {}
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, number = watched.number, "recording whether the pull request merges failed");
-        }
-    }
-
-    let waiting_on = store::WaitingOn::Mergeable {
-        repo_id: watched.repo.id,
-        number: watched.number,
-    };
-
-    let written = match merging {
-        store::Merging::Cleanly => {
-            store::settle_wrap_up(&state.pool, conversation_id, waiting_on).await
-        }
-        store::Merging::Conflicting => {
-            // Said on every poll for as long as the conflict stands, which is
-            // why it is not an `info!`: what a human reads a conflict off is the
-            // record rather than the log.
-            tracing::debug!(
-                conversation_id,
-                repo = watched.repo.name,
-                number = watched.number,
-                "the pull request conflicts with its base, so the wrap-up goes on waiting",
-            );
-
-            store::unsettle_wrap_up(&state.pool, conversation_id, waiting_on).await
-        }
-    };
-
-    if let Err(error) = written {
-        tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, "recording whether the wrap-up was waiting on a conflict failed");
-    }
-
-    Some(merging)
-}
-
-/// Dispatch a resolution session at a pull request that will not merge, or ask
-/// the human where it has had its goes.
-///
-/// The check fixes' shape end to end, and deliberately so: the same dispatch,
-/// the same Turn, the same two goes counted as the session starts, and the same
-/// waiting for every other pull request before a stop is written. What differs
-/// is what the session is told to do — see [`resolving`].
-///
-/// **The Turn is tried rather than waited for**, exactly as it is for a check.
-/// What else is in the Worktree is the review session or a finding the human
-/// accepted, and a resolution queued behind one would be dispatched about a base
-/// nobody has looked at since. Coming back in half a minute costs nothing and
-/// asks GitHub afresh — and nothing is counted for a poll that could not get in,
-/// the count being of sessions dispatched rather than of conflicts seen.
-///
-/// **And one session for a stack rather than one per pull request of it.** A
-/// Conversation that walked a chain holds several pull requests in the one
-/// repository — see [`crate::stacks`] — and a fix low in a stack moves every
-/// branch above it, so what is sent is one session told the whole ordered list
-/// from the bottom and told to sync it with `gh stack sync`. Whatever the
-/// configured strategy says: a stack is gh-stack's, and merging a base into
-/// each branch of one is what that extension's own documentation warns against.
-/// The count needs nothing new for it — [`store::conflict_fix_attempts`] is
-/// kept against the Conversation and the Repo, which for a stack is per stack —
-/// and a lone pull request is the paragraph above, unchanged. See [`syncing`].
-///
-/// **What syncs it is asked for before a go is spent**, the extension being a
-/// separate install: a Sandbox without it stops the run here rather than in the
-/// failure of a session that could not do what it was told. See
-/// [`crate::stacks::missing`] and [`unsyncable`].
-async fn resolve(
-    state: &AppState,
-    conversation_id: i64,
-    watched: &Watched,
-    writing: Option<i64>,
-) -> Watching {
-    let spent = match store::conflict_fix_attempts(&state.pool, conversation_id, watched.repo.id)
-        .await
-    {
-        Ok(spent) => spent,
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, "reading what a conflict had been given failed");
-            return Watching::Again(writing);
-        }
-    };
-
-    // The machine has had its goes at this one, so nothing further is dispatched
-    // for it — and the human is asked once there is nothing left to try
-    // anywhere. See [`owed_elsewhere`], which is what keeps a pull request out of
-    // goes from spending another's.
-    if spent >= ATTEMPTS {
-        if owed_elsewhere(state, conversation_id, watched).await {
-            tracing::debug!(
-                conversation_id,
-                repo = watched.repo.name,
-                number = watched.number,
-                "this pull request has had its goes at the conflict and another still \
-                 has one, so the run is not stopped over it yet",
-            );
-
-            return Watching::Again(writing);
-        }
-
-        return unmergeable(state, conversation_id, watched, writing).await;
-    }
-
-    let Some(_turn) = state.sessions.try_turn(conversation_id) else {
-        tracing::debug!(
-            conversation_id,
-            repo = watched.repo.name,
-            "something else is working in the Worktree, so the conflict is looked at again later",
-        );
-        return Watching::Again(writing);
-    };
-
-    // Which pull requests of this repository the Conversation holds, in order
-    // from the bottom — one where nothing was walked, and the chain where one
-    // was. Read under the Turn rather than before it, so that a poll which
-    // could not get in costs neither this query nor the run below it.
-    let stack = match store::stack(&state.pool, conversation_id, watched.repo.id).await {
-        Ok(stack) => stack,
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, "reading the stack a conflicting pull request is one of failed");
-            return Watching::Again(writing);
-        }
-    };
-
-    // What the session is told, which is where the two part company — and, for
-    // a stack, the one thing asked of the machine before a go is spent on it.
-    let told = match chained(&stack) {
-        Some(branches) => match crate::stacks::missing(state, conversation_id).await {
-            Some(why) => return unsyncable(state, conversation_id, watched, &why, writing).await,
-            None => syncing(watched, &stack, &branches),
-        },
-        // Read as the session is dispatched rather than held from anywhere: the
-        // settings file is read every time it is asked for, and a resolution
-        // configured a minute ago is what the next conflict is resolved by.
-        //
-        // Here rather than on a blocking thread: it is one small file, and this
-        // is the moment a conflict was found rather than anything on the poll's
-        // hot path.
-        None => resolving(watched, state.settings.config().conflict_resolution()),
-    };
-
-    // Counted as the session is dispatched rather than as it ends, so that an
-    // attempt spent by a server that then restarted is one the next server does
-    // not spend again. After the extension above and not before it: a Sandbox
-    // that cannot sync a stack spends nothing at all.
-    if let Err(error) =
-        store::record_conflict_fix_attempt(&state.pool, conversation_id, watched.repo.id).await
-    {
-        tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, "counting a resolution session failed");
-        return Watching::Again(writing);
-    }
-
-    tracing::info!(
-        conversation_id,
-        repo = watched.repo.name,
-        number = watched.number,
-        deep = stack.len(),
-        "the pull request will not merge, so a session is starting on the conflict",
-    );
-
-    let said = crate::runner::address(state, conversation_id, &told).await;
-
-    Watching::Again(said.or(writing))
-}
-
 /// Stop asking the machine about a stack nothing here can sync, and say so on
 /// the Timeline.
 ///
-/// [`unmergeable`]'s twin and its opposite in one respect: that one is written
-/// once the machine has had its goes, and this one before it has had any. What
+/// The opposite of a conflict given up on in one respect: that is written once
+/// the machine has had its goes, and this before it has had any. What
 /// is missing is the extension rather than a resolution, and no number of
 /// sessions would find it — so the goes are left where they are and the human
 /// is asked straight away.
@@ -1331,14 +521,16 @@ async fn resolve(
 /// **The Notice names the extension and the command that installs it.** A stop
 /// saying only that something did not work would be one somebody had to open a
 /// terminal to understand; what this is for is the human reading the one line
-/// and knowing the one thing to run. See [`crate::stacks::INSTALL`].
+/// and knowing the one thing to run. See [`crate::stacks::INSTALL`]. Answers
+/// the Notice's reason, which is what the `resolution` host function is
+/// refused with.
 async fn unsyncable(
     state: &AppState,
     conversation_id: i64,
     watched: &Watched,
     why: &str,
     writing: Option<i64>,
-) -> Watching {
+) -> String {
     let how = format!(
         "{} is one of a stack, and a stack is synced with the `gh {extension}` extension \
          rather than merged into branch by branch. A session here can't run it. {why} \
@@ -1367,57 +559,14 @@ async fn unsyncable(
         );
     }
 
-    Watching::Done("the stack cannot be synced here, so the human is being asked")
-}
-
-/// Stop asking the machine about a pull request that will not merge, and say so
-/// on the Timeline.
-///
-/// [`ask`]'s twin, and it names the pull request in the step for the same
-/// reason: a Conversation has more than one, and what stopped is *this* branch
-/// against *its* base rather than merging in general.
-///
-/// The evidence is the tail of what the last session said, which
-/// [`crate::stopping::stop`] reads off `writing` — a resolution that could not
-/// be made is usually a session saying why.
-async fn unmergeable(
-    state: &AppState,
-    conversation_id: i64,
-    watched: &Watched,
-    writing: Option<i64>,
-) -> Watching {
-    let how = format!(
-        "{} still conflicts with its base branch after {ATTEMPTS} resolution sessions. \
-         Nothing lands until the conflict is resolved by hand.",
-        crate::stopping::opening(&named(watched)),
-    );
-
-    if let Err(error) = crate::stopping::stop(
-        &state.pool,
-        &state.nudges,
-        conversation_id,
-        crate::stopping::Decided::Verkstead,
-        &format!("resolving the conflicts on {}", named(watched)),
-        &how,
-        writing,
-    )
-    .await
-    {
-        tracing::error!(
-            error = ?error,
-            conversation_id,
-            "the pull request would not merge and the stop saying so could not be recorded"
-        );
-    }
-
-    Watching::Done("the pull request would not merge, so the human is being asked")
+    how
 }
 
 /// What a resolution session is told: which pull request will not merge, where
 /// to work, and what to do about it — in the words of the strategy this
 /// repository resolves conflicts by.
 ///
-/// Where to work for [`feedback`]'s reason, and named the same way whichever
+/// Where to work for the fix session's reason, and named the same way whichever
 /// repository it is: `git` reads its repository from wherever it runs, so a
 /// merge made in the wrong checkout is a change to work nobody asked about.
 ///
@@ -1523,7 +672,7 @@ fn chained(stack: &[store::PullRequest]) -> Option<Vec<&str>> {
 /// stack rebase` is the verb that stops in it — so the session is told both,
 /// and told that the resolution is the point rather than the sync succeeding.
 ///
-/// Where to work for [`feedback`]'s reason, and named the same way whichever
+/// Where to work for the fix session's reason, and named the same way whichever
 /// repository it is. Every branch of the stack is a branch of *this*
 /// repository — that is what the walk refuses a fork for — so they are all
 /// reached through the one Worktree.
@@ -1784,36 +933,6 @@ mod tests {
         }
     }
 
-    /// What a fix session is told: which checks are red and where their runs
-    /// are, so it can go and read the real failure — and which pull request in
-    /// which repository they are red on, which is what says where to read it.
-    #[test]
-    fn a_fix_session_is_told_which_checks_failed_and_where_they_are() {
-        let rust = check(
-            "Rust",
-            "https://github.com/tobico/verkstead/actions/runs/1/job/2",
-        );
-        let told = feedback(&watched(), &[&rust]);
-
-        assert!(
-            told.contains("Rust") && told.contains("/actions/runs/1/job/2"),
-            "the name and the run: {told}",
-        );
-        assert!(
-            told.contains("push"),
-            "and that the fix has to reach the pull request: {told}",
-        );
-        assert!(
-            told.contains("#7") && told.contains("askance"),
-            "which pull request, in which repository: {told}",
-        );
-        assert!(
-            told.contains("/state/worktrees/rate-limiting-askance"),
-            "and the worktree to work in, `gh` reading its repository from wherever \
-             it is run: {told}",
-        );
-    }
-
     /// What a resolution session is told: which pull request will not merge,
     /// which repository's worktree to do it in, and what *resolving* means here
     /// — merge the base in, and neither side thrown away.
@@ -2005,13 +1124,6 @@ mod tests {
             "and nothing of the configured strategy, which a stack is not resolved \
              by: {told}",
         );
-    }
-
-    /// A check GitHub gave no link for is still a check to fix, and the line
-    /// says its name rather than trailing an empty dash.
-    #[test]
-    fn a_check_with_no_run_to_link_to_is_listed_by_name_alone() {
-        assert_eq!(listed(&[check("Rust", "")]), "- Rust");
     }
 
     /// One red check is a red suite, whatever the rest of it is doing. It is

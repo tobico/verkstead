@@ -410,9 +410,9 @@ async fn usable(state: &AppState, remembered: store::Picked) -> Result<Option<Pa
 ///
 /// **Whatever a pick asks for is written there, by the session that proposed.**
 /// That session is idling on the ask and the Response is on its way back to it,
-/// so nothing is ended and nothing is launched: what Verkstead does is arm the
-/// session already running, which sees the artifact out and carries the
-/// Conversation on from there — see [`write_the_artifact`]. The Conversation
+/// so nothing is ended and nothing is launched: what Verkstead does is tell the
+/// interview waiting on the session already running, which sees the artifact
+/// out and carries the Conversation on from there — see [`write_the_artifact`]. The Conversation
 /// stays grilling until then, because the grilling is what is still happening.
 ///
 /// Which artifact differs, and inline's is the handoff itself: the work runs
@@ -491,7 +491,7 @@ pub(crate) async fn settle_a_proposal(
         }
     };
 
-    if !write_the_artifact(state, conversation_id, picked).await {
+    if !write_the_artifact(state, conversation_id, picked) {
         // A Conversation grilling with nothing grilling it, which is a thing to
         // see in the log: the pick is recorded, so the human's answer stands, and
         // there is nothing here to stop over — no session ran and went wrong.
@@ -503,51 +503,29 @@ pub(crate) async fn settle_a_proposal(
     }
 }
 
-/// Arm the watcher that follows the grilling session as it writes the picked
-/// Direction's artifact.
+/// Tell the interview waiting on the grilling session what the human picked, so
+/// the session's Done signal is checked against the picked Direction's artifact.
 ///
 /// Nothing is started: the session is the one that proposed, it is idling on the
 /// blocking ask the Response is being delivered through, and it goes on from
-/// there with the whole thread still in its context. What is armed here is the
-/// watch — the session's Done signal, checked against the artifact the pick asked
-/// for, is what ends it and moves the Conversation on. Which artifact each
-/// direction ends on is
-/// [`crate::runner::follow_the_tail`]'s.
+/// there with the whole thread still in its context. What changes is the wait
+/// the **Interview** Activity is holding on it — the session's Done signal,
+/// checked against the artifact the pick asked for, is what ends it, and the
+/// Direction is the Outcome it ends in. Which artifact each direction ends on,
+/// and where each Outcome carries the Conversation, is
+/// [`crate::activities::interview::run`]'s.
 ///
-/// **Armed through the register, so exactly one watcher is live.** A pick lets
-/// the agent proceed and never makes it: it may come back with another Set
-/// instead, with a fresh proposal on it if it wants the direction reconsidered,
-/// and a pick on that one supersedes. The watcher the earlier pick armed is
-/// watching for the wrong artifact from that moment, so arming cancels it — see
+/// **Latest pick wins.** A pick lets the agent proceed and never makes it: it
+/// may come back with another Set instead, with a fresh proposal on it if it
+/// wants the direction reconsidered, and a pick on that one supersedes — see
 /// [`crate::followers`].
 ///
-/// Whether a watcher was armed. `false` is a Conversation with no session
-/// running, which has nothing to arm one *on*: the pick is recorded, so the
-/// human's answer stands, and what to make of a pick with nothing grilling it is
-/// said by the caller rather than here.
-async fn write_the_artifact(state: &AppState, id: i64, direction: Direction) -> bool {
-    let Some(session) = state.sessions.following(id) else {
-        return false;
-    };
-
-    // Taken here rather than inside the watcher, so the registration is on
-    // before the task that holds it exists: a watcher is what follows a grilling
-    // session, and the whole of what carries the Conversation from the pick
-    // through the move that follows it — see [`crate::drivers`].
-    let driving = state.drivers.driving(id);
-
-    state.followers.arm(
-        id,
-        tokio::spawn(crate::runner::follow_the_tail(
-            state.clone(),
-            id,
-            direction,
-            session,
-            driving,
-        )),
-    );
-
-    true
+/// Whether the interview was there to hear it. `false` is a Conversation with no
+/// interview running, which has nothing to check a signal *against*: the pick is
+/// recorded, so the human's answer stands, and what to make of a pick with
+/// nothing grilling it is said by the caller rather than here.
+fn write_the_artifact(state: &AppState, id: i64, direction: Direction) -> bool {
+    state.followers.picked(id, direction)
 }
 
 /// Record that the grilling is over and the work is being built.
@@ -2113,14 +2091,9 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // in for it across the launch, which is the slowest part of this: a sweep
     // that looked in between would find a Conversation being worked with nothing
     // working on it, and stop the run under a press the human is still standing
-    // at. Held to the
-    // end of this rather than handed on — what drives a grilling from there is
-    // its session — and what it leaves behind where the launch fails is a stall
-    // for the next sweep to find. See [`crate::drivers`] and [`crate::stalls`].
-    //
-    // A Tinker and an Investigate hand it on instead, to the run that is about
-    // to drive their rounds: each of those is a loop rather than a launch, and
-    // it holds the registration for as long as it is driving.
+    // at. Handed on to whatever drives the Conversation from here — the
+    // interview, or a Tinker's or an Investigate's rounds — which holds it for
+    // as long as it is driving. See [`crate::drivers`] and [`crate::stalls`].
     let driving = state.drivers.driving(id);
 
     // A Tinker's own session, which is the follow-up's: the same skill, the same
@@ -2128,9 +2101,13 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // on. Spawned rather than awaited, exactly as a steer into Follow-up spawns
     // it — what drives the Conversation from here is that run, and the human is
     // standing at the button this is answering. See
-    // [`crate::runner::follow_up_rounds`].
+    // [`crate::activities::follow_up_rounds::run`].
     if process == store::Process::Tinker {
-        tokio::spawn(crate::runner::follow_up_rounds(state.clone(), id, driving));
+        tokio::spawn(crate::activities::follow_up_rounds::run(
+            state.clone(),
+            id,
+            driving,
+        ));
 
         return Ok(GrillingStarted::Started);
     }
@@ -2139,9 +2116,10 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // investigation has: the investigating skill, opened on the Brief as the
     // question to find out about, in rounds of Question Sets that commit
     // nothing. Spawned rather than awaited for the Tinker's reason, and handed
-    // the registration for the same one — see [`crate::runner::investigating`].
+    // the registration for the same one — see
+    // [`crate::activities::follow_up_rounds::investigating`].
     if process == store::Process::Investigate {
-        tokio::spawn(crate::runner::investigating(
+        tokio::spawn(crate::activities::follow_up_rounds::investigating(
             state.clone(),
             id,
             crate::investigations::Investigation::opening(brief),
@@ -2151,10 +2129,6 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         return Ok(GrillingStarted::Started);
     }
 
-    // And a grilling keeps it here, for the paragraph above's reason: what
-    // drives one from here is the session this is about to launch.
-    let _driving = driving;
-
     // Read back rather than assembled from what was just recorded: what the
     // session runs against is the Conversation as it now stands, worktree and
     // all, and the one thing that must not be guessed at is where an agent is
@@ -2163,41 +2137,53 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         return Ok(GrillingStarted::NoSuchConversation);
     }
 
-    // The grilling Profile is what this session runs under. The implementation
-    // one is fixed before starting
-    // because the grilling ends by handing over to it — that hand-over is a
-    // later stage's, and this session is not run under it.
+    // And a grilling's own session, under the **Interview** Activity, which
+    // the registration is handed to for the Tinker's reason: what drives a
+    // grilling from here is the interview, from its launch through to wherever
+    // the Direction picked carries the Conversation. See
+    // [`crate::activities::interview::run`].
     //
-    // Logged rather than raised: by here the branch is made and the Brief is
-    // frozen, and answering the button with a failure would say that none of it
-    // happened.
+    // The grilling Profile is what the session runs under. The implementation
+    // one is fixed before starting because the grilling ends by handing over to
+    // it — that hand-over is a later stage's, and this session is not run under
+    // it.
     //
     // What it is started on is the Brief under the line that sends it into the
     // bundled grilling skill: nothing in a sandbox says what a session is for —
     // a global instructions file there holds the human's own text and never
     // Verkstead's — so the prompt is where it is said — see [`crate::skills`].
     //
-    // Through the host, as every launch is: under the grilling role, taking no
-    // Turn — nothing else is driving a Conversation that has only just started —
-    // and waited on by nothing here. What its Done signal is checked against is
-    // the pick's, written down when its tail is seen out — see
-    // [`crate::runner::follow_the_tail`] — so the evidence below is never
-    // registered. A grilling may not retire a Memo, so it is not told how.
-    if let Some(prompt) = state
-        .sessions
-        .skills()
-        .map(|skills| skills::grilling(skills, &brief))
-    {
-        crate::lending::Lent::new(state, id)
-            .turn_held()
-            .start(
-                "verkstead/grilling",
-                store::Role::Grilling,
-                prompt,
-                crate::done::Evidence::Nothing,
-                crate::done::Ends::WithItsWork,
-            )
-            .await;
+    // Taking no Turn — nothing else is driving a Conversation that has only
+    // just started. A grilling may not retire a Memo, so it is not told how.
+    // And waited on until the launch is over, so the press answers with the
+    // session there, as it always has.
+    //
+    // Logged rather than raised where this server has no skills to send it
+    // into: by here the branch is made and the Brief is frozen, and answering
+    // the button with a failure would say that none of it happened. What it
+    // leaves behind is a stall for the next sweep to find.
+    match state.sessions.skills() {
+        Some(skills) => {
+            let (launched, launching) = tokio::sync::oneshot::channel();
+
+            tokio::spawn(crate::activities::interview::run(
+                state.clone(),
+                id,
+                driving,
+                skills::grilling(skills, &brief),
+                crate::lending::Lent::new(state, id)
+                    .turn_held()
+                    .telling(launched),
+            ));
+
+            // Over either way, and nothing to say about which: see
+            // [`crate::lending::Lent::telling`].
+            let _ = launching.await;
+        }
+        None => tracing::error!(
+            conversation_id = id,
+            "this server has no grilling skill to send a session into, so none was started"
+        ),
     }
 
     Ok(GrillingStarted::Started)
@@ -3539,7 +3525,7 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// picker's branch as the name beside the base commit, and the move into
 /// Wrapping made by the take-up itself rather than by a record arriving. Then one
 /// `submitting` session is sent for the pull request the work is owed — see
-/// [`crate::runner::owed_for_a_branch`].
+/// [`crate::activities::wrap_up::run`].
 ///
 /// [`adopt`]'s sibling over the other kind of thing a Draft holds, and the same
 /// shape underneath — the roles checked, origin fetched, git asked everything
@@ -4133,22 +4119,14 @@ pub(crate) async fn take_up(state: &AppState, id: i64, confirming: &Confirming) 
         .nudges
         .announce(Nudge::Conversation { conversation: id });
 
-    // A branch has no pull request for the wrap-up to watch, so the one thing
-    // owed is asked for first and the wrap-up starts over what is opened — the
-    // run a finish step that stopped short of its push is sent through, with the
-    // base the picker holds carried into it. Spawned rather than awaited, and
+    // A branch has no pull request for the wrap-up to watch, so the wrap-up
+    // opens the one thing owed first, with the base the picker holds carried
+    // into it, and watches what is opened. Spawned rather than awaited, and
     // registered as driving before it is: the human is standing at the button
     // this is answering, and what drives the Conversation from here is that run.
-    // See [`crate::runner::owed_for_a_branch`].
+    // See [`crate::activities::wrap_up::run`].
     if let Target::Branch(_) = &taking {
-        let driving = state.drivers.driving(id);
-
-        tokio::spawn(crate::runner::owed_for_a_branch(
-            state.clone(),
-            id,
-            named,
-            driving,
-        ));
+        crate::wrapping::wrap_up(state, id, Some(named));
 
         return Ok(TakenUp::TakenUp);
     }

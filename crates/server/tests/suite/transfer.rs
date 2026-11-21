@@ -861,6 +861,31 @@ impl Verkstead {
         waited.unwrap_or_else(|_| panic!("no Profile called {name} was ever listed: {last:#?}"))
     }
 
+    /// The Profile called `name`, once it reads as one a session can run under
+    /// here. A mirror is listed as soon as its row replicates, which can be
+    /// before this device has read the member it is bound on as reachable — and
+    /// until then it is broken with *no bound device*, so a press refuses it.
+    async fn usable_profile_called(&self, name: &str) -> ProfileEntry {
+        let mut last = Vec::new();
+
+        let waited = tokio::time::timeout(WAITING, async {
+            loop {
+                last = reading(&self.workbench, PROFILES).await;
+
+                if let Some(row) = last.iter().find(|row: &&ProfileEntry| {
+                    row.name.as_deref() == Some(name) && row.broken.is_none()
+                }) {
+                    return row.clone();
+                }
+
+                tokio::time::sleep(LOOKING).await;
+            }
+        })
+        .await;
+
+        waited.unwrap_or_else(|_| panic!("no Profile called {name} was ever usable: {last:#?}"))
+    }
+
     /// A Conversation of this device's, written the way the composer writes one
     /// and left a draft — which is where a file is put on one: a Conversation
     /// takes attachments while it is drafting and no longer.
@@ -8134,7 +8159,7 @@ async fn the_account_is_home_before_the_work_leaves_and_the_far_end_runs_under_i
     b.account().await;
 
     let _holding = a.holding();
-    let mirror = a.profile_called(ACCOUNT).await;
+    let mirror = a.usable_profile_called(ACCOUNT).await;
 
     let conversation = a.drafting_under(&mirror.id).await;
     a.grills(conversation).await;

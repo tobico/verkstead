@@ -152,14 +152,14 @@
 //! roadmap it has written, which is [`crate::runner::implementing_again`], the
 //! same relaunch — or, where the human wrote one, the instruction itself, in a
 //! session that drives the Conversation and hands the pipeline on when it is
-//! done; see [`crate::runner::instructed`]. One or the other and never neither:
-//! an instruction is required exactly where nothing stands to be carried on,
-//! which is what [`standing`] answers. Into Wrapping it is the wrap-up's own
-//! watchers over whatever the branch now holds, with the fix attempts
-//! forgotten, which is what that press does there. Into Follow-up it is a
-//! session on the follow-up skill, started on the brief the human wrote and
-//! required to have one — see [`crate::runner::follow_up_rounds`]. Into Done there
-//! is nothing to start at all.
+//! done; see [`crate::activities::one_session::instructed`]. One or the other
+//! and never neither: an instruction is required exactly where nothing stands
+//! to be carried on, which is what [`standing`] answers. Into Wrapping it is
+//! the wrap-up's own watchers over whatever the branch now holds, with the fix
+//! attempts forgotten, which is what that press does there. Into Follow-up it
+//! is a session on the follow-up skill, started on the brief the human wrote
+//! and required to have one — see [`crate::activities::follow_up_rounds::run`].
+//! Into Done there is nothing to start at all.
 //!
 //! Nothing is reverted, reset or stashed, here or anywhere a stop is written:
 //! the Worktree is left exactly as whatever was running left it.
@@ -690,11 +690,13 @@ pub(crate) async fn submit(
         // which is the reading this one is the second of.
         SteerTarget::Implementing => match instruction {
             // A session started on the instruction, driving the Conversation
-            // while it runs and handing the pipeline on from whatever the branch
-            // then holds. See [`crate::runner::instructed`], which is what makes
-            // this a driver rather than an errand standing beside the work.
+            // while it runs and handing the pipeline on from whatever the
+            // branch then holds. See
+            // [`crate::activities::one_session::instructed`], which is what
+            // makes this a driver rather than an errand standing beside the
+            // work.
             Some(instruction) => {
-                tokio::spawn(crate::runner::instructed(
+                tokio::spawn(crate::activities::one_session::instructed(
                     state.clone(),
                     conversation_id,
                     instruction.to_owned(),
@@ -733,20 +735,20 @@ pub(crate) async fn submit(
                 // find the Conversation undriven all over again.
                 let _driving = driving;
 
-                crate::checks::afresh(state, conversation_id).await;
+                crate::wrapping::afresh(state, conversation_id).await;
             });
         }
 
         // A session on the follow-up skill, started on the brief the human
-        // steered with — which is required, so [`refusal`] has already made sure
-        // there is one and this cannot come to nothing. See
-        // [`crate::runner::follow_up_rounds`], which is what drives the Conversation
-        // while it runs.
+        // steered with — which is required, so [`refusal`] has already made
+        // sure there is one and this cannot come to nothing. See
+        // [`crate::activities::follow_up_rounds::run`], which is what drives
+        // the Conversation while it runs.
         SteerTarget::FollowUp => match follow_up {
             // Read back off the Steer Event by the Activity rather than handed
             // in, which is written by now.
             Some(_) => {
-                tokio::spawn(crate::runner::follow_up_rounds(
+                tokio::spawn(crate::activities::follow_up_rounds::run(
                     state.clone(),
                     conversation_id,
                     driving,
@@ -774,11 +776,11 @@ pub(crate) async fn submit(
         // And a session on the investigating skill, started on the question the
         // human wants found out — which is required, so [`refusal`] has already
         // made sure there is one and this cannot come to nothing. See
-        // [`crate::runner::investigating`], which drives the Conversation while
-        // it runs.
+        // [`crate::activities::follow_up_rounds::investigating`], which drives
+        // the Conversation while it runs.
         SteerTarget::Investigating => match investigation {
             Some(brief) => {
-                tokio::spawn(crate::runner::investigating(
+                tokio::spawn(crate::activities::follow_up_rounds::investigating(
                     state.clone(),
                     conversation_id,
                     crate::investigations::Investigation::opening(brief.to_owned()),

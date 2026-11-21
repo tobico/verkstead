@@ -476,7 +476,7 @@ async fn recompute(
         // no checks and never open the one thing missing. So the press asks for
         // that instead, which is the promise the run makes about a finish that
         // stopped short of its push, kept for the other ending that sends for one
-        // — see [`crate::runner::owed_for_a_branch`].
+        // — see [`crate::activities::wrap_up::run`].
         //
         // Asked of the record and nothing else: every other way into Wrapping
         // comes through the pull request being recorded, so a Conversation's own
@@ -498,14 +498,11 @@ async fn recompute(
                 .clone()
                 .unwrap_or_else(|| conversation.repo.default_branch.clone());
 
-            let state = state.clone();
-
-            tokio::spawn(crate::runner::owed_for_a_branch(
-                state,
-                conversation_id,
-                against,
-                driving,
-            ));
+            // The wrap-up opens it before it watches anything, taking a
+            // registration of its own as it is spawned — the handover this one
+            // is held across.
+            crate::wrapping::wrap_up(state, conversation_id, Some(against));
+            drop(driving);
         }
 
         // The wrap-up's watchers over the top of nothing, which is what a
@@ -516,7 +513,7 @@ async fn recompute(
         // The fix attempts are forgotten first: the human has read what stopped
         // and asked for another go, and a count left standing would be a watcher
         // that stopped again on its next poll without dispatching anything. See
-        // [`crate::checks::afresh`].
+        // [`crate::wrapping::afresh`].
         Lifecycle::Wrapping => {
             starting(state, conversation_id, resuming).await?;
 
@@ -536,7 +533,7 @@ async fn recompute(
                         // could find the Conversation undriven all over again.
                         let _driving = driving;
 
-                        crate::checks::afresh(state, conversation_id).await;
+                        crate::wrapping::afresh(state, conversation_id).await;
                     });
                 }
                 // The same five watchers with the counters left standing — see
@@ -567,11 +564,12 @@ async fn recompute(
         // [`crate::follow_ups`].
         //
         // **Unless the follow-up is over and its pull request is what is
-        // missing**, which is a Tinker whose ending sent for one and got nowhere
-        // — the state stays Follow-up until that pull request is recorded, so a
-        // press or a restart landing in that window has an ending to finish
-        // rather than a round to start. The component reads that off its start,
-        // as it reads its own ending: see [`crate::runner::follow_up_again`].
+        // missing**, which is a Tinker whose ending sent for one and got
+        // nowhere — the state stays Follow-up until that pull request is
+        // recorded, so a press or a restart landing in that window has an
+        // ending to finish rather than a round to start. The component reads
+        // that off its start, as it reads its own ending: see
+        // [`crate::activities::follow_up_rounds::again`].
         //
         // Whether there is anything to follow up on is read here all the same.
         // It costs one read of the Timeline, and a Conversation in this state
@@ -591,7 +589,7 @@ async fn recompute(
 
             starting(state, conversation_id, resuming).await?;
 
-            tokio::spawn(crate::runner::follow_up_again(
+            tokio::spawn(crate::activities::follow_up_rounds::again(
                 state.clone(),
                 conversation_id,
                 driving,
@@ -619,7 +617,7 @@ async fn recompute(
 
             starting(state, conversation_id, resuming).await?;
 
-            tokio::spawn(crate::runner::investigating(
+            tokio::spawn(crate::activities::follow_up_rounds::investigating(
                 state.clone(),
                 conversation_id,
                 investigation,

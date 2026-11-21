@@ -21,7 +21,8 @@
 //!   so the wire format refuses an unknown one on its own; what is left is a
 //!   rationale nobody wrote, and the chooser has nothing to show the human the
 //!   recommendation was argued for. A platform it `wants` is an enum too, and
-//!   each one needs the reason the human reads beside the tick.
+//!   each one needs the reason the human reads beside the tick. What it
+//!   `offers` names each Direction once, and what it recommends is one of them.
 //!
 //! Multi-select needs no rule: the format gives no way to express it — an
 //! Answer carries one `selected` number.
@@ -34,7 +35,8 @@
 //! - an entry is one or the other, never both, and never neither;
 //! - a selected Option is one the question actually offers;
 //! - a picked `direction` comes back only from a Set that carries a `proposal`,
-//!   because the chooser is drawn on that Set and on no other.
+//!   because the chooser is drawn on that Set and on no other — and is one of
+//!   the Directions that proposal offers, because those are all it draws.
 //!
 //! Every violation is collected rather than the first one returned, so an
 //! agent that got several things wrong learns about all of them at once.
@@ -45,7 +47,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::response::{Answer, Response};
-use crate::set::{Question, QuestionOption, QuestionSet, Subquestion};
+use crate::set::{Direction, Question, QuestionOption, QuestionSet, Subquestion};
 
 // A Violation reaches the CLI inside an `ApiError`, which is also how the viewer
 // is told what a request was refused for — see `Response` for the gating.
@@ -251,11 +253,22 @@ impl Response {
         // carrying a proposal and on no other. One anywhere else is a direction
         // nobody offered and nothing would act on — refused rather than dropped
         // on the floor, so whoever sent it hears about it.
-        if self.direction.is_some() && set.proposal.is_none() {
-            violations.push(Violation::set(
+        match (self.direction, &set.proposal) {
+            (Some(_), None) => violations.push(Violation::set(
                 "this Response picks a direction, but the Set carries no `proposal`; \
                  the chooser is drawn on the closing Set alone",
-            ));
+            )),
+            // And only among what the chooser drew: the interview offers the
+            // Directions its Process declares, and one it does not is a
+            // Direction nothing here would build.
+            (Some(picked), Some(proposal)) if !proposal.offered().contains(&picked) => {
+                violations.push(Violation::set(format!(
+                    "this Response picks `{}`, but the proposal offers only {}",
+                    picked.word(),
+                    Direction::listed(&proposal.offered()),
+                )));
+            }
+            _ => {}
         }
 
         if violations.is_empty() {
@@ -274,8 +287,8 @@ impl Response {
 /// is what the grammar cannot express — that there is reasoning to read.
 ///
 /// Nothing here asks whether the Set has anything answerable on it, because a
-/// proposal Set always has: the viewer injects the chooser, and the three
-/// directions are what there is to decide. The Questions beside it are the
+/// proposal Set always has: the viewer injects the chooser, and the directions
+/// it offers are what there is to decide — or, offering one, whether to accept. The Questions beside it are the
 /// agent's own and may be none at all.
 fn check_proposal(set: &QuestionSet, violations: &mut Vec<Violation>) {
     let Some(proposal) = &set.proposal else {
@@ -299,6 +312,27 @@ fn check_proposal(set: &QuestionSet, violations: &mut Vec<Violation>) {
                 want.platform.word(),
             )));
         }
+    }
+
+    // Each Direction offered once, and the recommendation among them: the
+    // chooser marks what was recommended, and cannot mark a Direction it does
+    // not draw.
+    for (at, offered) in proposal.offers.iter().enumerate() {
+        if proposal.offers[..at].contains(offered) {
+            violations.push(Violation::set(format!(
+                "a proposal's `offers` names `{}` twice; name each Direction once",
+                offered.word(),
+            )));
+        }
+    }
+
+    if !proposal.offered().contains(&proposal.direction) {
+        violations.push(Violation::set(format!(
+            "this proposal recommends `{}`, but the work may only be built as {}; \
+             recommend one of those",
+            proposal.direction.word(),
+            Direction::listed(&proposal.offered()),
+        )));
     }
 
     // And each platform once: the chooser draws a platform's devices under

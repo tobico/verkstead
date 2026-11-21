@@ -32,7 +32,12 @@
 //! started with `skill: verkstead/investigating` and `evidence: investigated`.
 //! Its reading of the branches is the same: an investigation that committed
 //! nothing ends `nothing`, and one that did ends `committed`, which is the word
-//! its Process holds it to.
+//! its Process holds it to. What an investigation is asked is the host's to
+//! write — the question it was opened with is read off a steer into
+//! Investigating or the Brief of an Investigate, which a follow-up's reading of
+//! the Timeline knows nothing of — so it is handed in whole as the `prompt`
+//! option, and a session that goes is said to have left the question
+//! unfinished rather than the follow-up.
 
 wit_bindgen::generate!({
     world: "activity",
@@ -50,25 +55,31 @@ const NOBODY: &str = "Nobody is left to ask you anything or to act on what you s
 /// How a session that finished went, where the host had nothing worse to say.
 const FINISHED: &str = "The follow-up session finished.";
 
+/// The same two for an investigation: what is left unfinished is the question
+/// rather than the follow-up, and there is nothing on the branch either way.
+const NOBODY_INVESTIGATING: &str = "Nobody is left to find anything out or to ask you about \
+     it. Any question the session put to you has been closed unanswered.";
+
+const FINISHED_INVESTIGATING: &str = "The investigating session finished.";
+
 struct Rounds;
 
 impl Guest for Rounds {
     fn run(facts: Facts) -> String {
         let skill = option(&facts, "skill").unwrap_or("verkstead/following-up");
-        let evidence = match option(&facts, "evidence") {
-            Some("investigated") => Evidence::Investigated,
-            _ => Evidence::NothingElse,
+        let (evidence, nobody, finished) = match option(&facts, "evidence") {
+            Some("investigated") => (
+                Evidence::Investigated,
+                NOBODY_INVESTIGATING,
+                FINISHED_INVESTIGATING,
+            ),
+            _ => (Evidence::NothingElse, NOBODY, FINISHED),
         };
 
         let Some(path) = facts.skills.iter().find(|named| named.name == skill) else {
             host::stop(&format!(
                 "There's no `{skill}` skill to start the follow-up session in."
             ));
-            return String::new();
-        };
-
-        let Some(follow_up) = opened(&facts.timeline) else {
-            host::stop("There's nothing on the timeline to follow up on.");
             return String::new();
         };
 
@@ -79,7 +90,17 @@ impl Guest for Rounds {
             return "committed".to_owned();
         }
 
-        let prompt = prompt(&path.path, &facts, &follow_up);
+        let prompt = match option(&facts, "prompt") {
+            Some(prompt) => prompt.to_owned(),
+            None => {
+                let Some(follow_up) = opened(&facts.timeline) else {
+                    host::stop("There's nothing on the timeline to follow up on.");
+                    return String::new();
+                };
+
+                prompt(&path.path, &facts, &follow_up)
+            }
+        };
 
         let session = match host::launch(
             skill,
@@ -96,18 +117,18 @@ impl Guest for Rounds {
         };
 
         match host::wait(session) {
-            Waited::Done | Waited::Marked => ending(&facts),
+            Waited::Done | Waited::Marked | Waited::Picked(_) => ending(&facts),
             Waited::Steered => "steered".to_owned(),
             // How it ended, where the ending itself was the trouble; otherwise
             // the ending is the whole of it, a session that has finished with
             // the follow-up still running being exactly as gone as one that
             // fell over.
             Waited::Gone(how) => {
-                host::stop(&format!("{} {NOBODY}", how.as_deref().unwrap_or(FINISHED)));
+                host::stop(&format!("{} {nobody}", how.as_deref().unwrap_or(finished)));
                 String::new()
             }
             Waited::Stalled => {
-                host::stop(&format!("{FINISHED} {NOBODY}"));
+                host::stop(&format!("{finished} {nobody}"));
                 String::new()
             }
         }

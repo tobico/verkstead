@@ -803,6 +803,47 @@ fn a_proposal_wanting_nothing_round_trips_without_the_key() {
     assert_eq!(reparsed, wanting);
 }
 
+/// A proposal offering every Direction writes no `offers` at all, so a Set
+/// from before there was a choice to narrow reads, and writes, as it did.
+#[test]
+fn a_proposal_offering_every_direction_writes_no_offers() {
+    let set = QuestionSet::from_yaml(PROPOSING).unwrap();
+    let proposal = set.proposal.as_ref().unwrap();
+
+    assert!(proposal.offers.is_empty());
+    assert_eq!(proposal.offered(), Direction::ALL.to_vec());
+    assert!(!set.to_yaml().unwrap().contains("offers"));
+}
+
+/// A proposal offering fewer carries them, and recommends one of them.
+#[test]
+fn a_proposal_recommends_one_of_the_directions_it_offers() {
+    let offering = |offers: &str| {
+        QuestionSet::from_yaml(&format!("{PROPOSING}  offers: {offers}\n"))
+            .unwrap()
+            .validate()
+    };
+
+    offering("[inline, task-list]").expect("task-list is among what it offers");
+    offering("[task-list]").expect("one Direction is offered by accepting it");
+
+    let error = offering("[inline, roadmap]").expect_err("task-list was not offered");
+    assert!(
+        error.to_string().contains(
+            "recommends `task-list`, but the work may only be built as `inline` and `roadmap`"
+        ),
+        "the refusal should say what may be recommended, got: {error}"
+    );
+
+    let error = offering("[task-list, task-list]").expect_err("named twice");
+    assert!(
+        error
+            .to_string()
+            .contains("`offers` names `task-list` twice"),
+        "the refusal should name the Direction, got: {error}"
+    );
+}
+
 /// A proposal Set needs nothing answerable of its own.
 ///
 /// The chooser is what there is to decide on one, and the viewer injects it —

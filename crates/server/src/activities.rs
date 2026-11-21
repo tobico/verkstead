@@ -29,6 +29,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
+use verkstead_schema::Direction;
 use verkstead_store as store;
 
 use crate::AppState;
@@ -41,6 +42,31 @@ use crate::plugins::component::worlds::category::activity::verkstead::plugin::{
 };
 use crate::plugins::component::{self, Ended};
 use crate::plugins::manifest::{Activity, Capability, Files, STEERED};
+
+pub(crate) mod follow_up_rounds;
+pub(crate) mod interview;
+pub(crate) mod one_session;
+pub(crate) mod wrap_up;
+
+/// The built-in Activities plugin, and its Activity whose id is `id`: how
+/// the Conversation's states call Verkstead's own Activities by name, until a
+/// Process names them (stage 11).
+pub(crate) fn built_in(
+    id: &str,
+) -> Option<(
+    crate::plugins::built_in::BuiltIn,
+    crate::plugins::manifest::Activity,
+)> {
+    let shipped = crate::plugins::built_in::activities();
+    let activity = shipped
+        .manifest(crate::platform::Platform::HERE)
+        .ok()?
+        .activities
+        .into_iter()
+        .find(|activity| activity.id == id)?;
+
+    Some((shipped, activity))
+}
 
 /// Start Activities on this server's Conversations from outside it — the
 /// suite's seam, until a Process says which Activity a state runs.
@@ -55,6 +81,21 @@ pub struct Hosting {
 impl Hosting {
     pub(crate) fn over(state: AppState) -> Hosting {
         Hosting { state }
+    }
+
+    /// Say that `conversation_id`'s interview is to offer `offers` alone —
+    /// the Process's declaration (Set 1765, Q27) until stage 11 writes it.
+    /// Said before the grilling starts, as a declaration is.
+    pub fn offering(&self, conversation_id: i64, offers: Vec<Direction>) {
+        self.state.followers.declare(conversation_id, offers);
+    }
+
+    /// Say that the Forge lacks `capability` from now on — the declaration a
+    /// Forge makes from stage 12, which GitHub, with every capability, never
+    /// does. A watcher asking over it is settled at once: see
+    /// [`crate::forge`].
+    pub fn lacking(&self, capability: crate::forge::Capability) {
+        self.state.forge.lacking(capability);
     }
 
     /// Start `activity`, whose component is `component`, on
@@ -126,6 +167,16 @@ pub(crate) struct Ran {
 ///
 /// `brought` is what brought the run about, which a Conversation the component
 /// starts is held to the limits by — see [`crate::continuing::begin`].
+///
+/// **The `building` option is the host's**: where it names a kind — see
+/// [`Building::named`] — every session the component launches builds that,
+/// which is what permits its Memos and previews and stamps the Memos it
+/// leaves.
+///
+/// **So is `offers`**: the Directions an interview offers, as their words
+/// joined by commas — `inline,task-list`. Where it is given, the session
+/// launched expecting `picked` offers those alone: its proposals are stamped
+/// with them and a pick of any other is not heard. Where it is not, all three.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run(
     state: &AppState,
@@ -138,7 +189,82 @@ pub(crate) async fn run(
     doing: &str,
     brought: Brought,
 ) -> Option<Ran> {
+    let (outcome, seen) = run_seeing(
+        state,
+        conversation_id,
+        files,
+        activity,
+        capabilities,
+        options,
+        Lent::new(state, conversation_id)
+            .doing(doing)
+            .brought(brought),
+    )
+    .await;
+
+    outcome.map(|outcome| Ran {
+        outcome,
+        writing: seen.event_id,
+    })
+}
+
+/// What the newest session a component launched came to, read back by an
+/// in-process caller where the world's `waited` says only *gone* — as
+/// [`Lent::see`] reads it back for a driver of its own.
+#[derive(Default)]
+pub(crate) struct Seen {
+    /// The Timeline Event it printed into, where one was launched.
+    pub(crate) event_id: Option<i64>,
+
+    /// How it ended, where a wait saw it end without its Done signal taken.
+    pub(crate) ended: Option<crate::sessions::Ended>,
+
+    /// The Direction a wait answered `picked`, its artifact written — which
+    /// stands where a stop that landed beside it took the Outcome away.
+    pub(crate) picked: Option<String>,
+
+    /// The registration the host took as the human picked a Direction, handed
+    /// on with the wait's `picked` to whatever the Direction sets going — see
+    /// [`Lent::wait`].
+    pub(crate) driving: Option<Driving>,
+
+    /// Whether a host function ended the component for a stop it found
+    /// standing — see [`Hosted::ended_by_a_stop`]. The stop is whoever's put it
+    /// there to say, so the run writes none of its own over it: a move that is
+    /// failing forgets its request before it writes its stop, and a run that
+    /// ended inside that gap would otherwise say the Activity stopped.
+    pub(crate) stopped_under: bool,
+}
+
+/// [`run`], and what the newest session the component launched came to — lent
+/// `lent`, which carries what only an in-process caller can say to the host:
+/// what the rescue says the session is doing, a Turn already held, the Sets a
+/// relaunched grilling holds open, a registration to let go once its session
+/// is launched.
+///
+/// The Driving registration is the caller's to hold across the run, as for
+/// [`run`] — or the [`Lent`]'s, for the interview, whose grilling is driven by
+/// its session until the human picks.
+pub(crate) async fn run_seeing(
+    state: &AppState,
+    conversation_id: i64,
+    files: Files<'_>,
+    activity: &Activity,
+    capabilities: &[Capability],
+    options: Vec<(String, String)>,
+    lent: Lent,
+) -> (Option<String>, Seen) {
     let name = &activity.name;
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let building = options
+        .iter()
+        .find(|(key, _)| key == "building")
+        .and_then(|(_, kind)| Building::named(kind));
+    let offers = options
+        .iter()
+        .find(|(key, _)| key == "offers")
+        .map(|(_, words)| offered(words))
+        .unwrap_or_else(|| Direction::ALL.to_vec());
 
     let facts = match facts(state, conversation_id, activity, options).await {
         Ok(facts) => facts,
@@ -151,24 +277,22 @@ pub(crate) async fn run(
                 &format!("{name} couldn't be started: the conversation couldn't be read."),
             )
             .await;
-            return None;
+            return (None, Seen::default());
         }
     };
 
     let home = crate::sandbox::Homes::of_the_server(&state.data_dir)
         .map(|homes| homes.servers().to_owned());
-    let writing = Arc::new(Mutex::new(None));
     let lent = Hosted {
-        lent: Lent::new(state, conversation_id)
-            .doing(doing)
-            .brought(brought),
+        doing: lent.doing_now().to_owned(),
+        lent: lent.building(building).offering(offers),
+        seen: seen.clone(),
         state: state.clone(),
         conversation_id,
         name: name.clone(),
         declared: activity.skills.clone(),
         starts: capabilities.contains(&Capability::Conversations),
-        doing: doing.to_owned(),
-        writing: writing.clone(),
+        building,
         planning: None,
         beside: false,
     };
@@ -176,10 +300,13 @@ pub(crate) async fn run(
     let ran =
         component::run_activity(files, activity, capabilities, home.as_deref(), lent, &facts).await;
 
+    let seen = std::mem::take(&mut *seen.lock().expect("nothing panics holding it"));
+
     // Whatever it answered, a stop that landed while it ran is the last word:
-    // its own `stop`, or the human's.
-    if already_stopped(state, conversation_id).await {
-        return None;
+    // its own `stop`, or the human's — or a move's, whose stop may still be on
+    // its way when the component it ended has already returned.
+    if seen.stopped_under || already_stopped(state, conversation_id).await {
+        return (None, seen);
     }
 
     let how = match ran {
@@ -190,11 +317,7 @@ pub(crate) async fn run(
                 outcome,
                 "an Activity ended"
             );
-            let writing = *writing
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-
-            return Some(Ran { outcome, writing });
+            return (Some(outcome), seen);
         }
         Ok(outcome) => {
             format!("{name} ended in `{outcome}`, which isn't one of the outcomes it declares.")
@@ -210,7 +333,7 @@ pub(crate) async fn run(
     );
     stopping(state, conversation_id, name, &how).await;
 
-    None
+    (None, seen)
 }
 
 /// Run `activity` **beside** `conversation_id` rather than driving it: the
@@ -256,7 +379,8 @@ pub(crate) async fn beside(
         declared: activity.skills.clone(),
         starts: capabilities.contains(&Capability::Conversations),
         doing: name.clone(),
-        writing: Arc::new(Mutex::new(None)),
+        building: None,
+        seen: Arc::new(Mutex::new(Seen::default())),
         planning: None,
         beside: true,
     };
@@ -294,9 +418,27 @@ pub(crate) async fn beside(
     }
 }
 
+/// The Directions `words` names, joined by commas, in the design's order and
+/// each once — all three where it names none of them.
+fn offered(words: &str) -> Vec<Direction> {
+    let named: Vec<Direction> = words
+        .split(',')
+        .filter_map(|word| Direction::named(word.trim()))
+        .collect();
+
+    match Direction::ALL
+        .into_iter()
+        .filter(|direction| named.contains(direction))
+        .collect::<Vec<_>>()
+    {
+        offered if offered.is_empty() => Direction::ALL.to_vec(),
+        offered => offered,
+    }
+}
+
 /// Stop the Conversation as `name` saying `how`, closing any Set left open.
 async fn stopping(state: &AppState, conversation_id: i64, name: &str, how: &str) {
-    crate::runner::left_open(state, conversation_id).await;
+    crate::activities::follow_up_rounds::left_open(state, conversation_id).await;
 
     crate::runner::stop(
         state,
@@ -431,6 +573,10 @@ fn shown(path: Option<&Path>) -> String {
 /// component at the next one.
 struct Hosted {
     lent: Lent,
+
+    /// What the newest session launched came to, for [`run_seeing`]'s caller.
+    seen: Arc<Mutex<Seen>>,
+
     state: AppState,
     conversation_id: i64,
 
@@ -450,9 +596,9 @@ struct Hosted {
     /// launches name — see [`step`].
     doing: String,
 
-    /// The Event the newest session launched here prints into, read back by
-    /// [`run`] once the component has ended.
-    writing: Arc<Mutex<Option<i64>>>,
+    /// What the sessions its launches name no step for build, from its
+    /// `building` option — see [`run`].
+    building: Option<Building>,
 
     /// The session launched to plan a roadmap stage, where the newest was one:
     /// its backlog landing is the host's to record once it has been waited on.
@@ -467,6 +613,11 @@ impl Hosted {
     /// Trap the component where the Conversation has stopped under it.
     async fn ended_by_a_stop(&self) -> wasmtime::Result<()> {
         if !self.beside && already_stopped(&self.state, self.conversation_id).await {
+            self.seen
+                .lock()
+                .expect("nothing panics holding it")
+                .stopped_under = true;
+
             return Err(wasmtime::Error::new(Ended(
                 "The conversation was stopped.".to_owned(),
             )));
@@ -541,7 +692,7 @@ impl host::Host for Hosted {
 
         match building {
             Some((building, doing)) => self.lent.now(Some(building), &doing),
-            None => self.lent.now(None, &self.doing),
+            None => self.lent.now(self.building, &self.doing),
         }
 
         let launched =
@@ -551,11 +702,10 @@ impl host::Host for Hosted {
             Ok(session) => {
                 self.planning = planning.then_some(*session);
 
-                *self
-                    .writing
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-                    Some(self.lent.event_id(*session));
+                *self.seen.lock().expect("nothing panics holding it") = Seen {
+                    event_id: Some(self.lent.event_id(*session)),
+                    ..Seen::default()
+                }
             }
             Err(_) => self.ended_by_a_stop().await?,
         }
@@ -575,6 +725,16 @@ impl host::Host for Hosted {
     async fn wait(&mut self, session: world::Session) -> wasmtime::Result<world::Waited> {
         let waited = host::Host::wait(&mut self.lent, session).await?;
 
+        {
+            let mut seen = self.seen.lock().expect("nothing panics holding it");
+            seen.ended = self.lent.ended(session);
+
+            if let world::Waited::Picked(direction) = &waited {
+                seen.picked = Some(direction.clone());
+                seen.driving = self.lent.driving();
+            }
+        }
+
         if self.planning == Some(session) && self.backlog_committed().await {
             crate::conversations::backlog_landed(&self.state, self.conversation_id).await;
         }
@@ -582,8 +742,9 @@ impl host::Host for Hosted {
         match waited {
             world::Waited::Done => {
                 self.state.sessions.end(self.conversation_id).await;
-                self.lent.now(None, &self.doing);
+                self.lent.now(self.building, &self.doing);
             }
+            world::Waited::Picked(_) => {}
             _ => self.ended_by_a_stop().await?,
         }
 
@@ -691,6 +852,196 @@ impl host::Host for Hosted {
         }
 
         host::Host::stage_chain(&mut self.lent, roadmap).await
+    }
+
+    async fn wait_any(
+        &mut self,
+        sessions: Vec<world::Session>,
+        timeout: u64,
+    ) -> wasmtime::Result<world::Woke> {
+        let woke = host::Host::wait_any(&mut self.lent, sessions, timeout).await?;
+
+        if let world::Woke::Waited((session, waited)) = &woke {
+            {
+                let mut seen = self.seen.lock().expect("nothing panics holding it");
+
+                if seen.event_id == Some(self.lent.event_id(*session)) {
+                    seen.ended = self.lent.ended(*session);
+                }
+            }
+
+            if !matches!(waited, world::Waited::Done) {
+                self.ended_by_a_stop().await?;
+            }
+        }
+
+        Ok(woke)
+    }
+
+    async fn pull_requests(&mut self) -> wasmtime::Result<Vec<world::PullRequest>> {
+        host::Host::pull_requests(&mut self.lent).await
+    }
+
+    async fn forge_standing(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Result<world::PullRequestStanding, world::Unforged>> {
+        host::Host::forge_standing(&mut self.lent, pull_request).await
+    }
+
+    async fn forge_checks(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Result<world::Suite, world::Unforged>> {
+        host::Host::forge_checks(&mut self.lent, pull_request).await
+    }
+
+    async fn forge_comments(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Result<Vec<world::Comment>, world::Unforged>> {
+        host::Host::forge_comments(&mut self.lent, pull_request).await
+    }
+
+    async fn forge_reply(
+        &mut self,
+        pull_request: world::PullRequest,
+        markdown: String,
+    ) -> wasmtime::Result<Result<String, world::Unforged>> {
+        host::Host::forge_reply(&mut self.lent, pull_request, markdown).await
+    }
+
+    async fn forge_opened(
+        &mut self,
+        repo: String,
+        branch: String,
+    ) -> wasmtime::Result<Result<Option<world::Opened>, world::Unforged>> {
+        host::Host::forge_opened(&mut self.lent, repo, branch).await
+    }
+
+    async fn wrap_up(&mut self) -> wasmtime::Result<world::Wrapped> {
+        host::Host::wrap_up(&mut self.lent).await
+    }
+
+    async fn record_opened(&mut self) -> wasmtime::Result<Result<world::PullRequest, String>> {
+        host::Host::record_opened(&mut self.lent).await
+    }
+
+    async fn settle(&mut self, watcher: world::Watcher) -> wasmtime::Result<()> {
+        host::Host::settle(&mut self.lent, watcher).await
+    }
+
+    async fn unsettle(&mut self, watcher: world::Watcher) -> wasmtime::Result<()> {
+        host::Host::unsettle(&mut self.lent, watcher).await
+    }
+
+    async fn fix_attempts(
+        &mut self,
+        pull_request: world::PullRequest,
+        check: String,
+    ) -> wasmtime::Result<Result<i64, String>> {
+        host::Host::fix_attempts(&mut self.lent, pull_request, check).await
+    }
+
+    async fn count_fix_attempt(
+        &mut self,
+        pull_request: world::PullRequest,
+        check: String,
+    ) -> wasmtime::Result<Result<i64, String>> {
+        host::Host::count_fix_attempt(&mut self.lent, pull_request, check).await
+    }
+
+    async fn addressed(&mut self, repo: String) -> wasmtime::Result<Result<Vec<String>, String>> {
+        host::Host::addressed(&mut self.lent, repo).await
+    }
+
+    async fn mark_addressed(
+        &mut self,
+        repo: String,
+        comments: Vec<String>,
+    ) -> wasmtime::Result<Result<(), String>> {
+        host::Host::mark_addressed(&mut self.lent, repo, comments).await
+    }
+
+    async fn pushed_head(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Option<String>> {
+        host::Host::pushed_head(&mut self.lent, pull_request).await
+    }
+
+    async fn conflict_attempts(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Result<i64, String>> {
+        host::Host::conflict_attempts(&mut self.lent, pull_request).await
+    }
+
+    async fn count_conflict_attempt(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Result<i64, String>> {
+        host::Host::count_conflict_attempt(&mut self.lent, pull_request).await
+    }
+
+    async fn resolution(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Result<String, String>> {
+        host::Host::resolution(&mut self.lent, pull_request).await
+    }
+
+    async fn give_up(
+        &mut self,
+        pull_request: world::PullRequest,
+        what: String,
+        how: String,
+    ) -> wasmtime::Result<bool> {
+        host::Host::give_up(&mut self.lent, pull_request, what, how).await
+    }
+
+    async fn ignored(
+        &mut self,
+        repo: String,
+        comments: Vec<world::Comment>,
+    ) -> wasmtime::Result<Vec<String>> {
+        host::Host::ignored(&mut self.lent, repo, comments).await
+    }
+
+    async fn settled(&mut self, watcher: world::Watcher) -> wasmtime::Result<bool> {
+        host::Host::settled(&mut self.lent, watcher).await
+    }
+
+    async fn cover(&mut self) -> wasmtime::Result<()> {
+        host::Host::cover(&mut self.lent).await
+    }
+
+    async fn review_wanted(&mut self, afresh: bool) -> wasmtime::Result<bool> {
+        host::Host::review_wanted(&mut self.lent, afresh).await
+    }
+
+    async fn reviewing(
+        &mut self,
+        said: Option<String>,
+    ) -> wasmtime::Result<Result<String, String>> {
+        host::Host::reviewing(&mut self.lent, said).await
+    }
+
+    async fn review_over(&mut self, how: Option<String>) -> wasmtime::Result<()> {
+        host::Host::review_over(&mut self.lent, how).await
+    }
+
+    async fn batch_over(
+        &mut self,
+        pull_request: world::PullRequest,
+        comments: Vec<String>,
+        how: Option<String>,
+    ) -> wasmtime::Result<()> {
+        host::Host::batch_over(&mut self.lent, pull_request, comments, how).await
+    }
+
+    async fn left_behind(&mut self) -> wasmtime::Result<bool> {
+        host::Host::left_behind(&mut self.lent).await
     }
 }
 

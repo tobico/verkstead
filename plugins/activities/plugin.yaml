@@ -27,7 +27,7 @@ provides:
     name: Follow-up rounds
     component: follow-up-rounds.wasm
     outcomes: [committed, nothing]
-    skills: [verkstead/following-up]
+    skills: [verkstead/following-up, verkstead/investigating]
   - category: activity
     id: backlog-runner
     name: Backlog runner
@@ -39,3 +39,21 @@ provides:
     name: Stage runner
     component: stage-runner.wasm
     outcomes: [finished, continued]
+  - category: activity
+    id: one-session
+    name: One session
+    component: one-session.wasm
+    outcomes: [done, refused]
+    skills: [verkstead/implementing, verkstead/submitting, verkstead/instruction]
+  - category: activity
+    id: interview
+    name: Interview
+    component: interview.wasm
+    outcomes: ["direction:inline", "direction:task-list", "direction:roadmap", gone]
+    skills: [verkstead/grilling]
+  - category: activity
+    id: wrap-up
+    name: Wrap-up
+    component: wrap-up.wasm
+    outcomes: [settled, merged, closed, given-up]
+    skills: [verkstead/submitting, verkstead/addressing, verkstead/reviewing, verkstead/responding]

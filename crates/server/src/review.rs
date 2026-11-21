@@ -37,7 +37,7 @@
 //! prompt whole and what they ask for is proposed in the same Set, beside the
 //! findings it made itself. Which is what stops them being acted on ungated: they
 //! are recorded as addressed as this session is dispatched, so no batch session is
-//! later sent to do what nobody agreed to. See [`crate::comments::for_the_review`].
+//! later sent to do what nobody agreed to. The Wrap-up Activity reads them.
 //!
 //! **A Conversation may be wrapped up with no review at all.** *No review* is a
 //! row of the Review picker on the setup card, and a Conversation whose human
@@ -127,7 +127,7 @@
 //! rather than only where nobody has read the branch — and the press is the one
 //! of them that reads past what it finds rather than stopping over it a second
 //! time, because the press is the human having read the Notice and asked for
-//! another go. See [`afresh`].
+//! another go. See [`wanted_now`].
 //!
 //! **One agent in one Worktree**, which is what the turns are for. The checks are
 //! being watched at the same time as this runs, and a fix session dispatched
@@ -149,63 +149,69 @@
 use verkstead_schema::Nudge;
 
 use crate::AppState;
-use crate::runner::Reviewed;
 use crate::store;
 
-/// See to `conversation_id`'s review: read the branch where nobody has, and pick
-/// up what a review whose session is gone left behind.
+/// Whether the **Wrap-up** Activity is to launch the review now — see
+/// `plugins/activities/wrap-up`, which asks whenever it has nothing running and
+/// the review is not settled.
 ///
-/// Both, because this is spawned by everything that might have left a wrap-up
-/// with no review running — the finish step opening the pull request, and a
-/// server coming back up over a Conversation it left wrapping — and *no review
-/// running* is two different situations. One is a branch nobody has read. The
-/// other is a review whose session is no longer there to finish it, which no
-/// amount of waiting resolves by itself and which stops the run.
+/// *No review running* is two different situations. One is a branch nobody
+/// has read, which is `true`. The other is a review whose session is no longer
+/// there to finish it, which no amount of waiting resolves by itself and which
+/// stops the run — unless `afresh`, which is a Resume the human pressed: they
+/// have read what stopped and asked for another go, so what the gone session
+/// left standing is closed and the branch is read from the start, in a session
+/// as new as the first. It reads the branch as it now stands — anything that
+/// session did land included — and raises whatever is still worth raising.
 ///
-/// A Resume the human pressed goes to [`afresh`] instead, which is the same
-/// entry with the second of those written off: they have read what stopped and
-/// asked for another go.
+/// A review there is to be none of is settled here and is `false`, as are a
+/// review already settled, a Conversation that has stopped wrapping up, and
+/// driving that has stopped. None of those is a failure: most of the time
+/// something else has already seen to it.
 ///
-/// Returns as soon as there is neither — a review already settled, a Conversation
-/// that has stopped wrapping up, or driving that has stopped. None of those is
-/// a failure: most of the time something else has already seen to it.
-///
-/// Nothing is refused for. This runs unattended with nobody watching, and what it
-/// has to say it says on the Timeline or in the log.
-pub(crate) async fn run(state: AppState, conversation_id: i64) {
-    // Zero in a server, and a window a test holds open — see
-    // [`crate::runner::Pace::reviewing`].
-    tokio::time::sleep(state.sessions.pace().reviewing).await;
-
-    match wanted(&state, conversation_id).await {
-        Wanted::Nothing => return,
+/// **Asked with the Worktree in hand**, tried rather than waited for: a live
+/// review holds it for as long as its session lives, the wait on the human
+/// included, so anything that gets it is looking at a Worktree with no agent in
+/// it — which is what tells a review whose session is gone from one sitting on
+/// its ask. A Worktree that is busy is `false`, and the next round asks again.
+pub(crate) async fn wanted_now(state: &AppState, conversation_id: i64, afresh: bool) -> bool {
+    match wanted(state, conversation_id).await {
+        Wanted::Nothing => return false,
         // Nothing is launched and no Worktree is wanted, so this settles where
-        // it stands rather than queueing behind whatever is working — see
+        // it stands rather than waiting on whatever is working — see
         // [`skipped`].
-        Wanted::Skipped => return skipped(&state, conversation_id).await,
+        Wanted::Skipped => {
+            skipped(state, conversation_id).await;
+            return false;
+        }
         _ => {}
     }
 
-    // Waited for rather than tried for: nothing else will start this review on
-    // its behalf, so a Worktree busy with a fix session is a queue to join rather
-    // than a reason to give up. It may be a long wait — and once taken, it is
-    // held for as long as the review session lives, which is across the human's
-    // answering too. That is the shape of one agent in one Worktree.
-    //
-    // It is also what tells a review whose session is gone from one whose session
-    // is sitting on its ask: a live review holds this, so anything that gets it
-    // is looking at a Worktree with no agent in it.
-    let _turn = state.sessions.turn(conversation_id).await;
+    let Some(_turn) = state.sessions.try_turn(conversation_id) else {
+        tracing::debug!(
+            conversation_id,
+            "something is working in the Worktree, so the review is looked at later",
+        );
+        return false;
+    };
 
-    // Asked again on the other side of the wait, because everything it asked
-    // about moves while it waits: the fix session that held the Worktree may have
-    // been the last of its attempts, the review may have finished under it, and
-    // the Conversation may have been closed out from under this altogether.
-    match wanted(&state, conversation_id).await {
-        Wanted::Nothing => {}
-        Wanted::Skipped => skipped(&state, conversation_id).await,
-        Wanted::Review => reading(&state, conversation_id).await,
-        Wanted::Unattended(set_id) => unattended(&state, conversation_id, set_id).await,
+    // Asked again with the Worktree in hand, because everything it asked about
+    // moves while something else holds it.
+    match wanted(state, conversation_id).await {
+        Wanted::Nothing => false,
+        Wanted::Skipped => {
+            skipped(state, conversation_id).await;
+            false
+        }
+        Wanted::Review => true,
+        Wanted::Unattended(set_id) if afresh => {
+            closed(state, conversation_id, set_id).await;
+            true
+        }
+        Wanted::Unattended(set_id) => {
+            unattended(state, conversation_id, set_id).await;
+            false
+        }
     }
 }
 
@@ -218,9 +224,9 @@ pub(crate) async fn run(state: AppState, conversation_id: i64) {
 /// what is on the pull request — so the wrap-up from here on is exactly the one
 /// a review that found nothing leaves behind: the checks with their two fix
 /// attempts apiece, the comments answered in batches, and Done once the suites
-/// are green. On a narrowed one there are no batches either: the comments watcher
-/// reads the same fact this does, settles what is said on its own pull request and
-/// stops — see [`crate::comments`].
+/// are green. On a narrowed one there are no batches either: its wrap-up is
+/// started with the comments watcher off — see
+/// [`crate::conversations::narrows_the_wrap_up`].
 ///
 /// Nothing is written to the Timeline for it. What the human picked is on the
 /// setup card and read on the details pane ever after, the Process is on the
@@ -236,43 +242,19 @@ async fn skipped(state: &AppState, conversation_id: i64) {
     );
 }
 
-/// Read the branch from the start, whatever this wrap's review has already left
-/// behind.
-///
-/// What a press means for the review, and the review's half of
-/// [`crate::checks::afresh`] — there for the reason the attempts are forgotten
-/// beside it. The human has read the Notice of what stopped and asked for
-/// another go, and a review found already asking would be a run that stopped all
-/// over again on its first look without reading a line.
-///
-/// So whatever the gone session left standing is closed and the branch is read
-/// afresh, in a session as new as the first: it reads the branch as it now
-/// stands — anything that session did land included — and raises whatever is
-/// still worth raising.
-pub(crate) async fn afresh(state: AppState, conversation_id: i64) {
-    match wanted(&state, conversation_id).await {
-        Wanted::Nothing => return,
-        Wanted::Skipped => return skipped(&state, conversation_id).await,
-        _ => {}
-    }
+/// What the one review session a wrap-up gets is told: the documents, every pull
+/// request the work ended up on where there are several — see [`across`] — and
+/// `said`, what was standing on them as it starts, which the Activity read and
+/// is about to mark addressed.
+pub(crate) async fn prompt(
+    state: &AppState,
+    conversation_id: i64,
+    said: Option<String>,
+) -> Result<String, String> {
+    let Some(documents) = crate::runner::documents(state, conversation_id).await else {
+        return Err("The documents the work is written down in couldn't be read.".to_owned());
+    };
 
-    // Waited for on the same terms [`run`] waits on it, and for the same reason:
-    // a Worktree with an agent in it is a queue to join, and getting it is what
-    // says there is no session left behind whatever the record shows.
-    let _turn = state.sessions.turn(conversation_id).await;
-
-    match wanted(&state, conversation_id).await {
-        Wanted::Nothing => return,
-        Wanted::Skipped => return skipped(&state, conversation_id).await,
-        Wanted::Review => {}
-        Wanted::Unattended(set_id) => closed(&state, conversation_id, set_id).await,
-    }
-
-    reading(&state, conversation_id).await
-}
-
-/// Run the one review session a wrap-up gets, and see out whatever it leaves.
-async fn reading(state: &AppState, conversation_id: i64) {
     tracing::info!(
         conversation_id,
         "the work is on a pull request nobody has read, so a review session is starting"
@@ -285,20 +267,13 @@ async fn reading(state: &AppState, conversation_id: i64) {
     // knows what the companions were covered with.
     let on = across(state, conversation_id).await;
 
-    // Read inside the Turn, which is what makes *what was said before the review
-    // started* a fact rather than a race: nothing can dispatch about a comment
-    // while this holds the Worktree, and one that lands from here on is the next
-    // batch session's. Recorded as addressed as this session is dispatched, so
-    // nothing is later sent to do ungated what the Set is about to propose.
-    let said = crate::comments::for_the_review(state, conversation_id).await;
-
-    match crate::runner::review(state, conversation_id, on, said).await {
-        Reviewed::Done => over(state, conversation_id, None).await,
-        Reviewed::Stopped { how, writing } => {
-            over(state, conversation_id, Some((how, writing))).await
-        }
-        Reviewed::Nothing => {}
-    }
+    Ok(crate::skills::reviewing(
+        documents.skills,
+        &documents.brief,
+        documents.handoff(),
+        on.as_deref(),
+        said.as_deref(),
+    ))
 }
 
 /// Every pull request this Conversation's work ended up on, written out for the
@@ -370,7 +345,7 @@ pub(crate) async fn across(state: &AppState, conversation_id: i64) -> Option<Str
 /// Pick up a review whose session is no longer there, whatever the human has or
 /// has not answered.
 ///
-/// The Worktree is this task's — see [`run`] — so there is no agent left in it,
+/// The Worktree is in hand — see [`wanted_now`] — so there is no agent left in it,
 /// and the Set on `set_id` is a proposal with nobody behind it. Which is a stop
 /// either way: the one session that could have finished this review is gone, and
 /// no other is ever sent to finish somebody else's.
@@ -398,7 +373,27 @@ async fn unattended(state: &AppState, conversation_id: i64, set_id: i64) {
 /// `ended_badly` is how it ended where it did not end well, and the Timeline
 /// Event it was printing into. A session that ended badly is a review that did
 /// not finish, whatever it had got to by then, and that stops the run.
-async fn over(state: &AppState, conversation_id: i64, ended_badly: Option<(String, i64)>) {
+///
+/// Nothing at all where the run was stopped from outside while it ran, or the
+/// Conversation is not wrapping up any more: the human closed or force-stopped
+/// it out from under the wrap-up, or the account ran out of window, and either
+/// way what happened is on the record already. See
+/// [`crate::sessions::Ended::on_purpose`].
+pub(crate) async fn over(
+    state: &AppState,
+    conversation_id: i64,
+    ended_badly: Option<(String, i64)>,
+) {
+    if !crate::wrapping::still_going(state, conversation_id).await
+        || crate::stopping::stopped(state, conversation_id).await
+    {
+        tracing::info!(
+            conversation_id,
+            "the review session was stopped from outside, so nothing is asked about it"
+        );
+        return;
+    }
+
     // A session that put its findings up and then went — cleanly or otherwise —
     // leaves a Set with nobody to read what the human writes into it, so the
     // questions go off and the run stops rather than waiting on an answer
@@ -537,7 +532,7 @@ async fn backlog(state: &AppState, conversation_id: i64) -> bool {
     }
 }
 
-/// What [`run`] has to do about this Conversation's review.
+/// What [`wanted_now`] has to do about this Conversation's review.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Wanted {
     /// Nothing at all, which is the ordinary answer and never a failure: the
@@ -561,7 +556,7 @@ enum Wanted {
     /// The review put its findings up on this Set and nothing is running for it,
     /// which is a stop whatever the human answered — see [`unattended`]. Where
     /// the press is what is looking, it is a Set to close on the way past
-    /// instead — see [`afresh`].
+    /// instead — see [`wanted_now`].
     Unattended(i64),
 }
 
@@ -658,7 +653,7 @@ async fn skipping(state: &AppState, conversation_id: i64) -> bool {
 ///
 /// The newest of this wrap's asks rather than its first, because a wrap can read
 /// its branch more than once: a review the human pressed Resume over is read
-/// afresh — see [`afresh`] — and the Set that reading puts up is the one there is
+/// afresh — see [`wanted_now`] — and the Set that reading puts up is the one there is
 /// anybody behind. An unsettled wrap's asks are the review's own, because it is
 /// the session a wrap-up starts with and the batch sessions that propose the same
 /// way about what was said on the pull request are none of them dispatched until

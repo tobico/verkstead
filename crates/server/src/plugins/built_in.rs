@@ -11,8 +11,9 @@
 //! 1762, Q15): a manifest refused, a wasm component that traps while it
 //! starts. The start says so in the log and carries on without it.
 
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Mutex};
 
 use super::component::{self, Trouble};
 use super::manifest::{Files, Manifest, Refusal};
@@ -47,8 +48,50 @@ impl BuiltIn {
     }
 
     /// Its manifest as `platform` reads it.
+    ///
+    /// **Read once per platform, and handed out as a copy after that.** The
+    /// text is this binary's own, and dozens of places ask for it: resolving
+    /// the installed plugins, finding a skill, listing the Plugins page — each
+    /// read is YAML parsed and, for a Skill Pack, every `SKILL.md` read off
+    /// `files()`, then every dependency read the same way to check a skill
+    /// against it. Done afresh per asking it cost a Conversation's start about
+    /// a CPU-second in a debug build, and a suite of such starts on four cores
+    /// left a neighbouring test's two-second dial timing out.
+    ///
+    /// What a debug build keeps live is untouched: a skill's body is read off
+    /// `files()` when a session is given it, not off this. A skill directory
+    /// added to the checkout is read at the next start.
+    ///
+    /// Read without the lock held, since reading one reads its dependencies:
+    /// two threads asking at once both read it, and the second's copy is the
+    /// same as the first's.
     pub fn manifest(&self, platform: Platform) -> Result<Manifest, Refusal> {
-        Manifest::parse(self.manifest, self.files(), platform)
+        type Key = (BuiltInKey, Platform);
+        static READ: LazyLock<Mutex<HashMap<Key, Result<Manifest, Refusal>>>> =
+            LazyLock::new(|| Mutex::new(HashMap::new()));
+
+        let key = (self.key(), platform);
+        if let Some(read) = READ.lock().expect("never poisoned").get(&key) {
+            return read.clone();
+        }
+        let read = Manifest::parse(self.manifest, self.files(), platform);
+        READ.lock()
+            .expect("never poisoned")
+            .insert(key, read.clone());
+        read
+    }
+
+    /// Everything that says what this built-in is, which is what its manifest
+    /// is read from — so a suite's own `BuiltIn` naming the same directory is
+    /// never handed another's reading.
+    fn key(&self) -> BuiltInKey {
+        (
+            self.directory,
+            self.manifest,
+            self.files.as_ptr() as usize,
+            self.files.len(),
+            self.checkout,
+        )
     }
 
     /// Whether its manifest's `uuid` is `uuid`, read off that one key.
@@ -57,13 +100,31 @@ impl BuiltIn {
     /// whole manifest: reading one checks its own dependencies' skills against
     /// the built-ins, so a built-in that depends on another would otherwise
     /// read itself while it was being read.
+    ///
+    /// That key is read once, for the reason [`BuiltIn::manifest`] is.
     pub fn is(&self, uuid: &str) -> bool {
-        serde_saphyr::from_str::<serde_json::Value>(self.manifest)
-            .ok()
-            .and_then(|tree| tree.get("uuid")?.as_str().map(|own| own == uuid))
-            .unwrap_or(false)
+        static UUIDS: LazyLock<Mutex<HashMap<&'static str, Option<String>>>> =
+            LazyLock::new(|| Mutex::new(HashMap::new()));
+
+        let mut uuids = UUIDS.lock().expect("never poisoned");
+        let own = uuids.entry(self.manifest).or_insert_with(|| {
+            serde_saphyr::from_str::<serde_json::Value>(self.manifest)
+                .ok()
+                .and_then(|tree| tree.get("uuid")?.as_str().map(str::to_owned))
+        });
+        own.as_deref() == Some(uuid)
     }
 }
+
+/// What a [`BuiltIn`] is told apart by: its directory, its manifest's text,
+/// where its embedded files are and how many, and its checkout.
+type BuiltInKey = (
+    &'static str,
+    &'static str,
+    usize,
+    usize,
+    Option<&'static str>,
+);
 
 /// Every built-in this binary carries.
 pub const BUILT_INS: &[BuiltIn] = include!(concat!(env!("OUT_DIR"), "/built_ins.rs"));
@@ -247,8 +308,8 @@ pub fn languages(manifest: &Manifest) -> impl Iterator<Item = &crate::languages:
 }
 
 /// The uuid of the built-in whose blocks are the Activities Verkstead ships,
-/// one component each: *Follow-up rounds* first, then the *Backlog runner*
-/// (Set 1803, Q3).
+/// one component each: *Follow-up rounds* first, then the *Backlog runner*,
+/// the *Stage runner*, *One session* and the *Interview* (Set 1803, Q3).
 pub const ACTIVITIES: &str = "d7a5e719-8491-46a7-b7d7-8f9f85e57bd6";
 
 /// The built-in the shipped Activities are.
@@ -368,9 +429,9 @@ mod tests {
     }
 
     /// The shipped Activities are a built-in depending on the pack
-    /// `verkstead`, whose *Follow-up rounds*, *Backlog runner* and *Stage
-    /// runner* blocks each name a component of their own written against the
-    /// `activity` world.
+    /// `verkstead`, whose *Follow-up rounds*, *Backlog runner*, *Stage runner*,
+    /// *One session*, *Interview* and *Wrap-up* blocks each name a component of
+    /// their own written against the `activity` world.
     #[tokio::test]
     async fn the_activities_are_a_built_in_with_their_components() {
         let shipped = activities();
@@ -383,13 +444,17 @@ mod tests {
         assert_eq!(manifest.dependencies.len(), 1);
         assert_eq!(manifest.dependencies[0].uuid, VERKSTEAD);
 
-        let [rounds, backlog, stages] = manifest.activities.as_slice() else {
-            panic!("three Activities: {:?}", manifest.activities);
+        let [rounds, backlog, stages, one, interview, wrap_up] = manifest.activities.as_slice()
+        else {
+            panic!("six Activities: {:?}", manifest.activities);
         };
         assert_eq!(rounds.id, "follow-up-rounds");
         assert_eq!(rounds.name, "Follow-up rounds");
         assert_eq!(rounds.outcomes, ["committed", "nothing"]);
-        assert_eq!(rounds.skills, ["verkstead/following-up"]);
+        assert_eq!(
+            rounds.skills,
+            ["verkstead/following-up", "verkstead/investigating"]
+        );
 
         assert_eq!(backlog.id, "backlog-runner");
         assert_eq!(backlog.name, "Backlog runner");
@@ -403,16 +468,58 @@ mod tests {
         assert_eq!(stages.name, "Stage runner");
         assert_eq!(stages.outcomes, ["finished", "continued"]);
         assert!(stages.skills.is_empty(), "it launches no session");
+        assert_eq!(one.id, "one-session");
+        assert_eq!(one.name, "One session");
+        assert_eq!(one.outcomes, ["done", "refused"]);
+        assert_eq!(
+            one.skills,
+            [
+                "verkstead/implementing",
+                "verkstead/submitting",
+                "verkstead/instruction"
+            ]
+        );
         assert_eq!(
             manifest.capabilities,
             [Capability::Conversations],
             "the stage runner starts conversations, and the plugin says so at install",
         );
 
+        assert_eq!(interview.id, "interview");
+        assert_eq!(interview.name, "Interview");
+        assert_eq!(
+            interview.outcomes,
+            [
+                "direction:inline",
+                "direction:task-list",
+                "direction:roadmap",
+                "gone"
+            ]
+        );
+        assert_eq!(interview.skills, ["verkstead/grilling"]);
+        assert_eq!(wrap_up.id, "wrap-up");
+        assert_eq!(wrap_up.name, "Wrap-up");
+        assert_eq!(
+            wrap_up.outcomes,
+            ["settled", "merged", "closed", "given-up"]
+        );
+        assert_eq!(
+            wrap_up.skills,
+            [
+                "verkstead/submitting",
+                "verkstead/addressing",
+                "verkstead/reviewing",
+                "verkstead/responding"
+            ]
+        );
+
         for component in [
             "follow-up-rounds.wasm",
             "backlog-runner.wasm",
             "stage-runner.wasm",
+            "one-session.wasm",
+            "interview.wasm",
+            "wrap-up.wasm",
         ] {
             assert!(
                 shipped

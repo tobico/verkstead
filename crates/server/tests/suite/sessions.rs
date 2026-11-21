@@ -2568,6 +2568,66 @@ fn a_tinker_round(prompts: &Path) -> String {
     )
 }
 
+/// A grilling whose interview offers `offers` alone — what a Process declares
+/// (Set 1765, Q27), said through the bench's hosting until stage 11 writes it —
+/// started as [`grilling`] starts one.
+async fn grilling_offering(
+    spill: tempfile::TempDir,
+    stub: &str,
+    offers: Vec<verkstead_schema::Direction>,
+) -> Grilling {
+    let bench = bench_at_pace(spill, stub, PULL_REQUEST, *BRISKLY, None).await;
+    let app = &bench.app;
+
+    let started: Started = post(
+        app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    bench.under_every_pairing(id).await;
+
+    // Declared before the press, as a Process's declaration is frozen with it.
+    bench
+        .hosting
+        .as_ref()
+        .expect("this bench hosts Activities")
+        .offering(id, offers);
+
+    let saved: BriefSaved = post(
+        app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": BRIEF }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    let grilling: GrillingStarted = post(
+        app,
+        &format!("/api/ui/conversations/{id}/grill"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(grilling, GrillingStarted::Started);
+
+    bench.holding(id)
+}
+
+/// A grilling session that writes down the prompt it was started on, then
+/// waits on nothing.
+fn a_grilling_that_writes_its_prompt(prompts: &Path) -> String {
+    format!(
+        "printf 'model=%s\\n%s\\n=====\\n' \"$1\" \"$2\" >> {prompts}\n\
+         printf 'grilling\\n'\n\
+         sleep 300\n",
+        prompts = quoted(prompts),
+    )
+}
+
 /// The same workbench with the same press, on a draft whose Process is
 /// **Investigate**: it lands in Investigating rather than Grilling, and the one
 /// session it starts is the investigating one.
@@ -9969,6 +10029,233 @@ async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
     );
 }
 
+/// A `gh` whose check is red until the first fix session has written its
+/// prompt to `written`, and which cannot be asked about the checks from then
+/// on — a server that dispatched one fix and then lost GitHub.
+fn red_until_a_fix_then_unaskable(written: &Path) -> String {
+    format!(
+        r#"
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ "$2" = list ]; then printf '[]'; exit 0; fi
+case "$5" in
+*statusCheckRollup*)
+    if [ -e {written} ]; then
+        printf 'gh: To use GitHub CLI, run: gh auth login\n' >&2
+        exit 1
+    fi
+    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}'
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[]}}'
+    ;;
+*comments*)
+    printf '{{"comments":[],"reviews":[]}}'
+    ;;
+*)
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
+    ;;
+esac
+"#,
+        written = quoted(written),
+    )
+}
+
+/// The goes a check has had are the host's record, not the Wrap-up
+/// component's memory: a server that comes back up mid-wrap-up over a check
+/// that has had one fix session gives it one more, and then asks the human.
+///
+/// The first server dispatches one fix and can't ask about the checks after
+/// it, so it spends nothing more; the second finds the check still red. Had
+/// the count started again there, it would have had two more goes.
+#[tokio::test]
+async fn fix_attempts_survive_a_server_restarted_mid_wrap_up() {
+    let prompts = tempfile::tempdir().unwrap();
+    let written = prompts.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        prompts,
+        &a_backlog_then_fixes(&written),
+        &red_until_a_fix_then_unaskable(&written),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let deadline = Instant::now() + *PATIENCE;
+    while attempts_spent(&fixture, "Rust").await < 1 || !written.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the first fix was never dispatched"
+        );
+        pause(Duration::from_millis(50)).await;
+    }
+
+    // Long enough for many more polls, had the first server anything left to
+    // spend.
+    pause(Duration::from_millis(500)).await;
+    assert_eq!(
+        attempts_spent(&fixture, "Rust").await,
+        1,
+        "the first server spent one go and lost GitHub",
+    );
+
+    let _restarted = router_running_sessions(
+        open_database(&fixture.database).await.unwrap(),
+        fixture.state.path().to_owned(),
+        Agents::running(
+            vec!["/bin/sh".to_owned(), "-c".to_owned(), "true".to_owned()],
+            Homes::on(
+                Platform::HERE,
+                PathBuf::from("/nonexistent"),
+                fixture.state.path(),
+            ),
+            Reachable::at(LISTENING),
+            SandboxConfig::default(),
+            BuildCache::none(),
+            Skills::installed(Platform::HERE, fixture.state.path())
+                .expect("this binary carries skills"),
+            equipped(fixture.state.path()),
+            Handoffs::under(fixture.state.path()),
+            Attachments::under(fixture.state.path()),
+            Settings::in_data_dir(fixture.state.path()),
+        )
+        .at_pace(*BRISKLY),
+        gh_stub(&gh_checking("FAILURE")),
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("after 2 fix sessions"),
+        "the restarted server asked the human once the check had had its two: {:?}",
+        stopped.html,
+    );
+    assert_eq!(
+        attempts_spent(&fixture, "Rust").await,
+        2,
+        "one go spent before the restart and one after it, and no more",
+    );
+}
+
+/// A `gh` that answers everything about the pull request — merging cleanly —
+/// and writes `asked` the moment anything asks about its checks.
+fn gh_telling_of_checks(asked: &Path) -> String {
+    format!(
+        r#"
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ "$2" = list ]; then printf '[]'; exit 0; fi
+case "$5" in
+*statusCheckRollup*)
+    : > {asked}
+    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[]}}'
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[]}}'
+    ;;
+*comments*)
+    printf '{{"comments":[],"reviews":[]}}'
+    ;;
+*)
+    printf '{{"mergeable":"MERGEABLE","number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
+    ;;
+esac
+"#,
+        asked = quoted(asked),
+    )
+}
+
+/// A Forge with no checks has nothing for the wrap-up to wait on: the checks
+/// watcher is settled at once and the Forge is never asked about them, and
+/// whether the pull request merges is read off its standing instead.
+#[tokio::test]
+async fn a_wrap_up_over_a_forge_lacking_checks_settles_them_and_never_asks() {
+    let spill = tempfile::tempdir().unwrap();
+    let asked = spill.path().join("checks-asked");
+    let written = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_fixes(&written),
+        &gh_telling_of_checks(&asked),
+    )
+    .await;
+
+    fixture
+        .hosting
+        .as_ref()
+        .expect("this bench hosts Activities")
+        .lacking(verkstead_server::forge::Capability::Checks);
+
+    worked_to_empty(&fixture).await;
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !(checks_settled(&fixture).await && merge_settled(&fixture).await) {
+        assert!(
+            Instant::now() < deadline,
+            "the checks the Forge lacks were never settled, nor the merge read off the \
+             standing",
+        );
+        pause(Duration::from_millis(50)).await;
+    }
+
+    // Long enough for many more polls.
+    pause(Duration::from_millis(500)).await;
+
+    assert!(
+        !asked.exists(),
+        "and nothing ever asked about the checks a Forge without them can't answer",
+    );
+    assert!(!written.exists(), "nor was a fix session dispatched");
+}
+
+/// And a Forge with no review has nothing said on its pull requests for the
+/// wrap-up to answer, nor a review to wait on: the comments are settled at once,
+/// the review with them, and the wrap-up goes Done on the checks and the merge
+/// with no session sent to read the branch or to answer anything — the three
+/// comments standing on it included.
+#[tokio::test]
+async fn a_wrap_up_over_a_forge_lacking_review_settles_it_and_sends_nobody() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
+        &gh_about(GREEN, THREE_COMMENTS, ""),
+    )
+    .await;
+
+    fixture
+        .hosting
+        .as_ref()
+        .expect("this bench hosts Activities")
+        .lacking(verkstead_server::forge::Capability::Review);
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    assert!(
+        !reviews.exists(),
+        "nothing read the branch: {:?}",
+        std::fs::read_to_string(&reviews).ok(),
+    );
+    assert!(
+        !batches.exists(),
+        "nor was anything sent to answer the comments standing on it: {:?}",
+        std::fs::read_to_string(&batches).ok(),
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped: {:?}",
+        notices(&view),
+    );
+}
+
 /// A finish that commits its work and opens no pull request is not the end of the
 /// run: one session is sent for the one thing missing, and a branch that comes
 /// back on a pull request wraps up as though the finish had done it itself.
@@ -12931,6 +13218,105 @@ async fn a_restart_over_a_review_waiting_on_its_ask_stops_the_run_rather_than_le
     assert!(
         matches!(standing, verkstead_render::Standing::LockedUnanswered(_)),
         "with nothing left for the human to answer into: {standing:?}",
+    );
+}
+
+/// A pull request merged while the review waits on its ask ends the wrap-up in
+/// Done — and takes the review with it, rather than leaving it running.
+///
+/// The human merges from GitHub whenever they like, which is often before they
+/// have got round to the review's questions. Once the work has landed nothing
+/// is waiting on that session: left running it would hold the Worktree for
+/// nobody, and its Set would carry answers to a session that pushes to a branch
+/// already merged.
+#[tokio::test]
+async fn a_merge_while_the_review_waits_on_its_ask_ends_it_and_lands_in_done() {
+    let (fixture, set, landing) = a_review_waiting_on_its_ask().await;
+
+    std::fs::write(&landing, r#"{"mergeable":"MERGEABLE","state":"MERGED"}"#).unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    seen_out_by_the_landing(&fixture, set).await;
+}
+
+/// And one closed unmerged stops the run, saying so, with the review seen out
+/// the same way.
+#[tokio::test]
+async fn a_close_while_the_review_waits_on_its_ask_ends_it_and_stops_the_run() {
+    let (fixture, set, landing) = a_review_waiting_on_its_ask().await;
+
+    std::fs::write(&landing, r#"{"mergeable":"MERGEABLE","state":"CLOSED"}"#).unwrap();
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("closed without being merged"),
+        "the stop says what happened to the pull request: {:?}",
+        stopped.html,
+    );
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "and the Conversation stays where it was, for a Resume once it is reopened",
+    );
+
+    seen_out_by_the_landing(&fixture, set).await;
+}
+
+/// A wrap-up whose review session is waiting on the Set it put, everything
+/// else green — and the file its pull request's state is read from.
+async fn a_review_waiting_on_its_ask() -> (Grilling, i64, PathBuf) {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let asked = spill.path().join("gh-asked");
+    let landing = spill.path().join("landing");
+
+    let fixture = grilling_landing(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_WAIT),
+        &gh_landing(&asked, &landing),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_asking(&fixture, &reviews).await;
+
+    let set = fixture.ask(REVIEW).await;
+
+    (fixture, set, landing)
+}
+
+/// The review session ended, and the Set it left open closed unanswered.
+async fn seen_out_by_the_landing(fixture: &Grilling, set: i64) {
+    fixture
+        .until(|view| {
+            outputs(view)
+                .last()
+                .filter(|output| !output.running)
+                .map(|_| ())
+        })
+        .await;
+
+    let view = fixture.view().await;
+
+    let standing = sets(&view)
+        .into_iter()
+        .find(|asked| asked.set_id == set)
+        .expect("the review's Set is on the Timeline")
+        .standing
+        .clone();
+
+    assert!(
+        matches!(standing, verkstead_render::Standing::LockedUnanswered(_)),
+        "with nothing left for the human to answer into: {standing:?}",
+    );
+    assert!(
+        !review_settled(fixture).await,
+        "and nothing settled the review it never finished",
     );
 }
 
@@ -34635,6 +35021,158 @@ async fn a_grilling_signal_is_refused_before_a_pick_and_over_another_directions_
     );
 }
 
+/// An interview offering two Directions puts a proposal whose chooser draws
+/// those two alone: the session is told so under its prompt, its proposal is
+/// stored offering them, a recommendation of the third is refused naming what
+/// is offered, and so is a pick of it.
+#[tokio::test]
+async fn an_interview_offering_two_directions_draws_only_those() {
+    use verkstead_schema::Direction;
+
+    let spill = tempfile::tempdir().unwrap();
+    let written_to = spill.path().join("grilling-prompts");
+    let fixture = grilling_offering(
+        spill,
+        &a_grilling_that_writes_its_prompt(&written_to),
+        vec![Direction::Inline, Direction::TaskList],
+    )
+    .await;
+
+    let written = until_written_by(&written_to, 1).await;
+    let prompt = prompts(&written)[0];
+
+    assert!(
+        prompt.contains("# How the work may be built")
+            && prompt.contains("only be built as `inline` and `task-list`"),
+        "the session is told which Directions it may recommend: {prompt:?}",
+    );
+
+    // A recommendation of the one not offered is refused as the Set arrives.
+    let (status, body) = fetch(
+        &fixture.app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/conversations/{}/api/v1/sets", fixture.id))
+            .header(header::CONTENT_TYPE, "application/yaml")
+            .body(Body::from(
+                PROPOSING.replace("direction: inline", "direction: roadmap"),
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "refused: {body}");
+    assert!(
+        body.contains("recommends `roadmap`") && body.contains("`inline`\n    and `task-list`"),
+        "saying what may be recommended: {body}",
+    );
+
+    // One among them is put, whatever the agent said it offers.
+    let set = fixture
+        .ask(&format!(
+            "{PROPOSING}  offers: [inline, task-list, roadmap]\n"
+        ))
+        .await;
+    let view = fixture.set(set).await;
+
+    assert_eq!(
+        view.proposal.expect("the Set carries the proposal").offers,
+        vec![Direction::Inline, Direction::TaskList],
+        "the chooser draws what the interview offers, stamped by the server",
+    );
+
+    let refused = fixture.pick(set, "roadmap").await;
+    let Submitted::Rejected(violations) = refused else {
+        panic!("a pick of a Direction not offered is refused, got {refused:?}");
+    };
+    assert!(
+        violations.iter().any(
+            |violation| violation.contains("the proposal offers only `inline` and `task-list`")
+        ),
+        "saying which were offered: {violations:?}",
+    );
+
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+}
+
+/// An interview offering one Direction is no chooser: the proposal carries
+/// that one alone, and accepting it picks it — the session's Done signal is
+/// then held to that Direction's artifact.
+#[tokio::test]
+async fn an_interview_offering_one_direction_is_accepted_with_it() {
+    use verkstead_schema::Direction;
+
+    let spill = tempfile::tempdir().unwrap();
+    let written_to = spill.path().join("grilling-prompts");
+    let fixture = grilling_offering(
+        spill,
+        &a_grilling_that_writes_its_prompt(&written_to),
+        vec![Direction::Inline],
+    )
+    .await;
+
+    let written = until_written_by(&written_to, 1).await;
+    assert!(
+        prompts(&written)[0].contains("built one way only, `inline`"),
+        "the session is told it is built one way: {written:?}",
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+
+    assert_eq!(
+        fixture.set(set).await.proposal.expect("a proposal").offers,
+        vec![Direction::Inline],
+    );
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    let deadline = Instant::now() + *PATIENCE;
+    let (status, body) = loop {
+        let (status, body) = signal_done(&fixture).await;
+
+        if !body.contains("still being taken up") {
+            break (status, body);
+        }
+
+        assert!(Instant::now() < deadline, "the pick was never taken up");
+        pause(Duration::from_millis(25)).await;
+    };
+
+    assert_eq!(status, StatusCode::CONFLICT, "refused: {body}");
+    assert!(
+        body.contains("handoff document has not been written"),
+        "accepting picked inline, so its handoff is what is waited for: {body}",
+    );
+}
+
+/// With nothing declared, a proposal offers all three as it always did, and
+/// the session is told nothing about it.
+#[tokio::test]
+async fn an_interview_nothing_narrows_offers_all_three_and_says_nothing() {
+    use verkstead_schema::Direction;
+
+    let spill = tempfile::tempdir().unwrap();
+    let written_to = spill.path().join("grilling-prompts");
+    let fixture = grilling_offering(
+        spill,
+        &a_grilling_that_writes_its_prompt(&written_to),
+        Direction::ALL.to_vec(),
+    )
+    .await;
+
+    let written = until_written_by(&written_to, 1).await;
+    assert!(
+        !written.contains("# How the work may be built"),
+        "nothing is said where nothing is narrowed: {written:?}",
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+
+    assert_eq!(
+        fixture.set(set).await.proposal.expect("a proposal").offers,
+        Direction::ALL.to_vec(),
+    );
+}
+
 /// A session that lands its step and then puts a blocking Set up is left alive
 /// while the Set is open, and after it is answered — which is the bug the Done
 /// signal began with.
@@ -43253,12 +43791,22 @@ impl Grilling {
         outcomes: &[&str],
         skills: &[&str],
     ) -> tokio::task::JoinHandle<Option<String>> {
+        self.activity_of(activity_component(wat), outcomes, skills)
+    }
+
+    /// The same, its component `component`'s bytes, built already.
+    fn activity_of(
+        &self,
+        component: Vec<u8>,
+        outcomes: &[&str],
+        skills: &[&str],
+    ) -> tokio::task::JoinHandle<Option<String>> {
         self.hosting
             .as_ref()
             .expect("this bench hosts Activities")
             .start(
                 self.id,
-                activity_component(wat),
+                component,
                 verkstead_server::plugins::manifest::Activity {
                     id: "rounds".to_owned(),
                     name: "Rounds".to_owned(),
@@ -43642,6 +44190,110 @@ async fn a_component_that_traps_stops_the_conversation_saying_so() {
 
     let view = fixture.view().await;
     assert!(!view.driven, "nothing is left looking driven");
+}
+
+/// The Activity built from `plugins/tests/activity-fixture`, which reaches
+/// every host function a wrap-up needs and answers what each came to.
+const ACTIVITY_FIXTURE: &str = env!("VERKSTEAD_ACTIVITY_FIXTURE_WASM");
+
+/// What the fixture answers where every host function did as the wrap-up
+/// needs: see its source.
+const ALL_AS_MEANT: &str = "tick first:steered second:done standing:cleanly:open \
+                            checks:lacking attempts:1 addressed:PRRC_1";
+
+/// The world grown for the wrap-up (Set 1838), through one component and
+/// nothing but its host functions.
+///
+/// **Waiting on several sessions and a timeout**: a wait on a session that
+/// outlives it is a tick; a wait on two is answered by the first to end —
+/// ended by the second's launch, which reads as the Conversation taken
+/// elsewhere — and a wait on the second by its Done signal, taken.
+///
+/// **The Forge**: a pull request's standing read through it, and its checks
+/// asked of a Forge said to lack them — which comes back `lacking`, the
+/// `checks` watcher over it settled at once.
+///
+/// **The wrap-up's records**, the host's and what the viewer's standings are
+/// drawn from: a watcher settled, a fix attempt counted and a comment marked
+/// addressed, each read back by the component and found in the store.
+#[tokio::test]
+async fn a_component_waits_on_sessions_asks_the_forge_and_keeps_the_wrap_ups_records() {
+    use verkstead_server::store::WaitingOn;
+
+    let fixture = grilling(
+        r#"
+case "$2" in
+*"first session waits"*)
+    printf 'the first session is waiting\n'
+    sleep 300
+    ;;
+*"second session signals"*)
+    printf 'the second session is done\n'
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+*)
+    printf 'grilling\n'
+    sleep 300
+    ;;
+esac
+"#,
+    )
+    .await;
+    fixture.grilling_printed().await;
+
+    fixture
+        .hosting
+        .as_ref()
+        .expect("this bench hosts Activities")
+        .lacking(verkstead_server::forge::Capability::Checks);
+
+    let component = std::fs::read(ACTIVITY_FIXTURE).expect("the fixture's component is built");
+    let running = fixture.activity_of(component, &[ALL_AS_MEANT], &["verkstead/implementing"]);
+
+    let outcome = tokio::time::timeout(*PATIENCE, running)
+        .await
+        .expect("the component should end")
+        .expect("the component's task should not panic");
+
+    assert_eq!(
+        outcome.as_deref(),
+        Some(ALL_AS_MEANT),
+        "every host function answered as the wrap-up needs: {:?}",
+        notices(&fixture.view().await),
+    );
+
+    let repo_id = own_repo(&fixture).await;
+    let number = 41;
+
+    assert!(
+        settled(&fixture, WaitingOn::Checks { repo_id, number }).await,
+        "the checks the Forge lacks are settled at once",
+    );
+    assert!(
+        settled(&fixture, WaitingOn::Mergeable { repo_id, number }).await,
+        "and the watcher the component settled stands settled",
+    );
+    assert!(
+        !settled(&fixture, WaitingOn::Comments { repo_id, number }).await,
+        "and nothing it did not settle is",
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    let attempts =
+        verkstead_server::store::fix_attempts(&pool, fixture.id, repo_id, number, "Rust")
+            .await
+            .unwrap();
+    let addressed = verkstead_server::store::addressed_comments(&pool, fixture.id, repo_id)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    assert_eq!(
+        attempts, 1,
+        "the fix attempt it counted is the host's record"
+    );
+    assert_eq!(addressed, ["PRRC_1"], "and so is the comment it marked");
 }
 
 /// And one that answers an Outcome it never declared stops it the same way,

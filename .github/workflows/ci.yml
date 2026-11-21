@@ -57,6 +57,9 @@ jobs:
           cargo build --release --locked --target wasm32-wasip2 \
             --target-dir plugins/target \
             --manifest-path plugins/tests/stub-harness/Cargo.toml
+          cargo build --release --locked --target wasm32-wasip2 \
+            --target-dir plugins/target \
+            --manifest-path plugins/tests/activity-fixture/Cargo.toml
           mkdir -p plugins/dist
           cp plugins/target/wasm32-wasip2/release/*.wasm plugins/dist/
 

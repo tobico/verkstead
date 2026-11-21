@@ -234,10 +234,11 @@ pub use unseen::{see_conversation, stamp_unseen};
 pub use waits::{WaitHeld, Waits};
 pub use wrap_up::{
     Finished, Narrowing, WAITED_ON, WaitingOn, addressed_comments, batch_over,
-    conflict_fix_attempts, finish_wrap_up, fix_attempts, forget_addressed_comments,
-    forget_every_addressed_comment, forget_fix_attempts, forget_narrowing, most_fix_attempts,
-    narrowed_to_checks, narrowing, record_addressed_comments, record_conflict_fix_attempt,
-    record_fix_attempt, review_over, settle_wrap_up, unsettle_wrap_up, wrap_up_settled,
+    conflict_fix_attempts, finish_merged_wrap_up, finish_wrap_up, fix_attempts,
+    forget_addressed_comments, forget_every_addressed_comment, forget_fix_attempts,
+    forget_narrowing, most_fix_attempts, narrowed_to_checks, narrowing, record_addressed_comments,
+    record_conflict_fix_attempt, record_fix_attempt, review_over, settle_wrap_up, unsettle_wrap_up,
+    wrap_up_settled, wrap_up_would_finish,
 };
 
 /// A Set as the store holds it: what was asked plus the identity the server
@@ -265,6 +266,12 @@ pub struct StoredSet {
 /// Nothing here ever rewrites a stored body. It is the record of what was
 /// asked, and a Verkstead that can read it again later should still find it as
 /// it was written.
+///
+/// The Set is much the larger variant, which is what the size lint is about —
+/// a proposal grew when it gained the Directions it offers. Left as it is: on a
+/// Timeline it already rides in a box of its own, and a stored body is read
+/// one Set at a time.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Asked {
     /// The Set, as the agent sent it.

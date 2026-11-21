@@ -40,6 +40,8 @@ use std::sync::{Arc, RwLock};
 
 use anyhow::{Context, Result};
 
+use verkstead_schema::Direction;
+
 use crate::handoffs;
 use crate::platform::Platform;
 use crate::plugins::built_in;
@@ -103,7 +105,9 @@ const NEXT_TASK: &str = "verkstead/next-task/SKILL.md";
 const SUBMITTING: &str = "verkstead/submitting/SKILL.md";
 
 /// And the addressing skill's, which every fix session of a wrap-up runs
-/// inside — whichever of the three kinds of feedback dispatched it.
+/// inside — whichever of the three kinds of feedback dispatched it. The Wrap-up
+/// component writes that prompt itself, so only the tests here still name it.
+#[cfg(test)]
 const ADDRESSING: &str = "verkstead/addressing/SKILL.md";
 
 /// And the reviewing skill's, which the one session a wrap-up starts with runs
@@ -114,6 +118,9 @@ const REVIEWING: &str = "verkstead/reviewing/SKILL.md";
 /// And the responding skill's, which a batch of comments left on the pull
 /// request after the review is answered inside: the review's propose-then-fix
 /// shape again, about what somebody has just said rather than about the branch.
+/// The Wrap-up component writes that prompt itself, so only the tests here
+/// still name it.
+#[cfg(test)]
 const RESPONDING: &str = "verkstead/responding/SKILL.md";
 
 /// And the instruction skill's, which the session a steer into Implementing
@@ -122,7 +129,7 @@ const RESPONDING: &str = "verkstead/responding/SKILL.md";
 /// The one session a human sets going by hand, and it is the pipeline's own:
 /// what follows it is whatever the branch then holds, rather than a
 /// Conversation left standing beside the work its session did — see
-/// [`crate::runner::instructed`].
+/// [`crate::activities::one_session::instructed`].
 const INSTRUCTION: &str = "verkstead/instruction/SKILL.md";
 
 /// And the following-up skill's, which the session a steer into Follow-up
@@ -588,6 +595,37 @@ pub(crate) fn grilling_again(skills: &Skills, brief: &str, settled: &str) -> Str
     )
 }
 
+/// A grilling's prompt, told which Directions its interview offers where that
+/// is fewer than all three — what a Process declares (Set 1765, Q27). Under
+/// everything else, because it is the narrowest thing said: it changes the
+/// proposal and nothing before it.
+///
+/// All three adds nothing, so every grilling a Process does not narrow is
+/// started on exactly the words it always was.
+pub(crate) fn offering(prompt: String, offers: &[Direction]) -> String {
+    if offers.len() >= Direction::ALL.len() {
+        return prompt;
+    }
+
+    let said = match offers {
+        [only] => format!(
+            "This work is built one way only, `{}`: recommend it in your proposal, \
+             and I accept it or send it back rather than choosing.",
+            only.word()
+        ),
+        offers => format!(
+            "This work may only be built as {}: recommend one of those in your proposal, \
+             since the chooser offers me no other.",
+            Direction::listed(offers)
+        ),
+    };
+
+    format!(
+        "{}\n\n# How the work may be built\n\n{said}\n",
+        prompt.trim_end()
+    )
+}
+
 /// What an inline implementation session is started on: the two documents it is
 /// building from, under the line that sends the agent into the implementation
 /// skill.
@@ -748,86 +786,6 @@ pub(crate) fn reviewing(
         ),
         None => prompt,
     }
-}
-
-/// What a batch session is started on: the comments it is about, under the two
-/// documents and the line that sends the agent into the responding skill.
-///
-/// The same three pieces the review gets, in the same order and for the same
-/// reasons — the documents say what the work is, and what was said goes last
-/// because it is the newest and least general thing. What differs is which
-/// comments and how many: the review is given everything standing on every one
-/// of the pull requests when it starts, and this is given one batch of what was
-/// said on one of them after it.
-///
-/// Which pull request that is, and which worktree to answer it in, are in `said`
-/// rather than said here: a Conversation ends on one per repository it was worked
-/// in, and a session sent at a companion's would otherwise read the diff of the
-/// repository it started in — see [`crate::comments::feedback`].
-///
-/// `said` is never empty here, unlike the review's. A batch session exists
-/// because something was said, so there is no version of this prompt with
-/// nothing under the heading.
-pub(crate) fn responding(
-    skills: &Skills,
-    brief: &str,
-    handoff: Option<&str>,
-    said: &str,
-) -> String {
-    let skill = skills.named(RESPONDING);
-
-    let prompt = on_the_documents(
-        &format!(
-            "Read {skill} and answer what has just been said on the pull request named \
-             at the end of this prompt, the way it says. The work described below is what it \
-             was meant to be."
-        ),
-        brief,
-        handoff,
-    );
-
-    format!(
-        "{prompt}\n# What has just been said on the pull request\n\n{}\n",
-        said.trim()
-    )
-}
-
-/// What a fix session is started on: the feedback to address, under the two
-/// documents the work was built from and the line that sends the agent into the
-/// addressing skill.
-///
-/// One function for all three callers — a failed check, and the fixes either
-/// proposal was answered with where the session that proposed them never landed
-/// them — because they are one job: somebody has said that work already pushed
-/// is not right yet, and what differs is the feedback rather than anything about
-/// how to take it. Three prompts saying the same thing in three places is three
-/// things to keep true.
-///
-/// The feedback goes *last*, under the documents rather than over them, for the
-/// reason everything written under them goes there: it is the newest thing said
-/// and the least general. The documents say what the work is; this says what is
-/// wrong with it.
-pub(crate) fn addressing(
-    skills: &Skills,
-    brief: &str,
-    handoff: Option<&str>,
-    feedback: &str,
-) -> String {
-    let skill = skills.named(ADDRESSING);
-
-    let prompt = on_the_documents(
-        &format!(
-            "Read {skill} and address the feedback at the end of this prompt, the way it \
-             says."
-        ),
-        brief,
-        handoff,
-    );
-
-    format!(
-        "{prompt}\n# The feedback to address\n\n{}\n",
-        feedback.trim()
-    )
 }
 
 /// What an instruction session is started on: the documents the work is written
@@ -3797,33 +3755,6 @@ mod tests {
         );
     }
 
-    /// A fix session is put inside the skill the same way every other is, and
-    /// primed with the documents *and* the feedback — which is the one thing
-    /// only this kind of session is told.
-    #[test]
-    fn a_fix_session_is_started_on_the_documents_with_the_feedback_last() {
-        let prompt = addressing(
-            &mounted(),
-            "# Rate limiting\n\nThe API has none.\n",
-            Some("# What we settled\n\nIn-process counter.\n"),
-            "The Rust check is failing.",
-        );
-
-        assert!(
-            prompt.contains(&at(ADDRESSING)),
-            "the skill is named by the path it is mounted at: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("The API has none.") && prompt.contains("In-process counter."),
-            "both documents go in whole: {prompt:?}"
-        );
-        assert!(
-            prompt.find("In-process counter.") < prompt.find("The Rust check is failing."),
-            "and the feedback comes last: it is the newest thing said and the least \
-             general — {prompt:?}"
-        );
-    }
-
     /// What the reviewing skill has to be, now that the session it runs is the
     /// whole of a wrap-up: it reads the branch, it proposes, and it lands what
     /// was agreed to.
@@ -4283,42 +4214,6 @@ mod tests {
             responding.contains("last thing you print"),
             "and what was said is answered where the Timeline will show it: \
              {responding}"
-        );
-    }
-
-    /// A batch session is put inside the skill the same way every other is, and
-    /// primed with the two documents *and* the comments it is about.
-    #[test]
-    fn a_batch_session_is_started_on_the_documents_with_the_comments_last() {
-        let prompt = responding(
-            &mounted(),
-            "# Rate limiting\n\nThe API has none.\n",
-            Some("# What we settled\n\nIn-process counter.\n"),
-            "**tobico** said on `src/window.rs` line 12:\n\nThis is the wrong way round.",
-        );
-
-        assert!(
-            prompt.contains(&at(RESPONDING)),
-            "the skill is named by the path it is mounted at: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("The API has none.") && prompt.contains("In-process counter."),
-            "both documents go in whole: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("This is the wrong way round.")
-                && prompt.contains("`src/window.rs` line 12"),
-            "and so does what was said, with where it was said: {prompt:?}"
-        );
-        assert!(
-            prompt.find("In-process counter.") < prompt.find("This is the wrong way round."),
-            "under the documents: they say what the work is and this says what \
-             somebody has just said about it — {prompt:?}"
-        );
-        assert!(
-            !prompt.contains(&at(ADDRESSING)) && !prompt.contains(&at(REVIEWING)),
-            "and no other skill is named: a batch is neither a fix nor a review — \
-             {prompt:?}"
         );
     }
 

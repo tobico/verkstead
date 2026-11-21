@@ -1650,6 +1650,7 @@ fn wrap_up_proposal() -> QuestionSet {
                         - **A roadmap** is more ceremony than two days of work needs\n"
                 .to_owned(),
             wants: Vec::new(),
+            offers: Vec::new(),
         }),
         project: Some("verkstead".to_owned()),
         branch: Some("usage-limits".to_owned()),

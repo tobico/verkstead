@@ -635,6 +635,44 @@ direction: inline
     );
 }
 
+/// A pick of a Direction the proposal does not offer is refused, saying which
+/// it does: the chooser drew only those, and nothing would build another.
+#[test]
+fn a_pick_the_proposal_does_not_offer_is_refused_naming_what_it_offers() {
+    let mut narrowed = proposing();
+    narrowed.proposal.as_mut().unwrap().offers = vec![
+        verkstead_schema::Direction::Inline,
+        verkstead_schema::Direction::TaskList,
+    ];
+
+    let picking = |direction: &str| {
+        Response::from_yaml(&format!(
+            "
+answers:
+  - label: Q1
+    unanswered: true
+  - label: Q2a
+    unanswered: true
+  - label: Q2b
+    unanswered: true
+direction: {direction}
+"
+        ))
+        .unwrap()
+        .validate(&narrowed)
+    };
+
+    picking("task-list").expect("a Direction the chooser drew is a pick");
+
+    let error = picking("roadmap").expect_err("roadmap was never drawn");
+    assert!(
+        error
+            .to_string()
+            .contains("picks `roadmap`, but the proposal offers only `inline` and `task-list`"),
+        "the refusal should say which were offered, got: {error}"
+    );
+}
+
 /// The complete Response to [`SET`], with `extra` appended to its answers.
 fn complete_but(extra: &str) -> Result<(), verkstead_schema::ValidationError> {
     let response = Response::from_yaml(&format!(

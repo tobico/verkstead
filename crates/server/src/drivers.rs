@@ -23,26 +23,15 @@
 //! the process, so a server that has just come back holds no registrations at
 //! all, which is exactly the truth about it.
 //!
-//! **A grilling is driven by its session until it is picked on.** Starting one
-//! launches the session and keeps nothing that follows it, so until the human
-//! picks there is nothing to hold a registration — see
-//! [`crate::conversations::start_grilling`]. That is why [`Drivers::driven`] is
-//! asked with the sessions register in hand rather than answering out of this
-//! one alone.
+//! **A grilling is driven by its interview**, the Activity its session runs
+//! under, from the launch through the pick to wherever the Direction picked
+//! carries the Conversation — see [`crate::activities::interview::run`]. The press that
+//! starts one holds a registration across the gap before it, the Conversation
+//! saying it is grilling from before the interview exists, and hands it on.
 //!
-//! The launch itself is the exception, and for the reason every other launch
-//! here holds one: the Conversation says it is grilling from before the session
-//! exists, and the gap in between is exactly the slow part. So the press holds a
-//! registration across it and lets go once there is a session — or once there is
-//! not, which is a stall the next sweep should find.
-//!
-//! A pick changes that: what it arms is a watcher of Verkstead's own, which
-//! follows the same session to the artifact it asked for and goes on holding the
-//! Conversation through the move that follows — see
-//! [`crate::runner::follow_the_tail`]. And a retried tail is the same thing by
-//! the other door: the Conversation is still Grilling while the fresh session is
-//! launched, and the retry has registered before it starts waiting. So a
-//! grilling counts as driven by either.
+//! Its session counts too, which is why [`Drivers::driven`] is asked with the
+//! sessions register in hand rather than answering out of this one alone: a
+//! grilling session running is a grilling being driven, whatever holds it.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -136,7 +125,7 @@ impl Drivers {
         state: Lifecycle,
     ) -> bool {
         match state {
-            // A grilling session, or the watcher a pick armed on one — see this
+            // A grilling session, or the interview holding it — see this
             // module's own documentation for why it is both.
             Lifecycle::Grilling => {
                 working.contains(&conversation_id) || self.registered(conversation_id)
@@ -431,11 +420,11 @@ mod tests {
         );
     }
 
-    /// A grilling is driven by its session or by the watcher a pick armed on
-    /// one, and by nothing else: a grilling with neither is a Conversation
-    /// standing still.
+    /// A grilling is driven by its session or by the interview holding it,
+    /// and by nothing else: a grilling with neither is a Conversation standing
+    /// still.
     #[test]
-    fn a_grilling_is_driven_by_its_session_or_by_the_watcher_on_it() {
+    fn a_grilling_is_driven_by_its_session_or_by_the_interview_holding_it() {
         let drivers = Drivers::new();
 
         assert!(

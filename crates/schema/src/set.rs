@@ -221,6 +221,32 @@ pub struct Proposal {
     /// they are asked to let it move.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wants: Vec<Want>,
+
+    /// The Directions the chooser draws, in the order the design names them:
+    /// the ones the interview that put this proposal offers, which a Process
+    /// declares (Set 1765, Q27). **Empty is all three**, which is every
+    /// interview's offer until a Process says otherwise — so a proposal offering
+    /// them all is written exactly as one was before there was a choice to
+    /// narrow. One alone is no chooser at all: the proposal is accepted with
+    /// that Direction or sent back.
+    ///
+    /// The server's to write rather than the agent's: what the session puts is
+    /// stamped with what its interview offers as the Set arrives, whatever it
+    /// said here — see [`Proposal::offered`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub offers: Vec<Direction>,
+}
+
+impl Proposal {
+    /// The Directions this proposal offers: [`Proposal::offers`], or all three
+    /// where it names none.
+    pub fn offered(&self) -> Vec<Direction> {
+        if self.offers.is_empty() {
+            Direction::ALL.to_vec()
+        } else {
+            self.offers.clone()
+        }
+    }
 }
 
 /// One platform a proposal wants, and why.
@@ -282,6 +308,43 @@ pub enum Direction {
 
     /// Staged under `docs/roadmaps/`, a feature per stage.
     Roadmap,
+}
+
+impl Direction {
+    /// The three, in the order the design names them — smallest first.
+    pub const ALL: [Direction; 3] = [Direction::Inline, Direction::TaskList, Direction::Roadmap];
+
+    /// The word as the wire spells it, for a refusal to quote back.
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Inline => "inline",
+            Self::TaskList => "task-list",
+            Self::Roadmap => "roadmap",
+        }
+    }
+
+    /// The Direction `word` spells, where it spells one.
+    pub fn named(word: &str) -> Option<Direction> {
+        Self::ALL
+            .into_iter()
+            .find(|direction| direction.word() == word)
+    }
+
+    /// `offered` as a refusal says it, with the serial comma: `inline`,
+    /// `inline` and `roadmap`, or `inline`, `task-list`, and `roadmap`.
+    pub fn listed(offered: &[Direction]) -> String {
+        let words: Vec<String> = offered
+            .iter()
+            .map(|direction| format!("`{}`", direction.word()))
+            .collect();
+
+        match words.split_last() {
+            None => String::new(),
+            Some((last, [])) => last.clone(),
+            Some((last, [only])) => format!("{only} and {last}"),
+            Some((last, rest)) => format!("{}, and {last}", rest.join(", ")),
+        }
+    }
 }
 
 /// A single labelled decision put to the human.
