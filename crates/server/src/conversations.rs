@@ -3044,15 +3044,10 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     if placed.here() {
         // Taken here rather than by the planning, which is started from more
         // than one place and takes the registration from all of them — see
-        // [`crate::runner::plan_stage`].
+        // [`crate::runner::backlog_runner`].
         let driving = state.drivers.driving(id);
 
-        tokio::spawn(crate::runner::plan_stage(
-            state.clone(),
-            id,
-            stacks_on,
-            driving,
-        ));
+        tokio::spawn(crate::runner::backlog_runner(state.clone(), id, driving));
     }
 
     Ok(Adopted::Adopted)
@@ -3387,12 +3382,7 @@ async fn alongside(
 
     let driving = state.drivers.driving(id);
 
-    tokio::spawn(crate::runner::plan_stage(
-        state.clone(),
-        id,
-        stacks_on.map(str::to_owned),
-        driving,
-    ));
+    tokio::spawn(crate::runner::backlog_runner(state.clone(), id, driving));
 }
 
 /// Take a made stage back: its checkouts, and the half-made Conversation with

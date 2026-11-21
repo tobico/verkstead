@@ -17,9 +17,10 @@
 
 #![cfg(windows)]
 
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use super::support::server::{Server, finished, stderr, stdout};
@@ -208,18 +209,53 @@ fn the_wait_reconnects_over_the_pipe_when_the_server_restarts() {
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::start(tmp.path().join("verkstead.db"));
 
-    let waiting = ask(&server.pipe_url(), tmp.path(), SET);
-    server.await_asked_set(1);
+    let mut waiting = ask(&server.pipe_url(), tmp.path(), SET);
+
+    // Read as it is written, so the restart can wait on what the CLI has said.
+    // A Set in the store is not a Set the CLI has heard back about: killed
+    // between the two, the server drops the reply to the submit, which the CLI
+    // rightly does not retry. So the kill waits on the CLI saying the Set is
+    // open, and the server comes back only once the CLI has said it is
+    // retrying — before that, a CLI slow to start its wait would find a server
+    // that had never gone away.
+    let (said, heard) = (Arc::new(Mutex::new(String::new())), mpsc::channel());
+    let reading = {
+        let said = Arc::clone(&said);
+        let lines = BufReader::new(waiting.stderr.take().unwrap()).lines();
+        std::thread::spawn(move || {
+            for line in lines.map_while(Result::ok) {
+                if line.contains("is open") || line.contains("retrying") {
+                    let _ = heard.0.send(line.clone());
+                }
+                let mut said = said.lock().unwrap();
+                said.push_str(&line);
+                said.push('\n');
+            }
+        })
+    };
+    let hear = |what: &str| loop {
+        let line = heard
+            .1
+            .recv_timeout(Duration::from_secs(30))
+            .unwrap_or_else(|_| panic!("the CLI should have said it was {what}"));
+        if line.contains(what) {
+            break;
+        }
+    };
+
+    hear("is open");
 
     // The same Data Directory, so the server comes back on the same pipe — as
     // it comes back on the same port.
     let (addr, database) = server.kill();
-    std::thread::sleep(Duration::from_millis(250));
+    hear("retrying");
     let server = Server::bind(addr, database);
 
     server.answer(1, ANSWERED);
 
-    let output = finished(waiting);
+    let mut output = finished(waiting);
+    reading.join().unwrap();
+    output.stderr = said.lock().unwrap().clone().into_bytes();
     assert!(
         output.status.success(),
         "the CLI should have ridden out the restart, got {:?}\n{}",

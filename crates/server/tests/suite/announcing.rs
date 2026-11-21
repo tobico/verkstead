@@ -69,14 +69,29 @@ const STRANGER: &str = "99887766554433221100ffeeddccbbaa";
 /// each reading's Tailscale is built with it and never runs.
 const PORT: u16 = 8422;
 
-/// How long a dial in this suite gives one address, rather than the two seconds
-/// a running server gives one.
+/// How long a dial through [`Verkstead::workbench_in_a_hurry`] gives one
+/// address: the two seconds a running server gives one to connect.
 ///
-/// Spent only where a dial is meant to reach nobody, which here is the member
-/// whose machine is not there: what is being asked is what an announcement does
-/// when it cannot be made, and a test that waited out the real deadline would
-/// be spending its time on the clock rather than on the question.
-const PATIENCE: Duration = Duration::from_millis(300);
+/// **Not shorter, because the same press dials members that answer.** The
+/// press whose announcement is meant to reach nobody also links an Annex that
+/// is there, and on a loaded machine a third of a second was short enough for
+/// that link to come back as timed out. Nothing here waits the patience out:
+/// the member that is not there is dialled at a port that refuses at once.
+const PATIENCE: Duration = Duration::from_secs(2);
+
+/// And how long [`Verkstead::workbench`] and [`Verkstead::peers`] give a dial,
+/// which is always to a listener that is up: ten seconds to connect, as long as
+/// a running server gives the answer.
+///
+/// **Not a running server's two seconds to connect**, because what those two
+/// seconds wait out is a machine that is not there, and every listener here is
+/// in this process and answering. The connect deadline covers the TLS
+/// handshake as well as the `SYN`, and both ends of it share the test's one
+/// thread, so a stall on a loaded runner is enough: Rust (3/5) had a Join to a
+/// listener that was up come back as "operation timed out". The dead address
+/// these tests do dial, `127.0.0.1:1`, refuses at once, so nothing waits this
+/// out.
+const ANSWERED_WITHIN: Duration = Duration::from_secs(10);
 
 /// A machine with no Tailscale on it: `verkstead-no-such-tailscale` is a
 /// program that is not there, which is what having none *is*.
@@ -182,9 +197,13 @@ impl Verkstead {
     }
 
     /// The workbench its browser would be talking to, which is what the presses
-    /// go through.
+    /// go through, with every dial given [`ANSWERED_WITHIN`].
     fn workbench(&self) -> Router {
-        router_answering_devices_telling(self.pool.clone(), self.devices(), self.nudges.clone())
+        router_answering_devices_telling(
+            self.pool.clone(),
+            self.devices().waiting(ANSWERED_WITHIN),
+            self.nudges.clone(),
+        )
     }
 
     /// And the same with every dial given [`PATIENCE`], for the press whose
@@ -213,14 +232,12 @@ impl Verkstead {
     /// How it dials, for the questions that are about a call rather than about
     /// a press.
     ///
-    /// **With a running server's deadlines rather than [`PATIENCE`]**, because
-    /// every call made through this one is meant to be answered — let in or
-    /// refused at the gate, but answered. Three hundred milliseconds for the
-    /// whole of an answer, a handshake and a write, is a dial a loaded runner
-    /// fails to finish, and that reads exactly as a member answering at none of
-    /// its addresses.
+    /// **With [`ANSWERED_WITHIN`] rather than [`PATIENCE`]**, because every call
+    /// made through this one is meant to be answered — let in or refused at the
+    /// gate, but answered. A deadline a loaded runner's handshake can outlast
+    /// reads exactly as a member answering at none of its addresses.
     fn peers(&self) -> Peers {
-        Peers::of(self.device.clone(), self.members.clone())
+        Peers::of(self.device.clone(), self.members.clone()).waiting(ANSWERED_WITHIN)
     }
 
     /// What it says about itself, which is what an announcement carries.
@@ -305,12 +322,14 @@ async fn allow(app: &Router, request: &str) {
 /// Read off the wire rather than off the channel behind it, the way
 /// `tests/suite/unlinking.rs` reads one: what has to hold is that a page which is
 /// open hears that a row has just been dimmed, down its own connection.
+///
+/// **Read as it arrives, the way a page reads it.** The server ends the stream
+/// of a page that falls a backlog behind, and a stream nobody polls is one
+/// falling behind: left unread through a press and its telling, a loaded runner
+/// had it ended before the Nudge it was opened for. So a task drains it from
+/// the moment it is open, as a browser does, and hands on what it heard.
 struct Listening {
-    body: Body,
-
-    /// What has been read off the stream and is not a whole frame yet. SSE
-    /// frames are not the chunks they arrive in.
-    buffered: String,
+    heard: tokio::sync::mpsc::UnboundedReceiver<Nudge>,
 }
 
 impl Listening {
@@ -326,45 +345,42 @@ impl Listening {
 
         assert_eq!(response.status(), StatusCode::OK, "GET {NUDGES}");
 
-        Listening {
-            body: response.into_body(),
-            buffered: String::new(),
-        }
-    }
+        let (hear, heard) = tokio::sync::mpsc::unbounded_channel();
+        let mut body = response.into_body();
+        tokio::spawn(async move {
+            // What has been read off the stream and is not a whole frame yet.
+            // SSE frames are not the chunks they arrive in.
+            let mut buffered = String::new();
 
-    /// The next Nudge, past the keep-alives that are the stream's other traffic.
-    async fn nudge(&mut self) -> Nudge {
-        let waited_for = tokio::time::timeout(HEARING, async {
-            loop {
-                let frame = self.frame().await;
+            while let Some(chunk) = body.frame().await {
+                let chunk = chunk
+                    .unwrap()
+                    .into_data()
+                    .expect("the stream carries data frames");
+                buffered.push_str(std::str::from_utf8(&chunk).unwrap());
 
-                if let Some(data) = frame.lines().find_map(|line| line.strip_prefix("data: ")) {
-                    return serde_json::from_str(data).unwrap();
+                while let Some(end) = buffered.find("\n\n") {
+                    let frame: String = buffered.drain(..end + 2).collect();
+
+                    // Past the keep-alives that are the stream's other traffic.
+                    if let Some(data) = frame.lines().find_map(|line| line.strip_prefix("data: "))
+                        && hear.send(serde_json::from_str(data).unwrap()).is_err()
+                    {
+                        return;
+                    }
                 }
             }
         });
 
-        waited_for.await.expect("waited for a Nudge in vain")
+        Listening { heard }
     }
 
-    /// The next whole frame off the stream, whatever kind it is.
-    async fn frame(&mut self) -> String {
-        loop {
-            if let Some(end) = self.buffered.find("\n\n") {
-                return self.buffered.drain(..end + 2).collect();
-            }
-
-            let chunk = self
-                .body
-                .frame()
-                .await
-                .expect("the stream ended")
-                .unwrap()
-                .into_data()
-                .expect("the stream carries data frames");
-
-            self.buffered.push_str(std::str::from_utf8(&chunk).unwrap());
-        }
+    /// The next Nudge.
+    async fn nudge(&mut self) -> Nudge {
+        tokio::time::timeout(HEARING, self.heard.recv())
+            .await
+            .expect("waited for a Nudge in vain")
+            .expect("the stream ended")
     }
 }
 

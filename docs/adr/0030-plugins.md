@@ -230,7 +230,8 @@ functions, and ending in one of the **outcomes** its manifest declares. The
 host lends it sessions — launch one under a named skill and role with a
 prompt and the Done-signal evidence it expects, wait on its signal — the
 Forge, a Question Set of Verkstead's own, a Timeline notice, the Worktree's
-git facts, and whatever WASI capabilities its manifest asked for. The narrower
+git facts, the Repo's committed files, and whatever WASI capabilities its
+manifest asked for. The narrower
 shapes — sessions and outcomes alone, or sessions plus a read-only view of
 everything else — were offered and the widest taken, for the same reason the
 capability model was: an Activity nobody here has imagined yet is the point of
@@ -243,6 +244,55 @@ from the files in the Repo, which stay the truth where they exist —
 Conversation was offered and declined: state nothing else can read is state
 nothing else can repair.
 
+**Reading the Repo needs no capability.** The backlog and stage runners read
+`.tasks/TODO.md`, a roadmap and `docs/agents/git-workflow.md` at a revision —
+the Worktree's HEAD, or a branch no Worktree holds — and the host lends that
+read as it lends the git facts: of the Conversation's own Repo and Companions,
+committed bytes only, never the working tree. A capability for it was weighed
+and not asked for (Set 1839, Q2): the `filesystem` capability is a fixed path
+on the device and cannot name a Worktree, and the Repos read are the ones the
+Conversation already works in, so there is nothing for the human to grant.
+
+**Placing is the host's, named by the Activity.** A backlog task whose line
+says `on windows` is placed before its session starts, as ADR-0029 says: the
+backlog runner reads the word off the line and asks the host to place the
+task, and the host decides whether it runs here, moves the Conversation, or
+asks the human where. The Activity never names a device; where the work goes
+elsewhere it ends `steered`, and is started again where the Conversation lands.
+A placement hidden inside *launch* was weighed and not taken (Set 1839, Q3):
+each of the host's decisions is a call the Activity makes, so a reader of the
+component sees every one.
+
+**Starting a Conversation is a capability.** An Activity whose manifest asks
+for `conversations: start` may start a roadmap stage as a Conversation of its
+own and read Conversations back: their state, and what the record holds of a
+roadmap's stages and chain. It is shown at Install beside the rest, because an
+Activity that can start work is one worth knowing about (Set 1839, Q4). The
+limits stay the host's: a start over `at_once` is refused as *no place* and
+the Activity says the stage waits, rather than reading the limits itself.
+
+**Joining a roadmap's chain is the host's, asked for by the Activity.** A
+stage's finish waits until every stage already in its roadmap's chain has
+settled, and is then told the chain to go on top of. The backlog runner asks
+for that wait with `join-chain` before it launches a stage's finish, and
+writes the chain the host answers into the finish's prompt; which stages
+joined, and in what order, is the record's, and the rebase is the session's.
+The `next-stage` annotation on a stage's line in the roadmap is neither's: the
+stage's planning session writes it, as the `next-stage` skill says, so neither
+the Activity nor the host writes the Repo's files.
+
+**The stage runner runs beside a Conversation, not in it.** It keeps the
+shape it had in process (Set 1839, Q1): started whenever a stage could start —
+a stage settling, a place coming free, a home device hearing a stage away
+settle — over the Conversation that settled or the foot of the roadmap's
+chain, it starts what is ready and ends `finished` or `continued`. It drives
+nothing, so it holds no Driving registration, which would count a settled
+Conversation as a place taken; a stop on the Conversation does not end it,
+and nothing it does stops the Conversation. What it notices goes where its
+start says: the Timeline at a settle, the report a home device answers, and the
+log at a look, but for a stage waiting on the server's places while they are
+all taken.
+
 **One wrap-up, with declared watchers.** The wrap-up watches checks, comments,
 the review and mergeability at once; Fix Merge Issues is the same Activity with
 two watchers off. A watcher per Activity, several running in one state, was
@@ -253,6 +303,11 @@ Activity's own.
 being the smallest that still launches, waits, asks and reads git; then the
 interview, one session and the wrap-up; then the backlog runner and the stage
 runner, which spawn Conversations and so give the interface that host function.
+Once they have crossed, the runner in the server is the host functions and
+nothing else: what is next in a backlog, which stages of a roadmap are ready
+and what each task's and stage's session is told are the components', and the
+server keeps launching and watching sessions, checking a Done signal against
+the Repo, the limits, placement, the chain and the record.
 
 ## Process
 

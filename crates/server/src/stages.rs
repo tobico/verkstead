@@ -57,14 +57,17 @@
 //!
 //! ## The other reading
 //!
-//! [`next_stage`], [`abandoned`] and what hangs off them read a **Repo** instead,
-//! at a commit, with no Worktree anywhere in it. That is what adoption needs: a
-//! roadmap the old tools or a human wrote is committed on the default branch and
-//! was touched by no branch Verkstead knows, so the reading above sees nothing of
-//! it. And it is what the **carry-on** needs, for the other half of the same
-//! reason: with stages worked side by side the Worktree of the one that has just
-//! settled holds a `ROADMAP.md` cut before the newest declarations were written, so
-//! what it has left is read at the top of its roadmap's chain — see [`Declaring`].
+//! [`abandoned`] and what hangs off it read a **Repo** instead, at a commit,
+//! with no Worktree anywhere in it. That is what adoption needs: a roadmap the
+//! old tools or a human wrote is committed on the default branch and was touched
+//! by no branch Verkstead knows, so the reading above sees nothing of it.
+//!
+//! What a roadmap being driven starts next is not read here at all: that is the
+//! **Stage runner**, a component of the built-in Activities plugin, which reads
+//! the index and the declarations through the host itself and asks the host to
+//! start each stage — see [`crate::continuing`]. It keeps its own copy of
+//! [`ready`]'s rule, in the same words, and the two are kept in step by the
+//! same cases, run against each — see that component's tests.
 //! The entries, the stage and the branch-naming rule are the same ones; only the
 //! way the bytes are fetched differs — `ls-tree` and `show` against the Repo's own
 //! git directory rather than files off a checkout.
@@ -121,10 +124,10 @@ pub(crate) const STAGES: &str = "roadmaps";
 ///
 /// The default rather than the rule: what it is on this machine is
 /// `at_once.roadmap_stages` in `config.yaml`, read afresh at every start — see
-/// [`crate::settings::AtOnce`], which falls back to this, and the carry-on, which
-/// reads the file and passes the number into [`next_stage`]. Passed in rather
-/// than read here so that where a start is permitted stays the one place, and how
-/// many are permitted is the caller's to say.
+/// [`crate::settings::AtOnce`], which falls back to this, and
+/// [`crate::continuing::begin`], which holds every start the **Stage runner**
+/// asks for to it. Passed in rather than read here so that how many are
+/// permitted is the caller's to say.
 pub(crate) const AT_ONCE: usize = 3;
 
 /// How many Conversations Verkstead runs at once **across the whole server**,
@@ -166,8 +169,8 @@ pub(crate) const AT_ONCE: usize = 3;
 ///
 /// Passed in rather than read here, for the reason [`AT_ONCE`] is: where a start
 /// is permitted stays the one place, and how many are permitted is the caller's
-/// to say. What counts the places is the carry-on — see
-/// [`crate::continuing::carry_on`] — and the look that spends the ones that come
+/// to say. What counts the places is the start the **Stage runner** asks for —
+/// see [`crate::continuing::begin`] — and the look that spends the ones that come
 /// free, [`crate::places`].
 pub(crate) const CONVERSATIONS_AT_ONCE: usize = 4;
 
@@ -393,27 +396,6 @@ const REVIEW_PROCESS: &str = "## Review process";
 /// And the block inside it that says how a stage stacks on the stage before it.
 const STACKING: &str = "### Stacking roadmap stages";
 
-/// Whether `worktree`'s repository records a way to stack a roadmap stage on
-/// its unmerged predecessor.
-///
-/// The question is only whether the block is *there*. What it says is the
-/// repository's own business and the session's to follow: Verkstead carries no
-/// stacking mechanism of its own, and one invented here would be a convention
-/// this repository never agreed to.
-///
-/// **What this does not decide is where the branch starts.** That is git's
-/// question rather than the file's — see [`crate::continuing::Stands`] — and a
-/// stage whose predecessor is unmerged stands on it whether or not there is a
-/// block to read. Where the block is missing what follows is a pull request
-/// carrying the stage before it until that one merges, and the Timeline says so.
-///
-/// Read under `## Review process` rather than anywhere in the file, because that
-/// is where the section belongs and a file that mentioned stacking in passing —
-/// a note, a changelog entry — would not be a repository that had recorded one.
-pub(crate) fn stacks(worktree: &Path) -> bool {
-    std::fs::read_to_string(worktree.join(GIT_WORKFLOW)).is_ok_and(|workflow| stacking(&workflow))
-}
-
 /// The same question asked of a Repo at a commit, with no Worktree anywhere in
 /// it — [`abandoned`]'s way of reading, for [`abandoned`]'s reason.
 ///
@@ -440,123 +422,6 @@ fn stacking(workflow: &str) -> bool {
         // and what it holds is not the review process.
         .take_while(|line| !line.starts_with("## "))
         .any(|line| line == STACKING)
-}
-
-/// What a Conversation's roadmap has left to start once its own work has
-/// settled.
-///
-/// *Which* roadmap is the record's — named by the caller and settled when the
-/// stage started. What it has ready comes from its declarations, the record and
-/// the boxes together: the entries and the briefs are read at a commit, off the
-/// branch holding the newest of that roadmap's declarations — see [`Declaring`] —
-/// and which of those entries may start now is [`ready`]'s question.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Next {
-    /// What the roadmap starts now, and what it says about the ready stages it
-    /// does not start.
-    ///
-    /// **Every ready stage there was a place for**, lowest number first — see
-    /// [`AT_ONCE`], which is how many places a roadmap has until Settings says
-    /// otherwise, and [`ready`], which
-    /// is which of its stages want one. A list rather than one stage because each
-    /// start is its own act from here on: one that halts halts itself, and the
-    /// rest are started anyway.
-    ///
-    /// `starting` is empty where every ready stage is held, which is a roadmap
-    /// already running as many as it runs at once. So this answer is not *the
-    /// roadmap has something to start* — it is *this is what the roadmap has to
-    /// say about what may start*, and the roadmap with nothing ready at all is
-    /// [`Next::InFlight`].
-    Stages {
-        /// The stages to start, lowest number first.
-        starting: Vec<Stage>,
-
-        /// One sentence per ready stage that does not start, and what each of
-        /// them is waiting on — see [`Held`].
-        ///
-        /// Said on the settled Conversation's Timeline as they stand, so that a
-        /// roadmap which has gone quiet says why it went quiet — a stage waiting
-        /// for a place is indistinguishable, from the sidebar, from a scheduler
-        /// that forgot about it.
-        held: Vec<Held>,
-    },
-
-    /// Every stage of it is done. The roadmap finished, and its directory stays
-    /// where it is as the record of what it was.
-    Complete {
-        /// What it is called, for saying so.
-        roadmap: String,
-    },
-
-    /// Nothing may start and the roadmap has not finished: what is left of it is
-    /// in flight, or stands on something that is.
-    ///
-    /// The third answer, and the one that used to be folded into
-    /// [`Next::Complete`] — a roadmap whose only unfinished stages are stages
-    /// somebody is on has nothing to start and has not finished, and saying it
-    /// was complete is how a roadmap worked side by side would announce itself
-    /// finished half way through.
-    InFlight {
-        /// What it is called, for saying so.
-        roadmap: String,
-    },
-
-    /// **Nothing of this roadmap may start**, and that is a thing to say: it is
-    /// not on the branch its declarations are read off at all, its index plans
-    /// nothing, or it declares badly.
-    ///
-    /// A thing to say rather than to guess past. A roadmap that has been renamed
-    /// or emptied on that branch is the human's to fix, and falling back to some
-    /// older reading of it would be Verkstead guessing at which roadmap this is.
-    ///
-    /// **A stage of it whose own brief is missing is not this.** That halts the
-    /// one stage and no other: it is one of [`Next::Stages`]'s held sentences,
-    /// and the rest of the ready stages start anyway.
-    Unstartable {
-        /// Why, in the words the Timeline says it in.
-        why: String,
-    },
-}
-
-/// One ready stage that did not start, in the words the Timeline says it in and
-/// under what it is waiting on.
-///
-/// Three of them, and they are told apart because a reader's next move is
-/// different for each: a stage waiting on its own roadmap waits on that
-/// roadmap's own work, a stage waiting on the server waits on whatever else the
-/// machine is running, and a stage that halted for its own brief waits on the
-/// human writing one. See [`CONVERSATIONS_AT_ONCE`] for the second limit and
-/// [`next_stage`], where all three are decided.
-///
-/// **And on which of them a look says out loud.** A settle says every one of
-/// them, being the one reading that happens once. A look runs every
-/// [`crate::Pace::places`] for as long as the server is up, so it says only the
-/// wait that is about the thing it has just moved: a place on the server
-/// changing hands — see [`crate::continuing::Brought`], where that is decided.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Held {
-    /// Waiting for a place on **its own roadmap**: the stages of it already in
-    /// flight have taken them, and one of them settling is what frees one.
-    Roadmap(String),
-
-    /// Waiting for a place **on the server**: the Conversations Verkstead is
-    /// running have taken them all, whatever roadmap or Process they belong to,
-    /// and nothing about this roadmap will free one.
-    Server(String),
-
-    /// Not waiting at all — **halted for itself**: its line names no brief, or
-    /// the brief it names is not there to prime it from. The human's to fix, and
-    /// it holds up no other stage.
-    Halted(String),
-}
-
-impl Held {
-    /// What it says, which is what goes on a Timeline.
-    pub(crate) fn said(&self) -> &str {
-        match self {
-            Self::Roadmap(said) | Self::Server(said) | Self::Halted(said) => said,
-        }
-    }
 }
 
 /// One stage of a roadmap, as the Conversation that runs it is started from.
@@ -694,263 +559,30 @@ pub(crate) fn in_the_way(repo: &Path, branch: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// **Where** a roadmap's declarations are read: the branch holding the newest of
-/// them, and the commit that branch is at.
-///
-/// Two halves of one fact, passed together rather than as two strings in a row
-/// for the reason `store::RoadmapStage`'s two are: the commit is what is read and
-/// the branch is what the reading is named after, and a caller that put them the
-/// other way round would read a roadmap at a branch name.
-///
-/// Which branch that is, is the carry-on's to decide — see
-/// `crate::continuing::declaring`, which is the whole of that rule: the top of the
-/// roadmap's chain, its own Conversation's branch while nothing has joined, and
-/// the branch that has just settled where git holds neither.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Declaring<'a> {
-    /// The branch the reading came off, for saying so. Nothing is looked up by
-    /// it: what is read is the commit beside it, this being the name that commit
-    /// was resolved from.
-    pub(crate) branch: &'a str,
-
-    /// And the commit itself, which is what every byte here is read at.
-    pub(crate) commit: &'a str,
+/// What a stage ready and **held by its own roadmap's limit** says, when the
+/// host refuses the **Stage runner**'s start of it as *no place* — see
+/// [`crate::continuing::begin`].
+pub(crate) fn waiting_on_its_roadmap(
+    roadmap: &str,
+    label: &str,
+    title: &str,
+    at_once: usize,
+) -> String {
+    format!(
+        "Stage {label} of the `{roadmap}` roadmap, *{title}*, is ready and waiting for a place. \
+         This roadmap runs {} at a time, and its places are taken. It starts when one of them \
+         settles.",
+        how_many_places(at_once),
+    )
 }
 
-/// What `roadmap` has left to start, with `branch` the Conversation that has
-/// just finished.
-///
-/// One roadmap, named by the caller. *Which* one is not a question this asks: it
-/// was settled when the stage started and is read back out of the record — see
-/// `store::stage_roadmap` and the module doc. So a roadmap this branch amended in
-/// passing is never read here, and neither is a roadmap somebody else is carrying
-/// on: what the branch touched decides nothing at all.
-///
-/// **Read at a commit out of the Repo's own git directory**, the way [`startable`]
-/// reads one for the adoption, rather than out of the settling stage's checkout.
-/// With stages worked side by side each Worktree holds a `ROADMAP.md` of its own,
-/// and the settling stage's was very likely cut before a dependency was edited or
-/// a stage added — so **declarations are read afresh at every start**, off the
-/// branch holding the newest of them. Which branch that is, is [`Declaring`]'s,
-/// and the reading is the index, the declarations on its lines and the stage's
-/// brief together: all three at the one commit, so that what starts and what it is
-/// primed with cannot come from two readings of the roadmap.
-///
-/// What it has left is not the lowest unchecked box: which of its stages may start
-/// now is [`ready`]'s question, and `record` is the half of it the repository does
-/// not hold — what Verkstead's own record says about each stage of this roadmap in
-/// this Repo. The Conversation's own stage settling is what brought this reading
-/// about, so the record is what skips it, and the annotation the roadmap keeps
-/// beside the line is the fallback where the record has no label for it.
-///
-/// **Every ready stage there is a place for**, lowest number first. `at_once` is
-/// how many stages of one roadmap run at once, which is the setting the carry-on
-/// reads and [`AT_ONCE`] where nobody has set it — and every stage
-/// the record has in flight is already holding one of those places, so what starts
-/// here is what is left over. Where there are more ready stages than places the
-/// lowest-numbered ones start and the rest are held: the roadmap's order is still
-/// the roadmap's own, and a stage that waited is told so rather than dropped.
-///
-/// **And a place on the server, which is the second limit**, in front of the
-/// first. `server_places` is how many of them are left over once every
-/// Conversation with a session running or a driver registered has taken its own —
-/// the carry-on counts them and hands the remainder in, the way it hands in the
-/// roadmap's number, so that how many are permitted stays the caller's to say. See
-/// [`CONVERSATIONS_AT_ONCE`], which is how many there are where Settings has not
-/// said, and [`crate::drivers::Drivers::taking`], which is the counting.
-///
-/// The two are spent together and a stage that starts spends one of each, so a
-/// ready stage that fits under its roadmap's limit and not under the server's is
-/// held with **a sentence of its own**: a roadmap waiting on the machine and a
-/// roadmap waiting on itself are two different things to be waiting for, and the
-/// human's next move is different for each.
-///
-/// **One brief read per stage that starts**, and a stage whose brief is not there
-/// halts itself alone — held with its own sentence while the rest of the ready
-/// stages go on starting. A brief nobody wrote is the human's to fix, and stopping
-/// a whole roadmap's fan for one of them would be a stage's fault spreading to its
-/// siblings. **And it leaves its place behind it**: a place is spent by a stage
-/// that starts and by nothing else, so the ready stage after it takes the one that
-/// stage would have had. Otherwise a roadmap allowed three would run two and tell
-/// the third its places were taken.
-///
-/// A value rather than a lookup, so this stays a reading: the rows are read once,
-/// by the caller, and nothing in here asks the database.
-///
-/// A roadmap that is not there to read is [`Next::Unstartable`], which is the
-/// treatment a stage naming a brief nobody wrote gets and for the same reason:
-/// the record says this Conversation is a stage of it, so the directory being
-/// renamed away or emptied where the declarations are read is the human's to look
-/// at rather than Verkstead's to guess past. Falling back to whatever else the
-/// branch touched is exactly the guess this stopped making — and so is falling
-/// back to a reading of the same roadmap somewhere older.
-///
-/// Blocking work: one git read, and one more per stage that starts.
-pub(crate) fn next_stage(
-    repo: &Path,
-    read: Declaring<'_>,
-    roadmap: &str,
-    branch: &str,
-    record: &store::StageStandings,
-    at_once: usize,
-    server_places: usize,
-) -> Next {
-    let index = format!("{ROADMAPS}/{roadmap}/{INDEX}");
-
-    let Some(list) = at(repo, read.commit, &index) else {
-        return Next::Unstartable {
-            why: format!(
-                "this conversation is a stage of the `{roadmap}` roadmap, and there's no `{index}` \
-                 on `{}`, the branch its declarations are read off, to read what it has left",
-                read.branch,
-            ),
-        };
-    };
-
-    if list.lines().filter_map(checklist::entry).next().is_none() {
-        // A directory under `docs/roadmaps/` with an index that plans nothing is
-        // not a roadmap, exactly as it is not one to pin — and the record saying
-        // this Conversation is a stage of it is what makes that worth saying out
-        // loud rather than passing over.
-        return Next::Unstartable {
-            why: format!(
-                "this conversation is a stage of the `{roadmap}` roadmap, and its `{INDEX}` on \
-                 `{}` has no stages in it",
-                read.branch,
-            ),
-        };
-    }
-
-    // Which of its stages may start is [`ready`]'s answer, and how many of them
-    // are already under way comes back with it. Another roadmap in this Repo
-    // having work left is not a reason to start any of it.
-    let (ready, in_flight) = match ready(roadmap, &list, record, branch) {
-        Ready::Stages {
-            lowest,
-            rest,
-            in_flight,
-        } => (
-            std::iter::once(lowest).chain(rest).collect::<Vec<_>>(),
-            in_flight,
-        ),
-        Ready::Complete => {
-            return Next::Complete {
-                roadmap: roadmap.to_owned(),
-            };
-        }
-        Ready::InFlight => {
-            return Next::InFlight {
-                roadmap: roadmap.to_owned(),
-            };
-        }
-        // Refused rather than repaired, and never run in order instead — see
-        // [`declarations::judge`], which is where the sentence is written. Saying
-        // it where the press can see it is the other half of the refusal.
-        Ready::Misdeclared(why) => return Next::Unstartable { why },
-    };
-
-    // What is left over once the stages somebody is on have taken theirs. Saturating
-    // because the record can hold more in flight than the limit allows — the limit
-    // is lowered in Settings, or a stage was started by hand — and a roadmap over
-    // its limit starts nothing rather than going backwards.
-    let places = at_once.saturating_sub(in_flight);
-
-    // Where each of them is placed, off the judged declaration rather than the
-    // line — see [`declared_platforms`].
-    let platforms = declared_platforms(roadmap, &list);
-
-    let mut starting = Vec::new();
-    let mut held = Vec::new();
-
-    for entry in ready {
-        // Beyond the places there are, so it waits — and is told so. It starts the
-        // moment one of the stages ahead of it settles, which is a settle that runs
-        // this reading again.
-        //
-        // Counted off what has **started** rather than off how far down the ready
-        // stages this has walked: a place is spent by a stage that starts and by
-        // nothing else, so a stage held below for a brief nobody wrote leaves its
-        // place to whatever is ready after it. Counting positions would have this
-        // roadmap run fewer stages than it is allowed and tell one of them its
-        // places were taken while one stood free.
-        if starting.len() >= places {
-            // How many are in flight is deliberately not said: three of them may
-            // have started a moment ago, in this very reading, and the record the
-            // count came off was read before any of that.
-            held.push(Held::Roadmap(format!(
-                "Stage {} of the `{roadmap}` roadmap, *{}*, is ready and waiting for a place. \
-                 This roadmap runs {} at a time, and its places are taken. It starts when one of \
-                 them settles.",
-                entry.label,
-                entry.title,
-                how_many_places(at_once),
-            )));
-
-            continue;
-        }
-
-        // And the second limit, which this one fits under its roadmap's and not
-        // under: the places the server has are taken by Conversations of every
-        // kind, and this stage would be one more of them.
-        //
-        // A sentence of its own rather than the one above, because what it is
-        // waiting for is a different thing: nothing about this roadmap will free
-        // the place, and the human reading the Timeline can see for themselves
-        // what the server is busy with. Counted off `starting` for the reason the
-        // roadmap's places are — a place is spent by a stage that starts and by
-        // nothing else.
-        if starting.len() >= server_places {
-            // How many are taken is deliberately not said, for the reason the
-            // stages in flight are not: the registers were read before any of
-            // this, and a Conversation may have finished since. What says the
-            // number as of the moment it is asked is the settings pane.
-            held.push(Held::Server(format!(
-                "Stage {} of the `{roadmap}` roadmap, *{}*, is ready and waiting for a place \
-                 on the server. The conversations Verkstead is running have taken them all, \
-                 whatever roadmap or process they belong to. It starts when one of them comes \
-                 free.",
-                entry.label, entry.title,
-            )));
-
-            continue;
-        }
-
-        // An entry naming no brief at all, which is a line to say something about
-        // rather than a path to go and read: `<commit>:docs/roadmaps/<name>/` is
-        // the roadmap's own directory, and git would hand back a listing of it.
-        if entry.link.is_empty() {
-            held.push(Held::Halted(format!(
-                "Stage {} of the `{roadmap}` roadmap was ready and couldn't be started. Its \
-                 line names no brief to start it from.",
-                entry.label,
-            )));
-
-            continue;
-        }
-
-        let brief_path = format!("{ROADMAPS}/{roadmap}/{}", entry.link);
-
-        let Some(markdown) = at(repo, read.commit, &brief_path) else {
-            held.push(Held::Halted(format!(
-                "Stage {} of the `{roadmap}` roadmap was ready and couldn't be started. It \
-                 names the brief `{brief_path}`, and there's nothing there to read on `{}`.",
-                entry.label, read.branch,
-            )));
-
-            continue;
-        };
-
-        starting.push(Stage {
-            brief_path,
-            roadmap: roadmap.to_owned(),
-            label: entry.label.to_owned(),
-            title: entry.title.to_owned(),
-            brief: markdown,
-            platform: platforms.get(entry.label).copied(),
-        });
-    }
-
-    Next::Stages { starting, held }
+/// And one **held by the server's**.
+pub(crate) fn waiting_on_the_server(roadmap: &str, label: &str, title: &str) -> String {
+    format!(
+        "Stage {label} of the `{roadmap}` roadmap, *{title}*, is ready and waiting for a place on \
+         the server. The conversations Verkstead is running have taken them all, whatever \
+         roadmap or process they belong to. It starts when one of them comes free."
+    )
 }
 
 /// How many places a roadmap has, said in a sentence.
@@ -1025,9 +657,9 @@ pub(crate) enum Ready<'a> {
 
 /// Which stages of `roadmap` may **start now**, lowest number first.
 ///
-/// The one reading both starts go through — the carry-on that runs when a stage
-/// settles, and the adoption's, which answers the roadmap notice, the compose page
-/// and the press. Three things go into it and all three were already there: what
+/// The adoption's reading, which answers the roadmap notice, the compose page and
+/// the press, and the card's — and the rule the **Stage runner** keeps its own
+/// copy of, for the starts it asks for when a stage settles. Three things go into it and all three were already there: what
 /// each stage's line declares it stands on, Verkstead's own record of what each
 /// stage of this roadmap has got to, and the boxes the roadmap keeps.
 ///
@@ -1250,9 +882,9 @@ fn held_on_the_roadmap(roadmap: &str, record: &store::StageStandings) -> bool {
 /// is done is what the stages above it stand on, and what is not done is what may
 /// yet start. A stage standing on no other stage stands on the roadmap's own
 /// Conversation instead, whose standing is read the same way and is
-/// [`held_on_the_roadmap`]'s to ask. Both readings of a roadmap go through that one reading — the
-/// carry-on's, off a Worktree as it stands, and the adoption's, off a Repo at a
-/// commit — because a stage that is done to one of them and open to the other is a
+/// [`held_on_the_roadmap`]'s to ask. Every reading of a roadmap goes through that one reading — the
+/// card's, off a Worktree as it stands, and the adoption's, off a Repo at a
+/// commit, with the **Stage runner** keeping a copy of the rule — because a stage that is done to one of them and open to the other is a
 /// notice offering work somebody has finished, or a roadmap that stops advancing.
 ///
 /// - **Settled** is done, whatever the box on the branch being read says. This is
@@ -1424,8 +1056,8 @@ fn states(
 /// a ready stage then needs is a place, and there are two limits on them: how
 /// many stages of its own roadmap run at once, and how many Conversations the
 /// whole server runs at once. Both are in force, so what is free is the smaller
-/// of the two — see [`Places`], and [`next_stage`], which spends them in this
-/// same order.
+/// of the two — see [`Places`], and the **Stage runner**, which spends them in
+/// this same order.
 ///
 /// **The lowest-numbered take the places and the rest wait**, which is the
 /// scheduler's own order: [`ready`] answers lowest first, and the stages past the
@@ -1460,8 +1092,8 @@ fn waiting_for_a_place<'a>(
 
     // What is left of its roadmap's places once the stages of it somebody is on
     // have taken theirs, and of the server's once everything running anywhere has
-    // — whichever of the two is the shorter. Saturating for [`next_stage`]'s
-    // reason: the record can hold more in flight than a lowered limit allows, and
+    // — whichever of the two is the shorter. Saturating because the
+    // record can hold more in flight than a lowered limit allows, and
     // a roadmap over its limit has no places rather than fewer than none.
     let free = places.roadmap.saturating_sub(in_flight).min(places.free());
 
@@ -2333,7 +1965,7 @@ fn indexed(path: &str) -> Option<&str> {
 /// lowest is [`Abandoned::stage`], that being the one the Conversation doing the
 /// pressing becomes, and the rest are [`Abandoned::beside`]. `at_once` is how many
 /// stages of one roadmap run at once — [`crate::settings::AtOnce`], the same
-/// setting the carry-on hands [`next_stage`] — and every stage the record has in
+/// setting every start the **Stage runner** asks for is held to — and every stage the record has in
 /// flight is already holding one of those places, so a roadmap whose places are
 /// all taken has nothing to offer however many of its lines are ready.
 ///
@@ -2362,9 +1994,9 @@ pub(crate) fn startable(
         return Startable::NoRoadmap;
     }
 
-    // Clause 1: a stage that may start — [`ready`]'s answer, which is the one
-    // reading the carry-on goes through too, so that what is offered here and what
-    // an unattended run would start are one rule. As asked for, because the press
+    // Clause 1: a stage that may start — [`ready`]'s answer, whose rule the
+    // **Stage runner** keeps a copy of, so that what is offered here and what an
+    // unattended run would start are one rule. As asked for, because the press
     // is: a root waiting on the roadmap's own review is one the human may start —
     // see [`ready_when_asked`]. Every stage done is a roadmap that finished, and
     // its directory stays where it is as the record of what it was; nothing ready
@@ -2392,7 +2024,7 @@ pub(crate) fn startable(
     // stages holding a place to settle, which is what [`Startable::InFlight`]
     // says.
     //
-    // Saturating for [`next_stage`]'s reason: the record can hold more in flight
+    // Saturating: the record can hold more in flight
     // than the limit allows — the limit lowered in Settings, or a stage started by
     // hand — and a roadmap over its limit starts nothing rather than going
     // backwards.
@@ -2430,8 +2062,8 @@ pub(crate) fn startable(
     // work, and a sibling whose brief nobody has written yet is no reason to
     // withhold the stages that are ready beside it.
     //
-    // Taken *after* the clauses rather than before them, for [`next_stage`]'s
-    // reason: a place is spent by a stage that is offered and by nothing else, so
+    // Taken *after* the clauses rather than before them, as the **Stage runner**
+    // takes them: a place is spent by a stage that is offered and by nothing else, so
     // one left out leaves its place to the ready stage behind it. Taking first
     // would have the press start fewer stages than the roadmap is allowed, and the
     // lazy iterator is what keeps the clauses to one reading per stage offered.
@@ -2709,65 +2341,6 @@ mod tests {
 
     use super::*;
 
-    /// The one stage a reading starts, where the test expects exactly one — and
-    /// `said`, which is what that test is about, where it started anything else.
-    ///
-    /// Most of these are about *which* stage a roadmap starts rather than how
-    /// many, and every one of those roadmaps has one ready stage at a time: they
-    /// run in order, or the record says everything above the stage they are about
-    /// stands on something in flight. So the list is unwrapped here, once, and a
-    /// roadmap that suddenly starts two fails the test that says it starts one.
-    #[track_caller]
-    fn only(next: Next, said: &str) -> Stage {
-        let Next::Stages { mut starting, held } = next else {
-            panic!("{said} — and the reading started nothing at all: {next:?}");
-        };
-
-        assert!(
-            starting.len() == 1 && held.is_empty(),
-            "{said} — and the reading answered {starting:?}, holding {held:?}",
-        );
-
-        starting.remove(0)
-    }
-
-    /// What a reading holds back, which is a sentence per ready stage that does
-    /// not start: one waiting for a place on its roadmap, one waiting for a place
-    /// on the server, one whose brief is not there.
-    ///
-    /// The sentences alone, which is what most of these ask about. See
-    /// [`waits_on`] for the tests that are about which of the three each one is.
-    #[track_caller]
-    fn holding(next: Next) -> Vec<String> {
-        waits_on(next)
-            .iter()
-            .map(|held| held.said().to_owned())
-            .collect()
-    }
-
-    /// And the same with what each of them is waiting on kept — see [`Held`],
-    /// which is what a **look** says one of and keeps the other two off a
-    /// Timeline.
-    #[track_caller]
-    fn waits_on(next: Next) -> Vec<Held> {
-        match next {
-            Next::Stages { held, .. } => held,
-            other => panic!("nothing of this roadmap was read as ready: {other:?}"),
-        }
-    }
-
-    /// And which stages it starts, by label — for the tests that are about how
-    /// many start rather than about one of them.
-    #[track_caller]
-    fn starting(next: &Next) -> Vec<&str> {
-        match next {
-            Next::Stages { starting, .. } => {
-                starting.iter().map(|stage| stage.label.as_str()).collect()
-            }
-            other => panic!("nothing of this roadmap was read as ready: {other:?}"),
-        }
-    }
-
     /// A roadmap index exactly as `/to-roadmap` writes one.
     const MVP: &str = "\
 # MVP roadmap
@@ -2841,166 +2414,6 @@ Turns this askance clone into Verkstead.
             let file = self.path().join(GIT_WORKFLOW);
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();
             std::fs::write(file, markdown).unwrap();
-        }
-
-        /// What the roadmap `roadmap` has left to start, as the Conversation on
-        /// `branch` finishing asks it.
-        ///
-        /// The roadmap is named rather than worked out, which is the whole of
-        /// the change: the record says which one this Conversation is a stage
-        /// of, and nothing about the branch decides it.
-        ///
-        /// With a record holding nothing, which is every roadmap worked before
-        /// Verkstead wrote one — so what these answer with is the boxes and the
-        /// annotation alone, exactly as they answered before there was a record.
-        fn next(&self, roadmap: &str, branch: &str) -> Next {
-            self.next_with(roadmap, branch, &store::StageStandings::default())
-        }
-
-        /// And the same reading with a record behind it: what Verkstead knows
-        /// about the stages of this Repo's roadmaps, which is what decides whether
-        /// a stage is done wherever it says anything at all.
-        ///
-        /// Committed first, because the reading is off a commit rather than off a
-        /// checkout: what a session has written and not committed is not the
-        /// roadmap yet, and the branch the declarations are read off may be one
-        /// nothing is checked out of at all.
-        fn next_with(&self, roadmap: &str, branch: &str, record: &store::StageStandings) -> Next {
-            let commit = self.committed();
-
-            self.next_at("main", &commit, roadmap, branch, record)
-        }
-
-        /// And the same reading at a named branch of this repository, which is
-        /// what the carry-on actually asks: the roadmap at the top of its chain
-        /// rather than wherever the branch that settled left it.
-        fn next_at(
-            &self,
-            at: &str,
-            commit: &str,
-            roadmap: &str,
-            branch: &str,
-            record: &store::StageStandings,
-        ) -> Next {
-            self.next_running(at, commit, roadmap, branch, record, AT_ONCE)
-        }
-
-        /// And the same reading with a limit of the caller's choosing, for the
-        /// tests that are about the limit rather than about which stages are
-        /// ready. Every other reading here runs at [`AT_ONCE`], which is what the
-        /// carry-on passes where nobody has set the number in Settings.
-        ///
-        /// On an **empty server**: every place there is stands free, which is the
-        /// reading every test but the ones about the second limit wants. See
-        /// [`Repo::next_on_a_server`], which is those.
-        fn next_running(
-            &self,
-            at: &str,
-            commit: &str,
-            roadmap: &str,
-            branch: &str,
-            record: &store::StageStandings,
-            at_once: usize,
-        ) -> Next {
-            self.next_with_places(
-                at,
-                commit,
-                roadmap,
-                branch,
-                record,
-                at_once,
-                CONVERSATIONS_AT_ONCE,
-            )
-        }
-
-        /// And the same reading with both limits the caller's, which is what the
-        /// carry-on hands in: how many stages of this roadmap run at once, and how
-        /// many places the whole server has **left over** once everything already
-        /// running has taken its own.
-        #[allow(clippy::too_many_arguments)]
-        fn next_with_places(
-            &self,
-            at: &str,
-            commit: &str,
-            roadmap: &str,
-            branch: &str,
-            record: &store::StageStandings,
-            at_once: usize,
-            server_places: usize,
-        ) -> Next {
-            next_stage(
-                self.path(),
-                Declaring { branch: at, commit },
-                roadmap,
-                branch,
-                record,
-                at_once,
-                server_places,
-            )
-        }
-
-        /// What this roadmap would start with `server_places` free across the
-        /// whole server, its own limit being whatever is passed.
-        ///
-        /// The second limit's own harness — see [`CONVERSATIONS_AT_ONCE`]. A
-        /// roadmap's places and the server's are spent together, so both numbers
-        /// are the caller's here: what these tests are about is which of the two
-        /// is the one that bites.
-        fn next_on_a_server(
-            &self,
-            roadmap: &str,
-            record: &store::StageStandings,
-            at_once: usize,
-            server_places: usize,
-        ) -> Next {
-            let commit = self.committed();
-
-            self.next_with_places("main", &commit, roadmap, "", record, at_once, server_places)
-        }
-
-        /// What this roadmap would start with only `at_once` places to give, the
-        /// record behind it as it stands.
-        fn next_limited(
-            &self,
-            roadmap: &str,
-            branch: &str,
-            record: &store::StageStandings,
-            at_once: usize,
-        ) -> Next {
-            let commit = self.committed();
-
-            self.next_running("main", &commit, roadmap, branch, record, at_once)
-        }
-
-        /// Everything written so far committed to the branch checked out, and the
-        /// commit that made.
-        ///
-        /// `--allow-empty`, so that a test asking the same reading twice is not a
-        /// commit git refuses the second time.
-        fn committed(&self) -> String {
-            run(self.path(), &["add", "-A"]);
-            run(
-                self.path(),
-                &[
-                    "commit",
-                    "--allow-empty",
-                    "-m",
-                    "docs: the roadmap as it stands",
-                ],
-            );
-
-            run(self.path(), &["rev-parse", "HEAD"]).trim().to_owned()
-        }
-
-        /// And the commit a named branch of it is at, which is what a reading off
-        /// that branch is read at.
-        fn commit_of(&self, branch: &str) -> String {
-            run(
-                self.path(),
-                &["rev-parse", "--verify", "--end-of-options", branch],
-            )
-            .trim()
-            .to_owned()
         }
 
         /// And which roadmaps this branch created since the base commit, which
@@ -4400,37 +3813,6 @@ Turns this askance clone into Verkstead.
         }
     }
 
-    /// The ordinary continuation: the stage after the one whose work has just
-    /// settled, read off the boxes the roadmap keeps.
-    #[test]
-    fn the_next_stage_is_the_lowest_numbered_unchecked_one() {
-        let repo = Repo::with(&[]);
-        repo.write("mvp", MVP);
-        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
-
-        let stage = only(
-            repo.next("mvp", "anything-else"),
-            "stage 03 is the one left",
-        );
-
-        assert_eq!(stage.roadmap, "mvp");
-        assert_eq!(stage.label, "03");
-        assert_eq!(stage.title, "Implementation");
-        assert_eq!(stage.brief_path, "docs/roadmaps/mvp/03-implementation.md");
-        assert_eq!(stage.brief, "# 03. Implementation\n");
-        assert_eq!(
-            stage.branch(),
-            "roadmaps/mvp/03-implementation",
-            "the branch is the brief's own name, under the roadmap it belongs to and the \
-             fixed component no roadmap's own branch can be called",
-        );
-        assert_eq!(
-            stage.former_branch(),
-            "mvp/03-implementation",
-            "and the shape it had before that component went in front of it",
-        );
-    }
-
     /// And the fallback, which is the number alone: a brief whose name is
     /// nothing but its number has no slug to put after it, and the number is the
     /// one thing every entry of every roadmap has.
@@ -4470,43 +3852,6 @@ Turns this askance clone into Verkstead.
             None,
             "and the stage's own branch is not something standing in front of it",
         );
-    }
-
-    /// The fallback, which is what a roadmap the record knows nothing about is
-    /// read by: a stage's box is still open where it was worked before Verkstead
-    /// wrote a record, and what says so is the roadmap's annotation naming the
-    /// branch it was worked on.
-    ///
-    /// A Conversation that started stage 02 again here would be a run going round
-    /// in circles for ever, with nobody watching.
-    #[test]
-    fn the_stage_this_conversation_worked_is_not_the_one_to_start() {
-        let repo = Repo::with(&[]);
-        repo.write(
-            "mvp",
-            "# MVP roadmap\n\n\
-             - [x] 01: Workbench — [brief](01-workbench.md)\n\
-             - [ ] 02: Grilling — [brief](02-grilling.md) *(in progress: `grilling`)*\n\
-             - [ ] 03: Implementation — [brief](03-implementation.md)\n",
-        );
-        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
-        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
-
-        let stage = only(
-            repo.next("mvp", "grilling"),
-            "the stage after this Conversation's own is the one to start",
-        );
-
-        assert_eq!(stage.label, "03");
-
-        // And to anybody else it is the stage it says it is: the annotation is
-        // about whose it is, not about whether it is done.
-        let stage = only(
-            repo.next("mvp", "some-other-branch"),
-            "stage 02 is still unchecked",
-        );
-
-        assert_eq!(stage.label, "02");
     }
 
     /// A roadmap with three stages in it and none of them ticked, which is what a
@@ -4577,223 +3922,6 @@ Turns this askance clone into Verkstead.
         )
     }
 
-    /// A stage that settled is a stage done, whatever the box on the branch being
-    /// read says.
-    ///
-    /// This is the whole point of the record. Stage 01 ticked its own box in its
-    /// own finish commit, on its own branch; the branch this reading is off was cut
-    /// before that landed and holds a `ROADMAP.md` with nothing ticked in it at
-    /// all. With the boxes alone the carry-on would start stage 01 a second time.
-    #[test]
-    fn a_settled_stage_is_done_however_its_box_reads_on_this_branch() {
-        let repo = Repo::with(&[]);
-        repo.write("mvp", UNTICKED);
-        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
-
-        let stage = only(
-            repo.next_with(
-                "mvp",
-                "anything-else",
-                &record([("mvp", "01", store::StageStanding::Settled)]),
-            ),
-            "stage 01 settled, so stage 02 is the one to start",
-        );
-
-        assert_eq!(stage.label, "02");
-    }
-
-    /// And a stage the record knows nothing about is done where its box is ticked:
-    /// worked by hand or by the old tools, and the boxes are all there is to go on.
-    ///
-    /// Both halves of the rule in one reading, which is what a roadmap carried on
-    /// from before this looks like: stage 01 ticked with no row, stage 02 settled
-    /// with no tick, and stage 03 the one left.
-    #[test]
-    fn a_stage_ticked_with_no_record_of_it_is_done_too() {
-        let repo = Repo::with(&[]);
-        repo.write(
-            "mvp",
-            "# MVP roadmap\n\n\
-             - [x] 01: Workbench — [brief](01-workbench.md)\n\
-             - [ ] 02: Grilling — [brief](02-grilling.md)\n\
-             - [ ] 03: Implementation — [brief](03-implementation.md)\n",
-        );
-        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
-
-        let stage = only(
-            repo.next_with(
-                "mvp",
-                "anything-else",
-                &record([("mvp", "02", store::StageStanding::Settled)]),
-            ),
-            "the box speaks for 01 and the record for 02, so stage 03 is the one left",
-        );
-
-        assert_eq!(stage.label, "03");
-    }
-
-    /// A stage the record says is in flight is neither done nor one to start,
-    /// however its box reads — and what stands on it is not started either.
-    ///
-    /// Which is newly load-bearing, and load-bearing in the other direction from
-    /// the box: a stage ticks its own box in its finish commit, before its pull
-    /// request has even opened, so a ticked box says *its tasks are done* rather
-    /// than *it settled*. Both readings of the box are here — 01 ticked and 02 not
-    /// — and neither is started.
-    ///
-    /// Nor is 03, which used to be: the reading walked past a stage in flight and
-    /// started whatever came after it. In an undeclared roadmap 03 stands on 02, so
-    /// a stage somebody is on holds up what stands on it rather than being stepped
-    /// over.
-    #[test]
-    fn a_stage_the_record_says_is_in_flight_is_not_started_however_its_box_reads() {
-        let repo = Repo::with(&[]);
-        repo.write(
-            "mvp",
-            "# MVP roadmap\n\n\
-             - [x] 01: Workbench — [brief](01-workbench.md)\n\
-             - [ ] 02: Grilling — [brief](02-grilling.md)\n\
-             - [ ] 03: Implementation — [brief](03-implementation.md)\n",
-        );
-        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
-
-        let in_flight = record([
-            ("mvp", "01", store::StageStanding::InFlight),
-            ("mvp", "02", store::StageStanding::InFlight),
-        ]);
-
-        assert_eq!(
-            repo.next_with("mvp", "anything-else", &in_flight),
-            Next::InFlight {
-                roadmap: "mvp".to_owned()
-            },
-            "the two stages somebody is on are not stages to start, and the stage that \
-             stands on one of them is not either",
-        );
-
-        // And in flight is not done either: a roadmap whose only unstarted stage is
-        // the one this reading just refused has nothing to start, which is not the
-        // same statement as the roadmap being complete.
-        repo.write(
-            "mvp",
-            "# MVP roadmap\n\n\
-             - [ ] 01: Workbench — [brief](01-workbench.md)\n",
-        );
-
-        assert_eq!(
-            repo.next_with("mvp", "anything-else", &in_flight),
-            Next::InFlight {
-                roadmap: "mvp".to_owned()
-            },
-        );
-    }
-
-    /// The stage a declaring roadmap carries on with is the one whose dependency
-    /// settled, rather than the lowest unticked box.
-    ///
-    /// This is the whole of the change, written as the roadmap that built it: 01
-    /// and 02 stand on nothing, 03 stands on 02 and 04 on both 01 and 03. With 02
-    /// settled and 01 still in flight, 03 is what starts — and the lowest unticked
-    /// box is 01, which is the answer this reading used to give.
-    #[test]
-    fn a_declared_roadmap_carries_on_with_the_stage_whose_dependency_settled() {
-        let repo = Repo::with(&[]);
-        repo.write("mvp", DECLARED);
-        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
-
-        let stage = only(
-            repo.next_with(
-                "mvp",
-                "roadmaps/mvp/02-grilling",
-                &record([
-                    ("mvp", "01", store::StageStanding::InFlight),
-                    ("mvp", "02", store::StageStanding::Settled),
-                ]),
-            ),
-            "stage 03 stands on 02 alone, and 02 has settled",
-        );
-
-        assert_eq!(stage.label, "03");
-    }
-
-    /// And a stage whose dependency is in flight is no stage to start, in a
-    /// declaring roadmap and in an undeclared one alike.
-    ///
-    /// Declared here — 04 stands on 01 and 03, and 01 is in flight — and undeclared
-    /// in [`a_stage_the_record_says_is_in_flight_is_not_started_however_its_box_reads`],
-    /// which is the same rule read off a roadmap that declares nothing.
-    #[test]
-    fn a_stage_whose_dependency_is_in_flight_is_not_started() {
-        let repo = Repo::with(&[]);
-        repo.write("mvp", DECLARED);
-        repo.brief("mvp", "04-wrap-up.md", "# 04. Wrap-up\n");
-
-        assert_eq!(
-            repo.next_with(
-                "mvp",
-                "roadmaps/mvp/03-implementation",
-                &record([
-                    ("mvp", "01", store::StageStanding::InFlight),
-                    ("mvp", "02", store::StageStanding::Settled),
-                    ("mvp", "03", store::StageStanding::Settled),
-                ]),
-            ),
-            Next::InFlight {
-                roadmap: "mvp".to_owned()
-            },
-            "04 stands on 01 as well as on 03, and 01 has not settled",
-        );
-    }
-
-    /// Nothing ready and nothing in flight is the roadmap complete, and nothing
-    /// ready with a stage still in flight is not: two answers rather than one.
-    ///
-    /// Which used to be one answer, and announcing a roadmap complete while three
-    /// of its stages were being worked is what that would have come to.
-    #[test]
-    fn nothing_ready_is_the_roadmap_complete_only_where_nothing_is_in_flight() {
-        let repo = Repo::with(&[]);
-        repo.write("mvp", DECLARED);
-
-        let settled = [
-            ("mvp", "01", store::StageStanding::Settled),
-            ("mvp", "02", store::StageStanding::Settled),
-            ("mvp", "03", store::StageStanding::Settled),
-        ];
-
-        assert_eq!(
-            repo.next_with(
-                "mvp",
-                "roadmaps/mvp/03-implementation",
-                &record(
-                    settled
-                        .into_iter()
-                        .chain([("mvp", "04", store::StageStanding::InFlight,)])
-                ),
-            ),
-            Next::InFlight {
-                roadmap: "mvp".to_owned()
-            },
-            "the one stage left is one somebody is on, so there is nothing to start",
-        );
-
-        assert_eq!(
-            repo.next_with(
-                "mvp",
-                "roadmaps/mvp/04-wrap-up",
-                &record(
-                    settled
-                        .into_iter()
-                        .chain([("mvp", "04", store::StageStanding::Settled,)])
-                ),
-            ),
-            Next::Complete {
-                roadmap: "mvp".to_owned()
-            },
-            "and with that one settled there is nothing left at all",
-        );
-    }
-
     /// Four stages standing on nothing, which is more roots than one roadmap has
     /// places: what the limit is read off.
     const FOUR_ROOTS: &str = "\
@@ -4804,557 +3932,6 @@ Turns this askance clone into Verkstead.
 - [ ] 03: Implementation — [brief](03-implementation.md) — no dependencies
 - [ ] 04: Wrap-up — [brief](04-wrap-up.md) — no dependencies
 ";
-
-    /// A repository holding that roadmap with a brief for every stage of it, so
-    /// that what a reading starts is decided by the places rather than by which
-    /// briefs somebody wrote.
-    fn four_roots() -> Repo {
-        let repo = Repo::with(&[]);
-        repo.write("mvp", FOUR_ROOTS);
-
-        for (label, slug) in [
-            ("01", "workbench"),
-            ("02", "grilling"),
-            ("03", "implementation"),
-            ("04", "wrap-up"),
-        ] {
-            repo.brief(
-                "mvp",
-                &format!("{label}-{slug}.md"),
-                &format!("# {label}. {slug}\n"),
-            );
-        }
-
-        repo
-    }
-
-    /// Every ready stage starts off the one settle, rather than the lowest of
-    /// them: 01 and 02 both stand on nothing, so a settle starts both.
-    ///
-    /// Which is the whole of the scheduler. What it replaces is the rule that one
-    /// settle started one stage, and a roadmap shaped like a fan worked through
-    /// its fan one prong at a time.
-    #[test]
-    fn a_settle_starts_every_ready_stage_of_a_declaring_roadmap() {
-        let repo = Repo::with(&[]);
-        repo.write("mvp", DECLARED);
-        repo.brief("mvp", "01-workbench.md", "# 01. Workbench\n");
-        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
-
-        let next = repo.next("mvp", "");
-
-        assert_eq!(
-            starting(&next),
-            ["01", "02"],
-            "both roots start, and 03 stands on 02 which has not settled",
-        );
-        assert!(
-            holding(next).is_empty(),
-            "with nothing held: there were places for both",
-        );
-    }
-
-    /// And an undeclared roadmap starts one stage still, which is what *in order*
-    /// comes to: every stage of it stands on the one before it, so there is never
-    /// a second ready stage for a second place to be given to.
-    #[test]
-    fn a_settle_on_an_undeclared_roadmap_still_starts_one_stage() {
-        let repo = Repo::with(&[]);
-        repo.write("mvp", UNTICKED);
-        repo.brief("mvp", "01-workbench.md", "# 01. Workbench\n");
-        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
-
-        let next = repo.next("mvp", "");
-
-        assert_eq!(starting(&next), ["01"]);
-        assert!(holding(next).is_empty());
-    }
-
-    /// Three of one roadmap at once, and the fourth ready stage waits for a place
-    /// — and is told it is waiting, so that a roadmap which has gone quiet says
-    /// why rather than looking like one the scheduler forgot.
-    ///
-    /// The lowest-numbered ready stages are the ones that start: the roadmap's
-    /// order is still the roadmap's own, and it is what decides between stages
-    /// that are otherwise alike.
-    #[test]
-    fn a_ready_stage_beyond_the_roadmaps_places_waits_and_says_so() {
-        let repo = four_roots();
-
-        let next = repo.next("mvp", "");
-
-        assert_eq!(
-            starting(&next),
-            ["01", "02", "03"],
-            "three of one roadmap at once, lowest first",
-        );
-
-        let held = holding(next);
-
-        assert_eq!(held.len(), 1, "and the fourth waits: {held:?}");
-        assert!(
-            held[0].contains("04") && held[0].contains("waiting for a place"),
-            "which stage, and what it is waiting for: {held:?}",
-        );
-    }
-
-    /// A place is taken by every stage the record has in flight, whatever that
-    /// stage is doing: one in flight is one fewer place for this settle to give.
-    ///
-    /// Which is what makes a stage blocked on a Question Set hold its place — the
-    /// human's choice, so that a roadmap they have stopped to answer does not fill
-    /// up with work behind them.
-    #[test]
-    fn a_stage_in_flight_takes_one_of_the_roadmaps_places() {
-        let repo = four_roots();
-
-        let next = repo.next_with(
-            "mvp",
-            "",
-            &record([("mvp", "01", store::StageStanding::InFlight)]),
-        );
-
-        assert_eq!(
-            starting(&next),
-            ["02", "03"],
-            "01 is somebody's, and it is holding one of the three places",
-        );
-
-        let held = holding(next);
-
-        assert_eq!(
-            held.len(),
-            1,
-            "so only one place was left to give: {held:?}"
-        );
-        assert!(held[0].contains("04"), "and 04 is what waits: {held:?}");
-    }
-
-    /// And a roadmap already running as many as it runs at once starts nothing at
-    /// all — with a sentence per ready stage saying so, rather than the silence a
-    /// roadmap with nothing ready keeps.
-    #[test]
-    fn a_roadmap_with_no_places_left_starts_nothing_and_says_why() {
-        let repo = four_roots();
-
-        let next = repo.next_with(
-            "mvp",
-            "",
-            &record([
-                ("mvp", "01", store::StageStanding::InFlight),
-                ("mvp", "02", store::StageStanding::InFlight),
-                ("mvp", "03", store::StageStanding::InFlight),
-            ]),
-        );
-
-        assert!(
-            starting(&next).is_empty(),
-            "three of this roadmap are already in flight: {next:?}",
-        );
-
-        let held = holding(next);
-
-        assert_eq!(held.len(), 1, "and 04 is the one ready stage: {held:?}");
-        assert!(
-            held[0].contains("04") && held[0].contains("waiting for a place"),
-            "told it is waiting rather than left to look forgotten: {held:?}",
-        );
-    }
-
-    /// How many places there are is the caller's to say, and what says it is the
-    /// `at_once.roadmap_stages` setting — see [`crate::settings::AtOnce`]. One
-    /// place runs a declared roadmap in order, whatever its declarations allow.
-    #[test]
-    fn a_roadmap_with_one_place_starts_one_stage_at_a_time() {
-        let repo = four_roots();
-
-        let next = repo.next_limited("mvp", "", &store::StageStandings::default(), 1);
-
-        assert_eq!(starting(&next), ["01"]);
-        assert_eq!(
-            holding(next).len(),
-            3,
-            "and the other three roots are told they are waiting",
-        );
-    }
-
-    /// And the one place a roadmap set to one has is held by the stage in flight
-    /// the same way three are: a ready stage does not take the place of a stage
-    /// somebody has been asked a question about.
-    ///
-    /// Which is the setting's own half of *a stage blocked on the human holds its
-    /// place*. What the stage is doing never comes into it — in flight by the
-    /// record is a place gone — so a roadmap run one at a time starts its next
-    /// stage when the one before it settles and not before.
-    #[test]
-    fn the_one_place_a_roadmap_set_to_one_has_is_held_by_a_stage_in_flight() {
-        let repo = four_roots();
-
-        let next = repo.next_limited(
-            "mvp",
-            "",
-            &record([("mvp", "01", store::StageStanding::InFlight)]),
-            1,
-        );
-
-        assert!(
-            starting(&next).is_empty(),
-            "01 is somebody's, and it is the only place there is: {next:?}",
-        );
-
-        let held = holding(next);
-
-        assert_eq!(held.len(), 3, "and the three roots left wait: {held:?}");
-        assert!(
-            held[0].contains("02") && held[0].contains("runs one stage at a time"),
-            "told what it is waiting for, in the number the setting says: {held:?}",
-        );
-    }
-
-    /// And a roadmap already over the number it is now allowed starts nothing,
-    /// rather than going backwards: the limit was lowered in Settings while three
-    /// of its stages were under way.
-    ///
-    /// Which is the reading's half of *a change stops nothing already running*.
-    /// Nothing here can stop a stage — it is asked what may start — so a limit
-    /// lowered under work in flight is three stages that carry on and no fourth,
-    /// and the ready stage is told it is waiting.
-    #[test]
-    fn a_roadmap_over_a_lowered_limit_starts_nothing_and_stops_nothing() {
-        let repo = four_roots();
-
-        let next = repo.next_limited(
-            "mvp",
-            "",
-            &record([
-                ("mvp", "01", store::StageStanding::InFlight),
-                ("mvp", "02", store::StageStanding::InFlight),
-                ("mvp", "03", store::StageStanding::InFlight),
-            ]),
-            1,
-        );
-
-        assert!(
-            starting(&next).is_empty(),
-            "three are under way and one place is allowed: {next:?}",
-        );
-
-        let held = holding(next);
-
-        assert_eq!(held.len(), 1, "and 04 is the one ready stage: {held:?}");
-        assert!(
-            held[0].contains("04") && held[0].contains("waiting for a place"),
-            "told it is waiting rather than left to look forgotten: {held:?}",
-        );
-    }
-
-    /// And the **second** limit in front of the first: a ready stage that fits
-    /// under its roadmap's places and not under the server's waits, and is told it
-    /// is the server it is waiting on.
-    ///
-    /// A sentence of its own rather than the roadmap's, because what it is waiting
-    /// for is a different thing — nothing about this roadmap will free the place —
-    /// and a roadmap gone quiet says which of the two it went quiet for. See
-    /// [`CONVERSATIONS_AT_ONCE`].
-    #[test]
-    fn a_ready_stage_beyond_the_servers_places_waits_and_says_so() {
-        let repo = four_roots();
-
-        // Four places of its own, so nothing here is the roadmap's limit, and two
-        // free across the server: the Conversations holding the other two belong
-        // to whatever they belong to.
-        let next = repo.next_on_a_server("mvp", &store::StageStandings::default(), 4, 2);
-
-        assert_eq!(
-            starting(&next),
-            ["01", "02"],
-            "two places on the server, and the lowest-numbered two take them",
-        );
-
-        let held = holding(next);
-
-        assert_eq!(held.len(), 2, "and the other two wait: {held:?}");
-
-        for (stage, said) in ["03", "04"].iter().zip(&held) {
-            assert!(
-                said.contains(stage) && said.contains("waiting for a place on the server"),
-                "which stage, and which of the two limits it is waiting on: {said:?}",
-            );
-            assert!(
-                !said.contains("This roadmap runs"),
-                "and not its roadmap's, which has places to spare: {said:?}",
-            );
-        }
-    }
-
-    /// A server with no place free starts nothing at all, however much room the
-    /// roadmap itself has — with a sentence per ready stage, rather than the
-    /// silence a roadmap with nothing ready keeps.
-    ///
-    /// Which is the one that has to be visible: a server whose places are all held
-    /// by stages waiting on answers starts nothing more until one is answered, and
-    /// that is a thing to say rather than a stall to look like.
-    #[test]
-    fn a_server_with_no_places_left_starts_nothing_and_says_why() {
-        let repo = four_roots();
-
-        let next = repo.next_on_a_server("mvp", &store::StageStandings::default(), 4, 0);
-
-        assert!(
-            starting(&next).is_empty(),
-            "every place on the server is taken: {next:?}",
-        );
-
-        let held = holding(next);
-
-        assert_eq!(held.len(), 4, "and all four ready stages wait: {held:?}");
-        assert!(
-            held.iter()
-                .all(|said| said.contains("waiting for a place on the server")),
-            "each told what it is waiting on: {held:?}",
-        );
-    }
-
-    /// And a server with places to spare leaves the roadmap's own limit to do the
-    /// holding, in the roadmap's own words.
-    ///
-    /// The two limits are both in force and the stricter one is what a stage is
-    /// told about. Three of one roadmap and four free on the server is the shape
-    /// every default machine is in.
-    #[test]
-    fn a_stage_held_by_its_roadmap_is_not_told_the_server_is_full() {
-        let repo = four_roots();
-
-        let next = repo.next_on_a_server(
-            "mvp",
-            &store::StageStandings::default(),
-            AT_ONCE,
-            CONVERSATIONS_AT_ONCE,
-        );
-
-        assert_eq!(
-            starting(&next),
-            ["01", "02", "03"],
-            "the roadmap's three, the server having four to give",
-        );
-
-        let held = holding(next);
-
-        assert_eq!(held.len(), 1, "and 04 is the one that waits: {held:?}");
-        assert!(
-            held[0].contains("This roadmap runs") && !held[0].contains("on the server"),
-            "told it is its roadmap's places that are taken: {held:?}",
-        );
-    }
-
-    /// And a place on the server is spent by a stage that **starts** and by
-    /// nothing else, the way a roadmap's is: a stage held for a brief nobody wrote
-    /// leaves its place to whatever is ready after it.
-    ///
-    /// Otherwise a server with two places free would run one stage and tell the
-    /// next one the machine was full while a place stood free.
-    #[test]
-    fn a_stage_with_no_brief_leaves_its_place_on_the_server_behind_it() {
-        let repo = Repo::with(&[]);
-        repo.write("mvp", FOUR_ROOTS);
-
-        // Every brief but 02's, which is the entry that halts itself.
-        for (label, slug) in [
-            ("01", "workbench"),
-            ("03", "implementation"),
-            ("04", "wrap-up"),
-        ] {
-            repo.brief(
-                "mvp",
-                &format!("{label}-{slug}.md"),
-                &format!("# {label}. {slug}\n"),
-            );
-        }
-
-        let next = repo.next_on_a_server("mvp", &store::StageStandings::default(), 4, 2);
-
-        assert_eq!(
-            starting(&next),
-            ["01", "03"],
-            "02 halted for its own brief and left its place to 03",
-        );
-
-        let held = holding(next);
-
-        assert_eq!(held.len(), 2, "and 02 and 04 are both held: {held:?}");
-        assert!(
-            held[0].contains("02") && held[0].contains("there's nothing there to read"),
-            "02 for the brief nobody wrote: {held:?}",
-        );
-        assert!(
-            held[1].contains("04") && held[1].contains("waiting for a place on the server"),
-            "and 04 for the place 03 took: {held:?}",
-        );
-    }
-
-    /// The one free place on the server goes to the **lowest-numbered ready
-    /// stage**, whatever else the roadmap is holding.
-    ///
-    /// Within a roadmap the order is the roadmap's own and it survives the second
-    /// limit: the ready stages come back lowest-numbered first and the place is
-    /// spent by the first of them, so nothing about how many places there are
-    /// reorders them. *Lowest-numbered ready* rather than lowest-numbered — 01 is
-    /// settled here and 02 is somebody's, so the roadmap's own order picks 03 out
-    /// of what is left.
-    ///
-    /// Nothing is stored about which of them was held first, and that is the
-    /// point: the answer is read afresh off the roadmap's own list every time,
-    /// so the order two stages were held back in cannot come to disagree with it.
-    #[test]
-    fn the_one_free_place_goes_to_the_lowest_numbered_ready_stage() {
-        let repo = four_roots();
-
-        // Four places of its own with one already spent, so the roadmap's limit
-        // is never what decides between 03 and 04 — and one place on the server.
-        let next = repo.next_on_a_server(
-            "mvp",
-            &record([
-                ("mvp", "01", store::StageStanding::Settled),
-                ("mvp", "02", store::StageStanding::InFlight),
-            ]),
-            4,
-            1,
-        );
-
-        assert_eq!(
-            starting(&next),
-            ["03"],
-            "the lowest-numbered stage that is ready takes the place",
-        );
-
-        let held = holding(next);
-
-        assert_eq!(held.len(), 1, "and 04 is the one that waits: {held:?}");
-        assert!(
-            held[0].contains("04") && held[0].contains("waiting for a place on the server"),
-            "told which place it is waiting for: {held:?}",
-        );
-    }
-
-    /// A roadmap **already at its own limit** spends no place on the server,
-    /// however many are free: it starts nothing, so it takes nothing, and the
-    /// place is still there for the roadmap the look reads after it.
-    ///
-    /// The two limits are both in force and the roadmap's is the stricter one
-    /// here. A place is spent by a stage that starts and by nothing else — see
-    /// [`crate::places`], where each roadmap's reading counts the places itself
-    /// for exactly this reason — so a roadmap passed over leaves the place behind
-    /// it rather than standing on it.
-    #[test]
-    fn a_roadmap_at_its_own_limit_spends_no_place_on_the_server() {
-        let repo = four_roots();
-
-        // Three of it in flight against its limit of three, and a place free on
-        // the server.
-        let next = repo.next_on_a_server(
-            "mvp",
-            &record([
-                ("mvp", "01", store::StageStanding::InFlight),
-                ("mvp", "02", store::StageStanding::InFlight),
-                ("mvp", "03", store::StageStanding::InFlight),
-            ]),
-            AT_ONCE,
-            1,
-        );
-
-        assert!(
-            starting(&next).is_empty(),
-            "its own three places are taken, so nothing of it starts: {next:?}",
-        );
-
-        let held = waits_on(next);
-
-        assert_eq!(held.len(), 1, "and 04 is the one ready stage: {held:?}");
-        assert!(
-            matches!(&held[0], Held::Roadmap(said) if said.contains("04")
-                && said.contains("This roadmap runs")
-                && !said.contains("on the server")),
-            "waiting on its own roadmap rather than on the machine: {held:?}",
-        );
-    }
-
-    /// And what each held stage is waiting on comes back beside the sentence,
-    /// which is what a **look** tells them apart by — see
-    /// [`crate::continuing::Brought`].
-    ///
-    /// Two of the three in one reading, which is as many as one can hold: 02's
-    /// brief is missing, so it halts for itself and leaves its place; 01 and 03
-    /// take the two places the server has; and 04 waits on the server. The third
-    /// is the roadmap's own, and a reading holds either that one or the server's
-    /// — whichever of the two limits bites first — never both. See
-    /// [`a_roadmap_at_its_own_limit_spends_no_place_on_the_server`] for it.
-    ///
-    /// Which of the two a stage is waiting on is what a look decides by, so it
-    /// cannot be a matter of reading the sentence back.
-    #[test]
-    fn a_held_stage_comes_back_under_what_it_is_waiting_on() {
-        let repo = Repo::with(&[]);
-        repo.write("mvp", FOUR_ROOTS);
-
-        // Every brief but 02's, which is the entry that halts itself.
-        for (label, slug) in [
-            ("01", "workbench"),
-            ("03", "implementation"),
-            ("04", "wrap-up"),
-        ] {
-            repo.brief(
-                "mvp",
-                &format!("{label}-{slug}.md"),
-                &format!("# {label}. {slug}\n"),
-            );
-        }
-
-        let held = waits_on(repo.next_on_a_server("mvp", &store::StageStandings::default(), 4, 2));
-
-        assert!(
-            matches!(&held[0], Held::Halted(said) if said.contains("02")),
-            "02 halted for the brief nobody wrote, which no place coming free would fix: \
-             {held:?}",
-        );
-        assert!(
-            matches!(&held[1], Held::Server(said) if said.contains("04")),
-            "and 04 waiting on the server, 01 and 03 having taken its two places: {held:?}",
-        );
-        assert_eq!(held.len(), 2, "and nothing else was held: {held:?}");
-    }
-
-    /// A stage that halts holds up only the stages that stand on it: 04 stands on
-    /// 01, which is in flight, and 03 stands on 02, which has settled.
-    ///
-    /// The scheduler's half of a halt in the middle. What a halted stage is — one
-    /// blocked on a Question Set, one waiting to join the chain — never comes into
-    /// it: it is in flight by the record, so what stands on it waits and what
-    /// stands beside it does not.
-    #[test]
-    fn a_stage_in_flight_holds_up_its_own_dependents_and_no_others() {
-        let repo = Repo::with(&[]);
-        repo.write("mvp", DECLARED);
-        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
-
-        let next = repo.next_with(
-            "mvp",
-            "",
-            &record([
-                ("mvp", "01", store::StageStanding::InFlight),
-                ("mvp", "02", store::StageStanding::Settled),
-            ]),
-        );
-
-        assert_eq!(
-            starting(&next),
-            ["03"],
-            "02's dependent starts, and 04 stands on 01 as well as on 03",
-        );
-        assert!(
-            holding(next).is_empty(),
-            "04 is not ready rather than held: nothing it stands on has settled",
-        );
-    }
 
     /// The ready stages come back lowest number first, and a declaring roadmap can
     /// have several of them: 01 and 02 stand on nothing, so both may start.
@@ -5500,644 +4077,6 @@ Turns this askance clone into Verkstead.
         );
     }
 
-    /// A stage the record says was abandoned is left to its box, and nothing here
-    /// starts it again on the strength of the record: what it left behind is a
-    /// branch by the stage's name, and that is what refuses it where a stage is
-    /// started.
-    #[test]
-    fn an_abandoned_stage_is_left_to_what_its_box_says() {
-        let repo = Repo::with(&[]);
-        repo.write("mvp", UNTICKED);
-        repo.brief("mvp", "01-workbench.md", "# 01. Workbench\n");
-        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
-
-        let abandoned = record([("mvp", "01", store::StageStanding::Abandoned)]);
-
-        let stage = only(
-            repo.next_with("mvp", "anything-else", &abandoned),
-            "an abandoned stage is not a settled one, so its unticked box stands",
-        );
-
-        assert_eq!(
-            stage.label, "01",
-            "the stage is offered and the branch it left behind is what refuses it",
-        );
-
-        // And where somebody ticked it off by hand, the box is what there is to go
-        // on: abandoned says nothing about whether the work got done.
-        repo.write(
-            "mvp",
-            "# MVP roadmap\n\n\
-             - [x] 01: Workbench — [brief](01-workbench.md)\n\
-             - [ ] 02: Grilling — [brief](02-grilling.md)\n",
-        );
-
-        let stage = only(
-            repo.next_with("mvp", "anything-else", &abandoned),
-            "stage 02 is the one left",
-        );
-
-        assert_eq!(stage.label, "02");
-    }
-
-    /// The whole of an in-order roadmap, which is every roadmap until stages are
-    /// worked side by side: the stage whose settling brought this reading about is
-    /// skipped by its own row, and the stage after it starts.
-    ///
-    /// Its box is unticked on this branch twice over — the tick rode in its own
-    /// finish commit on its own branch, and this reading is off the branch of the
-    /// stage before it — and the annotation is the roadmap saying whose it is.
-    #[test]
-    fn a_roadmap_run_in_order_carries_on_from_the_stage_that_settled() {
-        let repo = Repo::with(&[]);
-        repo.write(
-            "mvp",
-            "# MVP roadmap\n\n\
-             - [x] 01: Workbench — [brief](01-workbench.md)\n\
-             - [ ] 02: Grilling — [brief](02-grilling.md) \
-             *(in progress: `roadmaps/mvp/02-grilling`)*\n\
-             - [ ] 03: Implementation — [brief](03-implementation.md)\n",
-        );
-        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
-
-        let stage = only(
-            repo.next_with(
-                "mvp",
-                "roadmaps/mvp/02-grilling",
-                &record([
-                    ("mvp", "01", store::StageStanding::Settled),
-                    ("mvp", "02", store::StageStanding::Settled),
-                ]),
-            ),
-            "stage 02 has settled, so stage 03 is the one to start",
-        );
-
-        assert_eq!(stage.label, "03");
-    }
-
-    /// And a stage whose row holds a roadmap and no label is skipped by its own
-    /// annotation, which is the only thing that keeps it from being offered its own
-    /// stage back.
-    ///
-    /// Every stage started between ADR-0017 landing and the label being written
-    /// down is one of those: the record has rows for the stages around it and
-    /// nothing for this one, so the annotation is what says whose stage 02 is.
-    #[test]
-    fn a_stage_the_record_holds_no_label_for_is_still_skipped_by_its_annotation() {
-        let repo = Repo::with(&[]);
-        repo.write(
-            "mvp",
-            "# MVP roadmap\n\n\
-             - [ ] 01: Workbench — [brief](01-workbench.md)\n\
-             - [ ] 02: Grilling — [brief](02-grilling.md) \
-             *(in progress: `roadmaps/mvp/02-grilling`)*\n\
-             - [ ] 03: Implementation — [brief](03-implementation.md)\n",
-        );
-        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
-
-        let stage = only(
-            repo.next_with(
-                "mvp",
-                "roadmaps/mvp/02-grilling",
-                &record([("mvp", "01", store::StageStanding::Settled)]),
-            ),
-            "the stage after this Conversation's own is the one to start",
-        );
-
-        assert_eq!(stage.label, "03");
-    }
-
-    /// Two Repos may hold roadmaps of one name, and one Repo's stages answer for
-    /// nothing in another: the record handed to this reading is the Repo's own.
-    ///
-    /// Written as the thing the reading cannot do rather than as a fact about the
-    /// rows — what keeps the two apart is that the record is read per Repo, which
-    /// is `store::stage_standings`' own rule and is asserted where it is read.
-    #[test]
-    fn what_another_roadmap_of_this_repo_settled_says_nothing_about_this_one() {
-        let repo = Repo::with(&[]);
-        repo.write("mvp", UNTICKED);
-        repo.brief("mvp", "01-workbench.md", "# 01. Workbench\n");
-
-        let stage = only(
-            repo.next_with(
-                "mvp",
-                "anything-else",
-                &record([("public-release", "01", store::StageStanding::Settled)]),
-            ),
-            "nothing has settled in this roadmap, whatever another one has",
-        );
-
-        assert_eq!(stage.label, "01");
-    }
-
-    /// And a declaration on the line does not hide it, whichever way round the
-    /// two were written. They share one tail: the annotation is matched by the
-    /// branch in backticks and a declaration holds none, which is what keeps the
-    /// stage in flight findable beside one.
-    #[test]
-    fn a_declaration_on_the_line_does_not_hide_the_stage_in_flight() {
-        for tail in [
-            "— after 01 *(in progress: `grilling`)*",
-            "*(in progress: `grilling`)* — after 01",
-        ] {
-            let repo = Repo::with(&[]);
-            repo.write(
-                "mvp",
-                &format!(
-                    "# MVP roadmap\n\n\
-                     - [x] 01: Workbench — [brief](01-workbench.md) — no dependencies\n\
-                     - [ ] 02: Grilling — [brief](02-grilling.md) {tail}\n\
-                     - [ ] 03: Implementation — [brief](03-implementation.md) — after 02\n"
-                ),
-            );
-            repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
-            repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
-
-            let stage = only(
-                repo.next("mvp", "grilling"),
-                &format!("the stage after this Conversation's own is the one to start: {tail:?}"),
-            );
-
-            assert_eq!(stage.label, "03", "{tail:?}");
-        }
-    }
-
-    /// And a declaration is not mistaken for an annotation: a roadmap every line
-    /// of which declares is still a roadmap with no stage in flight, so the
-    /// lowest unticked box is the one to start.
-    #[test]
-    fn a_declaration_is_nobodys_stage_in_flight() {
-        let repo = Repo::with(&[]);
-        repo.write(
-            "mvp",
-            "# MVP roadmap\n\n\
-             - [x] 01: Workbench — [brief](01-workbench.md) — no dependencies\n\
-             - [ ] 02: Grilling — [brief](02-grilling.md) — after 01 — on windows\n",
-        );
-        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
-
-        let stage = only(
-            repo.next("mvp", "grilling"),
-            "stage 02 is unticked and nobody's",
-        );
-
-        assert_eq!(stage.label, "02");
-        assert_eq!(
-            stage.platform,
-            Some(crate::platform::Platform::Windows),
-            "and the stage carries the platform its line declares, which places it",
-        );
-    }
-
-    /// A line that declares no platform is a stage that wants none.
-    #[test]
-    fn a_stage_declaring_no_platform_wants_none() {
-        let repo = Repo::with(&[]);
-        repo.write(
-            "mvp",
-            "# MVP roadmap\n\n\
-             - [x] 01: Workbench — [brief](01-workbench.md) — no dependencies\n\
-             - [ ] 02: Grilling — [brief](02-grilling.md) — after 01\n",
-        );
-        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
-
-        let stage = only(repo.next("mvp", "grilling"), "stage 02 is the one left");
-
-        assert_eq!(stage.platform, None);
-    }
-
-    /// And a roadmap that declares nothing places nothing, whatever its prose
-    /// says: a tail written before any of this is not a platform somebody asked
-    /// for, at a settle's start or at a press's.
-    #[test]
-    fn an_undeclared_roadmaps_prose_places_no_stage() {
-        let repo = Repo::with(&[]);
-        repo.write(
-            "mvp",
-            "# MVP roadmap\n\n\
-             - [x] 01: Workbench — [brief](01-workbench.md)\n\
-             - [ ] 02: Installers — [brief](02-installers.md) — focus on windows installers\n",
-        );
-        repo.brief("mvp", "02-installers.md", "# 02. Installers\n");
-        repo.commit();
-
-        let stage = only(repo.next("mvp", "grilling"), "stage 02 is the one left");
-
-        assert_eq!(stage.platform, None, "a settle's start places nothing");
-
-        let Startable::Stage(abandoned) = repo.startable("mvp") else {
-            panic!(
-                "the press has a stage to start: {:?}",
-                repo.startable("mvp")
-            );
-        };
-
-        assert_eq!(abandoned.stage.label, "02");
-        assert_eq!(abandoned.stage.platform, None, "and nor does a press's");
-    }
-
-    /// The end of a roadmap, which is where the whole pipeline stops of its own
-    /// accord: nothing is started, and there is nothing for the human to do.
-    #[test]
-    fn a_roadmap_with_every_stage_checked_has_nothing_to_start() {
-        let repo = Repo::with(&[]);
-        repo.write(
-            "mvp",
-            "# MVP roadmap\n\n- [x] 01: Workbench — [brief](01-workbench.md)\n",
-        );
-
-        assert_eq!(
-            repo.next("mvp", "anything-else"),
-            Next::Complete {
-                roadmap: "mvp".to_owned()
-            },
-        );
-    }
-
-    /// Including the last stage of one whose box nothing ticked, which is what the
-    /// annotation is left saying where there is no record to go on.
-    #[test]
-    fn the_last_stage_finishing_is_the_roadmap_complete() {
-        let repo = Repo::with(&[]);
-        repo.write(
-            "mvp",
-            "# MVP roadmap\n\n\
-             - [x] 01: Workbench — [brief](01-workbench.md)\n\
-             - [ ] 02: Grilling — [brief](02-grilling.md) *(in progress: `grilling`)*\n",
-        );
-
-        assert_eq!(
-            repo.next("mvp", "grilling"),
-            Next::Complete {
-                roadmap: "mvp".to_owned()
-            },
-        );
-    }
-
-    /// And the whole point of naming the roadmap: a roadmap running out is the
-    /// roadmap complete, whatever else is in the Worktree with work left in it.
-    ///
-    /// This is the bug, written as a test. The reading used to walk every
-    /// roadmap the branch had touched in name order, so a stage of
-    /// `missing-roles` whose own roadmap ran out started stage 14 of
-    /// `brain-chat-parity` — a different effort, which nobody had selected.
-    /// Adopting that one is the human's act, from *Continue a roadmap*.
-    #[test]
-    fn a_named_roadmap_running_out_does_not_carry_on_into_another() {
-        let repo = Repo::with(&[]);
-
-        // Sorts first, and is somebody else's effort with work left in it.
-        repo.write(
-            "brain-chat-parity",
-            "# Brain chat parity roadmap\n\n\
-             - [x] 13: The agent chat — [brief](13-agent-chat.md)\n\
-             - [ ] 14: The widget — [brief](14-brain-chat-widget.md)\n",
-        );
-        repo.brief("brain-chat-parity", "14-brain-chat-widget.md", "# 14.\n");
-
-        // And this Conversation's own, down to its last stage — the one in
-        // flight on this branch, whose box nothing is ever going to tick.
-        repo.write(
-            "missing-roles",
-            "# Missing roles roadmap\n\n\
-             - [x] 01: Project config — [brief](01-project-config.md)\n\
-             - [ ] 02: Grant filters — [brief](02-grant-filters.md) \
-             *(in progress: `missing-roles/02-grant-filters`)*\n",
-        );
-
-        assert_eq!(
-            repo.next("missing-roles", "missing-roles/02-grant-filters"),
-            Next::Complete {
-                roadmap: "missing-roles".to_owned()
-            },
-            "the roadmap the record names is the only one read",
-        );
-    }
-
-    /// And a stage of one roadmap carries on into that roadmap even where the
-    /// branch amended another in passing — retiring a deferral, correcting a
-    /// decision a later effort recorded.
-    #[test]
-    fn a_roadmap_this_branch_only_amended_is_not_the_one_carried_on() {
-        let repo = Repo::with(&[]);
-
-        repo.write(
-            "brain-chat-parity",
-            "# Brain chat parity roadmap\n\n\
-             - [ ] 14: The widget — [brief](14-brain-chat-widget.md)\n",
-        );
-        repo.brief("brain-chat-parity", "14-brain-chat-widget.md", "# 14.\n");
-
-        repo.write(
-            "missing-roles",
-            "# Missing roles roadmap\n\n\
-             - [x] 01: Project config — [brief](01-project-config.md)\n\
-             - [ ] 02: Grant filters — [brief](02-grant-filters.md) \
-             *(in progress: `missing-roles/02-grant-filters`)*\n\
-             - [ ] 03: Workflow permissions — [brief](03-workflow-permissions.md)\n",
-        );
-        repo.brief("missing-roles", "03-workflow-permissions.md", "# 03.\n");
-
-        let stage = only(
-            repo.next("missing-roles", "missing-roles/02-grant-filters"),
-            "stage 03 of this Conversation's own roadmap is the one to start",
-        );
-
-        assert_eq!(stage.roadmap, "missing-roles");
-        assert_eq!(stage.label, "03");
-    }
-
-    /// A roadmap the record names and the branch does not hold is said out loud
-    /// rather than guessed past — renamed, deleted, or never on this branch at
-    /// all. The same treatment a stage naming a brief nobody wrote gets.
-    #[test]
-    fn a_recorded_roadmap_that_is_not_there_is_not_startable() {
-        let repo = Repo::with(&[]);
-        repo.write("mvp", MVP);
-
-        let Next::Unstartable { why } = repo.next("public-release", "anything-else") else {
-            panic!("there is no public-release roadmap on this branch");
-        };
-
-        assert!(
-            why.contains("public-release") && why.contains("ROADMAP.md"),
-            "which roadmap, and what was looked for: {why:?}",
-        );
-    }
-
-    /// And one whose index plans nothing, which is a directory rather than a
-    /// roadmap however it got that way.
-    #[test]
-    fn a_recorded_roadmap_with_no_stages_in_it_is_not_startable() {
-        let repo = Repo::with(&[]);
-        repo.write("mvp", "# MVP roadmap\n\nNothing planned yet.\n");
-
-        let Next::Unstartable { why } = repo.next("mvp", "anything-else") else {
-            panic!("an index with no entries has no stage to start");
-        };
-
-        assert!(
-            why.contains("mvp") && why.contains("no stages"),
-            "which roadmap, and what is wrong with it: {why:?}",
-        );
-    }
-
-    /// A stage that cannot be started is said rather than skipped: starting the
-    /// one after it would be Verkstead deciding to leave work out.
-    ///
-    /// Held rather than refusing the whole reading, which is what it used to be:
-    /// a brief nobody wrote halts the one stage that names it, and the roadmap's
-    /// other ready stages start anyway. Here there are none, so the held sentence
-    /// is the whole of the answer.
-    #[test]
-    fn a_stage_whose_brief_is_missing_is_not_startable() {
-        let repo = Repo::with(&[]);
-        repo.write("mvp", MVP);
-
-        let next = repo.next("mvp", "anything-else");
-
-        assert!(
-            starting(&next).is_empty(),
-            "there is no 03-implementation.md to start stage 03 from: {next:?}",
-        );
-
-        let held = holding(next);
-
-        assert_eq!(held.len(), 1, "one stage was ready: {held:?}");
-        assert!(
-            held[0].contains("03") && held[0].contains("03-implementation.md"),
-            "which stage and which brief: {held:?}",
-        );
-    }
-
-    /// And a stage naming no brief at all is said rather than read: at a commit,
-    /// the roadmap's own directory is a path git will happily hand back a listing
-    /// of, so the entry with nothing in its link is stopped by name.
-    #[test]
-    fn a_stage_naming_no_brief_is_not_startable() {
-        let repo = Repo::with(&[]);
-        repo.write("mvp", "# MVP roadmap\n\n- [ ] 03: Implementation\n");
-
-        let next = repo.next("mvp", "anything-else");
-
-        assert!(
-            starting(&next).is_empty(),
-            "stage 03 names no brief to be primed from: {next:?}",
-        );
-
-        let held = holding(next);
-
-        assert_eq!(held.len(), 1, "one stage was ready: {held:?}");
-        assert!(
-            held[0].contains("03") && held[0].contains("no brief"),
-            "which stage, and what its line is missing: {held:?}",
-        );
-    }
-
-    /// And a brief nobody wrote stops the stage that names it and no other: its
-    /// siblings start, which is the whole of *each start is its own act*.
-    ///
-    /// The one place a reading can halt a stage by itself — everything else that
-    /// stops one is the making of a branch and a worktree, which is the carry-on's
-    /// — so it is the one place this rule is worth reading off a reading.
-    #[test]
-    fn a_missing_brief_holds_its_own_stage_and_starts_its_siblings() {
-        let repo = Repo::with(&[]);
-        repo.write("mvp", DECLARED);
-        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
-
-        let next = repo.next("mvp", "");
-
-        assert_eq!(
-            starting(&next),
-            ["02"],
-            "01 and 02 both stand on nothing, and only 02 has a brief to be primed from",
-        );
-
-        let held = holding(next);
-
-        assert_eq!(held.len(), 1, "and 01 is the one held: {held:?}");
-        assert!(
-            held[0].contains("01") && held[0].contains("01-workbench.md"),
-            "with the brief nobody wrote named: {held:?}",
-        );
-    }
-
-    /// And the place that stage would have had goes to the ready stage behind it:
-    /// a place is spent by a stage that starts and by nothing else.
-    ///
-    /// Four roots and three places, with the brief of the lowest one nobody wrote.
-    /// Counting how far down the ready stages the reading had walked would run two
-    /// of the three it is allowed and tell the fourth its places were taken — which
-    /// is a roadmap quietly running short of what it was set to, and a sentence that
-    /// is not true.
-    #[test]
-    fn a_stage_held_for_want_of_a_brief_leaves_its_place_to_the_next() {
-        let repo = Repo::with(&[]);
-        repo.write("mvp", FOUR_ROOTS);
-
-        for (label, slug) in [
-            ("02", "grilling"),
-            ("03", "implementation"),
-            ("04", "wrap-up"),
-        ] {
-            repo.brief(
-                "mvp",
-                &format!("{label}-{slug}.md"),
-                &format!("# {label}. {slug}\n"),
-            );
-        }
-
-        let next = repo.next("mvp", "");
-
-        assert_eq!(
-            starting(&next),
-            ["02", "03", "04"],
-            "three started, which is the three places the roadmap has",
-        );
-
-        let held = holding(next);
-
-        assert_eq!(held.len(), 1, "and 01 is the one held: {held:?}");
-        assert!(
-            held[0].contains("01") && held[0].contains("01-workbench.md"),
-            "for the brief nobody wrote rather than for a place: {held:?}",
-        );
-        assert!(
-            !held[0].contains("waiting for a place"),
-            "nothing here waited for a place: {held:?}",
-        );
-    }
-
-    /// A roadmap as the branch that has just settled holds it: stage 03 stands on
-    /// 02, which is the stage somebody is still on.
-    const BEFORE_THE_EDIT: &str = "\
-# Rate limiting roadmap
-
-- [ ] 01: The counter — [brief](01-the-counter.md) — no dependencies
-- [ ] 02: The window — [brief](02-the-window.md) — no dependencies
-- [ ] 03: The limiter — [brief](03-the-limiter.md) — after 02
-";
-
-    /// And the same roadmap with one dependency edited by hand: stage 03 stands on
-    /// 01, which has settled. One line different, and a different stage starts.
-    const AFTER_THE_EDIT: &str = "\
-# Rate limiting roadmap
-
-- [ ] 01: The counter — [brief](01-the-counter.md) — no dependencies
-- [ ] 02: The window — [brief](02-the-window.md) — no dependencies
-- [ ] 03: The limiter — [brief](03-the-limiter.md) — after 01
-";
-
-    /// Where a roadmap being driven is read: the branch at the top of its chain,
-    /// which is where the newest of its declarations are.
-    ///
-    /// A dependency edited by hand and committed there is what decides what starts
-    /// next. The settling stage's own branch was cut before the edit and says
-    /// nothing may start; the edit says stage 03 may, and the edit is the reading.
-    #[test]
-    fn a_dependency_edited_at_the_top_of_the_chain_decides_what_starts() {
-        let repo = Repo::with(&[]);
-        repo.write("rate-limiting", BEFORE_THE_EDIT);
-        repo.brief("rate-limiting", "03-the-limiter.md", "# 03. The limiter\n");
-
-        // What the stage that has just settled holds, and what it settled first.
-        let cut_before = repo.committed();
-
-        repo.write("rate-limiting", AFTER_THE_EDIT);
-        repo.commit_on(
-            "roadmaps/rate-limiting/02-the-window",
-            "docs: 03 stands on 01 after all",
-        );
-
-        let record = record([
-            ("rate-limiting", "01", store::StageStanding::Settled),
-            ("rate-limiting", "02", store::StageStanding::InFlight),
-        ]);
-
-        let top = "roadmaps/rate-limiting/02-the-window";
-
-        let stage = only(
-            repo.next_at(
-                top,
-                &repo.commit_of(top),
-                "rate-limiting",
-                "roadmaps/rate-limiting/01-the-counter",
-                &record,
-            ),
-            "the edit at the top of the chain has 03 standing on the stage that settled",
-        );
-
-        assert_eq!(stage.label, "03");
-
-        assert_eq!(
-            repo.next_at(
-                "main",
-                &cut_before,
-                "rate-limiting",
-                "roadmaps/rate-limiting/01-the-counter",
-                &record,
-            ),
-            Next::InFlight {
-                roadmap: "rate-limiting".to_owned()
-            },
-            "and the branch that settled was cut before the edit, where 03 stands on the \
-             stage somebody is still on",
-        );
-    }
-
-    /// And a stage *added* by hand at the top of the chain starts, brief and all —
-    /// the whole reading being at that one commit, so an entry the settling
-    /// branch has never seen is started from a brief it has never held.
-    #[test]
-    fn a_stage_added_at_the_top_of_the_chain_is_started_from_there() {
-        let repo = Repo::with(&[]);
-        repo.write(
-            "rate-limiting",
-            "# Rate limiting roadmap\n\n\
-             - [ ] 01: The counter — [brief](01-the-counter.md) — no dependencies\n",
-        );
-
-        let cut_before = repo.committed();
-
-        // The stage somebody added while this one was working, brief beside it.
-        repo.write(
-            "rate-limiting",
-            "# Rate limiting roadmap\n\n\
-             - [ ] 01: The counter — [brief](01-the-counter.md) — no dependencies\n\
-             - [ ] 02: The window — [brief](02-the-window.md) — after 01\n",
-        );
-        repo.brief("rate-limiting", "02-the-window.md", "# 02. The window\n");
-        repo.commit_on(
-            "roadmaps/rate-limiting/01-the-counter",
-            "docs: a window to count in",
-        );
-
-        let record = record([("rate-limiting", "01", store::StageStanding::Settled)]);
-
-        let top = "roadmaps/rate-limiting/01-the-counter";
-
-        let stage = only(
-            repo.next_at(top, &repo.commit_of(top), "rate-limiting", top, &record),
-            "stage 02 was added at the top of the chain and stands on the one that settled",
-        );
-
-        assert_eq!(stage.label, "02");
-        assert_eq!(
-            stage.brief, "# 02. The window\n",
-            "and its brief is read at the same commit as the line that names it",
-        );
-
-        assert_eq!(
-            repo.next_at("main", &cut_before, "rate-limiting", top, &record),
-            Next::Complete {
-                roadmap: "rate-limiting".to_owned()
-            },
-            "where the branch that settled would have called the roadmap finished",
-        );
-    }
-
     /// What says a roadmap Conversation chose a roadmap: its branch created one.
     ///
     /// Uncommitted first, which is what a session part-way through its work
@@ -6246,34 +4185,6 @@ Turns this askance clone into Verkstead.
         assert!(why.contains("01 stands on 02"), "{why}");
     }
 
-    /// Whether the repository records a way to stack a stage on its predecessor
-    /// — which is a fact about the repository, and the only part of stacking
-    /// Verkstead decides.
-    #[test]
-    fn a_repository_records_its_stacking_mechanism_under_its_review_process() {
-        let repo = Repo::with(&[]);
-
-        assert!(
-            !stacks(repo.path()),
-            "a repository with no git-workflow.md has recorded nothing",
-        );
-
-        repo.workflow("# Git workflow\n\n## Review process\n\n### Finish sequence\n\nPush it.\n");
-
-        assert!(
-            !stacks(repo.path()),
-            "and neither has one whose review process says nothing about stacking",
-        );
-
-        repo.workflow(
-            "# Git workflow\n\n## Review process\n\n\
-             ### Finish sequence\n\nPush it.\n\n\
-             ### Stacking roadmap stages\n\n`gh stack init <predecessor> <new>`\n",
-        );
-
-        assert!(stacks(repo.path()), "and this one has");
-    }
-
     /// And the same mechanism read the way adoption has to read it: out of a git
     /// directory at a commit, there being no Worktree anywhere in that path.
     ///
@@ -6301,19 +4212,6 @@ Turns this askance clone into Verkstead.
             stacks_at(repo.path(), &repo.tip()),
             "and committed, it is what the commit records",
         );
-    }
-
-    /// Under the review process rather than anywhere in the file: a repository
-    /// that mentions stacking in a note has not recorded a mechanism to follow.
-    #[test]
-    fn a_stacking_block_outside_the_review_process_is_not_the_mechanism() {
-        let repo = Repo::with(&[]);
-        repo.workflow(
-            "# Git workflow\n\n## Review process\n\n### Finish sequence\n\nPush it.\n\n\
-             ## Notes\n\n### Stacking roadmap stages\n\nWe gave up on these.\n",
-        );
-
-        assert!(!stacks(repo.path()));
     }
 
     /// A roadmap that already exists, with something left to do and nobody on
@@ -6719,33 +4617,6 @@ Turns this askance clone into Verkstead.
         );
     }
 
-    /// And the carry-on's reading of the same roadmap starts nothing, with the
-    /// judgement's sentence to leave on the Timeline.
-    ///
-    /// The same words at both ends of the refusal, because they are the one
-    /// judgement's: a roadmap the human meets refused at the press and refused
-    /// again on a Timeline should read as one fault rather than two.
-    #[test]
-    fn a_roadmap_that_declares_badly_starts_nothing_when_a_stage_settles() {
-        let repo = Repo::with(&[]);
-        repo.write(
-            "mvp",
-            "# MVP roadmap\n\n\
-             - [x] 01: Workbench — [brief](01-workbench.md) — no dependencies\n\
-             - [ ] 02: Grilling — [brief](02-grilling.md)\n",
-        );
-        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
-
-        let Next::Unstartable { why } = repo.next("mvp", "roadmaps/mvp/01-workbench") else {
-            panic!("nothing of a roadmap that declares badly may start, here as anywhere");
-        };
-
-        assert!(
-            why.contains("mvp") && why.contains("02"),
-            "which roadmap, and which line to go and read: {why:?}",
-        );
-    }
-
     /// Which is what keeps a stage currently mid-flight under Verkstead out of
     /// the list. Everything the stage writes on its own line rides on its own
     /// branch until its pull request merges — the annotation its plan commit puts
@@ -6930,8 +4801,8 @@ Turns this askance clone into Verkstead.
     /// no longer takes the whole roadmap out of the notice, because a stage standing
     /// on nothing beside it may still start.
     ///
-    /// The same reading the carry-on goes through, which is what keeps the two
-    /// saying one thing about one roadmap.
+    /// The rule the **Stage runner** keeps a copy of, which is what keeps the
+    /// two saying one thing about one roadmap.
     #[test]
     fn the_adoption_offers_the_lowest_stage_of_a_declaring_roadmap_that_may_start() {
         let repo = Repo::with(&[]);
@@ -7117,7 +4988,8 @@ Turns this askance clone into Verkstead.
     }
 
     /// And the place a stage left out would have had goes to the ready stage
-    /// behind it, which is [`next_stage`]'s rule read off the other reading.
+    /// behind it, which is the **Stage runner**'s rule read off the other
+    /// reading.
     ///
     /// Four roots and three places, with the brief of the second one nobody wrote.
     /// Taking the places before the clauses rather than after them would offer two
@@ -7714,5 +5586,34 @@ Turns this askance clone into Verkstead.
 
         assert_eq!(view.roadmap, "mvp");
         assert_eq!(view.stage, None);
+    }
+
+    /// Whether a repository records a way to stack a stage on its unmerged
+    /// predecessor is the block being there, under its review process.
+    #[test]
+    fn a_repository_records_its_stacking_mechanism_under_its_review_process() {
+        assert!(
+            !stacking("# Git workflow\n\n## Review process\n\n### Finish sequence\n\nPush it.\n"),
+            "a review process that says nothing about stacking has recorded nothing",
+        );
+
+        assert!(
+            stacking(
+                "# Git workflow\n\n## Review process\n\n\
+                 ### Finish sequence\n\nPush it.\n\n\
+                 ### Stacking roadmap stages\n\n`gh stack init <predecessor> <new>`\n",
+            ),
+            "and this one has",
+        );
+    }
+
+    /// And a block of the same name somewhere else in the file is a note about
+    /// stacking rather than the mechanism.
+    #[test]
+    fn a_stacking_block_outside_the_review_process_is_not_the_mechanism() {
+        assert!(!stacking(
+            "# Git workflow\n\n## Review process\n\n### Finish sequence\n\nPush it.\n\n\
+             ## Notes\n\n### Stacking roadmap stages\n\nWe gave up on these.\n",
+        ));
     }
 }

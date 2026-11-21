@@ -157,9 +157,16 @@ const NOTHING_RUNS: &str = "exit 0";
 /// the real one would need an account.
 const NO_GITHUB: &str = "exit 1";
 
-/// How long one address has to answer here, rather than the two seconds a running
-/// server gives one.
-const PATIENCE: Duration = Duration::from_millis(300);
+/// How long one address has to answer here: the two seconds a running server
+/// gives one to connect.
+///
+/// **Not shorter, because the home device answers all along.** On a loaded
+/// machine a third of a second was short enough for B's dial to A to time out
+/// and dim A's row, and a grilling pressed in that moment was refused as having
+/// no bound device to fetch the account from. Nothing here waits the patience
+/// out: the devices that are not there are dialled at addresses that refuse at
+/// once.
+const PATIENCE: Duration = Duration::from_secs(2);
 
 /// How long a test waits for something two hops away to have happened: a Nudge
 /// crossing a link, a list read back over one, a session starting in a real

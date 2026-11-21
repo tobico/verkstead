@@ -1626,7 +1626,12 @@ Today there are four:
 - **`activities`**, the Activities Verkstead runs through the same host
   functions a stranger's would: a block per Activity, each a component built
   from the crate beside it — today *Follow-up rounds*, from
-  [`plugins/activities/follow-up-rounds/`](../plugins/activities/follow-up-rounds).
+  [`plugins/activities/follow-up-rounds/`](../plugins/activities/follow-up-rounds),
+  the *Backlog runner*, from
+  [`plugins/activities/backlog-runner/`](../plugins/activities/backlog-runner),
+  and the *Stage runner*, from
+  [`plugins/activities/stage-runner/`](../plugins/activities/stage-runner),
+  which is why the plugin declares `conversations: start`.
   It depends on the `verkstead` pack's plugin for the skills its sessions run
   under, and is the Built-in group's second row. Its directory holds the
   components' sources rather than their bytes, so `verkstead plugin check`
@@ -1662,6 +1667,15 @@ $ mkdir -p plugins/dist && cp plugins/target/wasm32-wasip2/release/*.wasm plugin
 
 `plugins/dist/` is gitignored and wins whenever it is there, so delete it after
 changing a component's source, or the server goes on embedding the old build.
+
+**The components' own tests run natively**, not as wasm: what a component
+decides without the host — the step a backlog is at, which stages of a roadmap
+are ready, what each session is told — is plain Rust, and CI's *Built-in
+plugins* job runs it:
+
+```console
+$ cargo test --manifest-path plugins/Cargo.toml --workspace
+```
 
 **Components that are no built-in's** are under `plugins/tests/`, each a
 workspace of its own: the server's suites install them as plugins of their

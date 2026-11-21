@@ -260,7 +260,7 @@ const PLATFORMS: [(&str, Platform); 3] = [
 ];
 
 /// The platform `word` names, or `None` where it names none of the three.
-fn matching(word: &str) -> Option<Platform> {
+pub(crate) fn matching(word: &str) -> Option<Platform> {
     PLATFORMS
         .iter()
         .find_map(|(named, platform)| is(word, named).then_some(*platform))

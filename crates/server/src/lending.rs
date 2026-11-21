@@ -31,6 +31,7 @@ use verkstead_schema::Nudge;
 use verkstead_store as store;
 
 use crate::AppState;
+use crate::continuing::{Began, Brought};
 use crate::done::{Ends, Evidence};
 use crate::memos::Building;
 use crate::plugins::component::worlds::category::activity::verkstead::plugin::{
@@ -68,6 +69,24 @@ pub(crate) struct Lent {
     /// The Timeline Event the newest session launched here prints into, which
     /// is what a stop asked for through the world carries the tail of.
     writing: Option<i64>,
+
+    /// Whether the newest session launched here was building — see
+    /// [`Lent::building`] — so that what it asked and left standing is
+    /// answered into the next session's prompt rather than closed by a stop.
+    folding: bool,
+
+    /// What brought the run about, which a Conversation it starts is held to
+    /// the limits by and says what it says by — see [`Lent::brought`].
+    brought: Brought,
+
+    /// The sentences a start was answered *no place* with for want of a place
+    /// on the server, which a look says out loud where the places are full —
+    /// see [`Brought::noticed`].
+    waiting: Vec<String>,
+
+    /// How many starts asked for here were weighed, had a place and halted:
+    /// places spent, for the rest of the run — see [`crate::continuing::begin`].
+    spent: usize,
 }
 
 /// Whether a launch waits for the Conversation's Turn.
@@ -130,7 +149,19 @@ impl Lent {
             watched: HashMap::new(),
             issued: 0,
             writing: None,
+            folding: false,
+            brought: Brought::Settle,
+            waiting: Vec::new(),
+            spent: 0,
         }
+    }
+
+    /// What brought the run about, where it may start Conversations: a look
+    /// says less — see
+    /// [`crate::continuing::begin`]. A settle where nobody says.
+    pub(crate) fn brought(mut self, brought: Brought) -> Lent {
+        self.brought = brought;
+        self
     }
 
     /// The caller holds the Turn already — a wrap-up takes it before it decides
@@ -162,6 +193,14 @@ impl Lent {
     pub(crate) fn doing(mut self, doing: &str) -> Lent {
         self.doing = doing.to_owned();
         self
+    }
+
+    /// The same two, changed between one launch and the next — a component's
+    /// launches, which each say what they build through the evidence they
+    /// expect. See [`crate::activities`].
+    pub(crate) fn now(&mut self, building: Option<Building>, doing: &str) {
+        self.building = building;
+        self.doing = doing.to_owned();
     }
 
     /// Launch a session through the world's *launch a session*, saying nothing
@@ -422,6 +461,8 @@ impl host::Host for Lent {
                     folding.recorded(&state.pool).await;
                 }
 
+                self.folding = self.building.is_some();
+
                 Ok(Ok(self.watch(session, evidence, taken_ends(ends))))
             }
             Ok(None) => Ok(self.refused("The session couldn't be started.")),
@@ -499,56 +540,17 @@ impl host::Host for Lent {
         &mut self,
         repo: String,
     ) -> wasmtime::Result<Result<world::BranchFacts, String>> {
-        let state = &self.state;
-        let conversation_id = self.conversation_id;
-
-        let conversation = match store::load_conversation(&state.pool, conversation_id).await {
-            Ok(Some(conversation)) => conversation,
-            Ok(None) => return Ok(Err("There is no Conversation left to read.".to_owned())),
-            Err(error) => {
-                tracing::error!(error = ?error, conversation_id, "reading the Conversation for its git facts failed");
-                return Ok(Err("The Conversation couldn't be read.".to_owned()));
-            }
+        let found = match self.found(&repo).await {
+            Ok(found) => found,
+            Err(why) => return Ok(Err(why)),
         };
 
-        let (path, worktree, branch, base) = if conversation.repo.name == repo {
-            let branch = match conversation.worktree.as_deref() {
-                Some(worktree) => crate::renames::follow(
-                    &state.pool,
-                    conversation_id,
-                    &conversation.repo.path,
-                    worktree,
-                    &conversation.branch,
-                )
-                .await
-                .unwrap_or_else(|| conversation.branch.clone()),
-                None => conversation.branch.clone(),
-            };
-
-            (
-                conversation.repo.path.clone(),
-                conversation.worktree.clone(),
-                branch,
-                conversation.base_commit.clone(),
-            )
-        } else if let Some(companion) = conversation
-            .companions
-            .iter()
-            .find(|companion| companion.repo.name == repo)
-        {
-            (
-                companion.repo.path.clone(),
-                companion.worktree.clone(),
-                companion
-                    .branch_for(&conversation.branch)
-                    .unwrap_or_else(|| companion.branch.clone()),
-                companion.base_commit.clone(),
-            )
-        } else {
-            return Ok(Err(format!(
-                "`{repo}` is neither this Conversation's repo nor one of its companions."
-            )));
-        };
+        let Found {
+            path,
+            worktree,
+            branch,
+            base,
+        } = found;
 
         let (Some(worktree), Some(base)) = (worktree, base) else {
             return Ok(Err(format!(
@@ -566,8 +568,20 @@ impl host::Host for Lent {
     }
 
     /// Put `text` on the Timeline as a Notice, and tell open pages it is there.
+    /// Put a notice on the Timeline — or, a run a look or a report brought
+    /// about, wherever that says what it noticed: see [`Brought::noticed`].
     async fn notice(&mut self, text: String) -> wasmtime::Result<()> {
         let conversation_id = self.conversation_id;
+
+        if self.brought != Brought::Settle {
+            let waiting = self.waiting.contains(&text);
+
+            self.brought
+                .noticed(&self.state, conversation_id, &text, waiting)
+                .await;
+
+            return Ok(());
+        }
 
         match store::note(&self.state.pool, conversation_id, &text).await {
             Ok(true) => self.state.nudges.announce(Nudge::Conversation {
@@ -590,8 +604,15 @@ impl host::Host for Lent {
     /// Stop where the Conversation stands, closing any Set left open first, with
     /// `reason` as what the stop's Notice says happened and the newest
     /// session's last words as its evidence.
+    ///
+    /// **Except a building session's Sets**, which stay standing: a backlog
+    /// step's ask is an ordinary one, whose Answers open the prompt of the
+    /// session the human's Resume starts — see [`crate::deferrals`] — as the
+    /// runner always left one when it stopped over its step.
     async fn stop(&mut self, reason: String) -> wasmtime::Result<()> {
-        crate::runner::left_open(&self.state, self.conversation_id).await;
+        if !self.folding {
+            crate::runner::left_open(&self.state, self.conversation_id).await;
+        }
 
         crate::runner::stop(
             &self.state,
@@ -605,6 +626,499 @@ impl host::Host for Lent {
 
         Ok(())
     }
+
+    /// The file at `path` as `repo` committed it at `at`, read by git rather
+    /// than off the disk, so what a session has written and not committed is
+    /// not there yet.
+    async fn read_file(
+        &mut self,
+        repo: String,
+        at: host::Revision,
+        path: String,
+    ) -> wasmtime::Result<Result<Option<Vec<u8>>, String>> {
+        Ok(self
+            .reading(repo, at, path, Reading::File)
+            .await
+            .map(|read| read.and_then(Read::file)))
+    }
+
+    /// The entries of the directory at `path` as `repo` committed it at `at`.
+    async fn list_directory(
+        &mut self,
+        repo: String,
+        at: host::Revision,
+        path: String,
+    ) -> wasmtime::Result<Result<Option<Vec<String>>, String>> {
+        Ok(self
+            .reading(repo, at, path, Reading::Directory)
+            .await
+            .map(|read| read.and_then(Read::directory)))
+    }
+
+    /// Place a backlog task whose line wants `platform`, as the runner always
+    /// placed one before launching it — see [`crate::placing`]. Moving, or
+    /// asking the human, is `elsewhere`; a word naming no platform is `here`.
+    async fn place_task(
+        &mut self,
+        task: u32,
+        label: String,
+        platform: String,
+    ) -> wasmtime::Result<host::Placed> {
+        let Some(wants) = crate::declarations::matching(&platform) else {
+            return Ok(host::Placed::Here);
+        };
+
+        let placed =
+            crate::placing::wanting(&self.state, self.conversation_id, task, label, wants).await;
+
+        Ok(match placed.here() {
+            true => host::Placed::Here,
+            false => host::Placed::Elsewhere,
+        })
+    }
+
+    /// Hold the finish until the stage may join its roadmap's chain, and
+    /// answer that chain, as the runner always held a stage's finish — see
+    /// [`crate::joins::let_in`]. Not a stage, nothing is held or answered.
+    async fn join_chain(&mut self) -> wasmtime::Result<Vec<host::Link>> {
+        Ok(crate::joins::let_in(&self.state, self.conversation_id)
+            .await
+            .into_iter()
+            .map(|link| host::Link {
+                stage: link.stage,
+                branch: link.branch,
+            })
+            .collect())
+    }
+
+    /// Start a roadmap stage as a Conversation of its own, as the carry-on
+    /// starts each stage it finds ready — see [`crate::continuing::begin`],
+    /// which holds it to the limits and says what it says.
+    async fn start_conversation(
+        &mut self,
+        stage: host::Stage,
+    ) -> wasmtime::Result<Result<host::Started, host::NotStarted>> {
+        let (stage, base, stacks) = match staged(stage) {
+            Ok(staged) => staged,
+            Err(why) => return Ok(Err(host::NotStarted::Halted(why))),
+        };
+
+        let began = crate::continuing::begin(
+            &self.state,
+            self.conversation_id,
+            stage,
+            base,
+            stacks,
+            self.brought,
+            self.spent,
+        )
+        .await;
+
+        Ok(match began {
+            Began::Started { id, branch } => Ok(host::Started {
+                conversation: id,
+                branch,
+            }),
+            Began::NoPlace { said, server } => {
+                if server {
+                    self.waiting.push(said.clone());
+                }
+
+                Err(host::NotStarted::NoPlace(said))
+            }
+            Began::Halted(why) => {
+                self.spent += 1;
+
+                Err(host::NotStarted::Halted(why))
+            }
+        })
+    }
+
+    /// Where `conversation` is, and whether it has settled, as the record
+    /// reads a stage — one of this Conversation's Repo's.
+    async fn conversation_state(
+        &mut self,
+        conversation: i64,
+    ) -> wasmtime::Result<Result<host::Stands, String>> {
+        let repo = match self.repo().await {
+            Ok(repo) => repo,
+            Err(why) => return Ok(Err(why)),
+        };
+
+        let read = store::conversation_standing(&self.state.pool, repo, conversation).await;
+
+        Ok(match read {
+            Ok(Some((state, standing))) => Ok(host::Stands {
+                state: state.stored().to_owned(),
+                settled: standing == store::StageStanding::Settled,
+            }),
+            Ok(None) => Err(format!(
+                "There is no conversation {conversation} on this conversation's repo."
+            )),
+            Err(error) => {
+                tracing::error!(error = ?error, conversation, "reading where a Conversation stands failed");
+                Err(format!(
+                    "Where conversation {conversation} is couldn't be read."
+                ))
+            }
+        })
+    }
+
+    /// What the record holds of `roadmap` in this Conversation's Repo — see
+    /// [`store::stage_standings`].
+    async fn stage_standings(
+        &mut self,
+        roadmap: String,
+    ) -> wasmtime::Result<Result<host::Standings, String>> {
+        let repo = match self.repo().await {
+            Ok(repo) => repo,
+            Err(why) => return Ok(Err(why)),
+        };
+
+        let record = match store::stage_standings(&self.state.pool, repo).await {
+            Ok(record) => record,
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id = self.conversation_id, "reading what a roadmap's stages had got to failed");
+                return Ok(Err(format!(
+                    "What the `{roadmap}` roadmap's stages have got to couldn't be read."
+                )));
+            }
+        };
+
+        Ok(Ok(host::Standings {
+            planner: record.planner(&roadmap).map(standing),
+            stages: record
+                .stages(&roadmap)
+                .into_iter()
+                .map(|(label, held, stopped, conversation)| host::StageStanding {
+                    label: label.to_owned(),
+                    standing: standing(held),
+                    stopped,
+                    conversation,
+                })
+                .collect(),
+        }))
+    }
+
+    /// The stages of `roadmap` that have joined its chain, bottom to top —
+    /// see [`store::stage_chain`].
+    async fn stage_chain(
+        &mut self,
+        roadmap: String,
+    ) -> wasmtime::Result<Result<Vec<host::Link>, String>> {
+        let repo = match self.repo().await {
+            Ok(repo) => repo,
+            Err(why) => return Ok(Err(why)),
+        };
+
+        Ok(
+            match store::stage_chain(&self.state.pool, repo, &roadmap).await {
+                Ok(chain) => Ok(chain
+                    .into_iter()
+                    .map(|joined| host::Link {
+                        stage: Some(joined.stage),
+                        branch: joined.branch,
+                    })
+                    .collect()),
+                Err(error) => {
+                    tracing::error!(error = ?error, conversation_id = self.conversation_id, "reading a roadmap's chain failed");
+                    Err(format!("The `{roadmap}` roadmap's chain couldn't be read."))
+                }
+            },
+        )
+    }
+}
+
+impl Lent {
+    /// The id of this Conversation's Repo, or a sentence saying it couldn't
+    /// be read.
+    async fn repo(&self) -> Result<i64, String> {
+        match store::load_conversation(&self.state.pool, self.conversation_id).await {
+            Ok(Some(conversation)) => Ok(conversation.repo.id),
+            Ok(None) => Err("There is no Conversation left to read.".to_owned()),
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id = self.conversation_id, "reading the Conversation for its Repo failed");
+                Err("The Conversation couldn't be read.".to_owned())
+            }
+        }
+    }
+}
+
+/// What the record's standing is called in the world.
+fn standing(standing: store::StageStanding) -> host::Standing {
+    match standing {
+        store::StageStanding::Settled => host::Standing::Settled,
+        store::StageStanding::InFlight => host::Standing::InFlight,
+        store::StageStanding::Abandoned => host::Standing::Abandoned,
+    }
+}
+
+/// A stage an Activity asked to start, read into the host's: the stage, the
+/// branch it is cut from, and whether the Repo records stacking. Refused, in a
+/// sentence, where its roadmap is no directory name or its brief is not inside
+/// that roadmap's directory, since the branch is named for both.
+fn staged(stage: host::Stage) -> Result<(crate::stages::Stage, String, bool), String> {
+    let host::Stage {
+        roadmap,
+        label,
+        title,
+        brief_path,
+        brief,
+        base,
+        platform,
+        stacks,
+    } = stage;
+
+    let named =
+        !roadmap.is_empty() && roadmap != "." && roadmap != ".." && !roadmap.contains(['/', '\\']);
+
+    if !named {
+        return Err(format!(
+            "`{roadmap}` isn't a roadmap's directory name, so no stage of it can start."
+        ));
+    }
+
+    let within = format!("{}/{roadmap}/", crate::stages::ROADMAPS);
+    let file = brief_path.strip_prefix(&within).unwrap_or_default();
+
+    if file.is_empty() || file.contains('/') || inside(&brief_path).is_none() {
+        return Err(format!(
+            "Stage {label} of the `{roadmap}` roadmap names `{brief_path}` as its brief, which \
+             isn't a file in `{within}`, so it can't start."
+        ));
+    }
+
+    if label.is_empty() || base.is_empty() {
+        return Err(format!(
+            "A stage of the `{roadmap}` roadmap needs its number and the branch it's cut from \
+             to start."
+        ));
+    }
+
+    let stage = crate::stages::Stage {
+        roadmap,
+        label,
+        title,
+        brief_path,
+        brief,
+        platform: crate::declarations::matching(&platform),
+    };
+
+    Ok((stage, base, stacks))
+}
+
+/// A Repo of the Conversation's, found by name: where it is, its Worktree, and
+/// what its branch was cut from.
+struct Found {
+    path: PathBuf,
+    worktree: Option<PathBuf>,
+    branch: String,
+    base: Option<String>,
+}
+
+impl Lent {
+    /// The Conversation's own Repo, or the Companion called `repo` — a rename
+    /// of the Conversation's branch followed first, as [`crate::runner`] reads
+    /// its own branch. A sentence saying why, where it is neither.
+    async fn found(&self, repo: &str) -> Result<Found, String> {
+        let state = &self.state;
+        let conversation_id = self.conversation_id;
+
+        let conversation = match store::load_conversation(&state.pool, conversation_id).await {
+            Ok(Some(conversation)) => conversation,
+            Ok(None) => return Err("There is no Conversation left to read.".to_owned()),
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id, "reading the Conversation for one of its Repos failed");
+                return Err("The Conversation couldn't be read.".to_owned());
+            }
+        };
+
+        if conversation.repo.name == repo {
+            let branch = match conversation.worktree.as_deref() {
+                Some(worktree) => crate::renames::follow(
+                    &state.pool,
+                    conversation_id,
+                    &conversation.repo.path,
+                    worktree,
+                    &conversation.branch,
+                )
+                .await
+                .unwrap_or_else(|| conversation.branch.clone()),
+                None => conversation.branch.clone(),
+            };
+
+            Ok(Found {
+                path: conversation.repo.path.clone(),
+                worktree: conversation.worktree.clone(),
+                branch,
+                base: conversation.base_commit.clone(),
+            })
+        } else if let Some(companion) = conversation
+            .companions
+            .iter()
+            .find(|companion| companion.repo.name == repo)
+        {
+            Ok(Found {
+                path: companion.repo.path.clone(),
+                worktree: companion.worktree.clone(),
+                branch: companion
+                    .branch_for(&conversation.branch)
+                    .unwrap_or_else(|| companion.branch.clone()),
+                base: companion.base_commit.clone(),
+            })
+        } else {
+            Err(format!(
+                "`{repo}` is neither this Conversation's repo nor one of its companions."
+            ))
+        }
+    }
+
+    /// `path` in `repo` at `at`, read as `reading` says, off the runtime's
+    /// threads: the Worktree's HEAD read in the Worktree, which has a HEAD of
+    /// its own, and a named revision in the Repo, where every branch is.
+    async fn reading(
+        &self,
+        repo: String,
+        at: host::Revision,
+        path: String,
+        reading: Reading,
+    ) -> Result<Option<Read>, String> {
+        let found = self.found(&repo).await?;
+
+        let (dir, revision) = match at {
+            host::Revision::Head => match found.worktree {
+                Some(worktree) => (worktree, "HEAD".to_owned()),
+                None => return Err(format!("`{repo}` has no Worktree to read the HEAD of.")),
+            },
+            host::Revision::Named(revision) => (found.path, revision),
+        };
+
+        let named = repo.clone();
+        tokio::task::spawn_blocking(move || read_at(&dir, &named, &revision, &path, reading))
+            .await
+            .unwrap_or_else(|_| Err(format!("git wouldn't read `{repo}`.")))
+    }
+}
+
+/// Which of the two reads a [`read_at`] is.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reading {
+    File,
+    Directory,
+}
+
+/// What a [`read_at`] found, which is what it was asked for.
+#[derive(Debug, PartialEq, Eq)]
+enum Read {
+    File(Vec<u8>),
+    Directory(Vec<String>),
+}
+
+impl Read {
+    fn file(self) -> Option<Vec<u8>> {
+        match self {
+            Read::File(bytes) => Some(bytes),
+            Read::Directory(_) => None,
+        }
+    }
+
+    fn directory(self) -> Option<Vec<String>> {
+        match self {
+            Read::Directory(names) => Some(names),
+            Read::File(_) => None,
+        }
+    }
+}
+
+/// `path` at `revision` in the repository at `dir` — called `repo` in what it
+/// says — as `reading` asks: `None` where nothing is there, and a sentence
+/// where the revision names no commit, the path leads out of the Repo, or what
+/// is there is the other of a file and a directory.
+///
+/// The revision is resolved to its commit first, so that one naming nothing is
+/// told apart from a path naming nothing, and every git here is run with
+/// `--no-optional-locks` by [`crate::repos::bytes`], so a read never trips a
+/// session's own `git add`.
+fn read_at(
+    dir: &Path,
+    repo: &str,
+    revision: &str,
+    path: &str,
+    reading: Reading,
+) -> Result<Option<Read>, String> {
+    let Some(path) = inside(path) else {
+        return Err(format!("`{path}` leads out of `{repo}`."));
+    };
+
+    let commit = crate::repos::git(
+        dir,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "--end-of-options",
+            &format!("{revision}^{{commit}}"),
+        ],
+    )
+    .map(|commit| commit.trim().to_owned())
+    .filter(|commit| !commit.is_empty())
+    .ok_or_else(|| format!("`{revision}` isn't a branch or a commit of `{repo}`."))?;
+
+    let object = format!("{commit}:{path}");
+    let Some(kind) = crate::repos::git(dir, &["cat-file", "-t", "--end-of-options", &object])
+    else {
+        return Ok(None);
+    };
+
+    let shown = if path.is_empty() { "." } else { &path };
+    match (kind.trim(), reading) {
+        ("blob", Reading::File) => crate::repos::bytes(
+            dir,
+            &["cat-file", "blob", "--end-of-options", &object],
+            &[0],
+        )
+        .map(|bytes| Some(Read::File(bytes)))
+        .ok_or_else(|| format!("git wouldn't read `{shown}` of `{repo}`.")),
+        ("tree", Reading::Directory) => crate::repos::bytes(
+            dir,
+            &["ls-tree", "-z", "--name-only", "--end-of-options", &object],
+            &[0],
+        )
+        .map(|listed| {
+            Some(Read::Directory(
+                listed
+                    .split(|byte| *byte == 0)
+                    .filter(|name| !name.is_empty())
+                    .map(|name| String::from_utf8_lossy(name).into_owned())
+                    .collect(),
+            ))
+        })
+        .ok_or_else(|| format!("git wouldn't list `{shown}` of `{repo}`.")),
+        ("tree", Reading::File) => Err(format!("`{shown}` is a directory in `{repo}`.")),
+        ("blob", Reading::Directory) => Err(format!("`{shown}` is a file in `{repo}`.")),
+        // A submodule's commit, say: nothing a read can answer with.
+        _ => Ok(None),
+    }
+}
+
+/// `path` said from the Repo's root as git names it — `.` and empty pieces
+/// dropped, `""` the root itself — or `None` where it is absolute or climbs
+/// out with a `..`.
+fn inside(path: &str) -> Option<String> {
+    if path.starts_with('/') {
+        return None;
+    }
+
+    let mut pieces = Vec::new();
+    for piece in path.split('/') {
+        match piece {
+            "" | "." => {}
+            ".." => return None,
+            piece => pieces.push(piece),
+        }
+    }
+
+    Some(pieces.join("/"))
 }
 
 /// The branch's facts, by git, off the runtime's threads. `None` where git
@@ -770,5 +1284,147 @@ mod tests {
         }
 
         assert!(taken_evidence(world::Evidence::Landed(world::Landing::Ticked(1)), None).is_none());
+    }
+
+    /// Run git in `dir`, where a test is building the repository it reads.
+    fn run(dir: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
+            .args(args)
+            .current_dir(dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    /// A repository with `.tasks/TODO.md` committed on `main`, a branch
+    /// `elsewhere` holding one more file, and the list changed on disk and not
+    /// committed.
+    fn repository() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+
+        run(path, &["init", "--quiet", "--initial-branch=main"]);
+        std::fs::create_dir(path.join(".tasks")).unwrap();
+        std::fs::write(path.join(".tasks/TODO.md"), "- [ ] 01: One\n").unwrap();
+        std::fs::write(path.join(".tasks/01-one.md"), "# One\n").unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "--quiet", "-m", "plan"]);
+
+        run(path, &["switch", "--quiet", "-c", "elsewhere"]);
+        std::fs::write(path.join("note.md"), "elsewhere\n").unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "--quiet", "-m", "note"]);
+        run(path, &["switch", "--quiet", "main"]);
+
+        std::fs::write(path.join(".tasks/TODO.md"), "- [x] 01: One\n").unwrap();
+
+        dir
+    }
+
+    #[test]
+    fn a_read_answers_what_is_committed_and_not_what_is_written() {
+        let dir = repository();
+
+        assert_eq!(
+            read_at(dir.path(), "app", "HEAD", ".tasks/TODO.md", Reading::File),
+            Ok(Some(Read::File(b"- [ ] 01: One\n".to_vec()))),
+        );
+        assert_eq!(
+            read_at(dir.path(), "app", "elsewhere", "./note.md", Reading::File),
+            Ok(Some(Read::File(b"elsewhere\n".to_vec()))),
+        );
+        assert_eq!(
+            read_at(dir.path(), "app", "main", "note.md", Reading::File),
+            Ok(None),
+            "a path that is not there is none",
+        );
+    }
+
+    #[test]
+    fn a_listing_names_a_directorys_entries() {
+        let dir = repository();
+
+        assert_eq!(
+            read_at(dir.path(), "app", "HEAD", ".tasks/", Reading::Directory),
+            Ok(Some(Read::Directory(vec![
+                "01-one.md".to_owned(),
+                "TODO.md".to_owned()
+            ]))),
+        );
+        assert_eq!(
+            read_at(dir.path(), "app", "elsewhere", "", Reading::Directory),
+            Ok(Some(Read::Directory(vec![
+                ".tasks".to_owned(),
+                "note.md".to_owned()
+            ]))),
+            "the root is the empty path",
+        );
+        assert_eq!(
+            read_at(dir.path(), "app", "HEAD", "docs", Reading::Directory),
+            Ok(None),
+        );
+    }
+
+    #[test]
+    fn a_read_is_refused_in_a_sentence() {
+        let dir = repository();
+
+        for (revision, path, reading, said) in [
+            (
+                "nowhere",
+                "TODO.md",
+                Reading::File,
+                "`nowhere` isn't a branch or a commit of `app`.",
+            ),
+            (
+                "--output=x",
+                "TODO.md",
+                Reading::File,
+                "`--output=x` isn't a branch or a commit of `app`.",
+            ),
+            (
+                "HEAD",
+                "../outside",
+                Reading::File,
+                "`../outside` leads out of `app`.",
+            ),
+            (
+                "HEAD",
+                "/etc/passwd",
+                Reading::File,
+                "`/etc/passwd` leads out of `app`.",
+            ),
+            (
+                "HEAD",
+                ".tasks",
+                Reading::File,
+                "`.tasks` is a directory in `app`.",
+            ),
+            (
+                "HEAD",
+                ".tasks/TODO.md",
+                Reading::Directory,
+                "`.tasks/TODO.md` is a file in `app`.",
+            ),
+        ] {
+            assert_eq!(
+                read_at(dir.path(), "app", revision, path, reading),
+                Err(said.to_owned()),
+            );
+        }
+    }
+
+    #[test]
+    fn a_path_is_said_from_the_root() {
+        assert_eq!(
+            inside("./docs//roadmaps/"),
+            Some("docs/roadmaps".to_owned())
+        );
+        assert_eq!(inside(""), Some(String::new()));
+        assert_eq!(inside("docs/../.."), None);
+        assert_eq!(inside("/docs"), None);
     }
 }

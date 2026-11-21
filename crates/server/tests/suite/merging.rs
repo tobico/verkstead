@@ -83,9 +83,17 @@ const SIDEBAR: &str = "/api/ui/conversations";
 /// switch for the whole merged list, held by the device the browser opened.
 const ARCHIVES: &str = "/api/ui/conversations/archived";
 
-/// How long one address has to answer here, rather than the two seconds a
-/// running server gives one.
-const PATIENCE: Duration = Duration::from_millis(300);
+/// How long one address has to answer here: the two seconds a running server
+/// gives one to connect.
+///
+/// **Not shorter, because B is meant to read as answering until its link goes
+/// off.** On a loaded machine a third of a second was short enough for a dial
+/// to B, answering all along, to dim its row and to put its Nudge stream on the
+/// long wait between attempts, and the row then read the opposite of what the
+/// test was asking at the moment it asked. Nothing here waits the patience out:
+/// the link switched off drops a connection at once, and the member never
+/// reached is at a port that refuses.
+const PATIENCE: Duration = Duration::from_secs(2);
 
 /// How long a test will wait for the merged list to say what it is waiting for.
 /// Generous, because it is only ever paid in full when the assertion is about to

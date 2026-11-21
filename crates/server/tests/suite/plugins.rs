@@ -318,9 +318,10 @@ async fn an_activity_naming_a_skill_its_dependency_lacks_loads_in_trouble() {
 }
 
 /// The Activities Verkstead ships are a Built-in row of their own after the
-/// pack's, naming *Follow-up rounds*, always on and with no Remove.
+/// pack's, naming *Follow-up rounds*, the *Backlog runner* and the *Stage
+/// runner*, always on and with no Remove.
 #[tokio::test]
-async fn the_activities_are_a_built_in_row_naming_follow_up_rounds() {
+async fn the_activities_are_a_built_in_row_naming_each_activity() {
     let (app, _dir) = kept().await;
 
     let view = page(&app).await;
@@ -332,7 +333,10 @@ async fn the_activities_are_a_built_in_row_naming_follow_up_rounds() {
     assert_eq!(row.uuid, ACTIVITIES);
     assert_eq!(row.name, "Activities");
     assert_eq!(row.provides, ["activity"]);
-    assert_eq!(row.activities, ["Follow-up rounds"]);
+    assert_eq!(
+        row.activities,
+        ["Follow-up rounds", "Backlog runner", "Stage runner"]
+    );
     assert_eq!(row.source, PluginSource::BuiltIn);
     assert!(row.enabled);
     assert_eq!(row.trouble, None);
@@ -521,6 +525,33 @@ async fn a_second_plugin_claiming_a_pack_name_loads_in_trouble() {
         dir.path()
             .join("skills/rust-review/reviewing/SKILL.md")
             .is_file()
+    );
+}
+
+/// A plugin asking to start Conversations says so on its card, beside what
+/// else it reaches: an Activity that can start work is one worth knowing about
+/// before it is installed.
+#[tokio::test]
+async fn a_plugin_starting_conversations_says_so_on_its_card() {
+    let (app, dir) = kept().await;
+    let path = plugin(
+        dir.path(),
+        "runner",
+        &manifest(
+            PLUGIN,
+            "Runner",
+            &["outbound: gitlab.com", "conversations: start"],
+        ),
+    );
+
+    assert_eq!(
+        read(&app, &path).await.capabilities,
+        [
+            PluginCapability::Outbound {
+                host: "gitlab.com".to_owned()
+            },
+            PluginCapability::Conversations,
+        ],
     );
 }
 
@@ -2067,6 +2098,7 @@ async fn the_page_and_the_card_are_written_for_the_viewer() {
                 "outbound: gitlab.com",
                 "filesystem: ~/.config/glab",
                 "environment: GITLAB_TOKEN",
+                "conversations: start",
             ],
         ),
     );

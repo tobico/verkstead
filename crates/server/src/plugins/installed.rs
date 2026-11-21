@@ -772,6 +772,7 @@ fn capabilities(manifest: &Manifest) -> Vec<PluginCapability> {
             Capability::Environment { name } => {
                 PluginCapability::Environment { name: name.clone() }
             }
+            Capability::Conversations => PluginCapability::Conversations,
         })
         .collect()
 }

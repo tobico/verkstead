@@ -358,9 +358,180 @@ interface host {
   notice: func(text: string);
 
   /// Stop: the Conversation stays where it is, the reason goes on the
-  /// Timeline, and any Set left open is closed. What `run` returns after is
-  /// not read.
+  /// Timeline, and any Set left open is closed — unless the newest session
+  /// launched was building (a backlog task, the finish, a stage's planning),
+  /// whose Sets stand to be answered into the next session's prompt. What
+  /// `run` returns after is not read.
   stop: func(reason: string);
+
+  // Reading the Repo (stage 10). Committed bytes only, never the working
+  // tree: what a session has merely written is not there until it commits.
+  // **No capability is declared for these**: the Repos read are the
+  // Conversation's own, on the same footing as `git-facts`, and nothing else
+  // on the device is reachable through them.
+
+  /// Where in a Repo's history a read is made.
+  variant revision {
+    /// The HEAD of the named Repo's Worktree: what the Conversation has
+    /// committed there.
+    head,
+    /// A branch or a commit, resolved in the Repo itself, so a branch no
+    /// Worktree holds — a roadmap chain's top, say — reads as well as one
+    /// that does.
+    named(string),
+  }
+
+  /// The file at `path` in `repo` — the Worktree's Repo or a Companion's, by
+  /// the name `git-facts` takes — as committed at `at`, from the Repo's root:
+  /// its bytes, or none where nothing is there. Refused, in a sentence, for a
+  /// Repo that is neither, a revision that names no commit, a path that leads
+  /// out of the Repo, or a path that is a directory.
+  read-file: func(repo: string, at: revision, path: string)
+    -> result<option<list<u8>>, string>;
+
+  /// The names of the entries of the directory at `path` in `repo` as
+  /// committed at `at`, `""` being the Repo's root: files and directories
+  /// alike, sorted as git sorts them, or none where nothing is there. Refused
+  /// as `read-file` is, and for a path that is a file.
+  list-directory: func(repo: string, at: revision, path: string)
+    -> result<option<list<string>>, string>;
+
+  // Placing work by platform (stage 10). Which device runs it is the host's
+  // (ADR-0029): the Activity names the platform a line of the Repo wants, and
+  // never a device.
+
+  /// Where a task is to run, once the host has placed it.
+  enum placed {
+    /// On this device: launch its session here.
+    here,
+    /// Not here: the Conversation is moving to a device of that platform, or
+    /// the human is being asked where it runs. Launch nothing. The Activity is
+    /// started again wherever the Conversation lands, so it ends `steered`.
+    elsewhere,
+  }
+
+  /// Place the backlog task numbered `task` — `label` being that number as
+  /// `.tasks/TODO.md` writes it — whose line wants `platform`, the word after
+  /// its `on`, before its session is launched. A word that is not `linux`,
+  /// `macos` or `windows` wants no platform, and the task runs here.
+  place-task: func(task: u32, label: string, platform: string) -> placed;
+
+  // Joining a roadmap's chain (stage 10). Which stages joined, and in what
+  // order, is the host's record; the rebase onto the top is the session's.
+
+  /// One branch of the chain a stage joins.
+  record link {
+    /// Which stage of the roadmap the branch is, or none for the branch the
+    /// chain starts at, at its foot.
+    stage: option<string>,
+    branch: string,
+  }
+
+  /// Hold the finish until this Conversation may join its roadmap's chain —
+  /// every stage already in it settled — and answer the chain, bottom to top,
+  /// for the finish's prompt. A Conversation that is no roadmap's stage joins
+  /// nothing: it is answered at once, with no branches.
+  join-chain: func() -> list<link>;
+
+  // Starting Conversations (stage 10). **Behind a capability**, the one an
+  // Activity's manifest writes as `- conversations: start`: an Activity that
+  // can start work is one worth knowing about at Install. Every call below is
+  // refused, in a sentence, for a plugin that does not declare it.
+
+  /// A roadmap stage to start as a Conversation of its own, against this
+  /// Conversation's Repo, under its Pairings and with its companions.
+  record stage {
+    /// The roadmap's directory under `docs/roadmaps/`: `mvp`.
+    roadmap: string,
+    /// The stage's number as the roadmap's line writes it: `05`.
+    label: string,
+    /// What the stage is called.
+    title: string,
+    /// Where its brief is, from the Repo's root, under the roadmap's
+    /// directory. Its name is what the stage's branch is named for.
+    brief-path: string,
+    /// The brief, which is the new Conversation's Brief.
+    brief: string,
+    /// The branch it is cut from.
+    base: string,
+    /// The word after its line's `on`, or empty: which device it starts on
+    /// is the host's (ADR-0029). A word that is no platform wants none.
+    platform: string,
+    /// Whether the Repo records a way to stack a stage for review, which
+    /// changes what the Timeline is told and nothing else.
+    stacks: bool,
+  }
+
+  /// A stage started: its Conversation, and the branch it is on.
+  record started {
+    conversation: s64,
+    branch: string,
+  }
+
+  /// Why a stage did not start.
+  variant not-started {
+    /// There is no place for it: its roadmap runs as many stages as it may,
+    /// or the server as many Conversations. The sentence says which. Nothing
+    /// was made, and the same start may be asked again once a place frees.
+    no-place(string),
+    /// It could not start, for the sentence's reason: a branch already
+    /// taken, no git author, a fetch git would not make. The host has said
+    /// so where it says such things already.
+    halted(string),
+  }
+
+  /// Start `stage`. The host checks and makes everything around it: the
+  /// branch and its Worktree, the companions, the record of which roadmap
+  /// and stage it is, where it runs, and the Timeline sentences.
+  start-conversation: func(stage: stage) -> result<started, not-started>;
+
+  /// What the record says of a stage, or of the Conversation that wrote a
+  /// roadmap.
+  enum standing {
+    /// Its work finished: it reached Done once, or it was closed having
+    /// wrapped up.
+    settled,
+    /// Somebody, or some run, is on it.
+    in-flight,
+    /// Closed without having wrapped up.
+    abandoned,
+  }
+
+  /// Where a Conversation is.
+  record stands {
+    /// The state's word: `implementing`, `done`.
+    state: string,
+    /// Whether it has settled, as `standing` says.
+    settled: bool,
+  }
+
+  /// The state of `conversation`, one of this Repo's. Refused, in a sentence,
+  /// for one that is not.
+  conversation-state: func(conversation: s64) -> result<stands, string>;
+
+  /// One stage the record holds.
+  record stage-standing {
+    label: string,
+    standing: standing,
+    /// Whether it has stopped: in flight still, and waiting on Resume.
+    stopped: bool,
+    /// The Conversation the standing is read from.
+    conversation: s64,
+  }
+
+  /// What the record holds of one roadmap of this Repo.
+  record standings {
+    /// The Conversation that wrote the roadmap, where the record holds one.
+    planner: option<standing>,
+    /// Every stage it holds a row for, in no order of the roadmap's.
+    stages: list<stage-standing>,
+  }
+
+  /// What the record holds of `roadmap`, in this Repo.
+  stage-standings: func(roadmap: string) -> result<standings, string>;
+
+  /// The stages of `roadmap` that have joined its chain, bottom to top.
+  stage-chain: func(roadmap: string) -> result<list<link>, string>;
 }
 
 /// An Activity's component, run once per start.

@@ -639,7 +639,7 @@ export type AtOnceView = {
  * always: a roadmap with no places would start nothing at all.
  *
  * A count of places rather than a quantity of anything, which is what the
- * scheduler is handed — see `stages::next_stage` on the server.
+ * host holds a *start a Conversation* to — see `continuing::begin` on the server.
  */
 roadmap_stages: number, 
 /**
@@ -4927,7 +4927,7 @@ export type PluginAt = { source: string, };
 /**
  * One capability a plugin's wasm component asks for.
  */
-export type PluginCapability = { "kind": "Filesystem", path: string, writable: boolean, } | { "kind": "Outbound", host: string, } | { "kind": "Environment", name: string, };
+export type PluginCapability = { "kind": "Filesystem", path: string, writable: boolean, } | { "kind": "Outbound", host: string, } | { "kind": "Environment", name: string, } | { "kind": "Conversations" };
 
 /**
  * The consent card: who the plugin is, what it provides, and every

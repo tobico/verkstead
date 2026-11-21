@@ -69,12 +69,17 @@ const NOWHERE: &str = "127.0.0.1:1";
 /// The port the workbench is taken to be on, which nothing here asks about.
 const PORT: u16 = 8422;
 
-/// How long a dial in this suite gives one address, rather than the two seconds a
-/// running server gives one.
+/// How long a dial through [`Verkstead::workbench_in_a_hurry`] or a hurried
+/// renewal gives one address: the two seconds a running server gives one to
+/// connect.
 ///
-/// Spent only where a dial is meant to reach nobody, which here is the member
-/// whose machine is not there.
-const PATIENCE: Duration = Duration::from_millis(300);
+/// **Not shorter, because the same announcement dials members that answer.** A
+/// renewal meant to reach nobody at [`NOWHERE`] also tells a member that is
+/// there, and on a loaded machine a third of a second was short enough for that
+/// member to take the new certificate while the dial gave up before its
+/// acknowledgement came back — leaving it owed the telling it already had.
+/// Nothing here waits the patience out on Linux: [`NOWHERE`] refuses at once.
+const PATIENCE: Duration = Duration::from_secs(2);
 
 /// A day, for standing a start inside the renewal window.
 const A_DAY: time::Duration = time::Duration::days(1);
@@ -270,9 +275,11 @@ impl Verkstead {
     }
 
     /// How it dials, for the questions that are about a call rather than about a
-    /// press.
+    /// press — at the ordinary patience, not [`PATIENCE`]: every device these
+    /// calls go to is there, and a dial cut short on a loaded machine reads as
+    /// a certificate the far end would not take.
     fn peers(&self) -> Peers {
-        Peers::of(self.device.clone(), self.members.clone()).waiting(PATIENCE)
+        Peers::of(self.device.clone(), self.members.clone())
     }
 
     /// What it says about itself, which is what an announcement carries.
