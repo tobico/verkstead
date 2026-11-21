@@ -572,12 +572,17 @@ jobs:
       # link is enough and the home stays inside the bind. Maven's comes off
       # Maven Central, which carries the same distribution as the Apache
       # archive: the archive is throttled, and took two minutes for it here.
+      #
+      # **Central throttles too, by answering 429**, and a runner shares its
+      # address with every other runner asking — so one refusal is not a reason
+      # to fail every proof below it. `--retry` takes a 429 as transient and
+      # waits out the `Retry-After` it comes with.
       - name: Install JDK 21, Maven 3.9.12 and Gradle 8.14.4
         run: |
           sudo ln -sf /usr/lib/jvm/temurin-21-jdk-amd64/bin/java /usr/local/bin/java
           sudo ln -sf /usr/lib/jvm/temurin-21-jdk-amd64/bin/javac /usr/local/bin/javac
 
-          curl -sSfL -o "$RUNNER_TEMP/maven.tar.gz" \
+          curl -sSfL --retry 5 -o "$RUNNER_TEMP/maven.tar.gz" \
             https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.12/apache-maven-3.9.12-bin.tar.gz
           sudo mkdir -p /usr/local/maven
           sudo tar -C /usr/local/maven --strip-components=1 -xzf "$RUNNER_TEMP/maven.tar.gz"
