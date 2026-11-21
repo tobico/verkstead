@@ -670,15 +670,15 @@ impl Verkstead {
     }
 
     /// And an account of the **stub harness plugin that names itself**, the
-    /// plugin installed here first, as it is on every device a Profile of it
-    /// runs on.
+    /// plugin installed here first from git, so that it is every device's:
+    /// what a Profile of it runs on, there as here.
     ///
     /// Here because a plugin harness told no id at launch is Codex's shape in a
     /// plugin's hands: what a carried conversation is resumed by is the id its
     /// component read out of the record the session wrote.
     async fn naming_stub_account(&self) -> String {
         StubHarness::Naming
-            .installed(
+            .installed_from_git(
                 &self.workbench,
                 self.elsewhere.path(),
                 [STUB_MODEL, STUB_MODEL_TOO],
@@ -2514,15 +2514,12 @@ async fn ready_to_carry_a_naming_stub_on(
     b.cloned_from(&theirs).await;
 
     let account = a.naming_stub_account().await;
-    StubHarness::Naming
-        .installed(
-            &b.workbench,
-            b.elsewhere.path(),
-            [STUB_MODEL, STUB_MODEL_TOO],
-        )
-        .await;
 
+    // B's copy is the record's, merged once B holds its stream to A — a git
+    // plugin being every device's — and never a second Install here, which
+    // A's record reaching B first would refuse.
     let holding = b.holding();
+    StubHarness::Naming.loaded(&b.workbench).await;
     b.profile_called(ACCOUNT).await;
 
     let conversation = a.drafting_under_on(&account, STUB_MODEL).await;
