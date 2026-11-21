@@ -2774,6 +2774,14 @@ impl Sessions {
         // [`session_name`].
         let session = session_name();
 
+        // A Conversation with Skill Packs attached waits for the installed
+        // plugins' first load before anything reads them, so a launch just
+        // after a start is not one that runs its whole life without them. One
+        // with none has nothing to wait for. See [`skills::Skills::settled`].
+        if !conversation.skill_packs.is_empty() {
+            agents.skills.settled().await;
+        }
+
         // What earlier sessions of the Conversation left for the ones after them,
         // under the kind's own sections and ahead of the listings below — here
         // for the companions' reason, and read off the record at every launch.
@@ -2847,6 +2855,15 @@ impl Sessions {
                 .map(|(name, _)| name.to_owned())
                 .collect::<Vec<_>>(),
             pairing.profile.agent_type(),
+        );
+
+        // And the Skill Packs it attached, listed beside them — read against
+        // the packs loaded on this device, as the bind is: one gone since is
+        // neither mounted nor named. See [`skills::packed`].
+        let prompt = skills::packed(
+            &prompt,
+            &agents.skills.among(&conversation.skill_packs),
+            &agents.skills,
         );
 
         // And, where the branch is still on the name Verkstead invented for it,
@@ -3077,10 +3094,19 @@ impl Sessions {
                 // for the row to be wrong about. See [`store::continued_as`].
                 store::continued_as(pool, event_id, &continuing.session).await?;
 
+                // And the Skill Packs listed under the note, as they are under
+                // a fresh prompt: an answer that added one carried this session
+                // on to mount it, and a move may have put it at another path.
+                let note = skills::packed(
+                    &continuing.note,
+                    &agents.skills.among(&conversation.skill_packs),
+                    &agents.skills,
+                );
+
                 (
                     Some(continuing.session),
                     Named::Continuing,
-                    continuing.note,
+                    note,
                     Some(continuing.carried),
                 )
             }

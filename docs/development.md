@@ -1612,9 +1612,20 @@ component for `wasm32-wasip2` — the crate in `plugins/<name>/` names its
 workspace of their own, never built for the host, and
 [`crates/server/build.rs`](../crates/server/build.rs) embeds every one in the
 server, where the start loads them through the same loader an installed plugin
-goes through ([ADR-0030](adr/0030-plugins.md)). Today there is one, the
-**fixture**, which provides nothing, exports nothing and is listed nowhere: it
-is the proof that the path works on every platform.
+goes through ([ADR-0030](adr/0030-plugins.md)). Every file in a built-in's
+directory is embedded, but a component crate's own `Cargo.toml` and `src/`.
+Today there are two:
+
+- **`verkstead`**, the skills every session is told to read: one Skill Pack
+  named `verkstead`, its thirteen skills under
+  [`plugins/verkstead/skills/`](../plugins/verkstead/skills), each a
+  `<skill>/SKILL.md`. Pure data, with no component, and the first row of the
+  Plugins page's Built-in group. **A debug build reads it off the checkout**
+  rather than out of the binary, the way the viewer is read, so a skill edited
+  there is what a running `cargo run -p verkstead-cli -- serve` installs at its
+  next start, with no recompile. A release embeds it.
+- the **fixture**, which provides nothing, exports nothing and is listed
+  nowhere: it is the proof that the component path works on every platform.
 
 The build script looks for the components in `plugins/dist/` first, which is
 where the release and CI workflows put the one build of them every leg

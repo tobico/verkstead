@@ -82,6 +82,10 @@
 //! is not. A name kept that long can outlive its declaration, and its chip then
 //! says the server is gone, as the composer's does.
 //!
+//! **The Skill Packs under them are the same again** — the composer's
+//! `PackRows`, picks held by name beside the servers', and put on the
+//! Conversation the press makes straight after them.
+//!
 //! The one thing it reads that a saved composer has no need of is the repo's own
 //! memory of what it was last grilled with — or, for a repo nothing has grilled,
 //! what the server prefills in its place. A draft has that applied to it when
@@ -134,7 +138,7 @@ import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Show, createEffect, createSignal, type JSX } from "solid-js";
 
 import app from "../App.module.css";
-import { attaching } from "../Attaching";
+import { attaching, type Chip } from "../Attaching";
 import { Icon } from "../Icon";
 import { Menu, Nested } from "../Menu";
 import { PaneSticky, Panes } from "../Panes";
@@ -145,6 +149,7 @@ import {
   listRepos,
   loadRepoPairings,
   loadSettings,
+  loadSkillPacks,
 } from "../api/client";
 import type { Process, RepoEntry } from "../api/types";
 import { useReading } from "../freshness";
@@ -156,7 +161,7 @@ import * as pairing from "../pairing";
 import { ShowArchived } from "./Archived";
 import { Conversations } from "./Conversations";
 import { addingServer } from "./AddServer";
-import { ServerRows, clashing } from "./Composer";
+import { PackRows, ServerRows, clashing } from "./Composer";
 import styles from "./Composer.module.css";
 import { PaneHead } from "./PaneHead";
 import { Wordmark } from "./Wordmark";
@@ -319,6 +324,22 @@ function Compose(props: {
     queryFn: loadSettings,
     enabled: servers().length > 0,
     freshness: { reconcile: "id" } as const,
+  }));
+
+  // And the Skill Packs picked there, held the same way and for the same
+  // reason (see `Composed.packs`).
+  const packs = (): Array<string> => state().packs;
+  const setPacks = (change: (was: Array<string>) => Array<string>) =>
+    setState((was) => ({ ...was, packs: change(was.packs) }));
+
+  // And what the work's device offers, read only while one is held, so a
+  // kept name whose plugin has since gone can say so — the reading the menu's
+  // rows make, on the device the page is drafting onto.
+  const offered = useReading(() => ({
+    queryKey: keyOf(device(), "skill-packs"),
+    queryFn: () => loadSkillPacks(device()),
+    enabled: packs().length > 0,
+    freshness: { reconcile: "name" } as const,
   }));
 
   // And written back whenever it moves. Every keystroke, which is what makes
@@ -599,8 +620,8 @@ function Compose(props: {
         // and the files are on their way up.
         removing: make.isPending,
       })),
-    chips: () =>
-      servers().map((name) => ({
+    chips: (): Array<Chip> => [
+      ...servers().map((name) => ({
         name,
         // Gone only once the settings have been read and say so: a chip is
         // not drawn as missing on the strength of a read still in flight.
@@ -613,6 +634,18 @@ function Compose(props: {
         remove: () => setServers((was) => was.filter((one) => one !== name)),
         removing: make.isPending,
       })),
+      ...packs().map((name) => ({
+        name,
+        kind: "pack" as const,
+        // Gone on the same terms as a server's chip: only once the read has
+        // landed and says so.
+        gone:
+          offered.data !== undefined &&
+          !offered.data.some((one) => one.name === name),
+        remove: () => setPacks((was) => was.filter((one) => one !== name)),
+        removing: make.isPending,
+      })),
+    ],
     add: files.add,
     // Not offered while a roadmap is loaded: the box is locked to a card then,
     // and there is nothing being written for a file to be handed over with.
@@ -622,21 +655,30 @@ function Compose(props: {
     // list of names either way. A pick lands in the page rather than on a
     // record: there is no Conversation yet for the chip to come back off.
     offering: (shut) => (
-      <ServerRows
-        attached={servers()}
-        attach={(name) => {
-          // The menu first, because the press has done its work: the row that
-          // was pressed is about to go, and a card still hanging under the
-          // trigger would be a list rearranging itself under the hand that had
-          // finished with it.
-          shut();
-          setServers((was) => [...was, name]);
-        }}
-        add={() => {
-          shut();
-          adding.open();
-        }}
-      />
+      <>
+        <ServerRows
+          attached={servers()}
+          attach={(name) => {
+            // The menu first, because the press has done its work: the row
+            // that was pressed is about to go, and a card still hanging under
+            // the trigger would be a list rearranging itself under the hand
+            // that had finished with it.
+            shut();
+            setServers((was) => [...was, name]);
+          }}
+          add={() => {
+            shut();
+            adding.open();
+          }}
+        />
+        <PackRows
+          attached={packs()}
+          attach={(name) => {
+            shut();
+            setPacks((was) => [...was, name]);
+          }}
+        />
+      </>
     ),
   });
 

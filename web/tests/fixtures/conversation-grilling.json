@@ -112,6 +112,7 @@
     }
   },
   "shared": null,
+  "skill_packs": [],
   "state": "Grilling",
   "stop_asked": false,
   "stopped_by_hand": false,

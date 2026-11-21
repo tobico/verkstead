@@ -84,8 +84,11 @@ import type {
   LanguageCleared,
   MemoPressed,
   MergedRow,
+  OfferedPack,
   OnboardingView,
   OpenTerminal,
+  PackAttached,
+  PackRemoved,
   Preflight,
   PrefillView,
   Process,
@@ -1294,6 +1297,51 @@ export function removeServer(
       `/api/ui/conversations/${id}/mcp-servers/${encodeURIComponent(name)}/remove`,
     ),
   );
+}
+
+/// Give a Conversation an installed Skill Pack, for its sessions to be launched
+/// with mounted.
+///
+/// [`attachServer`] said of a pack: the name in the path and no body, a pack
+/// being referred to by name as a declaration is, and encoded on the way out
+/// for the same reason.
+export function attachPack(
+  device: Device,
+  id: number,
+  name: string,
+): Promise<PackAttached> {
+  return post<PackAttached>(
+    on(
+      device,
+      `/api/ui/conversations/${id}/skill-packs/${encodeURIComponent(name)}`,
+    ),
+  );
+}
+
+/// And take one off again, by that same name.
+export function removePack(
+  device: Device,
+  id: number,
+  name: string,
+): Promise<PackRemoved> {
+  return post<PackRemoved>(
+    on(
+      device,
+      `/api/ui/conversations/${id}/skill-packs/${encodeURIComponent(name)}/remove`,
+    ),
+  );
+}
+
+/// The Skill Packs the Attach menu offers: every enabled installed plugin's,
+/// as loaded on the device the Conversation is on — never the built-in
+/// `verkstead`, which every session has already.
+///
+/// Addressed by device where the settings are not, because what a device has
+/// loaded is that device's own: a plugin is installed and enabled once for the
+/// cluster, and loaded — or in trouble — on each machine apart. The pack a
+/// menu offers is one the device the Conversation is on would take.
+export function loadSkillPacks(device: Device): Promise<OfferedPack[]> {
+  return get<OfferedPack[]>(on(device, "/api/ui/skill-packs"));
 }
 
 /// Put a file on one of a waiting Set's Answers, under the label of the

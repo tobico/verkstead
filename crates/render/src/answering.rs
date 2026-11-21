@@ -41,6 +41,10 @@ pub enum Submitted {
     /// the chip there to take off (ADR-0028).
     ServerGone(String),
 
+    /// A Skill Pack picked on the Set is no longer installed, or no longer
+    /// enabled, by this name: refused the way [`Self::ServerGone`] is.
+    PackGone(String),
+
     /// A repo picked on the Set is no longer registered, by this name: refused
     /// the way [`Self::ServerGone`] is.
     RepoGone(String),

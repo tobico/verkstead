@@ -21,7 +21,7 @@ use verkstead_render::{
     PluginCapability, PluginConsent, PluginFieldRefused, PluginFieldValue, PluginFix, PluginNeed,
     PluginRow, PluginSettingsSaved, PluginSettingsView, PluginSource, PluginUpdated, PluginsView,
 };
-use verkstead_server::plugins::built_in::FIXTURE;
+use verkstead_server::plugins::built_in::{FIXTURE, VERKSTEAD};
 use verkstead_server::settings::Settings;
 use verkstead_server::{open_database, router_keeping};
 
@@ -51,7 +51,7 @@ fn manifest(uuid: &str, name: &str, capabilities: &[&str]) -> String {
          author:\n  name: Ada Lovelace\n  email: ada@example.com\n\
          version: 1.4.0\n\
          interface: 1\n\
-         provides:\n  - category: forge\n  - category: skills\n  - category: forge\n\
+         provides:\n  - category: forge\n  - category: activity\n  - category: forge\n\
          {capabilities}"
     )
 }
@@ -145,6 +145,185 @@ async fn kept() -> (Router, tempfile::TempDir) {
     (router_keeping(pool, dir.path().to_owned()), dir)
 }
 
+/// A plugin under `dir/<name>` called `name`, whose one `provides:` entry is
+/// the Skill Pack `pack` holding the one skill `reviewing`.
+fn packing(dir: &Path, uuid: &str, name: &str, pack: &str) -> String {
+    let text = manifest(uuid, name, &[]).replace(
+        "provides:\n  - category: forge\n  - category: activity\n  - category: forge\n",
+        &format!("provides:\n  - category: skills\n    name: {pack}\n    directory: skills\n"),
+    );
+    let at = plugin(dir, name, &text);
+    let skill = Path::new(&at).join("skills/reviewing");
+    std::fs::create_dir_all(&skill).unwrap();
+    std::fs::write(
+        skill.join("SKILL.md"),
+        "---\nname: reviewing\ndescription: Review Rust.\n---\n\nRead /verkstead/skills/rust-review/reviewing/notes.md.\n",
+    )
+    .unwrap();
+    std::fs::write(skill.join("notes.md"), "Be kind.\n").unwrap();
+    at
+}
+
+/// The skills Verkstead ships are the Built-in group's row: providing skills,
+/// always on, and with no Remove — and the fixture is not listed.
+#[tokio::test]
+async fn the_verkstead_pack_is_a_built_in_row() {
+    let (app, _dir) = kept().await;
+
+    let view = page(&app).await;
+
+    let [row] = view.built_in.as_slice() else {
+        panic!("one built-in is listed: {view:?}");
+    };
+    assert_eq!(row.uuid, VERKSTEAD);
+    assert_eq!(row.name, "Verkstead");
+    assert_eq!(row.provides, ["skills"]);
+    assert_eq!(row.source, PluginSource::BuiltIn);
+    assert!(row.enabled);
+    assert_eq!(row.trouble, None);
+    assert!(view.installed.iter().all(|row| row.uuid != FIXTURE));
+
+    let (status, _) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{VERKSTEAD}/remove"),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "a built-in has no Remove");
+}
+
+/// An enabled plugin's pack is written out under its name, and taken away
+/// again when the plugin is unticked.
+#[tokio::test]
+async fn an_installed_plugins_pack_lands_under_its_name_until_it_is_disabled() {
+    let (app, dir) = kept().await;
+    let path = packing(dir.path(), PLUGIN, "Rust review", "rust-review");
+
+    let view = installs(&app, &path).await;
+    assert_eq!(row(&view, PLUGIN).trouble, None);
+
+    let pack = dir.path().join("skills/rust-review");
+    let skill = std::fs::read_to_string(pack.join("reviewing/SKILL.md")).unwrap();
+    assert!(skill.contains("name: reviewing"), "{skill}");
+    assert_eq!(
+        std::fs::read_to_string(pack.join("reviewing/notes.md")).unwrap(),
+        "Be kind.\n",
+        "every file of the pack lands, not only its SKILL.md files",
+    );
+
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{PLUGIN}/enabled"),
+        serde_json::json!({ "enabled": false }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert!(!pack.exists(), "a disabled plugin's pack is not there");
+
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{PLUGIN}/enabled"),
+        serde_json::json!({ "enabled": true }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert!(
+        pack.join("reviewing/SKILL.md").is_file(),
+        "ticked, it is back"
+    );
+
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{PLUGIN}/remove"),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert!(!pack.exists(), "a removed plugin's pack is not there");
+}
+
+/// A load rewrites a pack in place: its directory is the one a running
+/// session is bound, so it is the same directory afterwards, and only what the
+/// pack no longer has is taken out of it.
+#[tokio::test]
+async fn a_reload_rewrites_a_pack_in_its_own_directory() {
+    let (app, dir) = kept().await;
+    let path = packing(dir.path(), PLUGIN, "Rust review", "rust-review");
+    installs(&app, &path).await;
+
+    let pack = dir.path().join("skills/rust-review");
+    #[cfg(unix)]
+    let before = std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&pack).unwrap());
+
+    std::fs::remove_file(Path::new(&path).join("skills/reviewing/notes.md")).unwrap();
+    let linting = Path::new(&path).join("skills/linting");
+    std::fs::create_dir_all(&linting).unwrap();
+    std::fs::write(
+        linting.join("SKILL.md"),
+        "---\nname: linting\ndescription: Lint Rust.\n---\n",
+    )
+    .unwrap();
+
+    // Any load writes every pack again, so another plugin's install is one.
+    installs(
+        &app,
+        &plugin(
+            dir.path(),
+            "gitlab",
+            &manifest(ANOTHER, "GitLab", &["outbound: gitlab.com"]),
+        ),
+    )
+    .await;
+
+    #[cfg(unix)]
+    assert_eq!(
+        std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&pack).unwrap()),
+        before,
+        "a session bound the pack's directory is still bound the pack",
+    );
+    assert!(pack.join("reviewing/SKILL.md").is_file());
+    assert!(
+        pack.join("linting/SKILL.md").is_file(),
+        "what it gained lands"
+    );
+    assert!(
+        !pack.join("reviewing/notes.md").exists(),
+        "and what it no longer has is gone"
+    );
+}
+
+/// A pack name is one plugin's: the second plugin claiming it loads in
+/// trouble naming the first, and its pack is not written over the first's.
+#[tokio::test]
+async fn a_second_plugin_claiming_a_pack_name_loads_in_trouble() {
+    let (app, dir) = kept().await;
+    installs(
+        &app,
+        &packing(dir.path(), PLUGIN, "Rust review", "rust-review"),
+    )
+    .await;
+
+    let view = installs(
+        &app,
+        &packing(dir.path(), ANOTHER, "Other review", "rust-review"),
+    )
+    .await;
+
+    assert_eq!(row(&view, PLUGIN).trouble, None);
+    assert_eq!(
+        row(&view, ANOTHER).trouble.as_deref(),
+        Some(
+            "Its skill pack is named `rust-review`, and so is Rust review's. Give it a name of \
+             its own."
+        ),
+    );
+    assert!(
+        dir.path()
+            .join("skills/rust-review/reviewing/SKILL.md")
+            .is_file()
+    );
+}
+
 /// A local plugin read through the card and installed is listed with its name,
 /// version, author, what it provides and where it came from, and loads.
 #[tokio::test]
@@ -158,7 +337,7 @@ async fn a_local_plugin_installed_through_the_card_is_listed_on_its_row() {
 
     let consent = read(&app, &path).await;
     assert_eq!(consent.name, "GitLab");
-    assert_eq!(consent.provides, ["forge", "skills"]);
+    assert_eq!(consent.provides, ["forge", "activity"]);
     assert_eq!(
         consent.capabilities,
         [PluginCapability::Outbound {
@@ -176,12 +355,15 @@ async fn a_local_plugin_installed_through_the_card_is_listed_on_its_row() {
     assert_eq!(row.name, "GitLab");
     assert_eq!(row.version, "1.4.0");
     assert_eq!(row.author, "Ada Lovelace");
-    assert_eq!(row.provides, ["forge", "skills"]);
+    assert_eq!(row.provides, ["forge", "activity"]);
     assert_eq!(row.source, PluginSource::Local { path: path.clone() });
     assert!(row.enabled);
     assert_eq!(row.trouble, None);
     assert_eq!(row.elsewhere, None);
-    assert!(view.built_in.is_empty(), "the fixture isn't listed");
+    assert!(
+        view.built_in.iter().all(|row| row.uuid != FIXTURE),
+        "the fixture isn't listed"
+    );
 }
 
 /// Breaking a manifest on disk and pressing Update is trouble on its row, which
@@ -1246,4 +1428,397 @@ async fn the_page_and_the_card_are_written_for_the_viewer() {
     .await;
     let (_, settings) = pane(&app).await;
     written("plugin-settings.json", settings);
+}
+
+/// **A Skill Pack attached to a Conversation** while its round drafts, the way
+/// an MCP server is (ADR-0030, *Skill packs*): offered on the Attach menu once
+/// an installed plugin's pack has loaded, kept as a chip read back from the
+/// Conversation, and frozen once the round starts.
+mod packs {
+    use super::*;
+    use sqlx::SqlitePool;
+    use verkstead_render::{
+        Added, AdditionMade, AdditionState, ConversationView, OfferedPack, PackAttached,
+        PackRemoved, Registered, RepoEntry, SetReading, Started, Submitted,
+    };
+    use verkstead_server::store;
+
+    /// A router over a Data Directory of its own, with the plugin providing
+    /// `rust-review` installed and a Conversation drafting in a Repo.
+    async fn drafting() -> (Router, tempfile::TempDir, SqlitePool, i64) {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+        let app = router_keeping(pool.clone(), dir.path().to_owned());
+
+        let path = packing(dir.path(), PLUGIN, "Rust review", "rust-review");
+        assert_eq!(row(&installs(&app, &path).await, PLUGIN).trouble, None);
+
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        for args in [
+            &["init", "--initial-branch", "main"][..],
+            &["config", "user.email", "test@verkstead.invalid"],
+            &["config", "user.name", "Verkstead Test"],
+            &["commit", "--allow-empty", "-m", "first"],
+        ] {
+            let status = Command::new("git")
+                .args(args)
+                .current_dir(&repo)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        }
+
+        let registered: Registered =
+            answer(&app, "/api/ui/repos", serde_json::json!({ "path": repo })).await;
+        assert!(matches!(registered, Registered::Added(_)), "{registered:?}");
+        let repos: Vec<RepoEntry> = reading(&app, "/api/ui/repos").await;
+        let started: Started = answer(
+            &app,
+            "/api/ui/conversations",
+            serde_json::json!({ "repo_id": repos[0].id }),
+        )
+        .await;
+        let Started::Started { id } = started else {
+            panic!("the Conversation starts: {started:?}");
+        };
+
+        (app, dir, pool, id)
+    }
+
+    async fn answer<T: serde::de::DeserializeOwned>(
+        app: &Router,
+        path: &str,
+        body: serde_json::Value,
+    ) -> T {
+        let (status, said) = pressing(app, path, body).await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+        serde_json::from_str(&said).unwrap_or_else(|error| panic!("{error}: {said}"))
+    }
+
+    async fn reading<T: serde::de::DeserializeOwned>(app: &Router, path: &str) -> T {
+        let answered = app
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(answered.status(), StatusCode::OK);
+        let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    async fn attach(app: &Router, id: i64, name: &str) -> PackAttached {
+        answer(
+            app,
+            &format!("/api/ui/conversations/{id}/skill-packs/{name}"),
+            serde_json::json!({}),
+        )
+        .await
+    }
+
+    async fn detach(app: &Router, id: i64, name: &str) -> PackRemoved {
+        answer(
+            app,
+            &format!("/api/ui/conversations/{id}/skill-packs/{name}/remove"),
+            serde_json::json!({}),
+        )
+        .await
+    }
+
+    /// The chips, as the composer draws them: each name, and whether it is
+    /// still installed here.
+    async fn held(app: &Router, id: i64) -> Vec<(String, bool)> {
+        let view: ConversationView = reading(app, &format!("/api/ui/conversations/{id}")).await;
+        view.skill_packs
+            .into_iter()
+            .map(|pack| (pack.name, pack.installed))
+            .collect()
+    }
+
+    async fn offered(app: &Router) -> Vec<String> {
+        let offered: Vec<OfferedPack> = reading(app, "/api/ui/skill-packs").await;
+        offered.into_iter().map(|pack| pack.name).collect()
+    }
+
+    async fn enabled(app: &Router, enabled: bool) {
+        let (status, said) = pressing(
+            app,
+            &format!("/api/ui/plugins/{PLUGIN}/enabled"),
+            serde_json::json!({ "enabled": enabled }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+    }
+
+    #[tokio::test]
+    async fn an_installed_pack_is_offered_attached_and_taken_off() {
+        let (app, _dir, _pool, id) = drafting().await;
+
+        let menu: Vec<OfferedPack> = reading(&app, "/api/ui/skill-packs").await;
+        assert_eq!(
+            menu,
+            [OfferedPack {
+                name: "rust-review".to_owned(),
+                plugin: "Rust review".to_owned(),
+                skills: vec!["reviewing".to_owned()],
+            }],
+            "the installed plugin's pack, and never the built-in verkstead"
+        );
+        assert!(held(&app, id).await.is_empty());
+
+        assert_eq!(
+            attach(&app, id, "rust-review").await,
+            PackAttached::Attached
+        );
+        assert_eq!(
+            attach(&app, id, "rust-review").await,
+            PackAttached::Attached,
+            "a second press is the state there is"
+        );
+        assert_eq!(held(&app, id).await, [("rust-review".to_owned(), true)]);
+
+        assert_eq!(detach(&app, id, "rust-review").await, PackRemoved::Removed);
+        assert!(held(&app, id).await.is_empty());
+    }
+
+    /// Nothing is attached that no loaded plugin provides — the built-in pack
+    /// included, which every session has already.
+    #[tokio::test]
+    async fn a_pack_nothing_provides_is_refused() {
+        let (app, _dir, _pool, id) = drafting().await;
+
+        assert_eq!(
+            attach(&app, id, "verkstead").await,
+            PackAttached::NoSuchPack
+        );
+        assert_eq!(
+            attach(&app, id, "go-review").await,
+            PackAttached::NoSuchPack
+        );
+        assert!(held(&app, id).await.is_empty());
+    }
+
+    /// A disabled pack is not on the menu and cannot be attached; one disabled
+    /// after it was attached keeps its chip, marked gone, until it is ticked
+    /// again.
+    #[tokio::test]
+    async fn a_disabled_pack_is_off_the_menu_and_its_chip_is_gone() {
+        let (app, _dir, _pool, id) = drafting().await;
+        assert_eq!(
+            attach(&app, id, "rust-review").await,
+            PackAttached::Attached
+        );
+
+        enabled(&app, false).await;
+
+        assert!(offered(&app).await.is_empty());
+        assert_eq!(held(&app, id).await, [("rust-review".to_owned(), false)]);
+        assert_eq!(
+            attach(&app, id, "rust-review").await,
+            PackAttached::NoSuchPack
+        );
+
+        enabled(&app, true).await;
+
+        assert_eq!(offered(&app).await, ["rust-review"]);
+        assert_eq!(held(&app, id).await, [("rust-review".to_owned(), true)]);
+    }
+
+    /// Fixed once the round starts, both ways.
+    #[tokio::test]
+    async fn the_packs_freeze_with_the_brief() {
+        let (app, _dir, pool, id) = drafting().await;
+        assert_eq!(
+            attach(&app, id, "rust-review").await,
+            PackAttached::Attached
+        );
+
+        store::set_state(&pool, id, store::Lifecycle::Implementing)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            detach(&app, id, "rust-review").await,
+            PackRemoved::NotDrafting
+        );
+        assert_eq!(held(&app, id).await, [("rust-review".to_owned(), true)]);
+        assert_eq!(
+            attach(&app, 9_999, "rust-review").await,
+            PackAttached::NoSuchConversation
+        );
+    }
+
+    /// Ask a two-Question Set from the Conversation, the ordinary way.
+    async fn asked(pool: &SqlitePool, id: i64) -> i64 {
+        let set = verkstead_schema::QuestionSet::from_yaml(
+            "title: the rate limiter\n\
+             questions:\n\
+             \x20 - label: Q1\n\
+             \x20   text: where does the counter live?\n",
+        )
+        .unwrap();
+
+        store::ask(pool, id, &set, store::Ask::Blocking)
+            .await
+            .unwrap()
+            .unwrap()
+            .id
+    }
+
+    /// Pick pack `name` on the Set at Q1's menu.
+    async fn pick(app: &Router, set: i64, name: &str) -> AdditionMade {
+        answer(
+            app,
+            &format!("/api/ui/sets/{set}/additions"),
+            serde_json::json!({ "label": "Q1", "pick": { "Pack": { "name": name } } }),
+        )
+        .await
+    }
+
+    async fn submit(app: &Router, set: i64) -> Submitted {
+        answer(
+            app,
+            &format!("/api/ui/sets/{set}/response"),
+            serde_json::json!({ "answers": [{ "label": "Q1", "free_text": "in Redis" }] }),
+        )
+        .await
+    }
+
+    /// ADR-0028's second moment for a pack: picked on an Answer after the
+    /// round started, recorded pending, and put on the Conversation by the
+    /// Submit — the Answer the agent reads naming it and where it is mounted,
+    /// and the Timeline line saying it came with the Set.
+    #[tokio::test]
+    async fn a_pack_picked_on_an_answer_is_attached_by_the_submit() {
+        let (app, _dir, pool, id) = drafting().await;
+        store::set_state(&pool, id, store::Lifecycle::Implementing)
+            .await
+            .unwrap();
+        let set = asked(&pool, id).await;
+
+        let AdditionMade::Added { addition } = pick(&app, set, "rust-review").await else {
+            panic!("the pick is recorded");
+        };
+        assert_eq!(
+            addition.added,
+            Added::Pack {
+                name: "rust-review".to_owned(),
+                installed: true,
+            }
+        );
+        assert_eq!(addition.state, AdditionState::Pending);
+        assert!(
+            store::skill_packs(&pool, id).await.unwrap().is_empty(),
+            "nothing is on the Conversation before the Submit"
+        );
+
+        assert_eq!(submit(&app, set).await, Submitted::Accepted);
+
+        assert_eq!(
+            store::skill_packs(&pool, id).await.unwrap(),
+            ["rust-review"]
+        );
+        assert_eq!(held(&app, id).await, [("rust-review".to_owned(), true)]);
+
+        let reading: SetReading = reading(&app, &format!("/api/ui/sets/{set}")).await;
+        let SetReading::Set(view) = reading else {
+            panic!("the Set reads back");
+        };
+        assert_eq!(view.additions[0].state, AdditionState::Applied);
+        assert_eq!(
+            view.packs,
+            ["rust-review"],
+            "and the menus leave it out now"
+        );
+
+        let response: String = {
+            let answered = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!(
+                            "/conversations/{id}/api/v1/sets/{set}/response?hold=0"
+                        ))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(answered.status(), StatusCode::OK);
+            let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+            String::from_utf8(bytes.to_vec()).unwrap()
+        };
+        let response = verkstead_schema::Response::from_yaml(&response).unwrap();
+        let added = &response.answers[0].added;
+        assert_eq!(added.len(), 1, "{response:?}");
+        assert!(
+            added[0].contains("`rust-review`") && added[0].contains("/rust-review/`"),
+            "the Answer names the pack and where it is mounted: {added:?}"
+        );
+    }
+
+    /// A pack nothing provides is not picked, and one on the Conversation
+    /// already is on already.
+    #[tokio::test]
+    async fn a_pack_nothing_provides_or_already_on_is_refused_on_a_set() {
+        let (app, _dir, pool, id) = drafting().await;
+        assert_eq!(
+            attach(&app, id, "rust-review").await,
+            PackAttached::Attached
+        );
+        let set = asked(&pool, id).await;
+
+        assert_eq!(pick(&app, set, "go-review").await, AdditionMade::NoSuchPack);
+        assert_eq!(pick(&app, set, "verkstead").await, AdditionMade::NoSuchPack);
+        assert_eq!(
+            pick(&app, set, "rust-review").await,
+            AdditionMade::AlreadyOn
+        );
+    }
+
+    /// A pack disabled between the pick and the Submit refuses the Submit by
+    /// name, and nothing is stored: the Set still waits, and the chip says it
+    /// is gone. Ticked again, the same Submit goes through.
+    #[tokio::test]
+    async fn a_pack_no_longer_enabled_refuses_the_submit() {
+        let (app, _dir, pool, id) = drafting().await;
+        let set = asked(&pool, id).await;
+
+        assert!(matches!(
+            pick(&app, set, "rust-review").await,
+            AdditionMade::Added { .. }
+        ));
+        enabled(&app, false).await;
+
+        assert_eq!(
+            submit(&app, set).await,
+            Submitted::PackGone("rust-review".to_owned())
+        );
+        assert!(store::settlement(&pool, set).await.unwrap().is_none());
+        assert!(store::skill_packs(&pool, id).await.unwrap().is_empty());
+
+        let reading: SetReading = reading(&app, &format!("/api/ui/sets/{set}")).await;
+        let SetReading::Set(view) = reading else {
+            panic!("the Set reads back");
+        };
+        assert_eq!(
+            view.additions[0].added,
+            Added::Pack {
+                name: "rust-review".to_owned(),
+                installed: false,
+            }
+        );
+
+        enabled(&app, true).await;
+        assert_eq!(submit(&app, set).await, Submitted::Accepted);
+        assert_eq!(
+            store::skill_packs(&pool, id).await.unwrap(),
+            ["rust-review"]
+        );
+    }
 }

@@ -68,6 +68,27 @@ pub(crate) async fn add(
             store::Addition::Server { name: name.clone() }
         }
 
+        // A pack a plugin loaded on this device provides, as the composer's
+        // menu offers one — see [`crate::conversations::attach_pack`] — and
+        // not on the Conversation already.
+        Pick::Pack { name } => {
+            if !crate::conversations::offered_packs(state)
+                .iter()
+                .any(|pack| &pack.name == name)
+            {
+                return Ok(AdditionMade::NoSuchPack);
+            }
+
+            if store::skill_packs(&state.pool, conversation)
+                .await?
+                .contains(name)
+            {
+                return Ok(AdditionMade::AlreadyOn);
+            }
+
+            store::Addition::Pack { name: name.clone() }
+        }
+
         // A Repo registered here, and neither the work's own nor alongside it
         // already: the menu offers no other, and a press arriving for one is a
         // registration or a steer that landed between the drawing and the
@@ -193,28 +214,43 @@ pub(crate) async fn picked(state: &AppState, set_id: i64) -> Result<Vec<Addition
         .collect())
 }
 
+/// What [`undeclared`] found gone, by name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Gone {
+    /// A server the settings no longer declare.
+    Server(String),
+
+    /// A pack no plugin loaded on this device provides any more: removed, or
+    /// disabled.
+    Pack(String),
+}
+
 /// The first server picked on a waiting Set that the settings no longer
-/// declare, which refuses the Submit by name: the human answered on the
-/// strength of what they were adding, so the Answers are not stored without it
-/// (ADR-0028, *Every question before anything is ended*).
+/// declare, or pack that no enabled plugin here provides any more, which
+/// refuses the Submit by name: the human answered on the strength of what they
+/// were adding, so the Answers are not stored without it (ADR-0028, *Every
+/// question before anything is ended*).
 ///
 /// Only while the Set waits: one that has settled is the store's to refuse, and
 /// a lock leaves its picks pending without that being anything to say.
-pub(crate) async fn undeclared(state: &AppState, set_id: i64) -> Result<Option<String>> {
+pub(crate) async fn undeclared(state: &AppState, set_id: i64) -> Result<Option<Gone>> {
     if store::settlement(&state.pool, set_id).await?.is_some() {
         return Ok(None);
     }
 
     let declared = crate::conversations::declared_servers(state);
+    let offered = crate::conversations::offered_packs(state);
 
     Ok(store::set_additions(&state.pool, set_id)
         .await?
         .into_iter()
+        .filter(|added| added.state == store::AdditionState::Pending)
         .find_map(|added| match added.addition {
-            store::Addition::Server { name }
-                if added.state == store::AdditionState::Pending && !declared.contains(&name) =>
-            {
-                Some(name)
+            store::Addition::Server { name } if !declared.contains(&name) => {
+                Some(Gone::Server(name))
+            }
+            store::Addition::Pack { name } if !offered.iter().any(|pack| pack.name == name) => {
+                Some(Gone::Pack(name))
             }
             _ => None,
         }))
@@ -265,6 +301,7 @@ pub(crate) async fn readied(state: &AppState, set_id: i64) -> Result<Readied> {
             store::Addition::Companion { repo_id, .. }
             | store::Addition::OpenedUp { repo_id, .. } => *repo_id,
             store::Addition::Server { .. }
+            | store::Addition::Pack { .. }
             | store::Addition::Device { .. }
             | store::Addition::Unmatched { .. } => continue,
         };
@@ -304,6 +341,7 @@ pub(crate) async fn readied(state: &AppState, set_id: i64) -> Result<Readied> {
                 base,
             )),
             store::Addition::Server { .. }
+            | store::Addition::Pack { .. }
             | store::Addition::Device { .. }
             | store::Addition::Unmatched { .. } => {}
         }
@@ -473,8 +511,8 @@ pub(crate) async fn submit(
 /// answering it ends nothing (ADR-0028, *Only what changes the sandbox
 /// restarts the agent*, *Only the session waiting on that Set*).
 ///
-/// **What changes the sandbox**: a pending Companion, a Companion opened up, or
-/// an MCP server. A device tick is checked live by `verkstead transfer`, and a
+/// **What changes the sandbox**: a pending Companion, a Companion opened up, an
+/// MCP server, or a Skill Pack, which is a directory more bound. A device tick is checked live by `verkstead transfer`, and a
 /// file already reaches the running session, so a Set adding only those ends
 /// nothing.
 ///
@@ -739,7 +777,8 @@ enum Reach {
 /// A server is named with the prefix its tools carry, as the prompt's own
 /// listing names them — see [`crate::skills::tools_named`] — and says that it
 /// reaches the next launch: a running session keeps the Built Root it started
-/// with. A device is named with its id and the command that uses it. A
+/// with. A pack is named with the path it is mounted at, and reaches the next
+/// launch for the same reason. A device is named with its id and the command that uses it. A
 /// companion is named with the directory it is checked out in and its mode, as
 /// the prompt's own listing names one — see [`crate::skills::alongside`] — and
 /// reaches the next launch for the same reason a server does.
@@ -785,6 +824,24 @@ fn said(
             format!("The MCP server `{name}`{tools}. {reach}")
                 .trim_end()
                 .to_owned()
+        }
+        store::Addition::Pack { name } => {
+            let reach = match reach {
+                Reach::Carried => CARRIED,
+                Reach::Waiting => {
+                    "It is mounted from the next session launched; this one was started \
+                     without it."
+                }
+                Reach::Later => "",
+            };
+
+            format!(
+                "The skill pack `{name}`, mounted at `{}`, each skill's `SKILL.md` in a \
+                 directory of its own under it. {reach}",
+                naming.mounted(name),
+            )
+            .trim_end()
+            .to_owned()
         }
         store::Addition::Device { device } => {
             let name = naming.device(device);
@@ -888,6 +945,9 @@ pub(crate) async fn widened_with(
         .filter(|added| added.state == store::AdditionState::Applied)
         .map(|added| match added.addition {
             store::Addition::Server { name } => format!("the MCP server `{name}`"),
+            store::Addition::Pack { name } => {
+                format!("the skill pack `{name}`, listed under *Skill packs* below")
+            }
             store::Addition::Companion { repo_id, mode, .. } => format!(
                 "the repo `{}`, {}",
                 repo(repo_id),
@@ -1120,9 +1180,12 @@ fn named(name: &Option<String>) -> Option<String> {
 }
 
 /// What a chip names each thing by, read once for a list of them: the declared
-/// servers, the registered Repos and the cluster's devices.
+/// servers, the packs loaded here, the registered Repos and the cluster's
+/// devices.
 struct Naming {
     declared: Vec<String>,
+    packs: Vec<String>,
+    skills: std::path::PathBuf,
     repos: Vec<(i64, String)>,
     devices: Vec<(String, String)>,
 }
@@ -1148,9 +1211,23 @@ impl Naming {
 
         Ok(Self {
             declared: crate::conversations::declared_servers(state),
+            packs: crate::conversations::offered_packs(state)
+                .into_iter()
+                .map(|pack| pack.name)
+                .collect(),
+            skills: state.sessions.skills().map_or_else(
+                || std::path::PathBuf::from(crate::skills::INSIDE),
+                |skills| skills.inside().to_owned(),
+            ),
             repos,
             devices,
         })
+    }
+
+    /// Where a session finds pack `name`: [`crate::skills::Skills::inside`]
+    /// on this device, and the pack's own directory under it.
+    fn mounted(&self, name: &str) -> String {
+        format!("{}/", crate::sandbox::under(&self.skills, name).display())
     }
 
     fn repo(&self, id: i64) -> Option<String> {
@@ -1175,6 +1252,10 @@ fn viewed(added: store::SetAddition, naming: &Naming) -> AdditionView {
         added: match added.addition {
             store::Addition::Server { name } => Added::Server {
                 declared: naming.declared.contains(&name),
+                name,
+            },
+            store::Addition::Pack { name } => Added::Pack {
+                installed: naming.packs.contains(&name),
                 name,
             },
             store::Addition::Companion {

@@ -1,5 +1,24 @@
 {
-  "built_in": [],
+  "built_in": [
+    {
+      "author": "Tobias Cohen",
+      "dependents": [],
+      "elsewhere": null,
+      "enabled": true,
+      "name": "Verkstead",
+      "needs": [],
+      "provides": [
+        "skills"
+      ],
+      "settings": 0,
+      "source": {
+        "kind": "BuiltIn"
+      },
+      "trouble": null,
+      "uuid": "15447a8d-f28d-4573-8b8b-a7226d477755",
+      "version": "0.1.0"
+    }
+  ],
   "installed": [
     {
       "author": "Ada Lovelace",
@@ -10,7 +29,7 @@
       "needs": [],
       "provides": [
         "forge",
-        "skills"
+        "activity"
       ],
       "settings": 4,
       "source": {
@@ -30,7 +49,7 @@
       "needs": [],
       "provides": [
         "forge",
-        "skills"
+        "activity"
       ],
       "settings": 0,
       "source": {
@@ -50,12 +69,12 @@
       "needs": [],
       "provides": [
         "forge",
-        "skills"
+        "activity"
       ],
       "settings": 0,
       "source": {
         "kind": "Git",
-        "revision": "133d813ee268b94a39c8df028a5bfa266719fee7",
+        "revision": "eb22087f6ef05a5b5beafc79e4cb5a90b580ec2b",
         "url": "file:///home/you/src/sources/skills"
       },
       "trouble": null,
@@ -80,7 +99,7 @@
       ],
       "provides": [
         "forge",
-        "skills"
+        "activity"
       ],
       "settings": 0,
       "source": {

@@ -163,6 +163,46 @@ provides:
 
 An empty list, or none, is a plugin that provides nothing.
 
+#### `skills`
+
+A **Skill Pack**: a directory of skills, each a `<skill>/SKILL.md`, that a
+session reads at `/verkstead/skills/<pack>/<skill>/SKILL.md` and names
+`<pack>/<skill>`.
+
+```yaml
+provides:
+  - category: skills
+    name: rust-review      # the pack: lowercase letters, digits and hyphens
+    directory: skills      # relative to the plugin; holds <skill>/SKILL.md
+```
+
+Each directory at the top of `directory` is a skill, and its `SKILL.md` opens
+with frontmatter — a `---` line, the skill's `name`, which is its directory's,
+and a non-empty `description`, then another `---` — the way an agent's skill
+loader reads one. A skill with no `SKILL.md`, no frontmatter, another `name`
+or no `description` is refused, naming the skill. Files beside the skills are
+the pack's own and carried with it; every file under a skill's directory goes
+where its `SKILL.md` does.
+
+`verkstead` is the name of the pack Verkstead ships, and refused for any other.
+A pack name is one plugin's: a plugin whose pack has the name of one already
+loaded loads in trouble, saying whose it is. A pack asks for no capability
+and needs no component.
+
+A loaded pack is offered on a Brief's Attach menu, under **Skill packs**
+beside the MCP servers. Attached, every session of that Conversation has it
+mounted read-only at `/verkstead/skills/<pack>/` and listed in its prompt with
+each skill's path; a Conversation that did not attach it cannot reach it. A
+pack disabled or removed after it was attached keeps its chip, marked *no
+longer installed*, and is neither mounted nor listed until it is back.
+
+A pack is offered on a question set's Attach menus too, at every answer field
+and the comment box, the way a server is ([ADR-0028](adr/0028-adding-from-an-answer.md)):
+picked, it waits on the set, and the Submit puts it on the Conversation. A
+session waiting on that set is carried on in a sandbox with it mounted; a pack
+disabled or removed between the pick and the Submit refuses the Submit,
+naming it.
+
 ### What its wasm component may reach
 
 **`component`** — optional. A path to a `.wasm` file inside the plugin's

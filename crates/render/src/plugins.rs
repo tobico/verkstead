@@ -22,9 +22,10 @@ use ts_rs::TS;
 pub struct PluginsView {
     pub installed: Vec<PluginRow>,
 
-    /// The ones this binary ships and lists. None yet: the fixture that proves
-    /// the path is not listed, and the group is drawn only once it has a row.
-    /// A built-in has no **Remove**.
+    /// The ones this binary ships and lists, the Skill Pack `verkstead` first;
+    /// the fixture that proves the path is not listed, and the group is drawn
+    /// only once it has a row. A built-in has no **Remove** and no checkbox:
+    /// it is always on.
     pub built_in: Vec<PluginRow>,
 }
 
@@ -97,6 +98,8 @@ pub enum PluginSource {
     /// A git repository every device clones for itself, checked out at the
     /// revision pinned at install or at the last **Update**.
     Git { url: String, revision: String },
+    /// Inside this binary: a built-in.
+    BuiltIn,
 }
 
 /// Where to read a manifest for the consent card: a directory's absolute path,

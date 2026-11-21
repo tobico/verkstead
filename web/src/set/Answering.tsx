@@ -23,7 +23,8 @@
 //! **And the control is the composer's plus-menu**, at every Question and at
 //! the comment box alike: *Attach file…* first — at the comment box a file is
 //! on the Set as a whole, answering nothing — then the declared MCP servers the Conversation does not have yet, and *Add
-//! a server…*. A server picked there is recorded on the Set the moment it is
+//! a server…*, then the Skill Packs the installed plugins provide that it does
+//! not have yet. A server picked there is recorded on the Set the moment it is
 //! picked, under the Question it was picked at or under none at the comment
 //! box, and drawn as a chip beside that Answer's files — read back off the Set
 //! like them, so it survives a reload and shows on another device. Nothing
@@ -91,7 +92,7 @@ import { keyOf, useDevice } from "../reaching";
 import { addingServer } from "../workbench/AddServer";
 import { otherAuthor } from "../workbench/Timeline";
 import { addingRepo } from "./AddingRepo";
-import { ServerRows } from "../workbench/Composer";
+import { PackRows, ServerRows } from "../workbench/Composer";
 import { rowPress } from "../rows";
 import styles from "./Answering.module.css";
 import { AskText } from "./AskText";
@@ -159,6 +160,9 @@ export function Answering(props: {
 
   /// The MCP servers the Conversation has already, which the menus leave out.
   servers: string[];
+
+  /// And the Skill Packs it has already, for the same reason.
+  packs: string[];
 
   /// And the rest of what the menus offer: Repos to add alongside, read-only
   /// companions to open up, and devices the work may be transferred to.
@@ -250,8 +254,9 @@ export function Answering(props: {
 
   /// The rows an Attach menu holds under *Attach file…*, at `label` or at the
   /// comment box where `null`: the servers the Conversation does not have and
-  /// this Set has not had picked, and *Add a server…*; then the repos and the
-  /// devices, past what this Set has had picked already.
+  /// this Set has not had picked, and *Add a server…*; the packs the same way;
+  /// then the repos and the devices, past what this Set has had picked
+  /// already.
   const offering = (label: string | null) => (shut: () => void) => (
     <>
       <ServerRows
@@ -264,6 +269,13 @@ export function Answering(props: {
           shut();
           openedAt = label;
           declaring.open();
+        }}
+      />
+      <PackRows
+        attached={[...props.packs, ...additions.packs()]}
+        attach={(name) => {
+          shut();
+          additions.pick(label, { Pack: { name } }, name);
         }}
       />
       <AddableRows
@@ -1295,7 +1307,8 @@ function putting(what: {
 }
 
 /// What could not be picked on a Set or taken off it, one sentence per way of
-/// being refused — the files' own, with the two only a server meets.
+/// being refused — the files' own, with those only a server, a pack, a repo or
+/// a device meets.
 export const ADDITION_REFUSAL: Record<
   Exclude<AdditionMade | AdditionRemoved, { Added: unknown } | "Removed">,
   string
@@ -1306,6 +1319,7 @@ export const ADDITION_REFUSAL: Record<
   Closed: "This conversation is closed.",
   NoSuchLabel: "This question set doesn't ask that question.",
   NoSuchServer: "That server is no longer declared in the settings.",
+  NoSuchPack: "No plugin installed here provides that skill pack.",
   AlreadyOn: "This conversation has that already.",
   NoSuchRepo: "That repo is no longer registered.",
   NotACompanion: "That repo isn't alongside this conversation, so there's nothing to open up.",
@@ -1324,7 +1338,9 @@ type Picking = {
   /// leave out: a Set adds a server once.
   servers: () => string[];
 
-  /// And every repo, added or opened up, and every device, for the same reason.
+  /// And every pack, every repo, added or opened up, and every device, for
+  /// the same reason.
+  packs: () => string[];
   repos: () => number[];
   devices: () => string[];
 
@@ -1479,6 +1495,13 @@ function picking(what: {
         "Server" in addition.added ? [addition.added.Server.name] : [],
       );
 
+  const packs = () =>
+    what
+      .picked()
+      .flatMap((addition) =>
+        "Pack" in addition.added ? [addition.added.Pack.name] : [],
+      );
+
   const repos = () =>
     what.picked().flatMap((addition) => {
       if ("Companion" in addition.added) return [addition.added.Companion.repo_id];
@@ -1496,6 +1519,7 @@ function picking(what: {
   return {
     chips,
     servers,
+    packs,
     repos,
     devices,
     pick,
@@ -1519,6 +1543,10 @@ export function chipped(
 
   if ("Server" in added) {
     return { name: added.Server.name, gone: !added.Server.declared };
+  }
+
+  if ("Pack" in added) {
+    return { kind: "pack", name: added.Pack.name, gone: !added.Pack.installed };
   }
 
   if ("Companion" in added) {
@@ -1715,6 +1743,9 @@ function refused(outcome: Submitted | undefined, error: Error | null): string | 
 
   if ("ServerGone" in outcome) {
     return `The MCP server ${outcome.ServerGone} is no longer declared, so your response wasn't stored. Remove it, or declare it again in settings.`;
+  }
+  if ("PackGone" in outcome) {
+    return `The ${outcome.PackGone} skill pack is no longer installed here, so your response wasn't stored. Remove it to send your answers without it.`;
   }
   if ("RepoGone" in outcome) {
     return `The ${outcome.RepoGone} repo is no longer registered, so your response wasn't stored. Remove it, or register it again.`;
