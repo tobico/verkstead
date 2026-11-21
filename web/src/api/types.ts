@@ -4916,7 +4916,11 @@ export type PluginCapability = { "kind": "Filesystem", path: string, writable: b
  * The consent card: who the plugin is, what it provides, and every
  * capability it asks for.
  */
-export type PluginConsent = { uuid: string, name: string, version: string, author: string, email: string, description: string | null, provides: Array<string>, capabilities: Array<PluginCapability>, };
+export type PluginConsent = { uuid: string, name: string, version: string, author: string, email: string, description: string | null, provides: Array<string>, 
+/**
+ * The drawn name of each Activity it provides.
+ */
+activities: Array<string>, capabilities: Array<PluginCapability>, };
 
 /**
  * The checkbox.
@@ -5070,7 +5074,11 @@ provides: Array<string>,
  * The languages it provides, by label — `Rust`, `C/C++` — in the order
  * its manifest lists them. Empty for one providing none.
  */
-languages: Array<string>, source: PluginSource, 
+languages: Array<string>, 
+/**
+ * The drawn name of each Activity it provides, in the order written.
+ */
+activities: Array<string>, source: PluginSource, 
 /**
  * Its checkbox: whether the cluster has it on.
  */

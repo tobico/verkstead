@@ -3732,6 +3732,26 @@ pub(crate) async fn settle(
     Ok(true)
 }
 
+/// A Conversation's Timeline as it is held: each Event's id, kind and body as
+/// the `body` column stores it, oldest first, read nothing into.
+///
+/// What an Activity is started with — see the server's `activities` — which
+/// is a component's to make sense of in its own terms, so nothing is joined in
+/// and nothing is parsed: a kind this Verkstead has no reader for crosses as it
+/// is.
+pub async fn timeline_as_held(
+    pool: &SqlitePool,
+    conversation_id: i64,
+) -> Result<Vec<(i64, String, String)>> {
+    sqlx::query_as(
+        "SELECT id, kind, body FROM timeline_events WHERE conversation_id = ? ORDER BY id",
+    )
+    .bind(conversation_id)
+    .fetch_all(pool)
+    .await
+    .context("failed to read a Timeline as it is held")
+}
+
 /// A Conversation's Timeline, oldest first — which is reading order, and which
 /// puts the Brief at the top where it was written.
 ///

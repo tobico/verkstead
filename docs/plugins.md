@@ -29,6 +29,8 @@ not a WebAssembly component, one that imports something Verkstead does not
 provide, one that traps while it starts, and one still starting after ten
 seconds, which is stopped there, are each refused the same way, with the
 sentence the Plugins page would draw on the plugin's row.
+Each Activity's component is checked against the `activity` world beside it,
+without being started.
 
 ## Installing one from a directory
 
@@ -203,6 +205,92 @@ session waiting on that set is carried on in a sandbox with it mounted; a pack
 disabled or removed between the pick and the Submit refuses the Submit,
 naming it.
 
+#### `activity`
+
+An **Activity**: what a Process's state runs. A wasm component the server
+starts with a Conversation's facts, which launches sessions and waits on them
+through the functions the host lends it, and ends in one of the **Outcomes** it
+declares here. A plugin may provide several, a block each, and each names a
+component of its own.
+
+```yaml
+provides:
+  - category: activity
+    id: follow-up-rounds          # lowercase letters, digits and hyphens
+    name: Follow-up rounds        # what is drawn
+    component: follow-up-rounds.wasm
+    outcomes: [committed, nothing]
+    skills: [verkstead/following-up]
+dependencies:
+  - uuid: 15447a8d-f28d-4573-8b8b-a7226d477755   # the pack `verkstead`'s
+    name: Verkstead
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+```
+
+- **`id`** — required, and unique among the plugin's Activities: what a
+  Process names it by.
+- **`name`** — required. Drawn on the plugin's row.
+- **`component`** — required. A `.wasm` file inside the plugin's directory,
+  written against the `activity` world below. The top-level `component:` is
+  the plugin's own, apart from this.
+- **`outcomes`** — required, a list of words in lowercase letters, digits and
+  hyphens: every way the Activity ends. A Process maps each to one of its
+  states, so an Outcome never names a state. `steered` — the human steered the
+  Conversation elsewhere while it ran — is every Activity's without being
+  written, and writing it is refused, as is a word written twice.
+- **`skills`** — optional, a list: every skill the Activity launches a session
+  under, as `<pack>/<skill>`. **What an Activity names, it declares**: each
+  pack is one this plugin provides, or one a plugin it lists under
+  `dependencies` provides, and a skill from any other is refused, naming it.
+  Where the pack is the plugin's own or a built-in's, the skill has to be one
+  of its skills too; an installed dependency's pack is checked when the plugins
+  load, and a skill it lacks is the plugin's trouble.
+
+**The `activity` world.** The component exports one function, `run`, which is
+handed the **start facts** and answers the Outcome as its word:
+
+- the Worktree — the Repo's name, the Worktree's path, the branch and its
+  base — and each Companion the same way, with whether it may be committed in;
+- the roles' Pairings;
+- the Brief, and the handoff document where there is one;
+- the Timeline so far, each entry its kind and its body as the text the
+  Timeline stores, which is not JSON: a brief, a handoff or a notice is its
+  markdown; a move is the state's word, `follow-up` say; a steer is the
+  state's word, then a newline and the instruction where the human wrote one;
+  and a session's output, a question set or a commit has an empty body;
+- the options the Process configured the Activity with;
+- each skill it declared, with the path a session reads its `SKILL.md` at.
+
+It imports the **host functions**, `verkstead:plugin/host`, and nothing else
+of Verkstead's:
+
+- **`launch`** a session under a skill and a role, with the prompt the Activity
+  wrote — the host adds what every session is told — and the evidence
+  `verkstead done` is checked against: a file landed, commits since a count,
+  nothing, the Nothing-else mark, or an investigation's; and whether the session
+  ends with its work or on a pull request.
+- **`wait`** on it, answering what happened: it gave its Done signal, it is
+  gone — with the host's sentence for how, where it ended badly — it stalled, the human steered the Conversation, or the human answered a
+  round with the Nothing-else mark. Every event an Activity is handed arrives
+  here.
+- **`git-facts`** of the Worktree's repository or a Companion's, read-only: the
+  branch, the commits past its base, and whether anything is uncommitted.
+- **`notice`**, which puts a notice on the Timeline.
+- **`stop`**, with a reason: the Conversation stays where it is, the reason goes
+  on the Timeline, and a question set left open is closed.
+
+**An Activity keeps nothing between starts.** A server restarted starts it
+again with the same facts and the Timeline as it now stands, and the files in
+the Repo are the truth it works out where it was from.
+
+Each Activity's component is checked as the plugin loads, without being run:
+one that isn't a component, imports something Verkstead does not give an
+Activity, or does not export `run` is the plugin's trouble, drawn on its row
+and printed by `verkstead plugin check`, naming the Activity.
+
 ### What its wasm component may reach
 
 **`component`** — optional. A path to a `.wasm` file inside the plugin's
@@ -212,7 +300,8 @@ code. It is a WebAssembly **component** built for WASI 0.2 — Rust's
 Verkstead's WIT package, `verkstead:plugin` (`crates/server/wit/plugin.wit`):
 the base world `plugin`, or the world of a Category it provides. A Category's
 world is filled by the stage that gives it its grammar: the `agent` world's
-exports are above, and the rest hold nothing yet.
+exports are above, and the `activity` world's are below, where an Activity's
+component is named by its block rather than here; the rest hold nothing yet.
 
 The component may import WASI 0.2 and WASI HTTP, and nothing else. What any of
 it reaches is what `capabilities` grants, below.

@@ -44,7 +44,7 @@ use crate::AppState;
 use crate::answer_files::OnAnswers;
 use crate::drivers::Driving;
 use crate::exchanges::exchange;
-use crate::sessions;
+use crate::lending::Lent;
 use crate::skills;
 use crate::store;
 
@@ -193,71 +193,45 @@ async fn relaunching(
         Digest::Skip => skills::grilling(skills, &brief(timeline)),
     };
 
-    // Read back here rather than carried from anywhere: a stall may be answered
-    // the next morning, and where an agent is about to be let loose is the one
-    // thing that must not be guessed at.
-    let conversation = match store::load_conversation(&state.pool, conversation_id).await {
-        Ok(Some(conversation)) => conversation,
-        Ok(None) => {
-            tracing::error!(conversation_id, "there is no Conversation left to grill");
-            return false;
-        }
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading the Conversation to grill again failed");
-            return false;
-        }
-    };
-
     // The grilling Pairing, which is the one a grilling runs under whatever else
     // has happened since — the implementation one is what the work is built
-    // under, and this session is not building anything.
-    let Some(pairing) = conversation.grilling_pairing.clone() else {
-        tracing::error!(
-            conversation_id,
-            "the grilling Pairing is gone, so the grilling was not started again"
-        );
-        return false;
-    };
+    // under, and this session is not building anything. Read back by the host
+    // rather than carried from anywhere: a stall may be answered the next
+    // morning, and where an agent is about to be let loose is the one thing that
+    // must not be guessed at.
+    //
+    // No Turn taken, as a grilling never took one, and nothing it may build: a
+    // grilling may not retire a Memo, so it is not told how. What its Done
+    // signal is checked against is the pick's, written down when its tail is
+    // seen out — see [`crate::runner::follow_the_tail`] — so nothing is waited
+    // on here and the evidence below is never registered.
+    let mut lent = Lent::new(state, conversation_id)
+        .turn_held()
+        .holding(held.to_vec());
 
-    // One Worktree holds one agent. The session this is replacing died rather
-    // than being ended, so a register still holding a relay that has not
-    // finished unwinding would be two agents editing each other's files.
-    state.sessions.end(conversation_id).await;
-
-    let started = state
-        .sessions
+    let started = lent
         .start(
-            &state.pool,
-            &state.nudges,
-            state.devices.as_ref(),
-            &conversation,
-            &pairing,
-            &prompt,
-            // A grilling may not retire a Memo, so it is not told how.
-            false,
-            sessions::Held {
-                sets: held,
-                settlements: &state.settlements,
-            },
+            "verkstead/grilling",
+            store::Role::Grilling,
+            prompt,
+            crate::done::Evidence::Nothing,
+            crate::done::Ends::WithItsWork,
         )
         .await;
 
-    match &started {
-        Ok(Some(session)) => tracing::info!(
+    match started {
+        Some(session) => tracing::info!(
             conversation_id,
-            event_id = session.event_id,
+            event_id = lent.event_id(session),
             "a stalled grilling is being grilled again"
         ),
-        Ok(None) => tracing::error!(
+        None => tracing::error!(
             conversation_id,
             "no session could be started to grill the work again"
         ),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "a relaunched grilling could not be started");
-        }
     }
 
-    matches!(started, Ok(Some(_)))
+    started.is_some()
 }
 
 /// Lock every Question Set the dead grilling left open, so that nothing is left

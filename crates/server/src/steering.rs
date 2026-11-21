@@ -50,7 +50,7 @@
 //!
 //! **What ends that session is the submit rather than the press.** One Worktree
 //! holds one agent, so the session a steer starts takes the Worktree from
-//! whatever is still in it — see the runner's `launch_in_turn`, which waits for
+//! whatever is still in it — see [`crate::lending`]'s launch, which waits for
 //! a session that cannot be displaced and ends one that can. So a steer into a
 //! target something runs in ends what was running, at once or once a review
 //! waiting on an ask has finished; a steer into Done launches nothing and ends
@@ -158,7 +158,7 @@
 //! watchers over whatever the branch now holds, with the fix attempts
 //! forgotten, which is what that press does there. Into Follow-up it is a
 //! session on the follow-up skill, started on the brief the human wrote and
-//! required to have one — see [`crate::runner::following_up`]. Into Done there
+//! required to have one — see [`crate::runner::follow_up_rounds`]. Into Done there
 //! is nothing to start at all.
 //!
 //! Nothing is reverted, reset or stashed, here or anywhere a stop is written:
@@ -740,14 +740,15 @@ pub(crate) async fn submit(
         // A session on the follow-up skill, started on the brief the human
         // steered with — which is required, so [`refusal`] has already made sure
         // there is one and this cannot come to nothing. See
-        // [`crate::runner::following_up`], which is what drives the Conversation
+        // [`crate::runner::follow_up_rounds`], which is what drives the Conversation
         // while it runs.
         SteerTarget::FollowUp => match follow_up {
-            Some(follow_up) => {
-                tokio::spawn(crate::runner::following_up(
+            // Read back off the Steer Event by the Activity rather than handed
+            // in, which is written by now.
+            Some(_) => {
+                tokio::spawn(crate::runner::follow_up_rounds(
                     state.clone(),
                     conversation_id,
-                    crate::follow_ups::FollowUp::opening(follow_up.to_owned()),
                     driving,
                 ));
             }

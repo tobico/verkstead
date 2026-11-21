@@ -80,6 +80,7 @@ use verkstead_render::{
     TerminalView, TerminalsView, TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
+use verkstead_server::activities::Hosting;
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::device::Devices;
@@ -93,7 +94,7 @@ use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::{
-    Agents, Gh, Pace, open_database, router_running_sessions,
+    Agents, Gh, Pace, open_database, router_hosting_activities, router_running_sessions,
     router_running_sessions_answering_devices,
 };
 use verkstead_store::{Decision, StageOf, stage_roadmap};
@@ -224,6 +225,10 @@ struct Grilling {
     /// The stand-in for `verkstead done` — see [`signalling`]. Stopped when the
     /// fixture goes.
     _signalling: Signalling,
+
+    /// What starts an Activity on this Conversation, where the bench's server
+    /// hands one out — see [`Grilling::activity`].
+    hosting: Option<Hosting>,
 
     /// This fixture's place in the suite — see [`ROOM`]. Last, so that it is
     /// handed back only once everything above has been let go of.
@@ -3250,6 +3255,10 @@ struct Bench {
     repo: PathBuf,
     repo_id: i64,
 
+    /// What starts an Activity on one of its Conversations: every bench's but
+    /// a desktop install's.
+    hosting: Option<Hosting>,
+
     /// Held from the moment this bench was built and handed on to the
     /// [`Grilling`] it becomes — see [`ROOM`].
     room: tokio::sync::OwnedSemaphorePermit,
@@ -3632,6 +3641,7 @@ impl Bench {
             id,
             repo_id: self.repo_id,
             _signalling: signalling,
+            hosting: self.hosting,
             database: self.database,
             _room: self.room,
         }
@@ -3748,9 +3758,11 @@ async fn bench_serving(
         None => agents,
     };
 
-    let app = match serving {
+    let (app, hosting) = match serving {
         Serving::Sessions => {
-            router_running_sessions(pool, state.path().to_owned(), agents, gh_stub(gh))
+            let (app, hosting) =
+                router_hosting_activities(pool, state.path().to_owned(), agents, gh_stub(gh));
+            (app, Some(hosting))
         }
         Serving::ADesktopInstall => {
             let devices = Devices::of(
@@ -3771,13 +3783,14 @@ async fn bench_serving(
             )
             .installed_as(InstallKind::AppImage);
 
-            router_running_sessions_answering_devices(
+            let app = router_running_sessions_answering_devices(
                 pool,
                 state.path().to_owned(),
                 agents,
                 gh_stub(gh),
                 devices,
-            )
+            );
+            (app, None)
         }
     };
 
@@ -3798,6 +3811,7 @@ async fn bench_serving(
         database,
         repo,
         repo_id,
+        hosting,
         room,
     }
 }
@@ -31564,6 +31578,16 @@ const A_MARKED_ROUND_THEN_GONE: &str = "    SAYING='following it up'\n    \
      printf 'still tidying up\\n'; sleep 0.1; LEFT=$((LEFT - 1)); done\n    \
      printf 'that is that, then\\n'";
 
+/// A follow-up whose round is answered with the mark, and which goes on doing
+/// what the answer asked for without signalling: a session stopped in that
+/// window leaves a marked round whose work is undone.
+const A_MARKED_ROUND_STILL_WORKING: &str = "    SAYING='following it up'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+     printf 'doing what you asked\\n'\n    \
+     sleep 300";
+
 /// A follow-up that does its round, is answered, and then finishes: a session
 /// that is gone with the human never having said there was nothing else, which
 /// is the stop a follow-up is picked up again from.
@@ -33348,6 +33372,54 @@ async fn an_investigation_steered_out_of_a_closed_conversation_lands_done() {
         said,
         "and nothing stopped on the way out and back: {:?}",
         notices(&view),
+    );
+}
+
+/// And one that fell over says how, where it went badly, rather than that it
+/// finished: the component is told how the session ended as well as that it is
+/// gone.
+#[tokio::test]
+async fn a_follow_up_session_that_exits_badly_says_how_it_ended() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_a_follow_up(&reviews, "    printf 'falling over\\n'\n    exit 1"),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
+    assert_eq!(
+        fixture
+            .steer_following_up("Does it count the 429s it sends?\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("The session exited with status 1."),
+        "how it ended, which was the trouble: {:?}",
+        stopped.html,
+    );
+    assert!(
+        !stopped.html.contains("The follow-up session finished"),
+        "rather than that it finished: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("Nobody is left to ask you anything"),
+        "and why that is a stop: {:?}",
+        stopped.html,
     );
 }
 
@@ -37388,6 +37460,76 @@ async fn resume_follows_the_work_up_again_on_the_brief_and_the_rounds_answered()
     assert!(
         printed.contains("About the 429s") && printed.contains("It counts them against"),
         "which is the round it asked: {printed:?}",
+    );
+}
+
+/// A marked round on a pull request is a round still being worked, picked up
+/// again: Resume starts another follow-up session rather than carrying the
+/// Conversation back to its wrap-up.
+///
+/// The mark says there is nothing *else*, and the work the last answer asked
+/// for comes after it. A branch on a pull request always holds commits past its
+/// base, so reading *marked, work standing* as an ending owed would carry that
+/// work back to the wrap-up undone. That reading is a Tinker's on no pull
+/// request alone — see `resume_on_a_tinker_that_owes_a_pull_request_sends_for_it_rather_than_another_round`.
+#[tokio::test]
+async fn resume_on_a_marked_follow_up_on_a_pull_request_follows_it_up_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let stub = a_backlog_then_a_follow_up(&reviews, A_MARKED_ROUND_STILL_WORKING);
+
+    let fixture = grilling_spilling(spill, &stub, &gh_about(GREEN, "", "")).await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
+    assert_eq!(
+        fixture
+            .steer_following_up("Does it count the 429s it sends?\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    // The round marked, and the session stopped while it is still doing what
+    // the answer asked for.
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let working = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .rfind(|output| output.running)
+                .map(|output| output.id)
+        })
+        .await;
+    fixture.printed(working, "doing what you asked").await;
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+    fixture.stopped().await;
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let printed = fixture.printed_after(before).await;
+
+    assert!(
+        printed.contains("/verkstead/skills/verkstead/following-up/SKILL.md"),
+        "the press follows the work up again, the last round's work being \
+         undone: {printed:?}",
+    );
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::FollowUp,
+        "and the Conversation stays in Follow-up rather than going back to its \
+         wrap-up",
     );
 }
 
@@ -42963,4 +43105,270 @@ async fn a_grilling_session_is_refused_a_preview_naming_the_kinds_that_may() {
         "naming the kinds that may: {body}",
     );
     assert!(previews(&fixture).await.is_empty(), "and nothing lands");
+}
+
+/// An Activity's core module, made into a component against `wit/plugin.wit`'s
+/// `activity` world, as the plugins suite makes one — so the suite needs no
+/// wasm toolchain.
+fn activity_component(wat: &str) -> Vec<u8> {
+    let mut resolve = wit_parser::Resolve::default();
+    let (package, _) = resolve
+        .push_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("wit"))
+        .expect("the plugin WIT should parse");
+    let world = resolve
+        .select_world(&[package], Some("activity"))
+        .expect("the activity world should be there");
+
+    let mut module = wat::parse_str(wat).expect("the activity should assemble");
+    wit_component::embed_component_metadata(
+        &mut module,
+        &resolve,
+        world,
+        wit_component::StringEncoding::UTF8,
+        false,
+    )
+    .expect("the activity world should embed");
+
+    wit_component::ComponentEncoder::default()
+        .module(&module)
+        .expect("the activity should be a module wit-component reads")
+        .validate(true)
+        .encode()
+        .expect("the activity should encode as a component")
+}
+
+/// The Activity that launches one session, waits on it and reads the branch
+/// — see the WAT.
+const LAUNCHING: &str = include_str!("../fixtures/activity-launching.wat");
+
+/// One whose `run` traps the moment it is called.
+const TRAPPING: &str = r#"
+(module
+  (memory (export "memory") 1)
+  (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32)
+    (i32.const 1024))
+  (func (export "run") (param i32) (result i32)
+    unreachable))
+"#;
+
+impl Grilling {
+    /// Start an Activity called *Rounds*, whose component is `wat`'s and
+    /// which declares `outcomes`, on this Conversation — answering, once it
+    /// is over, its Outcome, or `None` where it stopped instead.
+    fn activity(&self, wat: &str, outcomes: &[&str]) -> tokio::task::JoinHandle<Option<String>> {
+        self.activity_declaring(wat, outcomes, &["verkstead/implementing"])
+    }
+
+    /// The same, its block declaring `skills` rather than the one the
+    /// launching fixture launches under.
+    fn activity_declaring(
+        &self,
+        wat: &str,
+        outcomes: &[&str],
+        skills: &[&str],
+    ) -> tokio::task::JoinHandle<Option<String>> {
+        self.hosting
+            .as_ref()
+            .expect("this bench hosts Activities")
+            .start(
+                self.id,
+                activity_component(wat),
+                verkstead_server::plugins::manifest::Activity {
+                    id: "rounds".to_owned(),
+                    name: "Rounds".to_owned(),
+                    component: PathBuf::from("rounds.wasm"),
+                    outcomes: outcomes
+                        .iter()
+                        .map(|outcome| (*outcome).to_owned())
+                        .collect(),
+                    skills: skills.iter().map(|skill| (*skill).to_owned()).collect(),
+                },
+            )
+    }
+
+    /// Wait until the grilling has a session printing, so that what starts
+    /// next is not raced by its launch.
+    async fn grilling_printed(&self) {
+        self.until(|view| output(view).filter(|output| output.lines > 0).map(|_| ()))
+            .await;
+    }
+}
+
+/// A grilling that prints and waits, and an Activity's session that commits
+/// only once its first signal is refused.
+fn under_an_activity(activity: &str) -> String {
+    format!(
+        r#"
+case "$2" in
+*"fixture Activity"*)
+{activity}
+    ;;
+*)
+    printf 'grilling\n'
+    sleep 300
+    ;;
+esac
+"#
+    )
+}
+
+/// A component reaches the server through nothing but the host functions: it
+/// launches a session on a skill, the session's Done signal is held to the
+/// evidence the component registered — refused until a commit lands, taken
+/// after — and the component's Outcome, read off the branch, comes back.
+#[tokio::test]
+async fn a_component_launches_a_session_and_its_outcome_comes_back() {
+    let fixture = grilling(&under_an_activity(SIGNALS_BEFORE_COMMITTING)).await;
+    fixture.grilling_printed().await;
+
+    let running = fixture.activity(LAUNCHING, &["committed", "nothing"]);
+
+    assert!(
+        fixture.view().await.driven,
+        "the Conversation counts as driven while the component runs",
+    );
+
+    let said = refused(&fixture).await;
+    assert!(
+        said.contains("nothing has been committed since this session began"),
+        "the signal is held to the evidence the component registered: {said:?}",
+    );
+
+    let outcome = tokio::time::timeout(*PATIENCE, running)
+        .await
+        .expect("the component should end")
+        .expect("the component's task should not panic");
+
+    assert_eq!(outcome.as_deref(), Some("committed"));
+
+    // The session committed at all only because it was launched on the
+    // component's own prompt: the stub's grilling branch never does.
+    let view = fixture.view().await;
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped: {:?}",
+        notices(&view)
+    );
+}
+
+/// A component launching under a skill its block does not declare is refused,
+/// and no session is started: **what an Activity names, it declares**. The
+/// fixture answers `refused` to a refused launch, which is no Outcome it
+/// declares, so the Conversation stops naming that word.
+#[tokio::test]
+async fn a_component_launching_under_an_undeclared_skill_is_refused() {
+    let fixture = grilling(&under_an_activity(
+        "    printf 'the fixture is working\\n'\n    sleep 300",
+    ))
+    .await;
+    fixture.grilling_printed().await;
+
+    let before = outputs(&fixture.view().await).len();
+
+    let outcome = fixture
+        .activity_declaring(LAUNCHING, &["committed", "nothing"], &[])
+        .await
+        .unwrap();
+
+    assert_eq!(outcome, None);
+
+    let notice = fixture.stopped().await;
+    assert!(
+        notice.html.contains("<code>refused</code>"),
+        "the launch was refused, which the fixture answers as `refused`: {}",
+        notice.html,
+    );
+    assert_eq!(
+        outputs(&fixture.view().await).len(),
+        before,
+        "and no session was started under the skill",
+    );
+}
+
+/// A component that traps leaves the Conversation stopped with a Notice saying
+/// so — never a server that panics, and never one left looking driven.
+#[tokio::test]
+async fn a_component_that_traps_stops_the_conversation_saying_so() {
+    let fixture = grilling(&under_an_activity("    sleep 300")).await;
+    fixture.grilling_printed().await;
+
+    let outcome = fixture.activity(TRAPPING, &["committed"]).await.unwrap();
+
+    assert_eq!(outcome, None);
+
+    let notice = fixture.stopped().await;
+    assert!(
+        notice.html.contains("Rounds stopped while it was running")
+            && notice.html.contains("unreachable"),
+        "the Notice says the component trapped: {}",
+        notice.html,
+    );
+
+    let view = fixture.view().await;
+    assert!(!view.driven, "nothing is left looking driven");
+}
+
+/// And one that answers an Outcome it never declared stops it the same way,
+/// naming the word.
+#[tokio::test]
+async fn a_component_answering_an_undeclared_outcome_stops_the_conversation_saying_so() {
+    let fixture = grilling(&under_an_activity("    sleep 300")).await;
+    fixture.grilling_printed().await;
+
+    let answers_committed = include_str!("../fixtures/activity.wat");
+    let outcome = fixture
+        .activity(answers_committed, &["nothing"])
+        .await
+        .unwrap();
+
+    assert_eq!(outcome, None);
+
+    let notice = fixture.stopped().await;
+    assert!(
+        notice.html.contains("<code>committed</code>")
+            && notice.html.contains("one of the outcomes it declares"),
+        "the Notice names the undeclared word: {}",
+        notice.html,
+    );
+
+    // And the server carries on: the next press is answered as ever.
+    assert_eq!(fixture.view().await.id, fixture.id);
+}
+
+/// A Force stop ends both the component's session and the component: the
+/// Outcome it would have read off the branch is never taken, and nothing is
+/// left driving.
+#[tokio::test]
+async fn a_force_stop_ends_a_components_session_and_the_component() {
+    let fixture = grilling(&under_an_activity(
+        "    printf 'the fixture is working\\n'\n    sleep 300",
+    ))
+    .await;
+    fixture.grilling_printed().await;
+
+    let running = fixture.activity(LAUNCHING, &["committed", "nothing"]);
+
+    fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .any(|output| output.running && output.latest.contains("the fixture is working"))
+                .then_some(())
+        })
+        .await;
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+
+    let outcome = tokio::time::timeout(*PATIENCE, running)
+        .await
+        .expect("the component should be ended")
+        .expect("the component's task should not panic");
+
+    assert_eq!(outcome, None, "the component's Outcome is not taken");
+
+    fixture
+        .until(|view| {
+            (!view.driven && outputs(view).iter().all(|output| !output.running)).then_some(())
+        })
+        .await;
 }
