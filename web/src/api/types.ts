@@ -5629,7 +5629,18 @@ author: string | null,
  * saying which this Repo's work is done as. With one Author or none there
  * is nothing to choose between, so this is never said of those.
  */
-author_unpicked: boolean, };
+author_unpicked: boolean, 
+/**
+ * The `owner/repo` on GitHub its `origin` remote is, where it has an
+ * origin and that origin is GitHub's.
+ *
+ * Asked of git as the list is read and kept nowhere, the origin being a
+ * fact about the repository rather than the registration. What a compose
+ * page holding nothing but a pull request URL picks its Repo by. Only the
+ * list of Repos says it: everywhere else a Repo is drawn it is `None`,
+ * there being nothing there to pick.
+ */
+github: string | null, };
 
 /**
  * What a Repo was last grilled with, as a Conversation started on it would

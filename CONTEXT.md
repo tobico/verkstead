@@ -311,10 +311,18 @@ says — a lone pull request follows the strategy as it always has.
 **Review and Fix Merge Issues need a target**, and the **Target** field is
 where it stands: drawn in the Repo panel under the Branch field for these two
 alone, reading **Pull request or branch** and taking any of the three. A pull
-request URL or `#number` is unambiguous in prose, so a saved Brief holding one
-fills that field while it is empty and never over what the human typed — a
-bare branch is not readable out of prose, and is typed in. Start reads the
-field, once, and is refused while it is empty.
+request URL or `#number` is unambiguous in prose, so a Brief holding one fills
+that field while it is the fill's — empty, or still holding what the Brief last
+filled it with, so `#4` typed on the way to `#41` is corrected — and never over
+what the human typed; nor is it emptied when the name leaves the Brief. A bare
+branch is not readable out of prose, and is typed in. Start reads the field,
+once, and is refused while it is empty.
+**A Brief that is one pull request URL and nothing else** fills the **Repo** and
+the **Process** by the same rule: the Repo with the registered one whose
+`origin` is that URL's repository on GitHub — matched by origin alone, the one
+already picked where two clones match, nothing moved where none does — and the
+Process with Fix Merge Issues. Prose around the URL, and a bare `#n`, fill the
+Target only. The same on the compose page and on a saved Draft.
 A field of its own rather than the Branch field re-read, that one being a rename
 and git refusing a URL as a ref: what the Conversation's branch is called is
 take-up's to decide from the head, and what to take up is this. A pull request
@@ -328,7 +336,9 @@ three, so typing in the field wins over it.
 Tinker the Implementation and Review Pairings, Investigate and Fix Merge Issues
 the Implementation Pairing alone. Develop is every new draft's default and is
 never remembered, unlike the Pairings — it is the one thing about a
-Conversation likeliest to differ from the last. Conversations from before this
+Conversation likeliest to differ from the last — except where the Brief is one
+pull request URL and nothing else, which fills it with Fix Merge Issues while
+nobody has picked one (see **Target**). Conversations from before this
 read Develop, and one that adopted a pull request reads Review. Drawn on the
 Brief's setup facts beside the Repo, the branch and the base — a fact about the
 work rather than about the machine it was worked on, so a **Share** says it as

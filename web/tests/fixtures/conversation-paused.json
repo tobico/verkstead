@@ -69,6 +69,7 @@
     "author": null,
     "author_unpicked": false,
     "default_branch": "main",
+    "github": null,
     "id": 1,
     "name": "verkstead",
     "path": "/srv/repos/verkstead"

@@ -91,6 +91,7 @@ import {
   startAdoption,
   startConversation,
   startGrilling,
+  switchRepo,
   takeUpPullRequest,
 } from "../api/client";
 import type {
@@ -99,6 +100,7 @@ import type {
   CompanionMode,
   ConversationView,
   Process,
+  RepoEntry,
   Started,
   TakenUp,
 } from "../api/types";
@@ -118,13 +120,14 @@ import {
   companionAddRefusal,
   CHOICE_REFUSAL,
   PROCESS_REFUSAL,
+  repoSwitchRefusal,
   RULE,
   TARGET_REFUSAL,
   TICK_REFUSAL,
 } from "./Setup";
 import { chosen } from "./naming";
 import { goingAhead, takeUpRefusal } from "./TakeUp";
-import { pullRequestIn } from "./targets";
+import { pullRequestIn, pullRequestRepository } from "./targets";
 import { BRIEF_REFUSAL, grillRefusal } from "./Timeline";
 
 /// One repo the work would run alongside, as the compose page holds it: which
@@ -209,6 +212,10 @@ export type Composed = {
   device: Device;
 
   repo: number | null;
+  /// What the fill last wrote into [`Composed.repo`], `null` until it has
+  /// written anything — [`Composed.filled`]'s counterpart for the Repo, read by
+  /// the same rule. See [`written`].
+  repoFilled: number | null;
   brief: string;
   /// The branch the work will be done on, empty being the name the server
   /// invents when the Conversation is started.
@@ -245,6 +252,9 @@ export type Composed = {
   /// last. So the control stands on Develop for every repo, and this is `null`
   /// until somebody says otherwise.
   process: Process | null;
+  /// And what the fill last wrote into [`Composed.process`], `null` until it
+  /// has written anything.
+  processFilled: Process | null;
   /// Who runs each of the three roles, as a picker writes it — `null` for a
   /// role nobody has touched. See `src/pairing.ts`.
   grilling: string | null;
@@ -300,18 +310,77 @@ export type Composed = {
 /// standing, because emptying the field is the human's act and not a Brief's —
 /// the server's own `fill_target` never clears one either.
 ///
+/// **A Brief that is one pull request URL and nothing else fills two more**:
+/// the Repo, with the one in `repos` whose origin is that repository — the one
+/// already picked where two are clones of it, the first listed otherwise — and
+/// the Process, with Fix Merge Issues. By the same rule: each is the fill's
+/// while it holds what the fill last wrote, or nobody has picked it, and the
+/// human's from the moment they pick. A URL no Repo is a clone of moves
+/// nothing, and still fills the Process. Prose around the URL, and a bare
+/// `#41`, fill only the Target. The server's `save_brief` keeps the same rule
+/// for a saved Draft.
+///
 /// The reading is `targets.ts`'s, which is the server's own expression written
 /// again on this side. What it decides is what is *drawn*; what the target
 /// turns out to be is the server's at Start.
-export function written(state: Composed, brief: string): Composed {
+export function written(
+  state: Composed,
+  brief: string,
+  repos: readonly RepoEntry[],
+): Composed {
   const named = state.target === state.filled ? pullRequestIn(brief) : null;
+  let next: Composed =
+    named === null
+      ? { ...state, brief }
+      : { ...state, brief, target: named, filled: named };
 
-  if (named === null) {
-    return { ...state, brief };
+  const repository = pullRequestRepository(brief)?.toLowerCase();
+  if (repository === undefined) {
+    return next;
   }
 
-  return { ...state, brief, target: named, filled: named };
+  if (next.process === next.processFilled) {
+    next = {
+      ...next,
+      process: "FixMergeIssues",
+      processFilled: "FixMergeIssues",
+    };
+  }
+
+  if (next.repo === null || next.repo === next.repoFilled) {
+    const matching = repos.filter(
+      (entry) => entry.github?.toLowerCase() === repository,
+    );
+    const onto =
+      matching.find((entry) => entry.id === next.repo) ?? matching[0];
+
+    if (onto !== undefined) {
+      next = { ...moved(next, onto.id), repoFilled: onto.id };
+    }
+  }
+
+  return next;
 }
+
+/// The page moved onto another Repo, which takes the same two things with it
+/// that a switch on a saved draft takes: the base goes back to the new
+/// repository's rule, and a companion that has just become the conversation's
+/// own Repo goes away — nothing is ever a companion of itself.
+///
+/// A move onto the Repo already picked changes nothing.
+export function moved(state: Composed, repoId: number): Composed {
+  if (state.repo === repoId) {
+    return state;
+  }
+
+  return {
+    ...state,
+    repo: repoId,
+    base: null,
+    companions: state.companions.filter((row) => row.repo_id !== repoId),
+  };
+}
+
 /// A compose page nobody has touched — on the device this browser last drafted
 /// onto, which is this one until it has picked another.
 ///
@@ -323,6 +392,7 @@ export function blank(): Composed {
   return {
     device: draftingOn(),
     repo: null,
+    repoFilled: null,
     brief: "",
     branch: "",
     target: "",
@@ -330,6 +400,7 @@ export function blank(): Composed {
     base: null,
     companions: [],
     process: null,
+    processFilled: null,
     grilling: null,
     implementation: null,
     review: null,
@@ -365,6 +436,7 @@ export function elsewhere(state: Composed, device: Device): Composed {
     ...state,
     device,
     repo: null,
+    repoFilled: null,
     base: null,
     companions: [],
     grilling: null,
@@ -545,6 +617,22 @@ export async function create(
       said(
         outcome === "Saved",
         `The brief couldn't be saved. ${BRIEF_REFUSAL[outcome]}`,
+      );
+    }
+
+    // A Brief that is one pull request URL fills the Repo on the server as it
+    // does here, and a draft only just made has no mark there yet saying the
+    // Repo was picked by hand. So a Repo the human picked over this page's fill
+    // is put back, which the server then reads as their pick.
+    if (
+      state.repo !== null &&
+      state.repo !== state.repoFilled &&
+      pullRequestRepository(state.brief) !== null
+    ) {
+      const outcome = await switchRepo(to, id, state.repo);
+      said(
+        outcome === "Switched",
+        `The repo couldn't be picked. ${repoSwitchRefusal(outcome)}`,
       );
     }
   }
@@ -929,6 +1017,18 @@ export async function moveTo(
     );
   }
 
+  // A Brief that is one pull request URL fills the Repo over there as it is
+  // saved, and the Repo the human picked for the move is theirs: so it is put
+  // back, which the server then reads as their pick — as `create` does.
+  const oneUrl = pullRequestRepository(brief) !== null;
+  if (oneUrl) {
+    const outcome = await switchRepo(to.reaching, id, repo);
+    said(
+      outcome === "Switched",
+      `The repo couldn't be picked. ${repoSwitchRefusal(outcome)}`,
+    );
+  }
+
   // The name the human settled on rather than whatever the record is carrying:
   // a branch nobody chose is Verkstead's own invention, and the new Conversation
   // was started under an invention of the target's — see `chosen` in
@@ -958,7 +1058,9 @@ export async function moveTo(
   // ids — a URL, a `#number` or a branch, and one of a fixed list — so they mean
   // the same over there. Develop is what the new Conversation already arrived
   // under, and no target is what it already has, so either left alone sends
-  // nothing, as the compose page's do.
+  // nothing, as the compose page's do — except Develop under a Brief that is one
+  // pull request URL, which the fill over there would otherwise have made Fix
+  // Merge Issues.
   if (draft.target !== null && draft.target !== "") {
     const outcome = await nameTarget(to.reaching, id, draft.target);
     said(
@@ -967,7 +1069,7 @@ export async function moveTo(
     );
   }
 
-  if (draft.process !== "Develop") {
+  if (draft.process !== "Develop" || oneUrl) {
     const outcome = await pickProcess(to.reaching, id, draft.process);
     said(
       outcome === "Picked",
@@ -1154,6 +1256,10 @@ function parsed(body: string): Composed | null {
     // it and will not write over it.
     !(held.target === undefined || typeof held.target === "string") ||
     !(held.filled === undefined || typeof held.filled === "string") ||
+    // And a body from before the Repo and the Process were filled has neither
+    // mark, which is the fill owning nothing it did not write.
+    !(held.repoFilled === undefined || whole(held.repoFilled)) ||
+    !kind(held.processFilled) ||
     !(held.base === null || typeof held.base === "string") ||
     !Array.isArray(held.companions) ||
     !kind(held.process) ||
@@ -1205,6 +1311,7 @@ function parsed(body: string): Composed | null {
     // `null` *has* said — this device — and is read as what it says.
     device: held.device === undefined ? draftingOn() : held.device,
     repo: held.repo,
+    repoFilled: held.repoFilled ?? null,
     brief: held.brief,
     branch: held.branch,
     target: held.target ?? "",
@@ -1212,6 +1319,7 @@ function parsed(body: string): Composed | null {
     base: held.base,
     companions,
     process: held.process ?? null,
+    processFilled: held.processFilled ?? null,
     grilling: held.grilling,
     implementation: held.implementation,
     review: held.review,

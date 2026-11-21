@@ -764,6 +764,10 @@ pub const STAYS_BEHIND: &[&str] = &[
     // Event id of this device's: the far end's sequence is no order here, and
     // keeps its own — see [`Held`].
     "stage_joined_at",
+    // And what this device's Brief last filled, which names a Repo of this
+    // device's and is about this copy's fields: the far end's fill starts from
+    // nothing, as a fresh Draft's does.
+    "brief_fills",
     // The two tables a Verkstead of before kept a stopped Conversation in.
     // Nothing writes either any more and the stop itself crosses on the row —
     // see [`Marks`].

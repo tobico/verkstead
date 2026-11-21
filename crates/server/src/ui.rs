@@ -1233,13 +1233,24 @@ async fn repos(State(state): State<AppState>) -> HttpResponse {
         }
     };
 
-    let config = state.settings.config();
-    let rows: Vec<RepoEntry> = repos
-        .into_iter()
-        .map(|repo| crate::repos::entry(repo, config.authors()))
-        .collect();
+    // Each row asks git for its origin, so the list is read off the runtime's
+    // own threads.
+    let authors = state.settings.config().authors().to_vec();
+    let rows = tokio::task::spawn_blocking(move || {
+        repos
+            .into_iter()
+            .map(|repo| crate::repos::listed(repo, &authors))
+            .collect::<Vec<RepoEntry>>()
+    })
+    .await;
 
-    Json(rows).into_response()
+    match rows {
+        Ok(rows) => Json(rows).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "reading the registered Repos' origins failed");
+            unavailable("The registered repos couldn't be read.")
+        }
+    }
 }
 
 /// `GET /api/ui/repos/clonable` — every **Clonable Repo**: what the other
@@ -4843,7 +4854,8 @@ async fn save_brief(
         return Json(verkstead_render::BriefSaved::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::save_brief(&state.pool, id, &edit.markdown).await {
+    let config = state.settings.config();
+    match crate::conversations::save_brief(&state.pool, &config, id, &edit.markdown).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "saving a Brief failed");

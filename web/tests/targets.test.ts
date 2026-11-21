@@ -10,7 +10,11 @@
 
 import { describe, expect, it } from "vitest";
 
-import { namesPullRequest, pullRequestIn } from "../src/workbench/targets";
+import {
+  namesPullRequest,
+  pullRequestIn,
+  pullRequestRepository,
+} from "../src/workbench/targets";
 
 describe("what a target field holds", () => {
   /// Whichever of the addresses GitHub hands out was copied into it.
@@ -89,5 +93,32 @@ describe("what a brief names", () => {
     expect(pullRequestIn("# Rate limiting\n\nThe API needs a ceiling.\n")).toBeNull();
     expect(pullRequestIn("tobico/askance#41 is the one")).toBeNull();
     expect(pullRequestIn("The rate limiter needs a review.")).toBeNull();
+  });
+});
+
+describe("a brief that is one pull request", () => {
+  /// The whole of it a URL, with GitHub's own tail and the whitespace around
+  /// it allowed — the Target field's own reading over the Brief.
+  it("says which repository a whole url is in", () => {
+    for (const brief of [
+      "https://github.com/tobico/verkstead/pull/41",
+      "github.com/tobico/verkstead/pull/41/files",
+      "https://www.github.com/tobico/verkstead/pull/41#issuecomment-9",
+      "  https://github.com/tobico/verkstead/pull/41/\n",
+    ]) {
+      expect(pullRequestRepository(brief), brief).toBe("tobico/verkstead");
+    }
+  });
+
+  /// And nothing for prose around one, or for a bare number.
+  it("says nothing for prose or a bare number", () => {
+    for (const brief of [
+      "Wrap up https://github.com/tobico/verkstead/pull/41 please.",
+      "#41",
+      "",
+      "https://gitlab.com/tobico/verkstead/pull/41",
+    ]) {
+      expect(pullRequestRepository(brief), brief).toBeNull();
+    }
   });
 });
