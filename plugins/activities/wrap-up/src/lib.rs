@@ -238,6 +238,13 @@ struct Watching<'a> {
     /// review has been launched.
     afresh: bool,
 
+    /// Whether this run's review is behind it: launched, or found settled.
+    /// One run reads the branch once, as its wrap's review. A settle that
+    /// goes again under it is a wrap of its own begun since — the work sent
+    /// back to be built and a pull request recorded again in the moment
+    /// between two rounds — whose review is the run that wrap starts.
+    reviewed: bool,
+
     /// When this started, and how long after it the review is held back.
     started: Instant,
     review_after: Duration,
@@ -278,6 +285,7 @@ impl<'a> Watching<'a> {
             lacking: HashSet::new(),
             silent: HashSet::new(),
             afresh: option(facts, "review") == Some("afresh"),
+            reviewed: false,
             started: Instant::now(),
             review_after: Duration::from_millis(
                 option(facts, "review-after")
@@ -463,10 +471,16 @@ impl<'a> Watching<'a> {
             return false;
         }
 
-        if self.started.elapsed() < self.review_after
-            || host::settled(&Watcher::Review)
-            || !host::review_wanted(self.afresh)
-        {
+        if self.reviewed {
+            return false;
+        }
+
+        if host::settled(&Watcher::Review) {
+            self.reviewed = true;
+            return false;
+        }
+
+        if self.started.elapsed() < self.review_after || !host::review_wanted(self.afresh) {
             return false;
         }
 
@@ -516,6 +530,7 @@ impl<'a> Watching<'a> {
         }
 
         self.afresh = false;
+        self.reviewed = true;
         self.running = Some((session, Dispatched::Review));
         true
     }
