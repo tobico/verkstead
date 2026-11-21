@@ -69,6 +69,20 @@ const STRANGER: &str = "99887766554433221100ffeeddccbbaa";
 /// each reading's Tailscale is built with it and never runs.
 const PORT: u16 = 8422;
 
+/// How long [`Verkstead::workbench`] and [`Verkstead::peers`] give a dial,
+/// which is always to a listener that is up: ten seconds to connect, as long
+/// as a running server gives the answer.
+///
+/// **Not a running server's two seconds to connect**, because what those two
+/// seconds wait out is a machine that is not there, and every listener here is
+/// in this process and answering. The connect deadline covers the TLS
+/// handshake as well as the `SYN`, and both ends of it share the test's one
+/// thread, so a stall on a loaded runner is enough: Rust (3/5) had a Join to a
+/// listener that was up come back as "operation timed out". The dead address
+/// these tests do dial, `127.0.0.1:1`, refuses at once, so nothing waits this
+/// out.
+const ANSWERED_WITHIN: Duration = Duration::from_secs(10);
+
 /// A machine with no Tailscale on it: `verkstead-no-such-tailscale` is a
 /// program that is not there, which is what having none *is*.
 fn no_tailscale() -> Tailscale {
@@ -188,7 +202,11 @@ impl Verkstead {
     /// a newcomer never told it was in reads exactly as a press that never told
     /// it.
     fn workbench(&self) -> Router {
-        router_answering_devices_telling(self.pool.clone(), self.devices(), self.nudges.clone())
+        router_answering_devices_telling(
+            self.pool.clone(),
+            self.devices().waiting(ANSWERED_WITHIN),
+            self.nudges.clone(),
+        )
     }
 
     fn devices(&self) -> Devices {
@@ -214,7 +232,7 @@ impl Verkstead {
     /// dial a loaded runner fails to finish, and that reads exactly as a member
     /// answering at none of its addresses.
     fn peers(&self) -> Peers {
-        Peers::of(self.device.clone(), self.members.clone())
+        Peers::of(self.device.clone(), self.members.clone()).waiting(ANSWERED_WITHIN)
     }
 
     /// What it says about itself, which is what an announcement carries.
