@@ -79,6 +79,20 @@ const PORT: u16 = 8422;
 /// the member that is not there is dialled at a port that refuses at once.
 const PATIENCE: Duration = Duration::from_secs(2);
 
+/// And how long [`Verkstead::workbench`] and [`Verkstead::peers`] give a dial,
+/// which is always to a listener that is up: ten seconds to connect, as long as
+/// a running server gives the answer.
+///
+/// **Not a running server's two seconds to connect**, because what those two
+/// seconds wait out is a machine that is not there, and every listener here is
+/// in this process and answering. The connect deadline covers the TLS
+/// handshake as well as the `SYN`, and both ends of it share the test's one
+/// thread, so a stall on a loaded runner is enough: Rust (3/5) had a Join to a
+/// listener that was up come back as "operation timed out". The dead address
+/// these tests do dial, `127.0.0.1:1`, refuses at once, so nothing waits this
+/// out.
+const ANSWERED_WITHIN: Duration = Duration::from_secs(10);
+
 /// A machine with no Tailscale on it: `verkstead-no-such-tailscale` is a
 /// program that is not there, which is what having none *is*.
 fn no_tailscale() -> Tailscale {
@@ -183,9 +197,13 @@ impl Verkstead {
     }
 
     /// The workbench its browser would be talking to, which is what the presses
-    /// go through.
+    /// go through, with every dial given [`ANSWERED_WITHIN`].
     fn workbench(&self) -> Router {
-        router_answering_devices_telling(self.pool.clone(), self.devices(), self.nudges.clone())
+        router_answering_devices_telling(
+            self.pool.clone(),
+            self.devices().waiting(ANSWERED_WITHIN),
+            self.nudges.clone(),
+        )
     }
 
     /// And the same with every dial given [`PATIENCE`], for the press whose
@@ -214,14 +232,12 @@ impl Verkstead {
     /// How it dials, for the questions that are about a call rather than about
     /// a press.
     ///
-    /// **With a running server's deadlines rather than [`PATIENCE`]**, because
-    /// every call made through this one is meant to be answered — let in or
-    /// refused at the gate, but answered. Three hundred milliseconds for the
-    /// whole of an answer, a handshake and a write, is a dial a loaded runner
-    /// fails to finish, and that reads exactly as a member answering at none of
-    /// its addresses.
+    /// **With [`ANSWERED_WITHIN`] rather than [`PATIENCE`]**, because every call
+    /// made through this one is meant to be answered — let in or refused at the
+    /// gate, but answered. A deadline a loaded runner's handshake can outlast
+    /// reads exactly as a member answering at none of its addresses.
     fn peers(&self) -> Peers {
-        Peers::of(self.device.clone(), self.members.clone())
+        Peers::of(self.device.clone(), self.members.clone()).waiting(ANSWERED_WITHIN)
     }
 
     /// What it says about itself, which is what an announcement carries.
