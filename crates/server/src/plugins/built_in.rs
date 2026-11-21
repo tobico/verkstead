@@ -11,8 +11,9 @@
 //! 1762, Q15): a manifest refused, a wasm component that traps while it
 //! starts. The start says so in the log and carries on without it.
 
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Mutex};
 
 use super::component::{self, Trouble};
 use super::manifest::{Files, Manifest, Refusal};
@@ -47,8 +48,50 @@ impl BuiltIn {
     }
 
     /// Its manifest as `platform` reads it.
+    ///
+    /// **Read once per platform, and handed out as a copy after that.** The
+    /// text is this binary's own, and dozens of places ask for it: resolving
+    /// the installed plugins, finding a skill, listing the Plugins page — each
+    /// read is YAML parsed and, for a Skill Pack, every `SKILL.md` read off
+    /// `files()`, then every dependency read the same way to check a skill
+    /// against it. Done afresh per asking it cost a Conversation's start about
+    /// a CPU-second in a debug build, and a suite of such starts on four cores
+    /// left a neighbouring test's two-second dial timing out.
+    ///
+    /// What a debug build keeps live is untouched: a skill's body is read off
+    /// `files()` when a session is given it, not off this. A skill directory
+    /// added to the checkout is read at the next start.
+    ///
+    /// Read without the lock held, since reading one reads its dependencies:
+    /// two threads asking at once both read it, and the second's copy is the
+    /// same as the first's.
     pub fn manifest(&self, platform: Platform) -> Result<Manifest, Refusal> {
-        Manifest::parse(self.manifest, self.files(), platform)
+        type Key = (BuiltInKey, Platform);
+        static READ: LazyLock<Mutex<HashMap<Key, Result<Manifest, Refusal>>>> =
+            LazyLock::new(|| Mutex::new(HashMap::new()));
+
+        let key = (self.key(), platform);
+        if let Some(read) = READ.lock().expect("never poisoned").get(&key) {
+            return read.clone();
+        }
+        let read = Manifest::parse(self.manifest, self.files(), platform);
+        READ.lock()
+            .expect("never poisoned")
+            .insert(key, read.clone());
+        read
+    }
+
+    /// Everything that says what this built-in is, which is what its manifest
+    /// is read from — so a suite's own `BuiltIn` naming the same directory is
+    /// never handed another's reading.
+    fn key(&self) -> BuiltInKey {
+        (
+            self.directory,
+            self.manifest,
+            self.files.as_ptr() as usize,
+            self.files.len(),
+            self.checkout,
+        )
     }
 
     /// Whether its manifest's `uuid` is `uuid`, read off that one key.
@@ -57,13 +100,31 @@ impl BuiltIn {
     /// whole manifest: reading one checks its own dependencies' skills against
     /// the built-ins, so a built-in that depends on another would otherwise
     /// read itself while it was being read.
+    ///
+    /// That key is read once, for the reason [`BuiltIn::manifest`] is.
     pub fn is(&self, uuid: &str) -> bool {
-        serde_saphyr::from_str::<serde_json::Value>(self.manifest)
-            .ok()
-            .and_then(|tree| tree.get("uuid")?.as_str().map(|own| own == uuid))
-            .unwrap_or(false)
+        static UUIDS: LazyLock<Mutex<HashMap<&'static str, Option<String>>>> =
+            LazyLock::new(|| Mutex::new(HashMap::new()));
+
+        let mut uuids = UUIDS.lock().expect("never poisoned");
+        let own = uuids.entry(self.manifest).or_insert_with(|| {
+            serde_saphyr::from_str::<serde_json::Value>(self.manifest)
+                .ok()
+                .and_then(|tree| tree.get("uuid")?.as_str().map(str::to_owned))
+        });
+        own.as_deref() == Some(uuid)
     }
 }
+
+/// What a [`BuiltIn`] is told apart by: its directory, its manifest's text,
+/// where its embedded files are and how many, and its checkout.
+type BuiltInKey = (
+    &'static str,
+    &'static str,
+    usize,
+    usize,
+    Option<&'static str>,
+);
 
 /// Every built-in this binary carries.
 pub const BUILT_INS: &[BuiltIn] = include!(concat!(env!("OUT_DIR"), "/built_ins.rs"));

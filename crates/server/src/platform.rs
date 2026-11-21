@@ -73,7 +73,7 @@ const CAPITALISED: &str = "Verkstead";
 /// A value rather than a `cfg`, so that the arm a machine will never run is
 /// still an arm a test can call. [`Platform::HERE`] is the one this binary was
 /// built for, and it is the only one anything resolving a directory passes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Platform {
     /// XDG: the directory is `$XDG_DATA_HOME` where that is set to an absolute
     /// path, and under `~/.local/share` otherwise.
