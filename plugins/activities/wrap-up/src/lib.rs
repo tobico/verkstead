@@ -524,7 +524,9 @@ impl<'a> Watching<'a> {
     /// Whether it was.
     fn answer(&mut self, pull_request: &PullRequest, fresh: &[Comment]) -> bool {
         let told = format!(
-            "These comments were left on {}. Work in that repository's worktree, at `{}` —              both `git` and `gh` read the repository from wherever they are run, so a diff              read or a commit made anywhere else is a different repository's.\n\n{}",
+            "These comments were left on {}. Work in that repository's worktree, at `{}` — both \
+             `git` and `gh` read the repository from wherever they are run, so a diff read or a \
+             commit made anywhere else is a different repository's.\n\n{}",
             named(pull_request),
             worktree(self.facts, &pull_request.repo),
             said_by(pull_request, fresh),
