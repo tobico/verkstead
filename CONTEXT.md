@@ -3035,6 +3035,11 @@ it that, with its article and plural — on the pinned card, the pane, the
 Target field's placeholder, the Share row, Steer's notes and the push
 notification; a Repo on GitHub reads *pull request*, and a Repo on no Forge
 has none and says *No forge*.
+**A session opens one with `verkstead pull-request open`**, which asks the
+Repo's Forge as the Repo's Author for a draft, records it on the Conversation
+and prints where it is: no Skill names a Forge's own tool to open one, so a
+Skill reads the same on every Forge. Refused where the branch is not pushed,
+where the Author holds no token for that Forge, or where the Repo is on none.
 _Avoid_: PR, merge request (in the documents)
 
 **Skill Pack**:

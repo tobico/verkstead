@@ -36,13 +36,6 @@ use crate::targets::NamedPullRequest;
 /// A pull request to open: the branch it is from and the one it goes into, and
 /// what it says.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "`verkstead pull-request open` is its first caller"
-    )
-)]
 pub(crate) struct Opening {
     pub(crate) head: String,
     pub(crate) base: String,
@@ -80,13 +73,6 @@ pub(crate) trait Forge: Send + Sync + std::fmt::Debug {
     fn pull_request_numbered(&self, repo: &Path, number: i64) -> Result<Numbered, Trouble>;
 
     /// Open `opening` as a draft, and answer it.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "`verkstead pull-request open` is its first caller"
-        )
-    )]
     fn open_pull_request(&self, repo: &Path, opening: &Opening) -> Result<Numbered, Trouble>;
 
     /// Every pull request open on `repo`, which is what a stack is walked off.

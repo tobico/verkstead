@@ -198,18 +198,24 @@ pub(crate) async fn resolution(
 
     // On a Forge without stacks there is no chain to sync, whatever is
     // recorded: the take-up walked none, and what is told is the strategy.
-    let stacks = crate::forges::of(state, &watched.repo.path)
-        .await
-        .has(crate::forges::Capability::Stacks);
+    // And the Forge is named in what is told either way — the prompt says
+    // which forge will not merge this rather than saying *GitHub* on a forge
+    // that is not one.
+    let forge = crate::forges::of(state, &watched.repo.path).await;
+    let named_forge = match &forge {
+        crate::forges::Matched::On(forge) => forge.name.clone(),
+        crate::forges::Matched::Unmatched { .. } => "The forge".to_owned(),
+    };
 
-    match chained(&stack).filter(|_| stacks) {
+    match chained(&stack).filter(|_| forge.has(crate::forges::Capability::Stacks)) {
         Some(branches) => match crate::stacks::missing(state, conversation_id).await {
             Some(why) => Err(unsyncable(state, conversation_id, &watched, &why, writing).await),
-            None => Ok(syncing(&watched, &stack, &branches)),
+            None => Ok(syncing(&watched, &stack, &branches, &named_forge)),
         },
         None => Ok(resolving(
             &watched,
             state.settings.config().conflict_resolution(),
+            &named_forge,
         )),
     }
 }
@@ -313,7 +319,11 @@ pub(crate) async fn marked(
 /// the caller reads as nothing to hold the rollup against rather than as a reason
 /// to distrust it. A checkout with no remote is every one of this suite's own,
 /// and a branch origin has never heard of is one nothing has pushed.
-fn pushed_head(worktree: &Path, head: Option<&str>, credential: &Credential) -> Option<String> {
+pub(crate) fn pushed_head(
+    worktree: &Path,
+    head: Option<&str>,
+    credential: &Credential,
+) -> Option<String> {
     let checked_out;
 
     let branch = match head {
@@ -584,7 +594,7 @@ async fn unsyncable(
 /// have read — so a session left to pick would be picking something the human
 /// has a setting for. Which is why the merge says *not a rebase* and the rebase
 /// says *with a lease*: each has to say the thing the other would have done.
-fn resolving(watched: &Watched, resolution: store::ConflictResolution) -> String {
+fn resolving(watched: &Watched, resolution: store::ConflictResolution, forge: &str) -> String {
     let how = match resolution {
         store::ConflictResolution::Merge => {
             "Merge the pull request's base branch into the branch that worktree is on, resolve \
@@ -603,7 +613,7 @@ fn resolving(watched: &Watched, resolution: store::ConflictResolution) -> String
     };
 
     format!(
-        "GitHub cannot merge {} into its base branch: the branch and the base have both \
+        "{forge} cannot merge {} into its base branch: the branch and the base have both \
          changed the same lines since they parted. Work in that repository's worktree, at \
          `{}` — `git` reads the repository from wherever it is run, so a resolution made \
          anywhere else is a different repository's.\n\n{how}\n\nA conflict is two changes to \
@@ -684,7 +694,12 @@ fn chained(stack: &[store::PullRequest]) -> Option<Vec<&str>> {
 /// repository it is. Every branch of the stack is a branch of *this*
 /// repository — that is what the walk refuses a fork for — so they are all
 /// reached through the one Worktree.
-fn syncing(watched: &Watched, stack: &[store::PullRequest], branches: &[&str]) -> String {
+fn syncing(
+    watched: &Watched,
+    stack: &[store::PullRequest],
+    branches: &[&str],
+    forge: &str,
+) -> String {
     let listed: Vec<String> = stack
         .iter()
         .map(|opened| match opened.head.as_deref() {
@@ -694,7 +709,7 @@ fn syncing(watched: &Watched, stack: &[store::PullRequest], branches: &[&str]) -
         .collect();
 
     format!(
-        "GitHub cannot merge {} into its base branch, and it is one of a stack of {deep} \
+        "{forge} cannot merge {} into its base branch, and it is one of a stack of {deep} \
          pull requests in that repository — from the bottom: {listed}. A fix low in a stack \
          moves every branch above it, so the whole chain is yours to put right rather than \
          the one pull request.\n\n\
@@ -946,7 +961,7 @@ mod tests {
     /// — merge the base in, and neither side thrown away.
     #[test]
     fn a_resolution_session_is_told_which_pull_request_will_not_merge_and_how_to_fix_it() {
-        let told = resolving(&watched(), store::ConflictResolution::Merge);
+        let told = resolving(&watched(), store::ConflictResolution::Merge, "Gitea");
 
         assert!(
             told.contains("#7") && told.contains("askance"),
@@ -974,6 +989,11 @@ mod tests {
             told.contains("two changes to reconcile"),
             "and neither side is the one to keep: {told}",
         );
+        assert!(
+            told.starts_with("Gitea cannot merge") && !told.contains("GitHub"),
+            "and the forge that will not merge it, named as itself rather than as \
+             GitHub: {told}",
+        );
     }
 
     /// And what it is told where the human has asked for a rebase instead: the
@@ -986,7 +1006,7 @@ mod tests {
     /// history the human configured this for.
     #[test]
     fn a_resolution_session_configured_for_a_rebase_is_told_to_rebase() {
-        let told = resolving(&watched(), store::ConflictResolution::Rebase);
+        let told = resolving(&watched(), store::ConflictResolution::Rebase, "Gitea");
 
         assert!(
             told.contains("#7") && told.contains("askance"),
@@ -1010,6 +1030,11 @@ mod tests {
             told.contains("two changes to reconcile"),
             "and neither side is the one to keep, which is the same either way: \
              {told}",
+        );
+        assert!(
+            told.starts_with("Gitea cannot merge") && !told.contains("GitHub"),
+            "and the forge that will not merge it, named as itself rather than as \
+             GitHub: {told}",
         );
     }
 
@@ -1075,7 +1100,7 @@ mod tests {
             link(7, "rate-limiting", "stage-02"),
         ];
         let branches = chained(&stack).expect("three pull requests, each with a branch");
-        let told = syncing(&watched(), &stack, &branches);
+        let told = syncing(&watched(), &stack, &branches, "Gitea");
 
         assert!(
             told.contains("#7") && told.contains("askance"),
@@ -1121,6 +1146,11 @@ mod tests {
             told.contains("two changes to reconcile"),
             "resolved rather than taken one side of, as every conflict here is: \
              {told}",
+        );
+        assert!(
+            told.starts_with("Gitea cannot merge") && !told.contains("GitHub"),
+            "and the forge that will not merge it, named as itself rather than as \
+             GitHub: {told}",
         );
         assert!(
             told.contains("tests") && told.contains("pushed"),

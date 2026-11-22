@@ -16,12 +16,12 @@ context — which is the point. Read it as somebody who has to live with it.
 **The work may be on more than one pull request.** A Conversation that committed
 in a companion repository ends on one there too, and the whole of the work is all
 of them. Where your prompt has a **The pull requests this work is on** section,
-it names each — the repository, the number, the URL, and the worktree that
-repository's branch is checked out in. Read each of them where it lives: `cd`
-into that worktree first, because `git` and `gh` both read their repository from
-wherever they are run, so a `gh pr diff` from the wrong directory reads somebody
-else's pull request. Where your prompt lists none, the branch in the worktree
-you started in is the whole of the work.
+it names each — the repository, the number, the URL, the branch it goes into
+and the worktree that repository's branch is checked out in. Read each of them
+where it lives: `cd` into that worktree first, because `git` reads its
+repository from wherever it is run, so a diff read from the wrong directory is
+somebody else's pull request. Where your prompt lists none, the branch in the
+worktree you started in is the whole of the work.
 
 They are one piece of work however many repositories they are spread across, and
 that is why one session reads them: a change in a companion and the change here
@@ -47,7 +47,13 @@ where the work is on more than one pull request, all of them, each read in the
 worktree its own repository is checked out in:
 
     cd <the worktree that pull request is in>
-    gh pr diff
+    git fetch origin
+    git diff <the branch that pull request goes into>...HEAD
+
+The branch each one goes into is named beside it — under *The pull requests
+this work is on* where the work is on several, and under *The forge this repo is
+on* for the one in the worktree you started in. Nothing here asks a forge for a
+diff: git in the right worktree is the whole of it.
 
 Then go and read what it landed in. A diff shows what changed and hides what it
 changed *around* — the callers, the sibling module doing the same job a
@@ -117,7 +123,7 @@ in a review, do not raise it.**
 
 ## 4. Change nothing yet
 
-No edits, no commits, no pushes, no `gh` command that writes anything — not
+No edits, no commits, no pushes, nothing written to the pull request — not
 until the human has answered. Fixing your own findings before they have seen
 them is deciding in their place, and the whole point of the Set is that the
 decision is theirs.
@@ -283,29 +289,25 @@ make. Fix it where it lives — in the worktree of the repository the finding is
 about — and then run that repository's tests and make sure what you did works
 before it goes anywhere.
 
-## 7. Fix whatever the checks have gone red on
+## 7. Fix whatever has gone red on the branch
 
 You have held this Worktree since before you asked, and you hold it until you
 end: the ask that blocked for hours is a session working rather than a Worktree
-free. So a check that went red while you waited has had nobody sent to it —
+free. So anything that broke while you waited has had nobody sent to it —
 nothing is dispatched into a Worktree something is already working in. It is
-yours, the way the comments are. Every pull request's checks, not just the one
+yours, the way the comments are. Every pull request's branch, not just the one
 you started in: none of them had anybody sent to it either.
 
-Once the answers are in, ask each pull request how its checks are getting on, in
-the worktree that one lives in:
-
-    cd <the worktree that pull request is in>
-    gh pr checks
-
-Asked where it lives, because `gh` reads its repository from wherever it is run:
-a `gh pr checks` from the wrong directory answers about somebody else's suite,
-which is the one report that looks exactly like the one you wanted.
+Once the answers are in, see for yourself that the branch still passes: run the
+repository's own tests over each worktree, the way that repository says to run
+them. Nothing here asks the forge how its checks are getting on — that is the
+wrap-up's own watcher, which reads them after you push and has its own goes at a
+red one.
 
 Whatever is failing, fix it there, alongside the findings they accepted and
-before you push. Go and read what the check actually complained about — its run
-is linked from that output, and the repository says how to run the failing thing
-yourself. A fix written from the name of a job is a guess.
+before you push. Go and read what actually failed rather than the name of the
+job that failed: the repository says how to run the failing thing yourself, and
+a fix written from a job's name is a guess.
 
 - **There is nothing to propose about a red check.** It is the branch being
   broken rather than a decision the human has to make: it is not a finding, it

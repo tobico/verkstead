@@ -10,17 +10,16 @@ to you, and each round of it goes back to them as a Question Set.
 You start in a worktree of the repository, on the branch the work is on. There
 is nothing to create, nothing to switch to and nothing to open.
 
-**Whether that branch is on a pull request is a thing to look up rather than
-assume**, because both happen and two steps below turn on it:
-
-    gh pr view --json number
+**Whether that branch is on a pull request is in this prompt** rather than
+something to look up, under *The forge this repo is on*: it says the pull
+request this branch is already on, with its number and where it is, or that it
+is on none yet. Two steps below turn on which it is.
 
 Work that has already been submitted has one, and the branch is pushed to it.
-Work that is only beginning has none — the command comes back empty-handed, the
-branch having been cut for this session with nothing tracking it. Either way,
-what becomes of it is not yours: where there is no pull request, opening one is
-Verkstead's job rather than this session's, and it does it once the human says
-the follow-up is over.
+Work that is only beginning has none — the branch having been cut for this
+session with nothing tracking it. Either way, what becomes of it is not yours:
+where there is no pull request, opening one is Verkstead's job rather than this
+session's, and it does it once the human says the follow-up is over.
 
 The Brief above the follow-up brief, and the handoff document under it, say what
 the work as a whole is, where either is there. They are context rather than the
@@ -42,14 +41,12 @@ what the brief said**: a choice the brief does not settle and the code cannot,
 something that would be expensive to unpick, work nobody asked for. Everything
 else you simply do.
 
-Then go and look. An answer written from memory of the diff is a guess. Where
-the branch is on a pull request, that is what holds the diff:
-
-    gh pr diff
-
-Where it is not, the branch itself is what to read — `git log` and `git diff`
-against the branch it was cut from. On the first round there may be nothing on
-it at all, the work not having started yet.
+Then go and look. An answer written from memory of the diff is a guess. The
+branch itself is what holds the work either way — `git fetch origin`, then
+`git diff <the branch this work goes into>...HEAD` and `git log` over the same
+range, the base being named in this prompt under *The forge this repo is on*.
+On the first round there may be nothing on it at all, the work not having
+started yet.
 
 Read the code each part of the brief is about, and read what the repository
 says about itself where the answer turns on a convention — its `CLAUDE.md` or

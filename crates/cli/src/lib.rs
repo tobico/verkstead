@@ -37,6 +37,9 @@ mod memo;
 mod pipe;
 mod plugin;
 mod preview;
+/// `verkstead pull-request open`: the pull request a session's work goes on,
+/// opened through the Repo's Forge.
+mod pull_request;
 pub mod repo;
 mod serve;
 /// The elevated pair that puts the local account a Windows session runs as on
@@ -268,6 +271,24 @@ enum Command {
         server: String,
     },
 
+    /// Open the pull request this session's work goes on, through the Repo's
+    /// Forge and as its Author.
+    ///
+    /// `verkstead pull-request open` is how a session opens one: Verkstead
+    /// knows where the Repo's pull requests live and which token to open it
+    /// with, so the same line works on every forge. It opens as a **draft**,
+    /// because merging is the human's act. The branch has to be pushed first.
+    ///
+    /// Prints where it is as YAML on stdout — `url: https://…` — and nothing
+    /// else, and records it on the Conversation. Refused with a non-zero exit
+    /// and the reason on stderr where the branch is not pushed, where the
+    /// Repo's Author holds no token for its forge, or where the Repo is on no
+    /// forge at all.
+    PullRequest {
+        #[command(subcommand)]
+        what: pull_request::What,
+    },
+
     /// Run the Verkstead server: the agents' API and the human's viewer.
     ///
     /// The one verb here that is not an agent's — everything else in this binary
@@ -362,6 +383,7 @@ impl Cli {
                 waiting::waiting(length.as_deref(), &server)
             }
             Some(Command::Transfer { device, server }) => transfer::transfer(&device, &server),
+            Some(Command::PullRequest { what }) => pull_request::pull_request(what),
             Some(Command::Serve(asked)) => serve::serve(asked),
             Some(Command::Plugin { what }) => plugin::plugin(what),
             #[cfg(windows)]

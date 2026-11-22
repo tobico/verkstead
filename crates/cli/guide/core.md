@@ -227,6 +227,36 @@ Options:
           Print help (see a summary with '-h')
 ```
 
+And `verkstead pull-request open`, which opens the pull request this
+session's work goes on — **Opening the pull request** below — verbatim too:
+
+```
+Open the pull request this session's work goes on, as a draft.
+
+Everything it is given is optional: the title is the branch's own name where none is given, the body nothing at all, and the base the branch this work was cut from, which the Conversation's record holds.
+
+Usage: verkstead pull-request open [OPTIONS]
+
+Options:
+      --title <TITLE>
+          What the pull request is called. The branch's own name where none is given
+
+      --body <BODY>
+          What it says, as markdown. Nothing where none is given
+
+      --base <BRANCH>
+          The branch to open it against. The base on the Conversation's record where none is given, which is what this branch was cut from
+
+      --server <SERVER>
+          Where the Verkstead server is: its base URL, or `pipe://<name>` for a named pipe, which is Windows' own and what a session in a container asks through
+          
+          [env: VERKSTEAD_SERVER=]
+          [default: http://127.0.0.1:8422]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
 ## Authoring the Set
 
 One Set is one round, budgeted as above. Because the round trip is expensive,
@@ -656,6 +686,42 @@ replays it as written.
 
 A preview stands until it is retired: through a steer and a follow-up alike,
 being true of the branch rather than of the round.
+
+## Opening the pull request
+
+Where a session's work ends on a pull request — a backlog's finish step, an
+inline implementation, a roadmap's own session, a session sent to open one —
+**`verkstead pull-request open`** is what opens it. Verkstead knows where the
+repo's pull requests live and which token to open one with, so the same line
+works wherever the work is hosted, and nothing here runs a forge's own tool.
+
+```
+verkstead pull-request open --title '<what this built>' --body '<what the branch delivered>'
+```
+
+**Push the branch first** — `git push -u origin HEAD` — because a pull
+request's head is a branch on the forge, under whatever name the push gave it.
+And it opens as a **draft**, always: merging is the human's act, and nothing a
+session does is allowed to look like it was theirs.
+
+Everything it takes is optional. The title is the branch's own name where none
+is given, the body is nothing at all, and `--base <branch>` is the base this
+work was cut from, which the Conversation's record holds — name one where the
+work is meant to merge into something else, such as the branch below it in a
+chain.
+
+- **Accepted** — it prints where the pull request is as YAML, `url: https://…`,
+  on stdout and nothing else, and records it on the Conversation, so the human
+  can read it before this session has finished. The confirmation in words goes
+  to stderr.
+- **Refused** — it exits non-zero and says why on stderr: the branch is not
+  pushed, the repo's Author holds no token for its forge, or the repo is on no
+  forge at all. Nothing was opened. Put right what it names and run it again.
+
+Which forge the repo is on is in this session's prompt, under **The forge this
+repo is on** — with the word that forge uses for a pull request, and whether a
+chain of them can be stacked there. A repo on no forge has nothing to open: the
+prompt says so, and `verkstead done` takes the signal without one.
 
 ## Ending the session
 

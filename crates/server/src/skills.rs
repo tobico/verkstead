@@ -42,6 +42,7 @@ use anyhow::{Context, Result};
 
 use verkstead_schema::Direction;
 
+use crate::forges::Capability;
 use crate::handoffs;
 use crate::platform::Platform;
 use crate::plugins::built_in;
@@ -711,8 +712,9 @@ pub(crate) fn submitting(
         Some(base) => format!(
             "{prompt}\n# The branch to open it against\n\nOpen the pull request against \
              `{base}`, which is the branch this work is meant to merge into — \
-             `gh pr create --base {base} …`. Not the repository's default branch, unless \
-             `{base}` is it.\n",
+             `verkstead pull-request open --base {base} …`. Not the repository's default \
+             branch, unless `{base}` is it, and not the base named anywhere else in this \
+             prompt.\n",
         ),
         None => prompt,
     }
@@ -733,10 +735,10 @@ pub(crate) fn submitting(
 /// than one: each of them named with its number, the repository it was opened
 /// in, its URL and the worktree to read it in. One review reads the whole of the
 /// work and the whole of it may be several branches, so the session is told where
-/// each of them is — it starts in the Conversation's own worktree and both `git`
-/// and `gh` read their repository from wherever they are run, so a `gh pr diff`
-/// left where the session landed would read one repository's half of the work
-/// twice and the other's never.
+/// each of them is — it starts in the Conversation's own worktree and `git`
+/// reads its repository from wherever it is run, so a diff read where the
+/// session landed would read one repository's half of the work twice and the
+/// other's never.
 ///
 /// A Conversation whose work touched nothing else carries none of it and is told
 /// what it is told today. There is nothing there to say: the branch this worktree
@@ -1409,6 +1411,103 @@ pub(crate) fn naming(prompt: &str, naming: bool) -> String {
          checkout, and the name is left as it is by leaving it alone.\n",
         prompt.trim_end(),
     )
+}
+
+/// The same prompt again, with the Forge the Repo is on named under it: what it
+/// calls a pull request, the one verb that opens one, whether this branch is on
+/// one already, the base the work goes into, and whether a chain of them can be
+/// stacked there (ADR-0030, *Forge*).
+///
+/// **The skills name no forge's own tool**, so this is where a session learns
+/// what it used to ask one. Every one of them says to open a pull request with
+/// `verkstead pull-request open`, and the server opens it through whichever
+/// Forge the remote names — so what is left for the prompt to say is the four
+/// things a skill cannot: the word this forge uses for one, whether the branch
+/// has one already, the branch a diff of this work is read against now that
+/// nothing asks a forge's tool for one, and whether the `gh stack` lines in a
+/// finish sequence apply at all. A Forge without `stacks` leaves a chain to the
+/// rebases the join already does, every pull request opened against the branch
+/// below as a chain has always been git's.
+///
+/// `base` is the branch this work goes into — the Conversation's own base, read
+/// the way everything else reads that column — which is both what
+/// `verkstead pull-request open` opens against and what a reading session holds
+/// the branch against. `opened` is the pull request recorded on the
+/// Conversation's own Repo, where there is one: a session told the record is a
+/// session that neither looks one up nor opens a second.
+///
+/// **And a Repo on no forge is told so**, rather than left to find out by
+/// running the verb: there is nowhere to open a pull request, and
+/// `verkstead done` takes the signal without one — see [`crate::done`].
+///
+/// Applied at the launch point, under whatever the Activity built, so that
+/// every session is told whether or not its own prompt builder thought to.
+pub(crate) fn forged(
+    prompt: &str,
+    forge: &crate::forges::Matched,
+    base: &str,
+    opened: Option<&store::PullRequest>,
+) -> String {
+    let said = match forge {
+        crate::forges::Matched::On(forge) => {
+            let (name, noun) = (&forge.name, &forge.noun);
+
+            let standing = match opened {
+                Some(opened) => format!(
+                    "This branch is **already on** {noun} #{}, at {}, so there is none to \
+                     open: push to it and leave the merging to the human.",
+                    opened.number, opened.url
+                ),
+                None => format!(
+                    "This branch is on **no {noun} yet**. Where the skill this session was \
+                     sent to says to open one, `verkstead pull-request open` is what opens \
+                     it — a draft through {name} as this repo's Author, so nothing here \
+                     runs a forge's own tool, and the branch has to be pushed first."
+                ),
+            };
+
+            let stacks = match forge.has(Capability::Stacks) {
+                true => format!(
+                    "{name} **stacks {noun}s**, so a chain of branches may be submitted as a \
+                     stack where this repository's own review process says how."
+                ),
+                false => format!(
+                    "{name} does **not** stack {noun}s. A chain of branches is a chain of \
+                     ordinary {noun}s, each opened against the branch below it, so nothing \
+                     here submits a stack or asks about one — whatever this repository's own \
+                     review process says about stacking."
+                ),
+            };
+
+            format!(
+                "# The forge this repo is on\n\nThis repo's pull requests live on {name}, \
+                 which calls one a **{noun}** — the word to use for it wherever this work \
+                 is written about.\n\n{standing}\n\nThis branch's work goes into `{base}`, \
+                 which is what a {noun} of it is opened against unless `--base` says \
+                 otherwise — and what a diff of this branch is read against: \
+                 `git fetch origin` and then `git diff {base}...HEAD`.\n\n{stacks}\n",
+            )
+        }
+        crate::forges::Matched::Unmatched { host } => {
+            let why = match host {
+                Some(host) => format!(
+                    "This repo's remote is on {host}, and no forge Verkstead has enabled \
+                     answers for that host. "
+                ),
+                None => "Verkstead has no forge enabled. ".to_owned(),
+            };
+
+            format!(
+                "# This repo is on no forge\n\n{why}There is nowhere to open a pull \
+                 request, so commit and push the work the way this repository's own \
+                 process says and leave it there: `verkstead done` takes the signal with \
+                 no pull request on the branch.\n\nThis branch's work goes into `{base}`, \
+                 so `git diff {base}...HEAD` is what this branch holds.\n",
+            )
+        }
+    };
+
+    format!("{}\n\n{said}", prompt.trim_end())
 }
 
 /// The same prompt again, with the devices of the cluster named under it, and
@@ -2367,7 +2466,7 @@ mod tests {
             let skill = flowed(name);
 
             assert!(
-                skill.contains("asks GitHub about each of them when you run `verkstead done`"),
+                skill.contains("asks the forge about each of them when you run `verkstead done`"),
                 "{name} has to say the companions are asked about at the signal: {skill}"
             );
             assert!(
@@ -2416,8 +2515,13 @@ mod tests {
             "a stacked branch is submitted as a stack: {implementing}"
         );
         assert!(
-            implementing.contains("gh pr create --draft"),
+            implementing.contains("verkstead pull-request open --title"),
             "and an unstacked one opens a draft PR of its own: {implementing}"
+        );
+        assert!(
+            implementing.contains("on offer only where this prompt says the forge stacks"),
+            "and the stacked shape is guarded by the capability the prompt declares, \
+             a forge without it having no stack to submit: {implementing}"
         );
         assert!(
             !implementing.contains("Do not push"),
@@ -2757,8 +2861,13 @@ mod tests {
             "a stacked branch is submitted as a stack: {staging}"
         );
         assert!(
-            staging.contains("gh pr create --draft"),
+            staging.contains("verkstead pull-request open --title"),
             "and an unstacked one opens a draft PR of its own: {staging}"
+        );
+        assert!(
+            staging.contains("on offer only where this prompt says the forge stacks"),
+            "and the stacked shape is guarded by the capability the prompt declares, \
+             a forge without it having no stack to submit: {staging}"
         );
     }
 
@@ -3154,8 +3263,13 @@ mod tests {
             "a stacked branch is submitted as a stack: {next_task}"
         );
         assert!(
-            next_task.contains("gh pr create --draft"),
+            next_task.contains("verkstead pull-request open --title"),
             "and an unstacked one opens a draft PR of its own: {next_task}"
+        );
+        assert!(
+            next_task.contains("on offer only where this prompt says the forge stacks"),
+            "and the stacked shape is guarded by the capability the prompt declares, \
+             a forge without it having no stack to submit: {next_task}"
         );
         assert!(
             !next_task.contains("Do not push"),
@@ -3424,8 +3538,13 @@ mod tests {
             "a stacked branch is submitted as a stack: {submitting}"
         );
         assert!(
-            submitting.contains("gh pr create --draft"),
+            submitting.contains("verkstead pull-request open --title"),
             "and an unstacked one opens a draft PR of its own: {submitting}"
+        );
+        assert!(
+            submitting.contains("on offer only where this prompt says the forge stacks"),
+            "and the stacked shape is guarded by the capability the prompt declares, \
+             a forge without it having no stack to submit: {submitting}"
         );
         assert!(
             submitting.contains("Nothing waits on approval"),
@@ -3639,7 +3758,7 @@ mod tests {
             "and there is no gate in front of either, as there is in front of none: {addressing}"
         );
         assert!(
-            !addressing.contains("gh pr create"),
+            !addressing.contains("verkstead pull-request open"),
             "the pull request already exists, and a second one would be a fix nobody \
              asked for: {addressing}"
         );
@@ -3773,7 +3892,7 @@ mod tests {
              replaced — {reviewing}"
         );
         assert!(
-            reviewing.contains("gh pr diff"),
+            reviewing.contains("git diff <the branch that pull request goes into>...HEAD"),
             "what it reads is the pull request the work is on: {reviewing}"
         );
     }
@@ -3929,16 +4048,18 @@ mod tests {
         let reviewing = skill("verkstead/reviewing/SKILL.md");
 
         assert!(
-            reviewing.contains("gh pr checks"),
-            "the woken session reads the pull request's own check state: {reviewing}"
+            reviewing.contains("run the\nrepository's own tests over each worktree"),
+            "the woken session sees for itself that the branch still passes, nothing \
+             here asking a forge how its checks are getting on: {reviewing}"
         );
         assert!(
-            reviewing.contains("ask each pull request how its checks are getting on"),
-            "each of them, asked where that one lives — a suite asked about from \
-             the wrong worktree is somebody else's: {reviewing}"
+            reviewing.contains("that is the\nwrap-up's own watcher"),
+            "what the forge says about its checks being the watcher's after the push, \
+             with its own goes at a red one: {reviewing}"
         );
         assert!(
-            reviewing.find("gh pr checks") < reviewing.find("git push"),
+            reviewing.find("run the\nrepository's own tests over each worktree")
+                < reviewing.find("git push"),
             "and fixes what is failing before it pushes, so the push is what puts \
              the fix back in front of the checks — {reviewing}"
         );
@@ -4275,7 +4396,7 @@ mod tests {
              {instruction}"
         );
         assert!(
-            !instruction.contains("gh pr create"),
+            !instruction.contains("verkstead pull-request open"),
             "and it does not carry the branch anywhere itself: {instruction}"
         );
     }
@@ -4415,7 +4536,7 @@ mod tests {
             "and it goes before the Set rather than after the answers: {following_up}"
         );
         assert!(
-            !following_up.contains("gh pr create"),
+            !following_up.contains("verkstead pull-request open"),
             "and this session opens no pull request, whether or not there is one: \
              {following_up}"
         );
@@ -4436,11 +4557,12 @@ mod tests {
              work: {following_up}"
         );
         assert!(
-            following_up.contains("gh pr view"),
-            "which one it is is asked rather than assumed: {following_up}"
+            flowed.contains("is in this prompt** rather than something to look up"),
+            "which one it is is on the prompt rather than asked of a forge: \
+             {following_up}"
         );
         assert!(
-            flowed.contains("the branch itself is what to read"),
+            flowed.contains("The branch itself is what holds the work either way"),
             "so a round with no pull request reads the branch rather than a diff \
              that is not there: {following_up}"
         );
@@ -4509,7 +4631,7 @@ mod tests {
             flowed.contains("No commits, no pushes and no pull request"),
             "and said again where a session would be about to: {investigating}"
         );
-        for written in ["git commit", "git push", "gh pr create"] {
+        for written in ["git commit", "git push", "verkstead pull-request open"] {
             assert!(
                 investigating.contains(written),
                 "{written} is named as the thing not to run: {investigating}"
@@ -5128,6 +5250,147 @@ mod tests {
             naming(&built, false),
             built,
             "a heading over nothing would tell a session the name was in question",
+        );
+    }
+
+    /// A Forge the suite declares, with the capabilities it is handed.
+    fn forge(name: &str, noun: &str, capabilities: &[Capability]) -> crate::forges::Matched {
+        crate::forges::Matched::On(crate::forges::Enabled {
+            uuid: "018f2bd6-0000-7000-8000-000000000001".to_owned(),
+            name: name.to_owned(),
+            hosts: vec!["example.com".to_owned()],
+            noun: noun.to_owned(),
+            capabilities: capabilities.to_vec(),
+        })
+    }
+
+    /// What every session is told about the Forge its Repo is on: the forge by
+    /// name, the word it uses for a pull request, the one verb that opens one,
+    /// the base its work goes into, and that this forge stacks them.
+    ///
+    /// The skills name no forge's own tool, so this section is where the two
+    /// things they cannot say are said. A Forge calling one a *merge request*
+    /// is read as that word throughout.
+    #[test]
+    fn a_session_is_told_which_forge_its_repo_is_on_and_in_which_word() {
+        let prompt = forged(
+            &implementing(&mounted(), "# Rate limiting\n", None),
+            &forge("GitLab", "merge request", &Capability::ALL),
+            "main",
+            None,
+        );
+
+        assert!(
+            prompt.contains("# The forge this repo is on"),
+            "a heading of its own, under whatever built the prompt: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("live on GitLab") && prompt.contains("**merge request**"),
+            "the forge by name, and the word it uses: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("pull request #"),
+            "and nothing calling one a pull request where the forge says otherwise: \
+             {prompt:?}"
+        );
+        assert!(
+            prompt.contains("verkstead pull-request open"),
+            "the one verb that opens one, whatever the forge calls it: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("goes into `main`") && prompt.contains("git diff main...HEAD"),
+            "the branch its work goes into, which is what it is opened against and \
+             what a diff of it is read against: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("**stacks merge requests**"),
+            "and that this forge stacks them, which is what the `gh stack` lines in a \
+             finish sequence are guarded by: {prompt:?}"
+        );
+    }
+
+    /// A Forge without `stacks` is said as one: a chain of branches is a chain
+    /// of ordinary pull requests there, so nothing submits a stack whatever the
+    /// repository's own file records.
+    #[test]
+    fn a_session_on_a_forge_that_does_not_stack_is_told_not_to_submit_one() {
+        let prompt = forged(
+            &implementing(&mounted(), "# Rate limiting\n", None),
+            &forge("Gitea", "pull request", &[Capability::Checks]),
+            "main",
+            None,
+        );
+
+        assert!(
+            prompt.contains("does **not** stack pull requests"),
+            "said as what it has not got: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("each opened against the branch below it"),
+            "and a chain is left to the ordinary pull requests the rebases already \
+             make: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("nothing \n             here submits a stack")
+                || prompt.contains("nothing here submits a stack"),
+            "so no stack is submitted and none asked about: {prompt:?}"
+        );
+    }
+
+    /// And the pull request the branch is on already, where the record holds
+    /// one: a session told it neither looks one up nor opens a second.
+    #[test]
+    fn a_session_whose_branch_is_on_a_pull_request_already_is_told_which() {
+        let prompt = forged(
+            &implementing(&mounted(), "# Rate limiting\n", None),
+            &forge("GitHub", "pull request", &Capability::ALL),
+            "main",
+            Some(&store::PullRequest {
+                number: 41,
+                title: "Rate limiting".to_owned(),
+                url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+                head: Some("rate-limiting".to_owned()),
+                base: Some("main".to_owned()),
+                repo: None,
+            }),
+        );
+
+        assert!(
+            prompt.contains("already on** pull request #41")
+                && prompt.contains("https://github.com/tobico/verkstead/pull/41"),
+            "the record is on the prompt, by number and where it is: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("no pull request yet"),
+            "and nothing telling the session to open one: {prompt:?}"
+        );
+    }
+
+    /// And a Repo on no forge is told so, rather than left to find out by
+    /// running the verb: there is nowhere to open one, and the signal is taken
+    /// without one.
+    #[test]
+    fn a_session_in_a_repo_on_no_forge_is_told_there_is_nowhere_to_open_one() {
+        let prompt = forged(
+            &implementing(&mounted(), "# Rate limiting\n", None),
+            &crate::forges::Matched::Unmatched {
+                host: Some("git.example.invalid".to_owned()),
+            },
+            "main",
+            None,
+        );
+
+        assert!(
+            prompt.contains("# This repo is on no forge") && prompt.contains("git.example.invalid"),
+            "the heading says so and names the host nobody answers for: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("`verkstead done` takes the signal with no pull request"),
+            "and the signal is taken without one: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("verkstead pull-request open"),
+            "nothing sends it after a verb there is nobody to answer: {prompt:?}"
         );
     }
 

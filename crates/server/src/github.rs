@@ -1090,13 +1090,6 @@ pub(crate) fn open_pull_requests(gh: &Gh, repo: &Path) -> Result<Vec<Numbered>, 
 /// As the Repo's Author, read at the moment of the call — see [`Gh::ask`].
 ///
 /// Blocking, like everything else here — see [`Gh::run`].
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "`verkstead pull-request open` is its first caller"
-    )
-)]
 pub(crate) fn open_pull_request(
     gh: &Gh,
     repo: &Path,

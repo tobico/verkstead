@@ -275,6 +275,34 @@ pub struct PreviewLeft {
     pub title: String,
 }
 
+/// What `POST …/api/v1/pull-requests` takes: what the session wants said on
+/// the pull request it asks the Repo's Forge to open, and which branch it goes
+/// into.
+///
+/// Every field is optional, and an absent one is read off the record instead —
+/// the base the work was cut against, and the branch's own name for a title —
+/// so a session with nothing of its own to say runs the verb bare.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PullRequestOpening {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+
+    /// The branch it is opened against. `None` is the base on the
+    /// Conversation's record, which is what its branch was cut from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+}
+
+/// What `POST …/api/v1/pull-requests` returns once the Forge has opened one:
+/// where it is. The CLI prints this and nothing else on stdout, so a session
+/// can read the URL back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PullRequestOpened {
+    pub url: String,
+}
+
 /// What `GET …/api/v1/guide?agent=<id>` returns: the two things about asking
 /// that are the harness's own, for `verkstead guide` to splice into the core.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

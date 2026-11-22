@@ -287,6 +287,9 @@ mod profiles;
 /// Putting a share where a link reaches it, which is Verkstead's own write to
 /// GitHub.
 mod publishing;
+/// A session asking the Repo's Forge to open a pull request, which is how
+/// every session opens one (ADR-0030, *Forge*).
+mod pull_requests;
 /// Telling the phones what happened while nobody was watching — and, in a
 /// cluster, telling the members so that one phone hears from all of them.
 pub mod push;
@@ -1946,6 +1949,12 @@ fn serving(state: AppState, gate: &key::Gate) -> Router {
         .route(
             &format!("{ASKING_FROM}/{{conversation}}/api/v1/transfer"),
             post(transfers::call),
+        )
+        // And asking the Repo's Forge to open the pull request its work goes
+        // on, which is how every session opens one (ADR-0030, *Forge*).
+        .route(
+            &format!("{ASKING_FROM}/{{conversation}}/api/v1/pull-requests"),
+            post(pull_requests::open),
         )
         // And leaving what it learned for the sessions after it (ADR-0023).
         .route(

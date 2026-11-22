@@ -98,25 +98,38 @@ repository's `docs/agents/git-workflow.md` — its `## Review process`, and the
 the repository's process rather than Verkstead's, so what is written there is
 what to do, whatever another project's habits would suggest.
 
+**The pull request itself is Verkstead's to open.** Push the branch, then open
+it with one line:
+
+    git push -u origin HEAD
+    verkstead pull-request open --title '<what this built>' --body '<what you built>'
+
+Verkstead knows where this repo's pull requests live and which token to open one
+with — this prompt's *The forge this repo is on* names the forge and what it
+calls a pull request — so that line works wherever the work is hosted, and it
+opens a draft. Wherever the repository's own sequence says to open one with a
+forge's own tool, this is what opens it instead; everything else that sequence
+says — the push, the branch's name, what the body covers — is the repository's
+and stands.
+
 Two shapes, and which one this is, is a fact about the branch rather than a
 choice:
 
 - an **unstacked** branch — the ordinary case — is pushed, and then opened as a
-  **draft** pull request titled for the work, with a summary of what you built
-  as its body;
+  draft pull request titled for the work, with a summary of what you built as its
+  body;
 - a **stacked** branch, one made with `gh stack init` / `gh stack add`, goes
   through `gh stack submit --auto` instead, after which this branch's own pull
   request has its title and body corrected. Leave the stack's other pull
   requests alone: they belong to finished work.
 
-Work out which of the two this branch is before running either, and follow what
-the repository's own sequence says about it — `gh stack view` naming this branch
-is what says it is in a stack, and an error or a stack without it says it is
-not. A repository whose file says nothing about finishing, or has no such file:
-push the branch and open a draft pull request titled for the work —
-
-    git push -u origin HEAD
-    gh pr create --draft --title '<what this built>' --body '<what you built>'
+**The stacked shape is on offer only where this prompt says the forge stacks
+pull requests**, under *The forge this repo is on*. A forge that does not has no
+stack to submit, so this branch is the unstacked shape whatever `gh stack` or
+the repository's own file would say about one. Where the prompt says it does,
+work out which of the two this branch is before running either — `gh stack view`
+naming this branch is what says it is in a stack, and an error or a stack
+without it says it is not.
 
 **Nothing waits on approval here either.** No gate, no confirmation and nobody
 at this terminal: the pull request opens unasked, and it opens as a *draft*
@@ -140,7 +153,7 @@ needs nothing at all, and a read-only one could hold nothing to begin with —
 `git log --oneline <base>..HEAD` in its worktree, against the commit its branch
 was cut from, is what says which is which.
 
-Verkstead asks GitHub about each of them when you run `verkstead done`, so a
+Verkstead asks the forge about each of them when you run `verkstead done`, so a
 companion holding commits and no pull request refuses the signal, naming the
 repository. Open the missing one and run it again.
 

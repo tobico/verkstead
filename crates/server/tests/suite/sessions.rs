@@ -2439,14 +2439,39 @@ async fn tinkering_asking(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gri
 /// test about a Tinker that commits in one and nowhere else needs: its own branch
 /// stays exactly as the press cut it, so the companion is the whole of what the
 /// ending has to find.
+/// The same, with somewhere to push to — for the test about a session opening
+/// its own pull request, which is refused until the branch is on origin.
+async fn tinkering_pushing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    tinkering_however(spill, stub, gh, &[], Origin::Cloned).await
+}
+
 async fn tinkering_alongside(
     spill: tempfile::TempDir,
     stub: &str,
     gh: &str,
     companions: &[(&str, CompanionMode)],
 ) -> Grilling {
+    tinkering_however(spill, stub, gh, companions, Origin::None).await
+}
+
+/// And the same with whatever remote `origin` says, which is what a session
+/// pushing its own branch needs: a push with nowhere to go is a branch the
+/// Forge is never asked about.
+async fn tinkering_however(
+    spill: tempfile::TempDir,
+    stub: &str,
+    gh: &str,
+    companions: &[(&str, CompanionMode)],
+    origin: Origin,
+) -> Grilling {
     let bench = bench_at_pace(spill, stub, gh, *BRISKLY, None).await;
     let app = &bench.app;
+
+    // Before the Conversation is started, so that the worktree cut from this
+    // repository has the remote — see [`grilling_on`], which says why.
+    if origin == Origin::Cloned {
+        cloned(&bench);
+    }
 
     let started: Started = post(
         app,
@@ -32703,10 +32728,14 @@ async fn a_tinker_starts_the_follow_ups_own_session_on_the_brief() {
          being on the name Verkstead invented: {prompt:?}",
     );
     assert!(
-        !prompt.contains("pull request"),
+        prompt.contains("on **no pull request yet**"),
         "and with nothing promising one: the branch was cut a moment ago and is \
-         on none, so the opening sends it to the branch it is standing on: \
-         {prompt:?}",
+         on none, which is what the forge section says of it: {prompt:?}",
+    );
+    assert!(
+        !prompt.contains("follow up on this branch's pull request"),
+        "so the opening sends it to the branch it is standing on rather than to \
+         a pull request: {prompt:?}",
     );
 }
 
@@ -32944,9 +32973,10 @@ async fn an_investigate_starts_the_investigating_session_on_the_brief() {
          being on the name Verkstead invented: {prompt:?}",
     );
     assert!(
-        !prompt.contains("pull request"),
-        "and with nothing promising one: an investigation never ends on one: \
-         {prompt:?}",
+        prompt.contains("on **no pull request yet**"),
+        "and with nothing promising one: an investigation never ends on one, and \
+         the forge section says the branch is on none — what forbids opening one \
+         is the skill it was sent to: {prompt:?}",
     );
 }
 
@@ -33405,6 +33435,214 @@ async fn a_tinker_that_committed_lands_in_wrapping_on_a_pull_request_it_sent_for
         "and nothing stopped anywhere along it: a Tinker that ends is not a run \
          that stopped: {:?}",
         notices(&view),
+    );
+}
+
+/// A `gh` that opens a pull request when it is asked to and answers about it
+/// from then on, writing every `pr create` it was given into `asked`.
+///
+/// Which is the whole of what `verkstead pull-request open` reaches: the verb
+/// is the server asking the Repo's Forge, so what a test about it reads is
+/// what the Forge was asked for — the draft flag, the head, the base and the
+/// title — and what the branch answers to afterwards.
+fn gh_opening_a_pull_request(asked: &Path, opened: &Path) -> String {
+    format!(
+        r#"
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ "$2" = list ]; then printf '[]'; exit 0; fi
+if [ "$2" = create ]; then
+    body=$(cat)
+    printf '%s\n' "$* -- $body" >> {asked}
+    : > {opened}
+    printf 'https://github.com/tobico/verkstead/pull/41\n'
+    exit 0
+fi
+if [ ! -f {opened} ]; then
+    printf 'no pull requests found for branch "%s"\n' "$3" >&2
+    exit 1
+fi
+case "$5" in
+*statusCheckRollup*)
+    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[]}}'
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[]}}'
+    ;;
+*comments*)
+    printf '{{"comments":[],"reviews":[]}}'
+    ;;
+*)
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"%s","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}' "$3"
+    ;;
+esac
+"#,
+        asked = quoted(asked),
+        opened = quoted(opened),
+    )
+}
+
+/// A Tinker's round that commits, pushes, says so, and then waits on the human
+/// — the push being what `verkstead pull-request open` is refused without.
+fn a_tinker_that_commits_and_pushes() -> String {
+    format!(
+        "case \"$2\" in\n\
+         *reviewing/SKILL.md*)\n    \
+             printf 'prompt was: %s\\n' \"$2\"\n    \
+             while :; do printf 'reading the branch\\n'; sleep 0.1; done\n    \
+             ;;\n\
+         *)\n    \
+             printf 'a limiter\\n' >> limiter.md\n    \
+             git add -A\n    \
+             git commit --quiet -m 'feat: count what the limiter rejects'\n    \
+             git push --quiet -u origin HEAD\n    \
+             : > {pushed}\n    \
+             SAYING='following it up'\n    \
+             printf '%s\\n' \"$SAYING\"\n    \
+             {WHILE_NOBODY_HAS_ASKED}\n    \
+             while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+             printf 'nothing else then\\n'\n    \
+             : > /tmp/verkstead/done\n    \
+             sleep 300\n    \
+             ;;\n\
+         esac\n",
+        pushed = "/tmp/verkstead/pushed",
+    )
+}
+
+/// What `POST …/api/v1/pull-requests` answered, as the status and the body.
+async fn opening(fixture: &Grilling, body: &str) -> (StatusCode, String) {
+    fetch(
+        &fixture.app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/conversations/{}/api/v1/pull-requests",
+                fixture.id
+            ))
+            .body(Body::from(body.to_owned()))
+            .unwrap(),
+    )
+    .await
+}
+
+/// A session that runs `verkstead pull-request open` has the Repo's Forge open
+/// one as a draft, has it recorded on the Conversation there and then, and the
+/// Tinker it was running in lands in Wrapping over that pull request.
+///
+/// The whole of the subcommand. The session says what the pull request should
+/// hold and nothing about where the Repo's pull requests live: the server reads
+/// the Forge off the remote, asks it as the Repo's Author, writes the row and
+/// the Timeline Event the wrap-up would have written on finding one, and prints
+/// where it is. Which is what makes the skills forge-neutral — the lines that
+/// said `gh pr create --draft` are this one verb now (ADR-0030, *Forge*).
+#[tokio::test]
+async fn a_session_that_opens_its_own_pull_request_lands_the_tinker_in_wrapping_on_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let asked = spill.path().join("asked-to-open");
+    let opened = spill.path().join("opened-by-the-verb");
+
+    let fixture = tinkering_pushing(
+        spill,
+        &a_tinker_that_commits_and_pushes(),
+        &gh_opening_a_pull_request(&asked, &opened),
+    )
+    .await;
+
+    // Once the branch is pushed, which is what the verb is refused without.
+    let pushed = handoff_directory(&fixture).join("pushed");
+    fixture.until(|_| pushed.exists().then_some(())).await;
+
+    let (status, body) = opening(
+        &fixture,
+        "title: Rate limiting\nbody: A counter per key.\nbase: main\n",
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "the verb was refused: {body}");
+    assert_eq!(
+        body.trim(),
+        "url: https://github.com/tobico/verkstead/pull/41",
+        "where it is, as YAML and nothing else",
+    );
+
+    // Asked of the Forge as a draft, against the base the verb was given, from
+    // the branch as origin is carrying it.
+    let asked_for = std::fs::read_to_string(&asked).unwrap();
+    for said in [
+        "pr create",
+        "--draft",
+        "--base main",
+        "--title Rate limiting",
+    ] {
+        assert!(
+            asked_for.contains(said),
+            "the Forge should have been asked for {said:?}, got:\n{asked_for}"
+        );
+    }
+    assert!(
+        asked_for.contains("A counter per key."),
+        "with the body on its stdin: {asked_for}"
+    );
+
+    // Recorded there and then, without the move: the Conversation is still
+    // following up, and what it does about being on a pull request is its
+    // ending's.
+    let view = fixture
+        .until(|view| pull_request(view).map(|_| view.clone()))
+        .await;
+
+    assert_eq!(
+        pull_request(&view).map(|opened| opened.number),
+        Some(41),
+        "the pull request the verb opened is the one on the record",
+    );
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Wrapping).then(|| view.clone()))
+        .await;
+
+    assert_eq!(
+        pull_requests(&view).len(),
+        1,
+        "one pull request, recorded once however many times it was found: {:?}",
+        view.pinned,
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped anywhere along it: {:?}",
+        notices(&view),
+    );
+}
+
+/// A branch origin has never heard of is refused, naming the push: a pull
+/// request's head is a branch on the Forge, so there is nothing to open one
+/// from until the branch is there.
+#[tokio::test]
+async fn opening_a_pull_request_on_an_unpushed_branch_is_refused() {
+    let spill = tempfile::tempdir().unwrap();
+    let prompts = spill.path().join("round-prompts");
+
+    let fixture = tinkering(spill, &a_tinker_round(&prompts)).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|_| ()))
+        .await;
+
+    let (status, body) = opening(&fixture, "title: Rate limiting\n").await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "it opened one: {body}");
+    assert!(
+        body.contains("isn't on origin") && body.contains("git push -u origin HEAD"),
+        "and says what is missing and what puts it right: {body}"
+    );
+    assert_eq!(
+        pull_request(&fixture.view().await),
+        None,
+        "and nothing was recorded",
     );
 }
 

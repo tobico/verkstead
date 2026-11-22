@@ -71,7 +71,7 @@ reviewed, on a branch nobody is going to merge.
     # not this, not ever, in this session
     git commit
     git push
-    gh pr create
+    verkstead pull-request open
 
 No commits, no pushes and no pull request — not at the end, not "to save the
 probe", and not because the worktree is untidy. Verkstead asks for none of them
