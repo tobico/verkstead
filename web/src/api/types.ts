@@ -1952,7 +1952,8 @@ export type ConversationView = { id: number,
 repo: RepoEntry, 
 /**
  * What kind of work it is: the Process, picked on the composer between the
- * Repo and the Pairings and frozen when the work starts — see [`Process`].
+ * Repo and the Pairings and frozen when the work starts — see
+ * [`ProvidedProcess`], and [`ProcessEntry`] for what it is called.
  *
  * Never `null`. Every Conversation has one, including every one started
  * before there were any: where the record holds no pick the reading stands,
@@ -1963,11 +1964,7 @@ repo: RepoEntry,
  * the machine the work was done on, and a Process is a fact about the work.
  * So it is one of the facts a published share says.
  */
-process: Process, 
-/**
- * Which plugin's Process, where `process` is [`Process::Provided`].
- */
-provided: ProvidedProcess | null, branch: string, 
+process: ProvidedProcess, branch: string, 
 /**
  * Whether that name is one somebody settled on, rather than the one
  * Verkstead prefilled the record with — see
@@ -5362,37 +5359,15 @@ command: string,
 description?: string, };
 
 /**
- * What kind of work a Conversation is for, and so which states it runs
- * through.
- *
- * [`Lifecycle`]'s pair rather than a schema type: a Process rides no Question
- * Set, so it is the viewer's half of a fact of the record's — the store's own
- * enum is in `crates/store/src/conversations.rs`, and the two vocabularies are
- * held to each other in one function on the server.
- *
- * All five, and all five can start something now that Fix Merge Issues has
- * landed: which of them the picker offers is a list of its own all the same,
- * and what a stage adds is a row on that list and a start path behind it —
- * never a variant. A wire that carried only what could be started would be one
- * to widen every time one more could.
- *
- * See ADR-0020.
- */
-export type Process = "Develop" | "Investigate" | "Review" | "Tinker" | "FixMergeIssues" | "Provided";
-
-/**
  * What kind of work a drafting Conversation is for.
  *
  * The Process and nothing else, the way [`RepoChoice`] is an id and nothing
- * else: which one it is is the whole of what the picker says.
- *
- * Any of the five may be asked for — the wire carries all of them, and whether
- * the one asked for can be started yet is the server's list to keep rather than
- * something the shape of this refuses. See [`ProcessPicked::NotLanded`].
- *
- * A plugin's Process is [`Process::Provided`] with `provided` saying which.
+ * else: which one it is is the whole of what the picker says. Any Process may
+ * be asked for, and whether the one asked for is offered here is the server's
+ * list to keep rather than something the shape of this refuses — see
+ * [`ProcessPicked::NotOffered`].
  */
-export type ProcessChoice = { process: Process, provided?: ProvidedProcess, };
+export type ProcessChoice = { process: ProvidedProcess, };
 
 /**
  * One Process a plugin loaded here provides, as the picker draws it and as
@@ -5434,22 +5409,31 @@ roles: Array<RoleEntry>,
 target: boolean, 
 /**
  * And whether its wrap-up is narrowed to what GitHub refuses a merge
- * for: the state it wraps up in turns the Wrap-up's `review` and
- * `comments` off, so nothing reads the branch and nothing said on the
- * pull request is answered. What the Steer form says wrapping up will do.
+ * for: its `wrapping` state turns the Wrap-up's `review` and `comments`
+ * off, so nothing reads the branch and nothing said on the pull request
+ * is answered.
+ *
+ * What the Steer form says wrapping up will do, under Verkstead's own
+ * **Wrapping** row — which is the row this is for, so it is read by that
+ * state's id and `false` for a Process that declares no such state.
  */
 narrowed: boolean, 
 /**
- * The record's own word for it, where it is one of Verkstead's
- * Processes written as data: a Conversation on it carries that word, and
- * it is what the picker's row makes its choice from.
+ * And whether a Brief that is one pull request URL and nothing else fills
+ * the Process with this one: **Fix merge issues**, which is the server's
+ * own rule rather than anything the manifest says (CONTEXT, *Target*).
+ *
+ * Sent so that the composer can draw the fill before the save lands and
+ * keep no word of its own for which Process that is — see
+ * `filled_from_a_pull_request` in `crates/server/src/conversations.rs`,
+ * which is where the rule lives.
  */
-built_in: Process | null, };
+filled_from_a_pull_request: boolean, };
 
 /**
  * What became of picking one.
  */
-export type ProcessPicked = "Picked" | "NoSuchConversation" | "NotDrafting" | "NotLanded" | "NotOffered";
+export type ProcessPicked = "Picked" | "NoSuchConversation" | "NotDrafting" | "NotOffered";
 
 /**
  * The account a Profile names: which harness runs it, and each of the paths
@@ -5713,8 +5697,16 @@ export type Prose = {
 id: number, html: string, };
 
 /**
- * Which of a plugin's Processes: the plugin's uuid and the id its manifest
+ * Which Process: the uuid of the plugin providing it and the id its manifest
  * gives the Process (Set 1877, Q6).
+ *
+ * **One shape for every Process** (ADR-0030, *Process*): the five Verkstead
+ * ships are bundled plugins of their own, so a wire that named them apart
+ * would be naming a difference there is not. What each of them is *called*,
+ * and what each of its states is called, is read off [`ProcessEntry`] —
+ * which the server sends for every Process it holds.
+ *
+ * See ADR-0020 and ADR-0030.
  */
 export type ProvidedProcess = { plugin: string, id: string, };
 

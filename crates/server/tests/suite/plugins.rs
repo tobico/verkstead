@@ -2621,10 +2621,7 @@ mod drawing {
         let picked: verkstead_render::ProcessPicked = answered(
             app,
             &format!("/api/ui/conversations/{id}/process"),
-            serde_json::json!({
-                "process": "Provided",
-                "provided": { "plugin": PLUGIN, "id": "rounds" },
-            }),
+            serde_json::json!({ "process": { "plugin": PLUGIN, "id": "rounds" } }),
         )
         .await;
         assert_eq!(
@@ -3141,7 +3138,7 @@ async fn an_installed_process_is_offered_to_the_picker_until_its_plugin_is_disab
     let theirs = |listed: Vec<verkstead_render::ProcessEntry>| {
         listed
             .into_iter()
-            .filter(|entry| entry.built_in.is_none())
+            .filter(|entry| entry.plugin == PLUGIN)
             .collect::<Vec<_>>()
     };
     assert!(
@@ -3223,17 +3220,17 @@ async fn verksteads_own_processes_are_built_ins_each_with_a_tick() {
         assert_eq!(row.processes, [name]);
     }
 
-    let offered = |listed: &[verkstead_render::ProcessEntry], process| {
+    let offered = |listed: &[verkstead_render::ProcessEntry], plugin: &str| {
         listed
             .iter()
-            .find(|entry| entry.built_in == Some(process))
-            .unwrap_or_else(|| panic!("{process:?} is listed: {listed:?}"))
+            .find(|entry| entry.plugin == plugin)
+            .unwrap_or_else(|| panic!("the Process of {plugin} is listed: {listed:?}"))
             .offered
     };
     let listed = processes(&app).await;
-    assert!(offered(&listed, verkstead_render::Process::Develop));
-    assert!(offered(&listed, verkstead_render::Process::Tinker));
-    assert!(offered(&listed, verkstead_render::Process::FixMergeIssues));
+    assert!(offered(&listed, DEVELOP));
+    assert!(offered(&listed, TINKER));
+    assert!(offered(&listed, FIX_MERGE_ISSUES));
 
     // Develop as well as Tinker: the ladder every Draft defaults to comes off
     // the picker with its tick like any other row.
@@ -3248,21 +3245,17 @@ async fn verksteads_own_processes_are_built_ins_each_with_a_tick() {
     }
 
     let listed = processes(&app).await;
-    for off in [
-        verkstead_render::Process::Develop,
-        verkstead_render::Process::Tinker,
-    ] {
+    for off in [DEVELOP, TINKER] {
         assert!(
             !offered(&listed, off),
-            "unticked, {off:?} is off the picker"
+            "unticked, the Process of {off} is off the picker"
         );
     }
-    for process in [
-        verkstead_render::Process::Investigate,
-        verkstead_render::Process::Review,
-        verkstead_render::Process::FixMergeIssues,
-    ] {
-        assert!(offered(&listed, process), "{process:?} is still offered");
+    for process in [INVESTIGATE, REVIEW, FIX_MERGE_ISSUES] {
+        assert!(
+            offered(&listed, process),
+            "the Process of {process} is still offered"
+        );
     }
     let view = page(&app).await;
     for unticked in [DEVELOP, TINKER] {

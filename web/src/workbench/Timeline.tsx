@@ -129,7 +129,6 @@ import type {
   PendingSteerView,
   SteerForm,
   SteerRow,
-  Process,
   ProvidedProcess,
   PinnedEvent,
   ProfileEntry,
@@ -863,7 +862,6 @@ export function Timeline(props: {
                       from={movedFrom(props.conversation.timeline, index())}
                       moved={moved()}
                       process={props.conversation.process}
-                      provided={props.conversation.provided}
                     />
                   )}
                 </Match>
@@ -872,7 +870,6 @@ export function Timeline(props: {
                     <Steered
                       steer={steer()}
                       process={props.conversation.process}
-                      provided={props.conversation.provided}
                       selected={props.selected === steer().id}
                       open={() => {
                         props.select(steer().id);
@@ -2105,16 +2102,10 @@ function ManualTask(props: { manual: ManualTaskEvent }): JSX.Element {
 function Moved(props: {
   from: MovedEvent | null;
   moved: MovedEvent;
-  process: Process;
-  provided: ProvidedProcess | null;
+  process: ProvidedProcess;
 }): JSX.Element {
   const word = (moved: MovedEvent | null) =>
-    stateWord(
-      props.process,
-      props.provided,
-      moved?.state ?? "Draft",
-      moved?.declared,
-    );
+    stateWord(props.process, moved?.state ?? "Draft", moved?.declared);
   const tone = () => styles[props.moved.state.toLowerCase()];
 
   return (
@@ -2152,8 +2143,7 @@ function Moved(props: {
 /// lines here, whole in the details pane.
 function Steered(props: {
   steer: SteerEvent;
-  process: Process;
-  provided: ProvidedProcess | null;
+  process: ProvidedProcess;
   selected: boolean;
   open: () => void;
 }): JSX.Element {
@@ -2172,12 +2162,7 @@ function Steered(props: {
         classList={tone() === undefined ? {} : { [tone()!]: true }}
       >
         You steered this into{" "}
-        {stateWord(
-          props.process,
-          props.provided,
-          props.steer.target,
-          props.steer.declared,
-        )}
+        {stateWord(props.process, props.steer.target, props.steer.declared)}
         .
       </p>
       <Show when={props.steer.html}>

@@ -109,7 +109,7 @@ pub enum Lifecycle {
     /// [`Conversation::declared_state`], and what runs there is the Process's
     /// manifest's to say (ADR-0030, *Process*). Nothing built in drives it.
     ///
-    /// Read only for a Conversation on a [`Process::Provided`], and for every
+    /// Read only for a Conversation on a a plugin's Process, and for every
     /// word of such a Conversation's but Draft, Done and Closed, which are
     /// Verkstead's whatever the Process — see [`Lifecycle::read_under`].
     Declared,
@@ -176,7 +176,7 @@ impl Lifecycle {
     /// Process naming a state `wrapping` is never driven as Verkstead's own
     /// wrap-up. Otherwise [`Self::read`].
     pub(crate) fn read_under(word: &str, process: &Process) -> Result<Self> {
-        if !matches!(process, Process::Provided { .. }) {
+        if process.built_in() {
             return Self::read_strict(word);
         }
 
@@ -248,85 +248,169 @@ impl Lifecycle {
 }
 
 /// What kind of work a Conversation is for, and so which states it runs
-/// through.
+/// through: the uuid of the plugin providing the Process and the id its
+/// manifest gives it (Set 1877, Q6).
+///
+/// **A reference to a manifest rather than a word this crate knows**
+/// (ADR-0030, *Process*): every Process is data in a plugin — its states, each
+/// running an Activity, its transitions, its roles and its words — so what the
+/// record holds is which Process, and everything anybody wants to know about
+/// it is read off that manifest above the store. The five Verkstead ships are
+/// bundled plugins of their own, so there is no second kind.
 ///
 /// [`Lifecycle`]'s pair rather than [`Direction`]'s: a fact of the
 /// Conversation's, picked before anything runs and frozen when the work starts,
 /// where a Direction rides a Question Set as a field of `Proposal` and so lives
 /// in the schema crate the agents write against. A Process is on no Set.
 ///
-/// All five from the start, and all five can launch something now that Fix
-/// Merge Issues has landed: the record reads and writes every one of them, and
-/// what a stage adds is a start path and a row on the picker — never a variant.
-/// A store that held only what could be started would be one to migrate every
-/// time one more could.
-///
-/// See ADR-0020.
+/// See ADR-0020 and ADR-0030.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Process {
-    /// The ladder as it has always run, the interview included: Draft,
-    /// Grilling, Implementing, Wrapping, Done. Every new draft's default, and
-    /// the reading of every Conversation from before there were Processes.
-    Develop,
+pub struct Process {
+    /// The uuid of the plugin providing it.
+    pub plugin: String,
 
-    /// Questions about the code answered without changing it: Draft to
-    /// Investigating to Done, in a Worktree it is told to commit nothing from.
-    Investigate,
+    /// And the id that plugin's manifest gives the Process, which is the word
+    /// the `processes` table's `process` column holds.
+    pub id: String,
+}
 
-    /// The wrap-up run over a pull request or a branch the Brief names: Draft
-    /// to Wrapping, reviewed. The Process a Conversation that adopted a pull
-    /// request already was, which is why that is how one reads.
-    Review,
+/// One of the five Processes Verkstead ships: the word the record has always
+/// held for it and the uuid of the bundled plugin providing it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuiltInProcess {
+    /// The word in the `processes` table, which is also the id the plugin's
+    /// manifest gives the Process — `develop` is the *Develop* plugin's
+    /// `develop`.
+    pub word: &'static str,
 
-    /// Follow-up entered from a Draft: rounds on a fresh branch for as long as
-    /// the human wants, wrapping up where they left commits and finishing Done
-    /// where they left none.
-    Tinker,
+    /// The uuid of the plugin providing it.
+    pub uuid: &'static str,
+}
 
-    /// A wrap-up narrowed to what GitHub refuses a merge for: Draft to
-    /// Wrapping with the review and the comments settled before it looks.
-    FixMergeIssues,
+/// The five, in the order they arrived.
+///
+/// **What lets a bare word stand for a plugin's Process**, so that nothing in
+/// the `processes` table is rewritten: a row naming no plugin is the Process of
+/// the plugin its word belongs to, and one of these five is written back
+/// without a plugin, the way it always was — a device of the cluster on an
+/// older release reads such a row as the word it has always been.
+///
+/// The uuids are the bundled manifests' own, under `plugins/` in the checkout,
+/// which `crate::plugins::built_in` names over on the server and that suite
+/// holds these to.
+pub const BUILT_IN_PROCESSES: [BuiltInProcess; 5] = [
+    BuiltInProcess {
+        word: "develop",
+        uuid: "2bcf359e-071a-4237-8741-9897cf06ac15",
+    },
+    BuiltInProcess {
+        word: "investigate",
+        uuid: "53f22a43-806b-4019-8798-c014fa9a0239",
+    },
+    BuiltInProcess {
+        word: "review",
+        uuid: "0b55843a-7c93-47cc-9655-e5f6ec3cf019",
+    },
+    BuiltInProcess {
+        word: "tinker",
+        uuid: "591db9f3-2cb1-4adb-bf35-ff046f5be6f0",
+    },
+    BuiltInProcess {
+        word: "fix-merge-issues",
+        uuid: "0b4f33da-1f61-46dd-aa82-3983d627e192",
+    },
+];
 
-    /// A Process a plugin provides, named by the plugin's uuid and the id its
-    /// manifest gives it (Set 1877, Q6): its states are
-    /// [`Lifecycle::Declared`] ones, run by reading the manifest.
-    Provided { plugin: String, id: String },
+impl BuiltInProcess {
+    /// The Process it is.
+    pub fn process(&self) -> Process {
+        Process {
+            plugin: self.uuid.to_owned(),
+            id: self.word.to_owned(),
+        }
+    }
 }
 
 impl Process {
-    /// The word the column holds. Lowercase and spelled out, so the table reads
-    /// as something rather than as a number nobody can look up — exactly as
-    /// [`Lifecycle::stored`] is, and its own pair of functions rather than
-    /// serde for the same reason: what goes in a `TEXT` column is this module's
-    /// business.
+    /// **Develop**: the ladder as it has always run, the interview included.
+    /// Every new draft's default, and the reading of every Conversation from
+    /// before there were Processes.
+    pub fn develop() -> Self {
+        Self::shipped("develop")
+    }
+
+    /// **Investigate**: questions about the code answered without changing it.
+    pub fn investigate() -> Self {
+        Self::shipped("investigate")
+    }
+
+    /// **Review**: the wrap-up run over a pull request or a branch the Target
+    /// names. The Process a Conversation that adopted a pull request already
+    /// was, which is why that is how one reads.
+    pub fn review() -> Self {
+        Self::shipped("review")
+    }
+
+    /// **Tinker**: follow-up entered from a Draft, on a fresh branch.
+    pub fn tinker() -> Self {
+        Self::shipped("tinker")
+    }
+
+    /// **Fix merge issues**: a wrap-up narrowed to what GitHub refuses a merge
+    /// for. What a Brief that is one pull request URL fills the Process with.
+    pub fn fix_merge_issues() -> Self {
+        Self::shipped("fix-merge-issues")
+    }
+
+    /// The Process the word `word` names, where it is one of the five —
+    /// [`BUILT_IN_PROCESSES`].
+    pub fn named(word: &str) -> Option<Self> {
+        BUILT_IN_PROCESSES
+            .iter()
+            .find(|built_in| built_in.word == word)
+            .map(BuiltInProcess::process)
+    }
+
+    /// The one of the five `word` names, which the five readers above hand a
+    /// word this crate wrote itself.
+    fn shipped(word: &str) -> Self {
+        Self::named(word).expect("one of BUILT_IN_PROCESSES' own words")
+    }
+
+    /// Whether it is one of the five: the plugin providing it is one Verkstead
+    /// ships, under the word it has always been stored as.
     ///
-    /// A plugin's Process is stored as its id, with its plugin's uuid in the
-    /// column beside — see [`Self::plugin`].
+    /// What says a Conversation's states are the ones Verkstead words itself —
+    /// see [`Lifecycle::read_under`] — rather than anything about how it is
+    /// drawn, which is the manifest's either way.
+    pub fn built_in(&self) -> bool {
+        BUILT_IN_PROCESSES
+            .iter()
+            .any(|built_in| built_in.uuid == self.plugin && built_in.word == self.id)
+    }
+
+    /// The word the `process` column holds, which is the Process's id in the
+    /// manifest that declares it.
+    ///
+    /// Its own pair of functions rather than serde, as [`Lifecycle::stored`]
+    /// is: what goes in a `TEXT` column is this module's business.
     pub(crate) fn stored(&self) -> &str {
-        match self {
-            Self::Develop => "develop",
-            Self::Investigate => "investigate",
-            Self::Review => "review",
-            Self::Tinker => "tinker",
-            Self::FixMergeIssues => "fix-merge-issues",
-            Self::Provided { id, .. } => id,
-        }
+        &self.id
     }
 
     /// The uuid of the plugin providing it, which the `processes` table's
-    /// `plugin` column holds — nothing for the five Verkstead runs itself.
+    /// `plugin` column holds — nothing for the five Verkstead ships, whose
+    /// word says which plugin on its own, so that a row written now reads the
+    /// same as one written before Processes were data.
     pub(crate) fn plugin(&self) -> Option<&str> {
-        match self {
-            Self::Provided { plugin, .. } => Some(plugin),
-            _ => None,
-        }
+        (!self.built_in()).then_some(self.plugin.as_str())
     }
 
-    /// The Process a stored row names: a plugin's where the row names one,
+    /// The Process a stored row names: the plugin's where the row names one,
     /// whatever its word, and otherwise [`Self::read`].
     pub(crate) fn read_row(word: &str, plugin: Option<String>) -> Result<Self> {
         match plugin {
-            Some(plugin) => Ok(Self::Provided {
+            Some(plugin) => Ok(Self {
                 plugin,
                 id: word.to_owned(),
             }),
@@ -334,18 +418,13 @@ impl Process {
         }
     }
 
-    /// The Process a stored word names. A word this does not know is a database
-    /// written by a Verkstead this one does not understand, which is worth
-    /// saying rather than guessing past — as an unknown state is.
+    /// The Process a stored word with no plugin beside it names: one of the
+    /// five. A word this does not know is a database written by a Verkstead
+    /// this one does not understand, which is worth saying rather than
+    /// guessing past — as an unknown state is.
     pub(crate) fn read(word: &str) -> Result<Self> {
-        Ok(match word {
-            "develop" => Self::Develop,
-            "investigate" => Self::Investigate,
-            "review" => Self::Review,
-            "tinker" => Self::Tinker,
-            "fix-merge-issues" => Self::FixMergeIssues,
-            other => bail!("a Conversation is running the unknown Process {other:?}"),
-        })
+        Self::named(word)
+            .with_context(|| format!("a Conversation is running the unknown Process {word:?}"))
     }
 }
 
@@ -2485,9 +2564,11 @@ pub async fn conversations(
                 // state `wrapping` is never read as Verkstead's wrap-up — see
                 // [`Lifecycle::read_under`].
                 let running = match (plugin, process) {
-                    (Some(plugin), Some(id)) => Process::Provided { plugin, id },
-                    (None, Some(word)) => Process::read(&word).unwrap_or(Process::Develop),
-                    _ => Process::Develop,
+                    (Some(plugin), Some(id)) => Process { plugin, id },
+                    (None, Some(word)) => {
+                        Process::read(&word).unwrap_or_else(|_| Process::develop())
+                    }
+                    _ => Process::develop(),
                 };
                 let read = Lifecycle::read_under(&state, &running);
                 // Every state but the three Verkstead words itself carries
@@ -3173,8 +3254,8 @@ pub async fn process(pool: &SqlitePool, id: i64) -> Result<Process> {
     }
 
     Ok(match adopted_pull_request(pool, id).await? {
-        Some(_) => Process::Review,
-        None => Process::Develop,
+        Some(_) => Process::review(),
+        None => Process::develop(),
     })
 }
 
@@ -3239,7 +3320,7 @@ pub async fn set_process(pool: &SqlitePool, id: i64, process: Process) -> Result
 /// **Except where a pull-request adoption is all there is**, which is a Draft
 /// from before there were Processes: it was started off the retired *Wrap up a
 /// pull request* level and pointed by the row that was pressed rather than by a
-/// field, and it reads as a [`Process::Review`] for that reason. So its target
+/// field, and it reads as a a Review for that reason. So its target
 /// is that pull request's own URL — where nothing else names one, the field
 /// staying the human's the moment they type in it. One reading rather than a
 /// case in every reader: the page draws the field, Start resolves it and
@@ -4650,7 +4731,7 @@ pub async fn state_under(pool: &SqlitePool, id: i64) -> Result<Option<(String, P
     row.map(|(state, word, plugin)| {
         let running = match word {
             Some(word) => Process::read_row(&word, plugin)?,
-            None => Process::Develop,
+            None => Process::develop(),
         };
 
         Ok((state, running))
@@ -5641,7 +5722,7 @@ pub async fn pick_direction(pool: &SqlitePool, id: i64, direction: Direction) ->
 
     let running = match word {
         Some(word) => Process::read_row(&word, plugin)?,
-        None => Process::Develop,
+        None => Process::develop(),
     };
 
     if !matches!(

@@ -461,7 +461,7 @@ describe("a shared conversation", () => {
     });
 
     expect(process.querySelector("dd")?.textContent).toBe(
-      named(SHARED.conversation.process),
+      named(SHARED.conversation.process.id),
     );
   });
 

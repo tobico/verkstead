@@ -26,16 +26,18 @@ use verkstead_render::{
     CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle, Merging, OtherAuthor,
-    PickedView, PinnedEvent, Process, ProcessPicked, ProfileChosen, ProfileSaved, ProfileTrouble,
-    Registered, RepoEntry, RepoSwitched, Resolved, Resumed, RoadmapPane, RoleWanted,
-    ShowingArchived, StageState, Standing, Started, SteerCancelled, SteerCompanionRefusal,
-    SteerOpened, SteerPairingView, SteerSaved, TakenUp, TargetRecorded, TimelineEvent, Uncommitted,
+    PickedView, PinnedEvent, ProcessPicked, ProfileChosen, ProfileSaved, ProfileTrouble,
+    ProvidedProcess, Registered, RepoEntry, RepoSwitched, Resolved, Resumed, RoadmapPane,
+    RoleWanted, ShowingArchived, StageState, Standing, Started, SteerCancelled,
+    SteerCompanionRefusal, SteerOpened, SteerPairingView, SteerSaved, TakenUp, TargetRecorded,
+    TimelineEvent, Uncommitted,
 };
 use verkstead_server::plugins::built_in::DEVELOP;
 use verkstead_server::settings::{Author, Recorded, Settings};
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
 use crate::fixture_repositories::{repository, repository_and_clone};
+use crate::processes;
 
 /// The role a press says it is waiting on a Pairing for, as the five built-in
 /// Processes label the three Verkstead knows.
@@ -357,7 +359,7 @@ async fn base(app: &Router, id: i64, branch: Option<&str>) -> BaseRecorded {
     .await
 }
 
-async fn pick_process(app: &Router, id: i64, process: Process) -> ProcessPicked {
+async fn pick_process(app: &Router, id: i64, process: ProvidedProcess) -> ProcessPicked {
     post(
         app,
         &format!("/api/ui/conversations/{id}/process"),
@@ -743,7 +745,7 @@ async fn a_new_conversation_is_a_develop_one() {
     let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
-    assert_eq!(opened(&app, id).await.process, Process::Develop);
+    assert_eq!(opened(&app, id).await.process, processes::develop());
 }
 
 /// And unticking Develop's plugin takes the ladder off the picker, so a new
@@ -760,7 +762,7 @@ async fn a_new_draft_defaults_to_the_first_process_still_offered() {
     let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let before = started(&app, repo_id).await;
 
-    assert_eq!(opened(&app, before).await.process, Process::Develop);
+    assert_eq!(opened(&app, before).await.process, processes::develop());
 
     let (status, said) = fetch(
         &app,
@@ -778,12 +780,12 @@ async fn a_new_draft_defaults_to_the_first_process_still_offered() {
 
     assert_eq!(
         opened(&app, after).await.process,
-        Process::Tinker,
+        processes::tinker(),
         "the row under Develop on the picker",
     );
     assert_eq!(
         opened(&app, before).await.process,
-        Process::Develop,
+        processes::develop(),
         "and the Draft that was already there is not rewritten",
     );
 }
@@ -798,7 +800,7 @@ async fn a_conversation_holding_a_pull_request_is_a_review_one() {
     let (_elsewhere, dir, app, _repo, repo_id) = workbench().await;
     let id = holding_a_pull_request(&app, dir.path(), repo_id, 41).await;
 
-    assert_eq!(opened(&app, id).await.process, Process::Review);
+    assert_eq!(opened(&app, id).await.process, processes::review());
 }
 
 /// What kind of work it is is the Draft's to say, and what the picker sends is
@@ -809,10 +811,10 @@ async fn a_drafting_conversations_process_is_the_humans_to_pick() {
     let id = started(&app, repo_id).await;
 
     assert_eq!(
-        pick_process(&app, id, Process::Develop).await,
+        pick_process(&app, id, processes::develop()).await,
         ProcessPicked::Picked
     );
-    assert_eq!(opened(&app, id).await.process, Process::Develop);
+    assert_eq!(opened(&app, id).await.process, processes::develop());
 }
 
 /// And **Tinker** is the second row the picker offers, its stage having landed:
@@ -823,10 +825,10 @@ async fn a_draft_can_be_set_to_tinker() {
     let id = started(&app, repo_id).await;
 
     assert_eq!(
-        pick_process(&app, id, Process::Tinker).await,
+        pick_process(&app, id, processes::tinker()).await,
         ProcessPicked::Picked
     );
-    assert_eq!(opened(&app, id).await.process, Process::Tinker);
+    assert_eq!(opened(&app, id).await.process, processes::tinker());
 }
 
 /// And a draft can be set to Investigate, the third Process whose stage has
@@ -837,10 +839,10 @@ async fn a_draft_can_be_set_to_investigate() {
     let id = started(&app, repo_id).await;
 
     assert_eq!(
-        pick_process(&app, id, Process::Investigate).await,
+        pick_process(&app, id, processes::investigate()).await,
         ProcessPicked::Picked
     );
-    assert_eq!(opened(&app, id).await.process, Process::Investigate);
+    assert_eq!(opened(&app, id).await.process, processes::investigate());
 }
 
 /// And a draft can be set to Review, the fourth Process whose stage has landed
@@ -851,10 +853,10 @@ async fn a_draft_can_be_set_to_review() {
     let id = started(&app, repo_id).await;
 
     assert_eq!(
-        pick_process(&app, id, Process::Review).await,
+        pick_process(&app, id, processes::review()).await,
         ProcessPicked::Picked
     );
-    assert_eq!(opened(&app, id).await.process, Process::Review);
+    assert_eq!(opened(&app, id).await.process, processes::review());
 }
 
 /// And Fix Merge Issues is the fifth and last, its stage having landed: the
@@ -866,34 +868,33 @@ async fn a_draft_can_be_set_to_fix_merge_issues() {
     let id = started(&app, repo_id).await;
 
     assert_eq!(
-        pick_process(&app, id, Process::FixMergeIssues).await,
+        pick_process(&app, id, processes::fix_merge_issues()).await,
         ProcessPicked::Picked
     );
-    assert_eq!(opened(&app, id).await.process, Process::FixMergeIssues);
+    assert_eq!(
+        opened(&app, id).await.process,
+        processes::fix_merge_issues()
+    );
 }
 
-/// Which is every one of them, so nothing is refused for want of a stage any
-/// more — the endpoint is reachable without the picker, and what it accepts is
-/// the whole of what the record can hold.
-///
-/// The refusal stays where it is all the same: a Process is spelled in the store
-/// before there is a stage that can run it, and that list is where the next one
-/// will wait.
+/// Which is each of the five Verkstead ships: every one of them is a bundled
+/// plugin with a tick, so the endpoint takes each in turn and the record reads
+/// back the plugin it named.
 #[tokio::test]
-async fn every_process_the_record_holds_can_be_picked() {
+async fn every_process_verkstead_ships_can_be_picked() {
     let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
 
     for process in [
-        Process::Develop,
-        Process::Tinker,
-        Process::Investigate,
-        Process::Review,
-        Process::FixMergeIssues,
+        processes::develop(),
+        processes::tinker(),
+        processes::investigate(),
+        processes::review(),
+        processes::fix_merge_issues(),
     ] {
         let id = started(&app, repo_id).await;
 
         assert_eq!(
-            pick_process(&app, id, process).await,
+            pick_process(&app, id, process.clone()).await,
             ProcessPicked::Picked,
             "{process:?} is offered on the picker, so the record takes it",
         );
@@ -915,10 +916,10 @@ async fn a_process_is_settled_once_the_grilling_has_started() {
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
     assert_eq!(
-        pick_process(&app, id, Process::Develop).await,
+        pick_process(&app, id, processes::develop()).await,
         ProcessPicked::NotDrafting
     );
-    assert_eq!(opened(&app, id).await.process, Process::Develop);
+    assert_eq!(opened(&app, id).await.process, processes::develop());
 }
 
 /// A second registered repository in the same directory, for the tests
@@ -1332,7 +1333,7 @@ async fn a_conversation_that_is_not_there_says_so_however_it_is_asked_about() {
         BaseRecorded::NoSuchConversation
     );
     assert_eq!(
-        pick_process(&app, 404, Process::Develop).await,
+        pick_process(&app, 404, processes::develop()).await,
         ProcessPicked::NoSuchConversation
     );
     assert_eq!(
@@ -2109,7 +2110,7 @@ async fn tinker(app: &Router, elsewhere: &Path, repo_id: i64) -> i64 {
     let id = started(app, repo_id).await;
 
     assert_eq!(
-        pick_process(app, id, Process::Tinker).await,
+        pick_process(app, id, processes::tinker()).await,
         ProcessPicked::Picked
     );
 
@@ -2137,7 +2138,7 @@ async fn a_tinker_waits_on_two_roles_and_never_on_the_grilling_one() {
     let id = started(&app, repo_id).await;
 
     assert_eq!(
-        pick_process(&app, id, Process::Tinker).await,
+        pick_process(&app, id, processes::tinker()).await,
         ProcessPicked::Picked
     );
 
@@ -2249,7 +2250,7 @@ async fn starting_a_tinker_lands_it_in_follow_up() {
     );
     assert_eq!(no_review(&app, id).await, ProfileChosen::NotDrafting);
     assert_eq!(
-        pick_process(&app, id, Process::Develop).await,
+        pick_process(&app, id, processes::develop()).await,
         ProcessPicked::NotDrafting
     );
 }
@@ -2290,7 +2291,7 @@ async fn investigate(app: &Router, elsewhere: &Path, repo_id: i64) -> i64 {
     let id = started(app, repo_id).await;
 
     assert_eq!(
-        pick_process(app, id, Process::Investigate).await,
+        pick_process(app, id, processes::investigate()).await,
         ProcessPicked::Picked
     );
 
@@ -2317,7 +2318,7 @@ async fn an_investigate_waits_on_one_role_and_a_brief_and_nothing_else() {
     let id = started(&app, repo_id).await;
 
     assert_eq!(
-        pick_process(&app, id, Process::Investigate).await,
+        pick_process(&app, id, processes::investigate()).await,
         ProcessPicked::Picked
     );
 
@@ -2422,7 +2423,7 @@ async fn starting_an_investigate_lands_it_in_investigating() {
         BriefSaved::NotDrafting
     );
     assert_eq!(
-        pick_process(&app, id, Process::Develop).await,
+        pick_process(&app, id, processes::develop()).await,
         ProcessPicked::NotDrafting
     );
 }
@@ -5024,7 +5025,7 @@ async fn steering_a_tinker_into_grilling_settles_the_grilling_pairing() {
     let id = ready(&app, elsewhere.path(), repo_id).await;
 
     assert_eq!(
-        pick_process(&app, id, Process::Tinker).await,
+        pick_process(&app, id, processes::tinker()).await,
         ProcessPicked::Picked
     );
 
@@ -8657,7 +8658,7 @@ async fn a_draft_from_before_is_a_review_pointed_at_the_pull_request_it_holds() 
 
     let view = opened(&app, id).await;
     assert_eq!(view.state, Lifecycle::Draft);
-    assert_eq!(view.process, Process::Review);
+    assert_eq!(view.process, processes::review());
     assert_eq!(
         view.target.as_deref(),
         Some("https://github.com/tobico/verkstead/pull/41"),
@@ -11426,7 +11427,7 @@ async fn a_review_is_refused_by_name_for_each_profile_it_is_short_of() {
 
     let id = started(&app, repo_id).await;
     assert_eq!(
-        pick_process(&app, id, Process::Review).await,
+        pick_process(&app, id, processes::review()).await,
         ProcessPicked::Picked
     );
     assert_eq!(
@@ -11637,7 +11638,7 @@ async fn ready_to_review_under(
     let id = started(app, repo_id).await;
 
     assert_eq!(
-        pick_process(app, id, Process::Review).await,
+        pick_process(app, id, processes::review()).await,
         ProcessPicked::Picked
     );
     assert_eq!(write_brief(app, id, brief).await, BriefSaved::Saved);
@@ -11681,7 +11682,7 @@ async fn a_review_takes_up_the_pull_request_its_brief_names() {
 
     let view = opened(&app, id).await;
     assert_eq!(view.state, Lifecycle::Wrapping);
-    assert_eq!(view.process, Process::Review);
+    assert_eq!(view.process, processes::review());
     assert_eq!(
         view.branch, "rate-limiting",
         "the Conversation is named for the pull request's branch, which take-up decided",
@@ -12804,7 +12805,7 @@ async fn pointed_at_the_branch(
     let id = started(app, repo_id).await;
 
     assert_eq!(
-        pick_process(app, id, Process::Review).await,
+        pick_process(app, id, processes::review()).await,
         ProcessPicked::Picked,
     );
     assert_eq!(
@@ -13544,7 +13545,7 @@ async fn a_brief_that_is_one_pull_request_url_picks_its_repo_and_process() {
         view.repo.id, limiter,
         "matched by origin, whatever its case"
     );
-    assert_eq!(view.process, Process::FixMergeIssues);
+    assert_eq!(view.process, processes::fix_merge_issues());
     assert_eq!(
         view.target.as_deref(),
         Some("https://github.com/tobico/limiter/pull/41"),
@@ -13557,7 +13558,7 @@ async fn a_brief_that_is_one_pull_request_url_picks_its_repo_and_process() {
     );
     let view = opened(&app, id).await;
     assert_eq!(view.repo.id, limiter);
-    assert_eq!(view.process, Process::FixMergeIssues);
+    assert_eq!(view.process, processes::fix_merge_issues());
 }
 
 /// Prose around the URL, and a bare number, fill the Target and nothing else:
@@ -13583,7 +13584,11 @@ async fn a_brief_naming_a_pull_request_among_other_words_picks_neither() {
 
         let view = opened(&app, id).await;
         assert_eq!(view.repo.id, repo_id, "{brief:?} moves nothing");
-        assert_eq!(view.process, Process::Develop, "{brief:?} picks nothing");
+        assert_eq!(
+            view.process,
+            processes::develop(),
+            "{brief:?} picks nothing"
+        );
         assert!(view.target.is_some(), "{brief:?} still fills the Target");
     }
 }
@@ -13630,7 +13635,7 @@ async fn a_brief_fill_corrects_itself_and_leaves_a_hand_pick_standing() {
     .await;
     assert_eq!(switched, RepoSwitched::Switched);
     assert_eq!(
-        pick_process(&app, id, Process::Review).await,
+        pick_process(&app, id, processes::review()).await,
         ProcessPicked::Picked,
     );
 
@@ -13638,15 +13643,19 @@ async fn a_brief_fill_corrects_itself_and_leaves_a_hand_pick_standing() {
 
     let view = opened(&app, id).await;
     assert_eq!(view.repo.id, repo_id, "the human's Repo stands");
-    assert_eq!(view.process, Process::Review, "the human's Process stands");
+    assert_eq!(
+        view.process,
+        processes::review(),
+        "the human's Process stands"
+    );
 
     // A Process picked before any URL arrived stands just the same.
     let second = started(&app, repo_id).await;
-    pick_process(&app, second, Process::Investigate).await;
+    pick_process(&app, second, processes::investigate()).await;
     write_brief(&app, second, "https://github.com/tobico/limiter/pull/9").await;
 
     let view = opened(&app, second).await;
-    assert_eq!(view.process, Process::Investigate);
+    assert_eq!(view.process, processes::investigate());
     assert_eq!(view.repo.id, limiter);
 
     // And so does a Repo switched by hand before any URL arrived.
@@ -13662,7 +13671,7 @@ async fn a_brief_fill_corrects_itself_and_leaves_a_hand_pick_standing() {
 
     let view = opened(&app, third).await;
     assert_eq!(view.repo.id, askance, "the human's Repo stands");
-    assert_eq!(view.process, Process::FixMergeIssues);
+    assert_eq!(view.process, processes::fix_merge_issues());
 }
 
 /// A URL of a repository nothing registered is a clone of moves nothing, and
@@ -13683,7 +13692,7 @@ async fn a_brief_url_no_repo_matches_leaves_the_repo_alone() {
 
     let view = opened(&app, id).await;
     assert_eq!(view.repo.id, repo_id);
-    assert_eq!(view.process, Process::FixMergeIssues);
+    assert_eq!(view.process, processes::fix_merge_issues());
 }
 
 /// Two clones of the one repository: the Draft already on one of them stays
@@ -13763,7 +13772,7 @@ async fn a_review_waits_on_its_target_and_takes_up_what_it_names() {
 
     let id = started(&app, repo_id).await;
     assert_eq!(
-        pick_process(&app, id, Process::Review).await,
+        pick_process(&app, id, processes::review()).await,
         ProcessPicked::Picked
     );
 
@@ -13806,7 +13815,7 @@ async fn a_review_is_ready_on_a_brief_and_both_pairings() {
     let id = started(&app, repo_id).await;
 
     assert_eq!(
-        pick_process(&app, id, Process::Review).await,
+        pick_process(&app, id, processes::review()).await,
         ProcessPicked::Picked
     );
     assert!(!opened(&app, id).await.ready_to_grill, "nothing is settled");
@@ -13849,7 +13858,7 @@ async fn a_review_pressed_with_no_profiles_is_refused_about_them_first() {
 
     let id = started(&app, repo_id).await;
     assert_eq!(
-        pick_process(&app, id, Process::Review).await,
+        pick_process(&app, id, processes::review()).await,
         ProcessPicked::Picked
     );
 
@@ -13907,7 +13916,7 @@ async fn ready_to_fix_under(app: &Router, repo_id: i64, brief: &str, implementat
 #[cfg(unix)]
 async fn settled_as_a_fix(app: &Router, id: i64, brief: &str, implementation: &str) {
     assert_eq!(
-        pick_process(app, id, Process::FixMergeIssues).await,
+        pick_process(app, id, processes::fix_merge_issues()).await,
         ProcessPicked::Picked
     );
     assert_eq!(write_brief(app, id, brief).await, BriefSaved::Saved);
@@ -13927,7 +13936,7 @@ async fn a_fix_merge_issues_is_ready_on_a_brief_a_target_and_one_pairing() {
     let id = started(&app, repo_id).await;
 
     assert_eq!(
-        pick_process(&app, id, Process::FixMergeIssues).await,
+        pick_process(&app, id, processes::fix_merge_issues()).await,
         ProcessPicked::Picked
     );
     assert!(!opened(&app, id).await.ready_to_grill, "nothing is settled");
@@ -13993,7 +14002,7 @@ async fn a_fix_merge_issues_takes_up_the_pull_request_its_brief_names() {
 
     let view = opened(&app, id).await;
     assert_eq!(view.state, Lifecycle::Wrapping);
-    assert_eq!(view.process, Process::FixMergeIssues);
+    assert_eq!(view.process, processes::fix_merge_issues());
     assert_eq!(view.branch, "rate-limiting");
     assert_eq!(view.base_commit.as_deref(), Some(head.as_str()));
 
@@ -14112,7 +14121,7 @@ async fn a_fix_merge_issues_keeps_every_take_up_refusal_by_name() {
     // Process words for itself.
     let bare = started(&app, repo_id).await;
     assert_eq!(
-        pick_process(&app, bare, Process::FixMergeIssues).await,
+        pick_process(&app, bare, processes::fix_merge_issues()).await,
         ProcessPicked::Picked
     );
     assert_eq!(

@@ -62,6 +62,7 @@ mod plugins;
 mod ports;
 mod preflight;
 mod probing;
+mod processes;
 mod profiles;
 mod push_delivery;
 mod relayed;

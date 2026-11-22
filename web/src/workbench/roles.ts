@@ -33,7 +33,15 @@ export type Role = string;
 /// `undefined` for a role that has to be answered with an account. Composed
 /// here rather than carried on the wire because it is a word of Verkstead's
 /// about a row Verkstead draws; what the role is *called* is the manifest's.
-export function away(role: RoleEntry | RolePairingView): string | undefined {
+///
+/// Asked of the two facts it reads rather than of one of the three shapes a
+/// role arrives in — [`RoleEntry`] off the Process list, [`RolePairingView`]
+/// off a Conversation, `RoleWanted` off a refused press — because the row is
+/// the same row whichever of them is holding the label.
+export function away(role: {
+  label: string;
+  away: boolean;
+}): string | undefined {
   return role.away ? `No ${role.label.toLowerCase()}` : undefined;
 }
 

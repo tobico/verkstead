@@ -43,7 +43,10 @@ provides:
         # review switched off there is no review session to pair, so a steer
         # into it settles what builds and waits on nothing else.
         roles: [implementation]
-        options: { review: "off", comments: "off" }
+        # The review and the comments off is the whole of the narrowing, and
+        # the stack on is what says this wrap-up is over a link of a chain:
+        # every pull request of it is walked on GitHub and recorded.
+        options: { review: "off", comments: "off", stack: "on" }
         steer: { brief: none }
       - id: follow-up
         word: Follow-up

@@ -1611,11 +1611,33 @@ provides:
         assert_eq!(refused_at(&two), "provides[0].models[1].default");
     }
 
+    /// A model may be for a role nobody has used before, which Processes being
+    /// plugins is what makes possible: a role is a word its Process declares
+    /// (ADR-0030, *Process*), so a harness naming one this build has never
+    /// heard of is a harness with an opinion about somebody's Process rather
+    /// than a manifest to refuse. What is refused is a word that is no role's
+    /// name at all, and a second model for a role an earlier one is already
+    /// for.
     #[test]
-    fn a_model_for_an_unknown_role_is_refused() {
-        let yaml = AGENT.replace("for: [review]", "for: [planning]");
+    fn a_model_may_be_for_a_role_nobody_has_used_before() {
+        let agent = agent_for(
+            &AGENT.replace("for: [review]", "for: [planning]"),
+            Platform::Linux,
+        );
 
-        assert_eq!(refused_at(&yaml), "provides[0].models[1].for[0]");
+        assert_eq!(
+            agent.models.roles,
+            [(store::Role::named("planning"), "stub-small".to_owned())]
+        );
+
+        assert_eq!(
+            refused_at(&AGENT.replace("for: [review]", "for: [Planning]")),
+            "provides[0].models[1].for[0]",
+        );
+        assert_eq!(
+            refused_at(&AGENT.replace("for: [review]", "for: [review, review]")),
+            "provides[0].models[1].for[1]",
+        );
     }
 
     #[test]

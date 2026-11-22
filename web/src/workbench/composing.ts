@@ -100,7 +100,6 @@ import type {
   AttachmentView,
   CompanionMode,
   ConversationView,
-  Process,
   ProvidedProcess,
   RepoEntry,
   Started,
@@ -112,7 +111,7 @@ import { rowKey, type Device } from "../reaching";
 import { draftingOn, forget, read, write } from "../remembered";
 import { adoptRefusal } from "./Adoption";
 import { ATTACH_REFUSAL, PACK_REFUSAL, SERVER_REFUSAL } from "./Composer";
-import { targeted } from "./provided";
+import { filledFromAPullRequest, targeted } from "./provided";
 import {
   BASE_REFUSAL,
   BRANCH_REFUSAL,
@@ -253,12 +252,10 @@ export type Composed = {
   /// Process is the one thing about a Conversation likeliest to differ from the
   /// last. So the control stands on Develop for every repo, and this is `null`
   /// until somebody says otherwise.
-  process: Process | null;
-  /// And which plugin's, where [`Composed.process`] is `Provided`.
-  provided: ProvidedProcess | null;
+  process: ProvidedProcess | null;
   /// And what the fill last wrote into [`Composed.process`], `null` until it
   /// has written anything.
-  processFilled: Process | null;
+  processFilled: ProvidedProcess | null;
   /// Who runs each role, as that role's picker writes it, keyed by the role's
   /// name — a role nobody has touched has no entry at all.
   ///
@@ -352,12 +349,12 @@ export function written(
     return next;
   }
 
-  if (next.process === next.processFilled) {
+  const filled = filledFromAPullRequest();
+  if (filled !== null && same(next.process, next.processFilled)) {
     next = {
       ...next,
-      process: "FixMergeIssues",
-      provided: null,
-      processFilled: "FixMergeIssues",
+      process: filled.process,
+      processFilled: filled.process,
     };
   }
 
@@ -414,7 +411,6 @@ export function blank(): Composed {
     base: null,
     companions: [],
     process: null,
-    provided: null,
     processFilled: null,
     pairings: {},
     adopting: null,
@@ -689,7 +685,7 @@ export async function create(
   // does, and the server's own reading of a Conversation with no row of its own
   // is what stands.
   if (state.process !== null) {
-    const outcome = await pickProcess(to, id, state.process, state.provided);
+    const outcome = await pickProcess(to, id, state.process);
     said(
       outcome === "Picked",
       `The process couldn't be picked. ${PROCESS_REFUSAL[outcome]}`,
@@ -759,10 +755,7 @@ export async function create(
         outcome === "Adopted",
         `The stage couldn't be started. ${adoptRefusal(outcome)}`,
       );
-    } else if (
-      state.process !== null &&
-      targeted(state.process, state.provided)
-    ) {
+    } else if (state.process !== null && targeted(state.process)) {
       // The third kickoff, and the one that starts no session: the take-up reads
       // the Target, puts the Conversation on what it names and moves it into
       // Wrapping, and what runs from there is the wrap-up's own watchers.
@@ -1055,13 +1048,10 @@ export async function moveTo(
     );
   }
 
-  // And the target and the Process, which are the human's words rather than
-  // ids — a URL, a `#number` or a branch, and one of a fixed list — so they mean
-  // the same over there. Develop is what the new Conversation already arrived
-  // under, and no target is what it already has, so either left alone sends
-  // nothing, as the compose page's do — except Develop under a Brief that is one
-  // pull request URL, which the fill over there would otherwise have made Fix
-  // Merge Issues.
+  // And the target, which is the human's words rather than an id — a URL, a
+  // `#number` or a branch — so it means the same over there. No target is what
+  // the new Conversation already has, so an empty one sends nothing, as the
+  // compose page's does.
   if (draft.target !== null && draft.target !== "") {
     const outcome = await nameTarget(to.reaching, id, draft.target);
     said(
@@ -1070,13 +1060,15 @@ export async function moveTo(
     );
   }
 
-  if (draft.process !== "Develop" || oneUrl) {
-    const outcome = await pickProcess(
-      to.reaching,
-      id,
-      draft.process,
-      draft.provided,
-    );
+  // And the Process this draft is on, always: it is the plugin providing it and
+  // its id there, which mean the same on either device — and the fill over
+  // there would otherwise make a Brief that is one pull request URL a Fix
+  // merge issues, whatever this draft was. A device whose plugin for it is
+  // switched off or missing refuses the pick and says so, which is the move
+  // arriving somewhere that cannot run this work rather than something to pass
+  // over in silence.
+  {
+    const outcome = await pickProcess(to.reaching, id, draft.process);
     said(
       outcome === "Picked",
       `The process couldn't be picked. ${PROCESS_REFUSAL[outcome]}`,
@@ -1277,12 +1269,14 @@ function parsed(body: string): Composed | null {
     // And a body from before the Repo and the Process were filled has neither
     // mark, which is the fill owning nothing it did not write.
     !(held.repoFilled === undefined || whole(held.repoFilled)) ||
-    !kind(held.processFilled) ||
+    // A body from before a Process was the plugin providing it holds a word in
+    // these two instead, which names no Process this build could send: it
+    // reads as a picker nobody touched rather than as a fault, and [`composed`]
+    // drops it.
+    !(typeof held.processFilled === "string" || whose(held.processFilled)) ||
     !(held.base === null || typeof held.base === "string") ||
     !Array.isArray(held.companions) ||
-    !kind(held.process) ||
-    // A body from before a plugin's Process could be picked has none.
-    !whose(held.provided) ||
+    !(typeof held.process === "string" || whose(held.process)) ||
     // A body from before the roles were a map holds the three fields instead,
     // each of which reads in as an entry — see [`carried`].
     !picked(held.grilling) ||
@@ -1353,9 +1347,8 @@ function parsed(body: string): Composed | null {
     filled: held.filled ?? "",
     base: held.base,
     companions,
-    process: held.process ?? null,
-    provided: held.provided ?? null,
-    processFilled: held.processFilled ?? null,
+    process: picks(held.process),
+    processFilled: picks(held.processFilled),
     pairings: held.pairings ?? carried(held),
     adopting: held.adopting ?? null,
     permitted: held.permitted ?? [],
@@ -1396,38 +1389,16 @@ function loaded(value: unknown): value is Adopting | null | undefined {
   );
 }
 
-/// The `process` words the wire knows, which is the union's own members
-/// written out: a type is no runtime value.
+/// Whether this names a Process — the plugin providing it and its id there —
+/// or nothing at all.
 ///
-/// Not a table of anything the human reads — what each Process is called, and
-/// which of them the picker offers, is the manifests' and the server's (see
-/// `provided.ts`). This is the shape of the field alone.
-const WORDS: Process[] = [
-  "Develop",
-  "Tinker",
-  "Investigate",
-  "Review",
-  "FixMergeIssues",
-  "Provided",
-];
-
-/// Whether this is a Process the wire knows, or the absence of one.
-///
-/// Checked against the words rather than merely for a string, because a Process
-/// goes straight back out on the wire: a body left by some other build holding a
-/// word this one has never heard of would be a request refused for a reason
-/// nobody could act on. A body from before this field has no `process` at all,
-/// which is untouched rather than a fault — [`loaded`]'s absence, read the same
-/// way.
-function kind(value: unknown): value is Process | null | undefined {
-  return (
-    value === null ||
-    value === undefined ||
-    (typeof value === "string" && WORDS.includes(value as Process))
-  );
-}
-
-/// Whether this names a plugin's Process, or nothing.
+/// Checked for its shape rather than against a list of Processes: which ones
+/// there are is the server's to say, and a body naming one this install has not
+/// got is refused by the press that sends it, naming the plugin. A body from
+/// before this field has no `process` at all, which is untouched rather than a
+/// fault — [`loaded`]'s absence, read the same way. One from before a Process
+/// was a plugin's holds a word instead, which is no Process this build can
+/// name and reads as untouched too.
 function whose(value: unknown): value is ProvidedProcess | null | undefined {
   if (value === null || value === undefined) {
     return true;
@@ -1437,6 +1408,25 @@ function whose(value: unknown): value is ProvidedProcess | null | undefined {
   }
   const named = value as Record<string, unknown>;
   return typeof named.plugin === "string" && typeof named.id === "string";
+}
+
+/// The Process a held body names, or nothing at all — a word from a body
+/// written before a Process was the plugin providing it among them, that being
+/// no Process this build could send.
+function picks(value: unknown): ProvidedProcess | null {
+  return whose(value) ? (value ?? null) : null;
+}
+
+/// Whether two picks are the same Process, or both nothing: the plugin and the
+/// id, rather than the object, so a pick read back out of the browser compares
+/// against one made here.
+function same(
+  one: ProvidedProcess | null,
+  other: ProvidedProcess | null,
+): boolean {
+  return one === null || other === null
+    ? one === other
+    : one.plugin === other.plugin && one.id === other.id;
 }
 
 /// Whether this is a Device Id, this device, or a body that never said — the
@@ -1464,7 +1454,7 @@ function picked(value: unknown): value is string | null | undefined {
 /// picks read back exactly where their pickers draw them.
 function carried(held: Record<string, unknown>): Record<string, string> {
   return Object.fromEntries(
-    (["grilling", "implementation", "review"] as const)
+    ["grilling", "implementation", "review"]
       .map((role) => [role, held[role]] as const)
       .filter(
         (entry): entry is readonly [string, string] =>

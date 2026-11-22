@@ -83,7 +83,6 @@ export type Status = {
 export function status(conversation: ConversationView): Status {
   const state = stateWord(
     conversation.process,
-    conversation.provided,
     conversation.state,
     conversation.declared_state,
   );

@@ -68,13 +68,14 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 
+use crate::processes;
 use crate::stub_harness::{self, StubHarness};
 use verkstead_render::{
     Adopted, AgentOutputEvent, AnswerAttached, Attached, BaseRecorded, BriefSaved, Capture,
     CommitEvent, CommitPane, CompanionAdded, CompanionMode, CompanionModeChosen, CompanionView,
     ConversationClosed, ConversationSteered, ConversationStopped, ConversationView, DevicesView,
-    GrillingStarted, InstallKind, Lifecycle, NoticeEvent, PickedView, PinnedEvent, Process,
-    ProcessPicked, ProfileSaved, PullRequestEvent, Registered, Resolved, Resumed, ServerAttached,
+    GrillingStarted, InstallKind, Lifecycle, NoticeEvent, PickedView, PinnedEvent, ProcessPicked,
+    ProfileSaved, ProvidedProcess, PullRequestEvent, Registered, Resolved, Resumed, ServerAttached,
     SetReading, SetView, Shown, Size, StageListReached, StageState, Started, SteerOpened,
     Submitted, TargetRecorded, TaskListEvent, TaskListReached, TerminalClosed, TerminalOpened,
     TerminalView, TerminalsView, TimelineEvent, TranscriptView, Turn, Watching,
@@ -2463,7 +2464,7 @@ async fn tinkering_alongside(
     let picked: ProcessPicked = post(
         app,
         &format!("/api/ui/conversations/{id}/process"),
-        &serde_json::json!({ "process": Process::Tinker }),
+        &serde_json::json!({ "process": processes::tinker() }),
     )
     .await;
     assert_eq!(picked, ProcessPicked::Picked);
@@ -2615,7 +2616,7 @@ async fn investigating(spill: tempfile::TempDir, stub: &str) -> Grilling {
     let picked: ProcessPicked = post(
         app,
         &format!("/api/ui/conversations/{id}/process"),
-        &serde_json::json!({ "process": Process::Investigate }),
+        &serde_json::json!({ "process": processes::investigate() }),
     )
     .await;
     assert_eq!(picked, ProcessPicked::Picked);
@@ -7859,7 +7860,7 @@ async fn an_update_over_two_running_sessions_counts_both_and_both_are_resumed() 
     )
     .await;
 
-    let beside = composed_beside(&fixture, Process::Investigate).await;
+    let beside = composed_beside(&fixture, processes::investigate()).await;
     grilled(&fixture, beside).await;
 
     until_working(&fixture, fixture.id).await;
@@ -19258,7 +19259,7 @@ async fn a_login_resumes_every_run_it_unblocks() {
 
     let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
 
-    let investigating = composed_beside(&fixture, Process::Investigate).await;
+    let investigating = composed_beside(&fixture, processes::investigate()).await;
     grilled(&fixture, investigating).await;
 
     running_out(&fixture).await;
@@ -21748,7 +21749,7 @@ esac
 
     // And the investigation, started before the roadmap settles so that it is
     // already holding a place when the carry-on counts them.
-    let investigating = composed_beside(&fixture, Process::Investigate).await;
+    let investigating = composed_beside(&fixture, processes::investigate()).await;
 
     grilled(&fixture, investigating).await;
 
@@ -21794,7 +21795,7 @@ esac
 /// Its own function because the tests about the server's places all want the
 /// same thing — a Conversation of another kind beside the fixture's own, holding
 /// one of the four.
-async fn composed_beside(fixture: &Grilling, process: Process) -> i64 {
+async fn composed_beside(fixture: &Grilling, process: ProvidedProcess) -> i64 {
     let started: Started = post(
         &fixture.app,
         "/api/ui/conversations",
@@ -22327,7 +22328,7 @@ esac
     // And the investigation, started before the roadmap settles so that it is
     // already holding that one place when the carry-on counts them. A press, so
     // the limit never stood in front of it.
-    let investigating = composed_beside(&fixture, Process::Investigate).await;
+    let investigating = composed_beside(&fixture, processes::investigate()).await;
 
     grilled(&fixture, investigating).await;
 
@@ -22560,7 +22561,7 @@ async fn two_roadmaps_waiting_for_a_place(at_once: usize, pace: Pace) -> (Grilli
 
     // The investigation first, so that it is already holding one of the four
     // when the older roadmap settles and the carry-on counts them.
-    let investigating = composed_beside(&fixture, Process::Investigate).await;
+    let investigating = composed_beside(&fixture, processes::investigate()).await;
 
     grilled(&fixture, investigating).await;
     until_working(&fixture, investigating).await;
@@ -22595,7 +22596,7 @@ async fn two_roadmaps_waiting_for_a_place(at_once: usize, pace: Pace) -> (Grilli
     // And the younger roadmap, planned and settled with every place taken. A
     // press starts its grilling over the limit — presses are never held back —
     // and its settle finds nothing free, so both its roots wait.
-    let parity = composed_beside(&fixture, Process::Develop).await;
+    let parity = composed_beside(&fixture, processes::develop()).await;
 
     staged_and_settled_beside(&fixture, parity, "parity").await;
 
@@ -24893,7 +24894,7 @@ async fn taking_up(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
         gh,
         *BRISKLY,
         Pickers::UnderEveryPairing,
-        Process::Review,
+        processes::review(),
         "",
     )
     .await
@@ -24908,7 +24909,7 @@ async fn taking_up_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) ->
         gh,
         *BRISKLY,
         Pickers::Unreviewed,
-        Process::Review,
+        processes::review(),
         "",
     )
     .await
@@ -24949,7 +24950,7 @@ async fn taking_up_to_fix_at_pace(
         gh,
         pace,
         Pickers::UnderEveryPairing,
-        Process::FixMergeIssues,
+        processes::fix_merge_issues(),
         "",
     )
     .await
@@ -24968,7 +24969,7 @@ async fn taking_up_sharing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gr
         gh,
         *BRISKLY,
         Pickers::UnderEveryPairing,
-        Process::Review,
+        processes::review(),
         "share_on_done: true\n",
     )
     .await
@@ -24986,7 +24987,7 @@ async fn taking_up_however_reviewed(
     gh: &str,
     pace: Pace,
     pickers: Pickers,
-    process: Process,
+    process: ProvidedProcess,
     config: &str,
 ) -> Grilling {
     let bench = bench_at_pace(spill, stub, gh, pace, None).await;
@@ -25010,7 +25011,7 @@ async fn taking_up_however_reviewed(
         panic!("expected the Conversation to start, got {started:?}");
     };
 
-    if process == Process::FixMergeIssues {
+    if process == processes::fix_merge_issues() {
         bench.the_one_an_investigation_runs_under(id).await;
     } else {
         bench.the_two_a_wrap_up_runs_under(id).await;
@@ -25081,7 +25082,7 @@ async fn reviewing_a_branch(
     base: Option<&str>,
     standing: Option<&str>,
     holder: Option<Holder<'_>>,
-    process: Process,
+    process: ProvidedProcess,
 ) -> Grilling {
     let bench = bench(spill, stub, gh).await;
 
@@ -25125,7 +25126,7 @@ async fn reviewing_a_branch(
         panic!("expected the Conversation to start, got {started:?}");
     };
 
-    if process == Process::FixMergeIssues {
+    if process == processes::fix_merge_issues() {
         bench.the_one_an_investigation_runs_under(id).await;
     } else {
         bench.the_two_a_wrap_up_runs_under(id).await;
@@ -25235,7 +25236,7 @@ async fn a_review_of_a_branch_sends_one_session_for_the_pull_request_it_is_owed(
         Some("release/2.1"),
         None,
         None,
-        Process::Review,
+        processes::review(),
     )
     .await;
 
@@ -25332,7 +25333,7 @@ async fn a_fix_merge_issues_over_a_branch_sends_the_one_session_it_is_owed() {
         Some("release/2.1"),
         None,
         None,
-        Process::FixMergeIssues,
+        processes::fix_merge_issues(),
     )
     .await;
 
@@ -25569,7 +25570,7 @@ async fn a_bare_branch_inside_a_stack_is_walked_when_its_pull_request_arrives() 
         None,
         None,
         None,
-        Process::FixMergeIssues,
+        processes::fix_merge_issues(),
     )
     .await;
 
@@ -25688,7 +25689,7 @@ async fn a_bare_branch_whose_stack_somebody_is_standing_on_stops_the_run() {
         // here — which is what a human's own clone of the stage below looks like.
         Some("stage-01"),
         None,
-        Process::FixMergeIssues,
+        processes::fix_merge_issues(),
     )
     .await;
 
@@ -25754,7 +25755,7 @@ async fn a_bare_branch_whose_stack_a_finished_conversation_stands_on_carries_on(
             number: 40,
             holding: false,
         }),
-        Process::FixMergeIssues,
+        processes::fix_merge_issues(),
     )
     .await;
 
@@ -25852,7 +25853,7 @@ async fn a_bare_branch_whose_stack_holds_uncommitted_changes_stops_the_run() {
             number: 40,
             holding: true,
         }),
-        Process::FixMergeIssues,
+        processes::fix_merge_issues(),
     )
     .await;
 
@@ -25913,7 +25914,7 @@ async fn a_review_of_a_branch_whose_session_opens_none_stops_and_resume_is_anoth
         None,
         None,
         None,
-        Process::Review,
+        processes::review(),
     )
     .await;
 
@@ -26037,7 +26038,7 @@ async fn reviewing_a_pull_request(spill: tempfile::TempDir, stub: &str) -> Grill
     let picked: ProcessPicked = post(
         &bench.app,
         &format!("/api/ui/conversations/{id}/process"),
-        &serde_json::json!({ "process": Process::Review }),
+        &serde_json::json!({ "process": processes::review() }),
     )
     .await;
     assert_eq!(picked, ProcessPicked::Picked);
@@ -27960,7 +27961,7 @@ async fn a_fix_merge_issues_over_a_branch_enters_the_same_narrowed_wrap_up() {
         None,
         None,
         None,
-        Process::FixMergeIssues,
+        processes::fix_merge_issues(),
     )
     .await;
 
@@ -43034,7 +43035,7 @@ async fn a_wrap_up_session_is_refused_a_memo_naming_the_kinds_that_may() {
         None,
         None,
         None,
-        Process::Review,
+        processes::review(),
     )
     .await;
 
@@ -44474,10 +44475,7 @@ async fn two_steps_with(spill: tempfile::TempDir, stub: &str, more: &str) -> Gri
     let picked: ProcessPicked = post(
         &app,
         &format!("/api/ui/conversations/{id}/process"),
-        &serde_json::json!({
-            "process": Process::Provided,
-            "provided": { "plugin": TWO_STEPS, "id": "two-steps" },
-        }),
+        &serde_json::json!({ "process": { "plugin": TWO_STEPS, "id": "two-steps" } }),
     )
     .await;
     assert_eq!(picked, ProcessPicked::Picked);
@@ -44566,7 +44564,7 @@ async fn a_conversation_on_a_plugins_process_runs_its_states_to_done() {
         .until(|view| (view.declared_state.as_deref() == Some("drafting")).then(|| view.clone()))
         .await;
     assert_eq!(view.state, Lifecycle::Declared);
-    assert_eq!(view.process, Process::Provided);
+    assert_eq!(view.process.plugin, TWO_STEPS);
     assert_eq!(stored_state(&fixture).await, "drafting");
 
     std::fs::write(handoff_directory(&fixture).join("drafted"), "").unwrap();
@@ -45039,10 +45037,7 @@ async fn sketching(spill: tempfile::TempDir, stub: &str) -> (Grilling, i64) {
     let picked: ProcessPicked = post(
         &app,
         &format!("/api/ui/conversations/{id}/process"),
-        &serde_json::json!({
-            "process": Process::Provided,
-            "provided": { "plugin": SKETCHING, "id": "sketching" },
-        }),
+        &serde_json::json!({ "process": { "plugin": SKETCHING, "id": "sketching" } }),
     )
     .await;
     assert_eq!(picked, ProcessPicked::Picked);

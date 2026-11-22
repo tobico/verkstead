@@ -324,9 +324,9 @@ export function rowFor(view: ConversationView): ConversationEntry {
     repo: view.repo.name,
     state: view.state,
     declared:
-      view.provided !== null && view.declared_state !== null
-        ? { process: view.provided, state: view.declared_state }
-        : null,
+      view.declared_state === null
+        ? null
+        : { process: view.process, state: view.declared_state },
     working: false,
     idle: false,
     waiting: false,

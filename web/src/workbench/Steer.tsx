@@ -119,7 +119,6 @@ import type {
   ConversationView,
   Lifecycle,
   PairingView,
-  Process,
   ProvidedProcess,
   RepoEntry,
   SteerCompanionRefusal,
@@ -251,11 +250,7 @@ const STEER_COMPANION_REFUSAL: Record<
 ///
 /// Asked of [`narrowed`](./provided.ts) rather than of the Process by name,
 /// that being the Process's own manifest read off the list the server sends.
-function note(
-  offered: SteerRow,
-  process: Process,
-  provided: ProvidedProcess | null,
-): string {
+function note(offered: SteerRow, process: ProvidedProcess): string {
   if (offered.target === "Declared") {
     const said = BRIEF_NOTE[offered.brief];
 
@@ -264,7 +259,7 @@ function note(
 
   const known = NOTE[offered.target];
 
-  return known.narrowed !== undefined && narrowed(process, provided)
+  return known.narrowed !== undefined && narrowed(process)
     ? known.narrowed
     : known.note;
 }
@@ -1538,11 +1533,7 @@ export function Steer(props: {
                   {offered.word}
                 </label>
                 <Note class={styles.optionNote}>
-                  {note(
-                    offered,
-                    props.conversation.process,
-                    props.conversation.provided,
-                  )}
+                  {note(offered, props.conversation.process)}
                 </Note>
               </div>
             )}
@@ -1952,7 +1943,6 @@ export function Frozen(props: {
           You steered this into{" "}
           {stateWord(
             props.conversation.process,
-            props.conversation.provided,
             props.steer.target,
             props.steer.declared,
           )}

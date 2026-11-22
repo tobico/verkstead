@@ -112,7 +112,6 @@ import type {
   DeviceIdentity,
   PairingView,
   Permitting,
-  Process,
   ProcessChoice,
   ProcessPicked,
   ProfileChosen,
@@ -191,7 +190,6 @@ export const PROCESS_REFUSAL: Record<ProcessPicked, string> = {
     "The branch exists now, so the process is settled.",
   NotOffered:
     "That process's plugin is switched off or in trouble here. Check it in Settings.",
-  NotLanded: "Verkstead can't run that process yet.",
 };
 
 /// And naming what the work is pointed at.
@@ -418,12 +416,7 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
                 done on — drawn for the Processes whose manifest says they are
                 pointed at work already somewhere else and for no other, which
                 is `provided.ts`'s question to put. */}
-            <Show
-              when={targeted(
-                props.conversation.process,
-                props.conversation.provided,
-              )}
-            >
+            <Show when={targeted(props.conversation.process)}>
               <TargetName conversation={props.conversation} />
             </Show>
 
@@ -457,7 +450,7 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
 /// own to pick.
 export function onAPullRequest(conversation: ConversationView): boolean {
   return (
-    targeted(conversation.process, conversation.provided) &&
+    targeted(conversation.process) &&
     conversation.target !== null &&
     namesPullRequest(conversation.target)
   );
@@ -1296,12 +1289,7 @@ function ProcessOption(props: { conversation: ConversationView }): JSX.Element {
 
   const say = useMutation(() => ({
     mutationFn: (picked: ProcessChoice) =>
-      pickProcess(
-        device(),
-        props.conversation.id,
-        picked.process,
-        picked.provided ?? null,
-      ),
+      pickProcess(device(), props.conversation.id, picked.process),
     onSuccess: (outcome: ProcessPicked) => {
       if (outcome !== "Picked") {
         setRefused(outcome);
@@ -1328,12 +1316,7 @@ function ProcessOption(props: { conversation: ConversationView }): JSX.Element {
 
   return (
     <ProcessPicker
-      chosen={{
-        process: props.conversation.process,
-        ...(props.conversation.provided === null
-          ? {}
-          : { provided: props.conversation.provided }),
-      }}
+      chosen={{ process: props.conversation.process }}
       disabled={branched() || say.isPending}
       pick={(picked) => say.mutate(picked)}
     >
@@ -1367,7 +1350,9 @@ function ProcessOption(props: { conversation: ConversationView }): JSX.Element {
 /// words it, name and sentence alike — see `provided.ts`, which is where this
 /// asks (Set 1765, Q29).
 export function ProcessPicker(props: {
-  chosen: ProcessChoice;
+  /// What it stands on, `null` being nothing at all: a composer whose Process
+  /// list has not landed, and a server offering none.
+  chosen: ProcessChoice | null;
   pick: (picked: ProcessChoice) => void;
   disabled?: boolean;
   /// What the caller has to say under it — the refusals above all, which are
@@ -1375,15 +1360,19 @@ export function ProcessPicker(props: {
   children?: JSX.Element;
 }): JSX.Element {
   /// The rows, and whatever is chosen wherever the list does not hold it —
-  /// [`RepoChoice.also`]'s reason, and the same shape: a Conversation that took
-  /// a pull request up reads *Review*, which cannot be picked until its own
-  /// stage lands, and a control showing nothing there would be the row missing
-  /// the one thing that tells a Review apart.
+  /// [`RepoChoice.also`]'s reason, and the same shape: a Conversation on a
+  /// Process whose plugin is switched off reads that Process all the same, and
+  /// a control showing nothing there would be the row missing the one thing
+  /// that says what kind of work this is.
+  ///
+  /// The offered rows alone where nothing at all is chosen, which is a composer
+  /// whose Process list has not landed yet.
   const options = (): ProcessChoice[] => {
     const offered = offeredProcesses();
     const chosen = choiceValue(props.chosen);
 
-    return offered.some((choice) => choiceValue(choice) === chosen)
+    return props.chosen === null ||
+      offered.some((choice) => choiceValue(choice) === chosen)
       ? offered
       : [props.chosen, ...offered];
   };
@@ -1402,7 +1391,7 @@ export function ProcessPicker(props: {
         heading={{ words: "Process", class: styles.optionLabel }}
         options={options()}
         value={choiceValue}
-        label={(choice) => processName(choice.process, choice.provided ?? null)}
+        label={(choice) => processName(choice.process)}
         says={processDescription}
         chosen={choiceValue(props.chosen)}
         disabled={props.disabled}

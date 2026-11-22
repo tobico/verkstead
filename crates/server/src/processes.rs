@@ -121,8 +121,16 @@ impl Loaded {
                 .collect(),
             target: self.process.target,
             narrowed: self.narrows_the_wrap_up(),
-            built_in: crate::plugins::built_in::stood_for(&self.plugin, &self.process.id)
-                .map(|process| crate::ui::process(&process)),
+            filled_from_a_pull_request: self.whose()
+                == crate::conversations::filled_from_a_pull_request(),
+        }
+    }
+
+    /// Which Process it is, as the record holds it and the viewer receives it.
+    pub(crate) fn whose(&self) -> store::Process {
+        store::Process {
+            plugin: self.plugin.clone(),
+            id: self.process.id.clone(),
         }
     }
 
@@ -148,24 +156,42 @@ impl Loaded {
 
         off("review") && off("comments")
     }
+
+    /// And whether its wrap-up is over a link of a chain rather than over one
+    /// pull request: the `stack` option of its wrapping state, which *Fix
+    /// merge issues* turns on.
+    ///
+    /// Read off the options as the narrowing is, and for the same reason: what
+    /// a state does is what its Activity is told to do, never which Process it
+    /// belongs to. A conflict low in a stack moves every branch above it, so a
+    /// wrap-up told this walks the chain on GitHub both ways from what it was
+    /// pointed at and records every pull request of it.
+    fn walks_the_stack(&self) -> bool {
+        self.process.state(WRAPPING).is_some_and(|wrapping| {
+            wrapping
+                .options
+                .iter()
+                .any(|(named, value)| named == "stack" && value == "on")
+        })
+    }
 }
 
-/// The Process `process` runs by, where it is data: a plugin's own, or the
-/// built-in plugin one of the record's bare words stands for — `tinker` is
-/// the *Tinker* plugin's, and `develop` the *Develop* plugin's. Held whether
-/// or not it is offered, so a Conversation on a plugin unticked since runs on.
-/// `None` for a plugin that isn't held here.
+/// The Process `process` names, where a plugin here provides it: an installed
+/// plugin's, or one of the five Verkstead ships — `tinker` with no plugin
+/// beside it is the *Tinker* plugin's, which is how a Conversation stored
+/// before Processes were data finds its manifest. Held whether or not it is
+/// offered, so a Conversation on a plugin unticked since runs on. `None` for a
+/// plugin that isn't held here.
 pub(crate) fn of(state: &AppState, process: &store::Process) -> Option<Loaded> {
-    match process {
-        store::Process::Provided { plugin, id } => state.plugins.process(plugin, id),
-        built_in => {
-            let (plugin, id) = crate::plugins::built_in::standing_for(built_in)?;
+    state
+        .plugins
+        .process(&process.plugin, &process.id)
+        .or_else(|| {
             built_ins()
                 .iter()
-                .find(|loaded| loaded.plugin == plugin && loaded.process.id == id)
+                .find(|loaded| loaded.plugin == process.plugin && loaded.process.id == process.id)
                 .cloned()
-        }
-    }
+        })
 }
 
 /// Every Process the built-in plugins provide, each with the Activities its
@@ -230,16 +256,11 @@ fn built_ins() -> &'static [Loaded] {
 /// it is loaded, switched on and in no trouble; a built-in plugin's while its
 /// tick stands — Develop's included, since stage 11 wrote it as data.
 pub(crate) async fn offered(state: &AppState, process: &store::Process) -> bool {
-    match process {
-        store::Process::Provided { plugin, id } => state.plugins.offers(plugin, id),
-        // Each of the five is a built-in plugin of its own, so every arm here
-        // reads a tick. A word none of them stands for could only be a
-        // record this build does not understand, and nothing is refused over
-        // one.
-        built_in => match crate::plugins::built_in::standing_for(built_in) {
-            Some((plugin, _)) => ticked(state, plugin).await,
-            None => true,
-        },
+    // Each of the five is a built-in plugin of its own, so what is read for
+    // one of them is its tick; an installed plugin's is read off what loaded.
+    match process.built_in() {
+        true => ticked(state, &process.plugin).await,
+        false => state.plugins.offers(&process.plugin, &process.id),
     }
 }
 
@@ -424,6 +445,12 @@ pub(crate) fn takes_a_target(state: &AppState, process: &store::Process) -> bool
 /// the same reading sent to the picker.
 pub(crate) fn narrows_the_wrap_up(state: &AppState, process: &store::Process) -> bool {
     of(state, process).is_some_and(|loaded| loaded.narrows_the_wrap_up())
+}
+
+/// And whether its wrap-up is over a whole stack, as its manifest says — see
+/// [`Loaded::walks_the_stack`].
+pub(crate) fn walks_the_stack(state: &AppState, process: &store::Process) -> bool {
+    of(state, process).is_some_and(|loaded| loaded.walks_the_stack())
 }
 
 /// The state a built-in Process wraps up in, by the word the record holds.
@@ -677,9 +704,12 @@ async fn step(state: &AppState, conversation_id: i64, driving: &Driving) -> anyh
         return Ok(false);
     };
 
-    let store::Process::Provided { plugin, id } = &conversation.process else {
+    // The five Verkstead ships run on the host's own drivers, their states
+    // being the ones it words itself — see the module above.
+    if conversation.process.built_in() {
         return Ok(false);
-    };
+    }
+    let store::Process { plugin, id } = &conversation.process;
 
     // Not before the installed plugins have loaded since the start: until
     // then nothing is held, and a restart reading the Processes in that
@@ -1075,9 +1105,10 @@ pub(crate) async fn taken_back(state: &AppState) {
             continue;
         };
 
-        let store::Process::Provided { plugin, id } = &declared.process else {
+        if declared.process.built_in() {
             continue;
-        };
+        }
+        let store::Process { plugin, id } = &declared.process;
 
         if state.plugins.process(plugin, id).is_none() {
             continue;
@@ -1138,9 +1169,28 @@ mod tests {
             [
                 ("comments".to_owned(), "off".to_owned()),
                 ("review".to_owned(), "off".to_owned()),
+                ("stack".to_owned(), "on".to_owned()),
             ]
         );
         assert!(options("review").is_empty());
+
+        assert!(built_in("fix-merge-issues").narrows_the_wrap_up());
+        assert!(!built_in("review").narrows_the_wrap_up());
+    }
+
+    /// And it is the one whose wrap-up is over a whole stack, which is its
+    /// `stack` option and nothing about which Process it is: the chain the
+    /// pull request is a link of is walked on GitHub and recorded whole.
+    #[test]
+    fn fix_merge_issues_walks_the_stack_by_its_options_alone() {
+        assert!(built_in("fix-merge-issues").walks_the_stack());
+
+        for id in ["develop", "tinker", "investigate", "review"] {
+            assert!(
+                !built_in(id).walks_the_stack(),
+                "{id} is pointed at work on the one branch",
+            );
+        }
     }
 
     /// Each of the five starts in the state word the record already holds for

@@ -60,7 +60,7 @@ pub use conversations::{
     Lifecycle, ManualTaskEvent, MemoEvent, MemoPressed, MemoRetirement, MergedRow, Merging,
     MovedEvent, NewAdoption, NewCompanion, NewConversation, NewRank, NoticeEvent, NoticeLogIn,
     OfferedPack, OfferedView, OpenTerminal, OtherAuthor, PackAttached, PackRemoved, Parked,
-    PendingSteerView, Pick, Picking, PinnedEvent, PortsView, PreviewView, Process, ProcessChoice,
+    PendingSteerView, Pick, Picking, PinnedEvent, PortsView, PreviewView, ProcessChoice,
     ProcessEntry, ProcessPicked, ProposalView, ProvidedProcess, PullRequestCheck,
     PullRequestComment, PullRequestCommit, PullRequestDetails, PullRequestEvent,
     PullRequestSummary, QuestionSetEvent, RepoChoice, RepoSwitched, ResolveConflictsEvent,

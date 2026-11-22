@@ -48,7 +48,7 @@ use verkstead_render::{
     IgnoredCommentsEdit, InstallPress, InstructionsEdit, LanguageCleared, LanguageView, Lifecycle,
     Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption,
     NewAnnex, NewCompanion, NewConversation, NewJoin, NewRank, OfferedPack, OpenTerminal,
-    PackAttached, PackRemoved, PairingView, Parked, PendingSteerView, Permitting, Picking, Process,
+    PackAttached, PackRemoved, PairingView, Parked, PendingSteerView, Permitting, Picking,
     ProcessChoice, ProcessEntry, ProcessPicked, ProfileEdit, ProfileEntry, ProvidedProcess,
     PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved,
     Resumed, RoleChoice, RuleField, RuleRefused, Running, ServeEdit, ServePress, ServerAttached,
@@ -1833,7 +1833,7 @@ async fn conversations(
                 // off that Process's manifest either way (Set 1765, Q29).
                 declared: conversation
                     .declared
-                    .and_then(|declared| declaring(&declared.process, declared.state)),
+                    .map(|declared| declaring(&declared.process, declared.state)),
                 working,
                 // Idle is a thing a running session is, and the two sets are
                 // read a moment apart — so the pair is made consistent here
@@ -2832,8 +2832,7 @@ pub(crate) async fn conversation_view(
     let view = ConversationView {
         id: conversation.id,
         repo: crate::repos::entry(conversation.repo, config.authors()),
-        process: process(&conversation.process),
-        provided: provided(&conversation.process),
+        process: provided(&conversation.process),
         branch: conversation.branch,
         branch_named: conversation.branch_named,
         naming: conversation.naming,
@@ -6726,23 +6725,14 @@ fn parked(sitting: &crate::sessions::Parked) -> Parked {
 /// its id there — which is what a sidebar row's word is read off (Set 1765,
 /// Q29).
 ///
-/// A plugin's Process names itself; one of Verkstead's own is named by the
-/// built-in plugin holding it, all five being plugins of their own. `None`
-/// for a Process this build does not know, which can only be a record written
-/// by a newer one: the row then draws the word it has.
-fn declaring(process: &store::Process, state: String) -> Option<DeclaredState> {
-    let (plugin, id) = match process {
-        store::Process::Provided { plugin, id } => (plugin.clone(), id.clone()),
-        built_in => {
-            let (plugin, id) = crate::plugins::built_in::standing_for(built_in)?;
-            (plugin.to_owned(), id.to_owned())
-        }
-    };
-
-    Some(DeclaredState {
-        process: ProvidedProcess { plugin, id },
+/// Every Process names itself, the five Verkstead ships included, all of them
+/// being plugins of their own: the row draws its word off the manifest that
+/// plugin holds, and the state's own id where this build holds no such plugin.
+fn declaring(process: &store::Process, state: String) -> DeclaredState {
+    DeclaredState {
+        process: provided(process),
         state,
-    })
+    }
 }
 
 /// The store's lifecycle state as the viewer receives it. One word either side,
@@ -6761,45 +6751,25 @@ pub(crate) fn lifecycle(state: store::Lifecycle) -> Lifecycle {
     }
 }
 
-/// And the store's Process as the viewer receives it. One word either side, and
-/// this is where those two vocabularies are held to each other — the pair
-/// [`lifecycle`] above is, for the fact beside it.
-pub(crate) fn process(process: &store::Process) -> Process {
-    match process {
-        store::Process::Develop => Process::Develop,
-        store::Process::Investigate => Process::Investigate,
-        store::Process::Review => Process::Review,
-        store::Process::Tinker => Process::Tinker,
-        store::Process::FixMergeIssues => Process::FixMergeIssues,
-        store::Process::Provided { .. } => Process::Provided,
+/// And which Process the record holds, as the viewer receives it: the plugin
+/// providing it and its id there, whichever Process it is.
+///
+/// No table of words beside it, unlike [`lifecycle`] above: a Process is a
+/// reference to a manifest on both sides of the wire, and what it is called is
+/// read off the Process list — see [`processes`].
+pub(crate) fn provided(process: &store::Process) -> ProvidedProcess {
+    ProvidedProcess {
+        plugin: process.plugin.clone(),
+        id: process.id.clone(),
     }
 }
 
-/// And which plugin's Process, where it is one.
-pub(crate) fn provided(process: &store::Process) -> Option<ProvidedProcess> {
-    match process {
-        store::Process::Provided { plugin, id } => Some(ProvidedProcess {
-            plugin: plugin.clone(),
-            id: id.clone(),
-        }),
-        _ => None,
+/// And back the other way, for the one press that writes one.
+pub(crate) fn picked_process(choice: ProcessChoice) -> store::Process {
+    store::Process {
+        plugin: choice.process.plugin,
+        id: choice.process.id,
     }
-}
-
-/// And back the other way, for the one press that writes one: `None` for a
-/// plugin's Process the choice doesn't say which of.
-pub(crate) fn picked_process(choice: ProcessChoice) -> Option<store::Process> {
-    Some(match choice.process {
-        Process::Develop => store::Process::Develop,
-        Process::Investigate => store::Process::Investigate,
-        Process::Review => store::Process::Review,
-        Process::Tinker => store::Process::Tinker,
-        Process::FixMergeIssues => store::Process::FixMergeIssues,
-        Process::Provided => {
-            let ProvidedProcess { plugin, id } = choice.provided?;
-            store::Process::Provided { plugin, id }
-        }
-    })
 }
 
 /// And the same word read the other way, which is what a Conversation arriving

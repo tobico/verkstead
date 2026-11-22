@@ -329,8 +329,7 @@ describe("a declared state", () => {
     };
     const declared = like({
       state: "Declared",
-      process: "Provided",
-      provided,
+      process: provided,
       declared_state: "checking",
       waiting: true,
     });
@@ -352,7 +351,7 @@ describe("a declared state", () => {
         ],
         target: false,
         narrowed: false,
-        built_in: null,
+        filled_from_a_pull_request: false,
       },
     ]);
 

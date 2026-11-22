@@ -538,9 +538,11 @@ What Verkstead does on the way into the wrap-up or Done — sending for a pull
 request the work isn't on yet, the settling rule — is its own, whichever
 Process leads there. **A wrap-up is narrowed by its options**:
 Fix merge issues' wrapping state starts the *Wrap-up* with
-`{ review: "off", comments: "off" }`, so nothing reads the branch and nothing
-said on the pull request is answered, and that is the whole of what makes it
-narrower than a Review.
+`{ review: "off", comments: "off", stack: "on" }`, so nothing reads the branch,
+nothing said on the pull request is answered, and the chain the pull request is
+a link of is walked on GitHub both ways and recorded whole. That is all of what
+makes it different from a Review — three options, and no Process named in any
+of the code that reads them.
 
 A Conversation whose Process is in trouble — its plugin, or the plugin of an
 Activity it runs, missing or in trouble — stops where it stands, its notice

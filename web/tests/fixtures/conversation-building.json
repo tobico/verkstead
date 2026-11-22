@@ -149,8 +149,10 @@
   "permitted": [],
   "pinned": [],
   "previews": [],
-  "process": "Develop",
-  "provided": null,
+  "process": {
+    "id": "develop",
+    "plugin": "2bcf359e-071a-4237-8741-9897cf06ac15"
+  },
   "ready_to_continue": false,
   "ready_to_grill": false,
   "ready_to_resume": true,

@@ -2887,7 +2887,7 @@ fn unmarked(
         return None;
     }
 
-    let provided = matches!(conversation.process, store::Process::Provided { .. });
+    let provided = !conversation.process.built_in();
     if provided != (submission.target == SteerTarget::Declared) {
         return Some(named(submission));
     }
@@ -2957,7 +2957,7 @@ fn written(
 pub(crate) fn rows(state: &AppState, conversation: &Conversation) -> Vec<SteerRow> {
     use crate::plugins::manifest::process::Brief;
 
-    let provided = matches!(conversation.process, store::Process::Provided { .. });
+    let provided = !conversation.process.built_in();
     let loaded = crate::processes::of(state, &conversation.process);
     let mut rows: Vec<SteerRow> = match (loaded.as_ref(), provided) {
         (Some(loaded), true) => crate::processes::steerable(loaded)

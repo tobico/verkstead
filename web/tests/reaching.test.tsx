@@ -44,7 +44,7 @@ import {
   retrying,
 } from "../src/api/client";
 import { osIcon } from "../src/devices";
-import { named, declaredOn } from "./processes";
+import { declaredOn, named, whose } from "./processes";
 import { Reaching, rowKey } from "../src/reaching";
 import sheet from "../src/set/Sheet.module.css";
 import { Asked } from "../src/workbench/Asked";
@@ -540,11 +540,11 @@ describe("the process and the target of a draft on another device", () => {
     mount(on(`/conversations/${OPEN.id}`));
 
     await waitFor(() => picker("Process"));
-    pick("Process", named("Tinker"));
+    pick("Process", named("tinker"));
 
     await waitFor(() =>
       expect(written(fetching, at(`/conversations/${OPEN.id}/process`))).toEqual(
-        [{ process: "Tinker" }],
+        [{ process: whose("tinker") }],
       ),
     );
     expect(localWrites(fetching)).toEqual([]);
@@ -554,7 +554,7 @@ describe("the process and the target of a draft on another device", () => {
     const fetching = theMember(
       whenever(
         at(`/conversations/${OPEN.id}`),
-        json({ ...OPEN, process: "Review", target: null }),
+        json({ ...OPEN, process: whose("review"), target: null }),
       ),
       whenever(at(`/conversations/${OPEN.id}/target`), json("Recorded"), "POST"),
       whenever(at(`/conversations/${OPEN.id}/seen`), json({}), "POST"),

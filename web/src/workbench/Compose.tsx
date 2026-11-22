@@ -507,13 +507,10 @@ function Compose(props: {
   /// the repo: which pickers stand in it, what the press waits on, and what an
   /// inert press says it is waiting on all come off this and the roles its
   /// manifest declares.
-  const chosen = (): ProcessChoice =>
+  const chosen = (): ProcessChoice | null =>
     state().process === null
       ? defaultChoice()
-      : {
-          process: state().process!,
-          ...(state().provided === null ? {} : { provided: state().provided! }),
-        };
+      : { process: state().process! };
 
   /// Whether there is anything to create at all, which is the repo and nothing
   /// else: everything else on this page may stay empty, as it always may while
@@ -941,7 +938,7 @@ function Compose(props: {
                       </RepoChoice>
 
                       <Show when={repo()}>
-                        {(chosen) => (
+                        {(registered) => (
                           <>
                             {/* Neither is asked of a page adopting a roadmap: a
                                 stage is worked on its own slug, and the base went
@@ -984,7 +981,7 @@ function Compose(props: {
                                 <BasePicker
                                   id="base-branch"
                                   label="Base branch"
-                                  repo={chosen()}
+                                  repo={registered()}
                                   chosen={state().base ?? RULE}
                                   pick={(branch) => change({ base: branch })}
                                 />
@@ -1042,12 +1039,7 @@ function Compose(props: {
               <ProcessPicker
                 chosen={chosen()}
                 disabled={make.isPending}
-                pick={(picked) =>
-                  change({
-                    process: picked.process,
-                    provided: picked.provided ?? null,
-                  })
-                }
+                pick={(picked) => change({ process: picked.process })}
               />
 
               {/* And who runs it, which is one control: a picker per role the

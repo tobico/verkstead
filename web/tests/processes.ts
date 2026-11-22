@@ -9,44 +9,80 @@
 //!
 //! Seeded for every test in `setup.ts`. What is here is the way a test *names*
 //! one of them: the row to press, the sentence under it, the state words.
+//!
+//! **A Process is named by its id here**, which is the word the record has
+//! always held for each of the five — `develop`, `tinker`, `investigate`,
+//! `review`, `fix-merge-issues` — and the plugin providing it comes off the
+//! list, so no uuid is written into a test.
 
 import type {
   DeclaredState,
   Lifecycle,
-  Process,
+  ProcessChoice,
   ProcessEntry,
+  ProvidedProcess,
 } from "../src/api/types";
-import { stateWord } from "../src/workbench/provided";
+import { knowProvidedProcesses, stateWord } from "../src/workbench/provided";
 import listed from "./fixtures/processes.json" with { type: "json" };
+import { json, whenever, type Answer } from "./serving";
 
 /// The five, in the order the server lists them and so the order the picker
 /// draws their rows.
 export const PROCESSES = listed as ProcessEntry[];
 
-/// Which of them the picker offers, by the word the record holds — the five,
-/// each while its plugin's tick stands, which is how a server with nothing
-/// unticked lists them.
-export const OFFERED: Process[] = PROCESSES.map((entry) => entry.built_in!);
+/// Which of them the picker offers, as a choice each — the five, each while
+/// its plugin's tick stands, which is how a server with nothing unticked lists
+/// them.
+export const OFFERED: ProcessChoice[] = PROCESSES.map((entry) => ({
+  process: whose(entry.id),
+}));
 
-/// The entry for one of them, by the word the record holds.
-export function processEntry(process: Process): ProcessEntry {
-  const entry = PROCESSES.find((listed) => listed.built_in === process);
+/// Say that `entries` is what this server lists, both ways: here, where the
+/// page reads it, and on the wire, where the shell reads it once for the whole
+/// page.
+///
+/// Both because the shell's own read lands a moment after a test has said what
+/// it means — so a test that seeded a list and let the wire answer another
+/// would be drawing a page that changed its mind under it. What it hands back
+/// is the answer, for whichever `serving` the test is building.
+export function saying(entries: ProcessEntry[]): Answer {
+  knowProvidedProcesses(entries);
+
+  return whenever("/api/ui/processes", json(entries));
+}
+
+/// The entry for one of them, by the id its manifest gives it.
+export function processEntry(process: string): ProcessEntry {
+  const entry = PROCESSES.find((listed) => listed.id === process);
 
   if (entry === undefined) {
-    throw new Error(`no built-in Process ${process} is listed`);
+    throw new Error(`no Process ${process} is listed`);
   }
 
   return entry;
 }
 
+/// And which Process that is, as a record and a press name one: the plugin
+/// providing it and its id there.
+export function whose(process: string): ProvidedProcess {
+  const entry = processEntry(process);
+
+  return { plugin: entry.plugin, id: entry.id };
+}
+
+/// And the same as a picker's choice.
+export function choice(process: string): ProcessChoice {
+  return { process: whose(process) };
+}
+
 /// What it is called: the name its manifest gives it, which is the row's label
 /// and the word a frozen Brief reads back.
-export function named(process: Process): string {
+export function named(process: string): string {
   return processEntry(process).name;
 }
 
 /// And the sentence under that row.
-export function described(process: Process): string {
+export function described(process: string): string {
   return processEntry(process).description;
 }
 
@@ -70,7 +106,7 @@ const STORED: Record<Lifecycle, string | null> = {
 /// it: off Develop's manifest for the states it declares, and Verkstead's own
 /// word for the three nothing returns to.
 export function stateOf(state: Lifecycle): string {
-  return stateWord("Develop", null, state, STORED[state]);
+  return stateWord(whose("develop"), state, STORED[state]);
 }
 
 /// The id a Conversation in `state` carries beside it, as the server sends the
@@ -100,25 +136,19 @@ export function declaredRow(state: Lifecycle): {
   declared: DeclaredState | null;
 } {
   const stored = STORED[state];
-  const develop = processEntry("Develop");
 
   return {
     declared:
-      stored === null
-        ? null
-        : {
-            process: { plugin: develop.plugin, id: develop.id },
-            state: stored,
-          },
+      stored === null ? null : { process: whose("develop"), state: stored },
   };
 }
 
 /// The five with only the ones `offered` names offered, for a test about a
 /// plugin's tick — the rest are listed and not offered, which is what the
 /// server says about a Process whose plugin is switched off.
-export function offeringOnly(offered: Process[]): ProcessEntry[] {
+export function offeringOnly(offered: string[]): ProcessEntry[] {
   return PROCESSES.map((entry) => ({
     ...entry,
-    offered: offered.includes(entry.built_in!),
+    offered: offered.includes(entry.id),
   }));
 }

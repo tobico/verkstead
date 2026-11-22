@@ -517,7 +517,7 @@ function Written(props: {
 const missing = (conversation: ConversationView): string =>
   `This needs ${needed(conversation.pairings.length, {
     brief: true,
-    target: targeted(conversation.process, conversation.provided),
+    target: targeted(conversation.process),
   })}.`;
 
 /// The press the whole pane is arranged for, in whichever of its two shapes
@@ -540,10 +540,7 @@ function Start(props: {
 }): JSX.Element {
   return (
     <Show
-      when={targeted(
-        props.conversation.process,
-        props.conversation.provided,
-      )}
+      when={targeted(props.conversation.process)}
       fallback={
         <StartGrilling conversation={props.conversation} files={props.files} />
       }

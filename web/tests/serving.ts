@@ -11,12 +11,14 @@ import type {
   DevicesView,
   ForwardsView,
   HarnessEntry,
+  ProcessEntry,
   SetReading,
   SetView,
   UnreadableSet,
 } from "../src/api/types";
 import devices from "./fixtures/devices.json" with { type: "json" };
 import harnesses from "./fixtures/harnesses.json" with { type: "json" };
+import processes from "./fixtures/processes.json" with { type: "json" };
 
 /// Where the shell asks whether another device is asking to link — see the
 /// default [`serving`] holds for it.
@@ -97,10 +99,14 @@ export function serving(...answers: Array<Answer>) {
   // and `setup.ts`, which says the same list before anything is mounted.
   held.set(`GET ${HARNESSES}`, json(harnesses as HarnessEntry[]));
 
-  // And no plugin's Process, which is what a server with nothing installed
-  // has — see `src/workbench/provided.ts`. A test about one answers with a
-  // `whenever` of its own.
-  held.set(`GET ${PROCESSES}`, json([]));
+  // And the five Processes Verkstead ships, which is what a server with
+  // nothing installed lists — every one of them is a bundled plugin of its own
+  // (ADR-0030, *Process*), and every word the page says about a Process or one
+  // of its states is read off this list, see `src/workbench/provided.ts`. The
+  // same list `setup.ts` says before anything is mounted, so the shell's own
+  // read of it leaves the page where it started. A test about a plugin's
+  // Process answers with a `whenever` of its own.
+  held.set(`GET ${PROCESSES}`, json(processes as ProcessEntry[]));
 
   for (const answer of answers) {
     if (typeof answer === "function") {

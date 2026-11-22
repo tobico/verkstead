@@ -92,7 +92,6 @@ import type {
   PackRemoved,
   Preflight,
   PrefillView,
-  Process,
   ProcessEntry,
   ProcessPicked,
   ProfileAccount,
@@ -1513,16 +1512,16 @@ export function switchRepo(
 /// keep — a picker offering only the landed ones is a courtesy, and this route
 /// is reachable without one — so a refusal is another outcome to read here too.
 ///
-/// A plugin's Process is `Provided`, with `provided` saying which.
+/// Which Process is the plugin providing it and its id there, whichever Process
+/// it is.
 export function pickProcess(
   device: Device,
   id: number,
-  process: Process,
-  provided: ProvidedProcess | null = null,
+  process: ProvidedProcess,
 ): Promise<ProcessPicked> {
   return post<ProcessPicked>(
     on(device, `/api/ui/conversations/${id}/process`),
-    provided === null ? { process } : { process, provided },
+    { process },
   );
 }
 

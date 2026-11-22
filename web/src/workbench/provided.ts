@@ -26,7 +26,6 @@ import { listProcesses } from "../api/client";
 import type {
   DeclaredState,
   Lifecycle,
-  Process,
   ProcessChoice,
   ProcessEntry,
   ProvidedProcess,
@@ -71,13 +70,12 @@ export const ENDED: ReadonlySet<Lifecycle> = new Set<Lifecycle>([
 /// legible where a blank would not be, and Verkstead's own word for the three
 /// that are Verkstead's.
 export function stateWord(
-  process: Process,
-  provided: ProvidedProcess | null,
+  process: ProvidedProcess,
   state: Lifecycle,
   declared: string | null | undefined,
 ): string {
   return declared
-    ? wordIn(processEntry(process, provided), declared)
+    ? wordIn(processEntry(process), declared)
     : (VERKSTEAD[state] ?? "In progress");
 }
 
@@ -90,7 +88,7 @@ export function rowWord(
 ): string {
   return declared === null
     ? (VERKSTEAD[state] ?? "In progress")
-    : wordIn(providedProcess(declared.process), declared.state);
+    : wordIn(processEntry(declared.process), declared.state);
 }
 
 /// The word a Process says the state `state` in, or the state's own id where
@@ -112,12 +110,10 @@ export function offeredProcesses(): ProcessChoice[] {
     .map(choiceOf);
 }
 
-/// The choice a picker row holds for a listed Process: one of Verkstead's own
-/// by its word, and a plugin's by the plugin and the Process's id there.
+/// The choice a picker row holds for a listed Process: the plugin providing it
+/// and the Process's id there, which is what every Process is named by.
 function choiceOf(entry: ProcessEntry): ProcessChoice {
-  return entry.built_in === null
-    ? { process: "Provided", provided: { plugin: entry.plugin, id: entry.id } }
-    : { process: entry.built_in };
+  return { process: { plugin: entry.plugin, id: entry.id } };
 }
 
 /// The row a picker nobody has touched stands on: the first Process the server
@@ -125,37 +121,38 @@ function choiceOf(entry: ProcessEntry): ProcessChoice {
 ///
 /// The server prefills a new Draft the same way, off the same order — see
 /// `default_process` in `crates/server/src/conversations.rs` — so the control
-/// and the record say one thing. Develop while nothing at all is offered,
-/// which is every tick off: the record reads Develop with no row of its own,
-/// and Start says it is not offered rather than the page naming something
-/// nobody offered. And Develop again before the list has been read, which the
-/// first read answers a moment later.
-export function defaultChoice(): ProcessChoice {
-  return offeredProcesses()[0] ?? { process: "Develop" };
+/// and the record say one thing.
+///
+/// `null` where this page has nothing to stand on: a list it has not read yet,
+/// which the first read answers a moment later, and a server with every tick
+/// off and no plugin providing one. The picker then draws no row rather than
+/// naming a Process nobody offered, and the press says it is not offered —
+/// which is the truth, the record reading Develop with no row of its own.
+export function defaultChoice(): ProcessChoice | null {
+  return offeredProcesses()[0] ?? null;
 }
 
-/// The entry for whichever Process `process` is: a plugin's by what `provided`
-/// names, and one of Verkstead's own by the built-in word its plugin stands
-/// for.
+/// The entry for the Process `process`: the plugin providing it and its id
+/// there, which is how the server lists every one of them.
 ///
 /// Offered or not, so a Conversation on a switched-off plugin's Process is
 /// still worded — and `undefined` for a Process this page holds nothing for,
 /// which is a list it has not read yet or a plugin removed under a
 /// Conversation.
 export function processEntry(
-  process: Process,
-  provided: ProvidedProcess | null,
+  process: ProvidedProcess,
 ): ProcessEntry | undefined {
-  return process === "Provided"
-    ? providedProcess(provided)
-    : listed().find((entry) => entry.built_in === process);
+  return listed().find(
+    (entry) => entry.plugin === process.plugin && entry.id === process.id,
+  );
 }
 
 /// And the same for a Process the composer is *picking* rather than one a
-/// Conversation is on: a choice carries `undefined` where the record carries
-/// `null`.
-export function entryFor(choice: ProcessChoice): ProcessEntry | undefined {
-  return processEntry(choice.process, choice.provided ?? null);
+/// Conversation is on, `null` being a picker standing on nothing at all.
+export function entryFor(
+  choice: ProcessChoice | null,
+): ProcessEntry | undefined {
+  return choice === null ? undefined : processEntry(choice.process);
 }
 
 /// The roles the Process a composer is picking declares, in the order its
@@ -166,7 +163,7 @@ export function entryFor(choice: ProcessChoice): ProcessEntry | undefined {
 /// picker the dropdown shape is — see `control` in `roles.ts`. A Conversation
 /// past drafting reads its roles off its own Pairings instead, which carry
 /// the label and the mark beside the pick.
-export function rolesFor(choice: ProcessChoice): RoleEntry[] {
+export function rolesFor(choice: ProcessChoice | null): RoleEntry[] {
   return entryFor(choice)?.roles ?? [];
 }
 
@@ -178,15 +175,12 @@ export function rolesFor(choice: ProcessChoice): RoleEntry[] {
 /// `crates/server/src/conversations.rs` — so the field and the press ask one
 /// question. A Process this page holds nothing for draws no field: there is
 /// nothing saying it wants one.
-export function targeted(
-  process: Process,
-  provided: ProvidedProcess | null,
-): boolean {
-  return processEntry(process, provided)?.target ?? false;
+export function targeted(process: ProvidedProcess): boolean {
+  return processEntry(process)?.target ?? false;
 }
 
 /// And the same for a Process being picked.
-export function targetedFor(choice: ProcessChoice): boolean {
+export function targetedFor(choice: ProcessChoice | null): boolean {
   return entryFor(choice)?.target ?? false;
 }
 
@@ -199,62 +193,47 @@ export function targetedFor(choice: ProcessChoice): boolean {
 /// under Verkstead's own **Wrapping** row. Its manifest's again — its
 /// `wrapping` state turns the Wrap-up's `review` and `comments` off, which is
 /// the same reading the wrap-up itself makes.
-export function narrowed(
-  process: Process,
-  provided: ProvidedProcess | null,
-): boolean {
-  return processEntry(process, provided)?.narrowed ?? false;
+export function narrowed(process: ProvidedProcess): boolean {
+  return processEntry(process)?.narrowed ?? false;
 }
 
-/// The plugin's Process `provided` names, where this server holds it —
-/// offered or not, so a Conversation on a switched-off plugin's is still
-/// worded.
-export function providedProcess(
-  provided: ProvidedProcess | null,
-): ProcessEntry | undefined {
-  if (provided === null) {
-    return undefined;
-  }
-  return listed().find(
-    (entry) => entry.plugin === provided.plugin && entry.id === provided.id,
-  );
+/// Which Process a Brief that is one pull request URL and nothing else fills
+/// the picker with, where this page holds it: **Fix merge issues**, that being
+/// what the record is filled with.
+///
+/// The server's rule drawn before the save lands — see `save_brief` in
+/// `crates/server/src/conversations.rs`, which writes the same one — so the
+/// picker says what the record is about to. The list's own fact rather than a
+/// word kept here, and `null` for a server whose Fix merge issues is unticked
+/// or gone: the picker then stays where it was, as it does for a Brief naming
+/// nothing.
+export function filledFromAPullRequest(): ProcessChoice | null {
+  const entry = listed().find((listed) => listed.filled_from_a_pull_request);
+
+  return entry === undefined ? null : choiceOf(entry);
 }
 
 /// What a Conversation's Process is called: the name its manifest gives it, or
-/// the word the record holds where this server holds no such Process.
-export function processName(
-  process: Process,
-  provided: ProvidedProcess | null,
-): string {
-  return (
-    processEntry(process, provided)?.name ?? provided?.id ?? named(process)
-  );
+/// its own id where this server holds no such Process — a plugin removed under
+/// a Conversation, which is legible where a blank would not be.
+export function processName(process: ProvidedProcess): string {
+  return processEntry(process)?.name ?? process.id;
 }
 
 /// And the sentence under a picker row's name: what kind of work it is, said
 /// before the human picks it rather than found out after. Its manifest's, and
 /// empty for a Process this page holds nothing for — a row offered always has
 /// one, every offered row being one the server listed.
-export function processDescription(choice: ProcessChoice): string {
+export function processDescription(choice: ProcessChoice | null): string {
   return entryFor(choice)?.description ?? "";
 }
 
-/// The last resort for a name: the wire's own word for one of Verkstead's
-/// five, spaced where it is spelled as one word.
-///
-/// Read only where the list holds no entry at all — a page that has not read
-/// it yet, or a build whose plugin for one of the five would not load. The
-/// name every row and every frozen Brief actually draws is the manifest's.
-function named(process: Process): string {
-  return process === "FixMergeIssues" ? "Fix merge issues" : process;
-}
-
-/// The value a picker's row holds for a choice, which is what tells the
-/// rows apart: a Process's own word, or a plugin's uuid and the Process's id.
-export function choiceValue(choice: ProcessChoice): string {
-  return choice.process === "Provided" && choice.provided !== undefined
-    ? `${choice.provided.plugin}/${choice.provided.id}`
-    : choice.process;
+/// The value a picker's row holds for a choice, which is what tells the rows
+/// apart: the plugin's uuid and the Process's id there. The empty string for a
+/// picker standing on nothing, which is what [`Choosing.chosen`] reads as
+/// nothing chosen.
+export function choiceValue(choice: ProcessChoice | null): string {
+  return choice === null ? "" : `${choice.process.plugin}/${choice.process.id}`;
 }
 
 /// Say what the Processes are — what the shell's read does.

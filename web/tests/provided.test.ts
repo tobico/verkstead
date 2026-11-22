@@ -16,9 +16,10 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { Process, ProcessEntry } from "../src/api/types";
+import type { ProcessEntry } from "../src/api/types";
 import {
   defaultChoice,
+  filledFromAPullRequest,
   knowProvidedProcesses,
   narrowed,
   offeredProcesses,
@@ -28,7 +29,14 @@ import {
   stateWord,
   targeted,
 } from "../src/workbench/provided";
-import { described, named, offeringOnly, PROCESSES } from "./processes";
+import {
+  choice,
+  described,
+  named,
+  offeringOnly,
+  PROCESSES,
+  whose,
+} from "./processes";
 
 /// A plugin's own Process, as the server lists one: two states of its own
 /// words, pointed at nothing.
@@ -47,50 +55,51 @@ const THEIRS: ProcessEntry = {
   ],
   target: false,
   narrowed: false,
-  built_in: null,
+  filled_from_a_pull_request: false,
 };
 
-/// Which plugin's Process a Conversation on `THEIRS` names.
+/// Which Process a Conversation on `THEIRS` names.
 const WHOSE = { plugin: THEIRS.plugin, id: THEIRS.id };
+
+/// And a Process no plugin here provides: one removed under a Conversation.
+const GONE = { plugin: "gone", id: "triage" };
 
 describe("what each process is called", () => {
   /// The name its manifest gives it, for one of Verkstead's own as for a
   /// plugin's: the five are plugins too, so there is one rule rather than a
   /// table and a rule.
   it("is the name its manifest gives it", () => {
-    expect(processName("Develop", null)).toBe(named("Develop"));
-    expect(processName("FixMergeIssues", null)).toBe("Fix merge issues");
+    expect(processName(whose("develop"))).toBe(named("develop"));
+    expect(processName(whose("fix-merge-issues"))).toBe("Fix merge issues");
   });
 
   it("is a plugin's own name where the Conversation is on one", () => {
     knowProvidedProcesses([...PROCESSES, THEIRS]);
 
-    expect(processName("Provided", WHOSE)).toBe("Two steps");
+    expect(processName(WHOSE)).toBe("Two steps");
   });
 
   /// And a Process this page holds nothing for is named by what it names: a
   /// plugin removed under a Conversation, which a blank would say nothing
   /// about.
   it("is the id where no such process is listed", () => {
-    expect(processName("Provided", { plugin: "gone", id: "triage" })).toBe(
-      "triage",
-    );
+    expect(processName(GONE)).toBe("triage");
   });
 });
 
 describe("the sentence under a picker row", () => {
   /// Its manifest's description, which is the one the human wrote.
   it("is the description the server sent", () => {
-    expect(processDescription({ process: "Review" })).toBe(described("Review"));
-    expect(processDescription({ process: "Tinker" })).toBe(described("Tinker"));
+    expect(processDescription(choice("review"))).toBe(described("review"));
+    expect(processDescription(choice("tinker"))).toBe(described("tinker"));
   });
 
   it("is a plugin's own where the row is a plugin's", () => {
     knowProvidedProcesses([...PROCESSES, THEIRS]);
 
-    expect(
-      processDescription({ process: "Provided", provided: WHOSE }),
-    ).toBe("Draft the change, then check it.");
+    expect(processDescription({ process: WHOSE })).toBe(
+      "Draft the change, then check it.",
+    );
   });
 
   /// Every row the picker offers has one: a row offered with no sentence under
@@ -98,8 +107,8 @@ describe("the sentence under a picker row", () => {
   it("is said under every row offered", () => {
     knowProvidedProcesses([...PROCESSES, THEIRS]);
 
-    for (const choice of offeredProcesses()) {
-      expect(processDescription(choice)).not.toBe("");
+    for (const offered of offeredProcesses()) {
+      expect(processDescription(offered)).not.toBe("");
     }
   });
 });
@@ -110,13 +119,13 @@ describe("which processes the picker offers", () => {
   it("is the server's list in the server's order", () => {
     knowProvidedProcesses([...PROCESSES, THEIRS]);
 
-    expect(offeredProcesses().map((choice) => choice.process)).toEqual([
-      "Develop",
-      "Tinker",
-      "Investigate",
-      "Review",
-      "FixMergeIssues",
-      "Provided",
+    expect(offeredProcesses()).toEqual([
+      choice("develop"),
+      choice("tinker"),
+      choice("investigate"),
+      choice("review"),
+      choice("fix-merge-issues"),
+      { process: WHOSE },
     ]);
   });
 
@@ -124,31 +133,53 @@ describe("which processes the picker offers", () => {
   /// on it — one of Verkstead's own included, every one of the five being a
   /// plugin with a tick.
   it("leaves off a process whose plugin is unticked", () => {
-    knowProvidedProcesses(offeringOnly(["Develop", "Investigate", "Review"]));
+    knowProvidedProcesses(offeringOnly(["develop", "investigate", "review"]));
 
-    expect(offeredProcesses().map((choice) => choice.process)).toEqual([
-      "Develop",
-      "Investigate",
-      "Review",
+    expect(offeredProcesses()).toEqual([
+      choice("develop"),
+      choice("investigate"),
+      choice("review"),
     ]);
   });
 
   /// And the row an untouched picker stands on is the first of them, which is
   /// Develop while its tick stands and the next one offered where it does not.
   it("stands on the first process offered", () => {
-    expect(defaultChoice()).toEqual({ process: "Develop" });
+    expect(defaultChoice()).toEqual(choice("develop"));
 
-    knowProvidedProcesses(offeringOnly(["Investigate", "Review"]));
-    expect(defaultChoice()).toEqual({ process: "Investigate" });
+    knowProvidedProcesses(offeringOnly(["investigate", "review"]));
+    expect(defaultChoice()).toEqual(choice("investigate"));
   });
 
-  /// Develop where nothing at all is offered, which is every tick off: the
-  /// record reads Develop with no row of its own, and Start says it is not
-  /// offered rather than the page naming something nobody offered.
-  it("stands on Develop where nothing is offered", () => {
+  /// And on nothing at all where nothing is offered, which is every tick off:
+  /// the picker draws no row rather than naming a Process nobody offered, and
+  /// the record is left reading Develop for Start to refuse.
+  it("stands on nothing where nothing is offered", () => {
     knowProvidedProcesses(offeringOnly([]));
 
-    expect(defaultChoice()).toEqual({ process: "Develop" });
+    expect(defaultChoice()).toBeNull();
+  });
+});
+
+describe("which process a pull request fills the picker with", () => {
+  /// **Fix Merge Issues**, which is what the server's own fill writes — so the
+  /// composer draws the row the record is about to hold rather than keeping a
+  /// word of its own for which Process that is.
+  it("is the one the server marks", () => {
+    const filled = PROCESSES.filter(
+      (entry) => entry.filled_from_a_pull_request,
+    ).map((entry) => entry.id);
+
+    expect(filled).toEqual(["fix-merge-issues"]);
+    expect(filledFromAPullRequest()).toEqual(choice("fix-merge-issues"));
+  });
+
+  /// And nothing where the list holds no such row, which is its plugin
+  /// unticked or gone: the picker then stays where it was.
+  it("is nothing where no row is marked", () => {
+    knowProvidedProcesses([THEIRS]);
+
+    expect(filledFromAPullRequest()).toBeNull();
   });
 });
 
@@ -159,20 +190,20 @@ describe("which processes are pointed at a target", () => {
   /// either composer.
   it("is what each manifest says", () => {
     const pointed = PROCESSES.filter((entry) => entry.target).map(
-      (entry) => entry.built_in,
+      (entry) => entry.id,
     );
 
-    expect(pointed).toEqual(["Review", "FixMergeIssues"]);
+    expect(pointed).toEqual(["review", "fix-merge-issues"]);
 
     for (const entry of PROCESSES) {
-      expect(targeted(entry.built_in as Process, null)).toBe(entry.target);
+      expect(targeted(whose(entry.id))).toBe(entry.target);
     }
   });
 
   /// And a Process this page holds nothing for draws no field: there is
   /// nothing saying it wants one.
   it("draws no field for a process nothing is listed for", () => {
-    expect(targeted("Provided", { plugin: "gone", id: "triage" })).toBe(false);
+    expect(targeted(GONE)).toBe(false);
   });
 });
 
@@ -182,13 +213,13 @@ describe("which processes wrap up narrowed", () => {
   /// and the Steer form's note is drawn off the same fact.
   it("is what each manifest's wrapping state says", () => {
     const narrows = PROCESSES.filter((entry) => entry.narrowed).map(
-      (entry) => entry.built_in,
+      (entry) => entry.id,
     );
 
-    expect(narrows).toEqual(["FixMergeIssues"]);
+    expect(narrows).toEqual(["fix-merge-issues"]);
 
     for (const entry of PROCESSES) {
-      expect(narrowed(entry.built_in as Process, null)).toBe(entry.narrowed);
+      expect(narrowed(whose(entry.id))).toBe(entry.narrowed);
     }
   });
 });
@@ -198,46 +229,41 @@ describe("the word a state is said in", () => {
   /// *Grilling* off Develop's manifest, and *Follow-up* is the hyphenated word
   /// the manifest spells rather than the variant's.
   it("is the word its process declares", () => {
-    expect(stateWord("Develop", null, "Grilling", "grilling")).toBe("Grilling");
-    expect(stateWord("Develop", null, "FollowUp", "follow-up")).toBe(
+    expect(stateWord(whose("develop"), "Grilling", "grilling")).toBe(
+      "Grilling",
+    );
+    expect(stateWord(whose("develop"), "FollowUp", "follow-up")).toBe(
       "Follow-up",
     );
-    expect(stateWord("Tinker", null, "Wrapping", "wrapping")).toBe("Wrapping");
+    expect(stateWord(whose("tinker"), "Wrapping", "wrapping")).toBe("Wrapping");
   });
 
   /// A state a plugin's Process declares reads whatever that plugin called it.
   it("is a plugin's own word for a state it declares", () => {
     knowProvidedProcesses([...PROCESSES, THEIRS]);
 
-    expect(stateWord("Provided", WHOSE, "Declared", "checking")).toBe(
-      "Checking",
-    );
+    expect(stateWord(WHOSE, "Declared", "checking")).toBe("Checking");
   });
 
   /// And an unknown word — a plugin removed under a Conversation — is drawn as
   /// the word the record holds, which is legible where a blank would not be.
   it("is the word itself where no process is listed for it", () => {
-    expect(
-      stateWord("Provided", { plugin: "gone", id: "triage" }, "Declared", "sorting"),
-    ).toBe("sorting");
+    expect(stateWord(GONE, "Declared", "sorting")).toBe("sorting");
   });
 
   /// The three Verkstead words itself carry no state id and are Verkstead's
   /// own words: nothing returns to any of them, and no Process declares one.
   it("is Verkstead's own for Draft, Done and Closed", () => {
-    expect(stateWord("Develop", null, "Draft", null)).toBe("Draft");
-    expect(stateWord("Develop", null, "Done", null)).toBe("Done");
-    expect(stateWord("Develop", null, "Closed", null)).toBe("Closed");
+    expect(stateWord(whose("develop"), "Draft", null)).toBe("Draft");
+    expect(stateWord(whose("develop"), "Done", null)).toBe("Done");
+    expect(stateWord(whose("develop"), "Closed", null)).toBe("Closed");
   });
 
   /// And a sidebar row reads the same word off the plugin its row names, that
   /// being what the server sends it as.
   it("is read the same way on a sidebar row", () => {
     expect(
-      rowWord(
-        { process: { plugin: PROCESSES[0]!.plugin, id: "develop" }, state: "grilling" },
-        "Grilling",
-      ),
+      rowWord({ process: whose("develop"), state: "grilling" }, "Grilling"),
     ).toBe("Grilling");
     expect(rowWord(null, "Draft")).toBe("Draft");
   });

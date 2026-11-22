@@ -199,10 +199,7 @@ function Configuration(props: {
             machine it was worked on — so a share says it, as it says the three
             around it. */}
         <Fact term="Process">
-          {processName(
-            props.conversation.process,
-            props.conversation.provided,
-          )}
+          {processName(props.conversation.process)}
         </Fact>
         {/* The name where there is one, and the rule that will pick one where
             there is not — which is what a Conversation adopting a roadmap

@@ -33,7 +33,6 @@ import type {
   AuthorEntry,
   DevicesView,
   DirectoryListing,
-  Process,
   ProcessPicked,
   ProfileEntry,
   RepoEntry,
@@ -66,7 +65,7 @@ import {
 // The Processes the picker offers and the words they are said in, read off the
 // list the server actually sent rather than spelled out again: what the row
 // offers is that list and nothing else.
-import { declaredRow, named, OFFERED } from "./processes";
+import { declaredRow, named, OFFERED, whose } from "./processes";
 import {
   CREATE_REFUSAL,
   REFUSAL as REPO_REFUSAL,
@@ -1639,13 +1638,15 @@ describe("the process a compose page is composing under", () => {
     await composing(container);
     await waitFor(() => expect(screen.getByLabelText("Process")).toBeTruthy());
 
-    expect(rows("Process")).toEqual(OFFERED.map(named));
-    expect(OFFERED).toEqual([
-      "Develop",
-      "Tinker",
-      "Investigate",
-      "Review",
-      "FixMergeIssues",
+    expect(rows("Process")).toEqual(
+      OFFERED.map((offered) => named(offered.process.id)),
+    );
+    expect(OFFERED.map((offered) => offered.process.id)).toEqual([
+      "develop",
+      "tinker",
+      "investigate",
+      "review",
+      "fix-merge-issues",
     ]);
   });
 
@@ -1697,17 +1698,17 @@ describe("the process a compose page is composing under", () => {
     await rolesAnswered();
 
     await waitFor(() => expect(screen.getByLabelText("Process")).toBeTruthy());
-    pick("Process", named("Develop"));
+    pick("Process", named("develop"));
 
     // Held on the device the moment it is picked, so a reload loses nothing.
-    expect(stored().process).toBe("Develop");
+    expect(stored().process).toEqual(whose("develop"));
 
     fireEvent.click(screen.getByRole("button", { name: "Start work" }));
 
     await waitFor(() =>
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/process`),
-      ).toEqual({ process: "Develop" }),
+      ).toEqual({ process: whose("develop") }),
     );
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/process`)).toBe(1);
   });
@@ -1730,7 +1731,7 @@ describe("the target a compose page is pointed at", () => {
       JSON.stringify({
         ...blank(),
         repo: REPOS[1]!.id,
-        process: "Review" satisfies Process,
+        process: whose("review"),
         ...over,
       }),
     );
@@ -1747,7 +1748,7 @@ describe("the target a compose page is pointed at", () => {
     await waitFor(() => expect(screen.getByLabelText("Branch")).toBeTruthy());
     expect(screen.queryByLabelText("Target")).toBeNull();
 
-    pick("Process", named("Review"));
+    pick("Process", named("review"));
 
     const field = (await waitFor(() =>
       screen.getByLabelText("Target"),
@@ -1768,13 +1769,13 @@ describe("the target a compose page is pointed at", () => {
 
     await waitFor(() => expect(screen.getByLabelText("Branch")).toBeTruthy());
 
-    pick("Process", named("FixMergeIssues"));
+    pick("Process", named("fix-merge-issues"));
     const field = (await waitFor(() =>
       screen.getByLabelText("Target"),
     )) as HTMLInputElement;
     expect(field.placeholder).toBe(TARGET);
 
-    pick("Process", named("Develop"));
+    pick("Process", named("develop"));
     await waitFor(() => expect(screen.queryByLabelText("Target")).toBeNull());
   });
 
@@ -1885,7 +1886,7 @@ describe("the target a compose page is pointed at", () => {
     });
 
     await waitFor(() => expect(stored().repo).toBe(LIMITER.id));
-    expect(stored().process).toBe("FixMergeIssues");
+    expect(stored().process).toEqual(whose("fix-merge-issues"));
 
     // And the panel redraws itself for the Process: the Target field, filled.
     await openRepo(container);
@@ -1910,8 +1911,8 @@ describe("the target a compose page is pointed at", () => {
         filled: url,
         repo,
         repoFilled: REPOS[1]!.id,
-        process: "FixMergeIssues",
-        processFilled: "FixMergeIssues",
+        process: whose("fix-merge-issues"),
+        processFilled: whose("fix-merge-issues"),
       });
       const fetching = creating(
         whenever(
@@ -2202,7 +2203,7 @@ describe("the target a compose page is pointed at", () => {
       // this is about.
       whenever(
         `/api/ui/conversations/${OPEN.id}`,
-        json({ ...OPEN, process: "Review" satisfies Process }),
+        json({ ...OPEN, process: whose("review") }),
       ),
     );
     const { container } = mount("/compose");
@@ -2256,7 +2257,7 @@ describe("the target a compose page is pointed at", () => {
       JSON.stringify({
         ...blank(),
         repo: REPOS[1]!.id,
-        process: "FixMergeIssues" satisfies Process,
+        process: whose("fix-merge-issues"),
         target: "#41",
       }),
     );
@@ -2302,7 +2303,7 @@ describe("the target a compose page is pointed at", () => {
 
     await waitFor(() =>
       expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/process`)).toEqual(
-        { process: "FixMergeIssues" satisfies Process },
+        { process: whose("fix-merge-issues") },
       ),
     );
     await waitFor(() =>
@@ -2329,15 +2330,19 @@ describe("the pickers a compose page's process draws", () => {
 
   /// A page holding a Process and the repo it would be composed against, which
   /// is where a reload would leave one.
-  function composedAs(process: Process): void {
+  function composedAs(process: string): void {
     localStorage.setItem(
       COMPOSING,
-      JSON.stringify({ ...blank(), repo: REPOS[1]!.id, process }),
+      JSON.stringify({
+        ...blank(),
+        repo: REPOS[1]!.id,
+        process: whose(process),
+      }),
     );
   }
 
   it("draws all three under Develop", async () => {
-    composedAs("Develop");
+    composedAs("develop");
     theWorkbench(...REMEMBERED, json(null));
     const { container } = mount("/compose");
 
@@ -2351,7 +2356,7 @@ describe("the pickers a compose page's process draws", () => {
   /// And two under a Tinker, which is the other Process this page can be moved
   /// to: no Grilling picker, it being a Process that is never interviewed.
   it("draws two and no grilling picker under Tinker", async () => {
-    composedAs("Tinker");
+    composedAs("tinker");
     theWorkbench(...REMEMBERED, json(null));
     const { container } = mount("/compose");
 
@@ -2363,13 +2368,13 @@ describe("the pickers a compose page's process draws", () => {
     expect(screen.getByLabelText("Review")).toBeTruthy();
     expect(screen.queryByLabelText("Grilling")).toBeNull();
 
-    expect(OFFERED).toContain("Tinker");
+    expect(OFFERED).toContainEqual({ process: whose("tinker") });
   });
 
   /// And one picker is no panel at all: the control is the picker, which is
   /// what the describe below is about.
   it("draws one picker under a process that uses one role", async () => {
-    composedAs("Investigate");
+    composedAs("investigate");
     theWorkbench(...REMEMBERED, json(null));
     const { container } = mount("/compose");
 
@@ -2379,7 +2384,7 @@ describe("the pickers a compose page's process draws", () => {
     expect(screen.queryByLabelText("Grilling")).toBeNull();
     expect(screen.queryByLabelText("Implementation")).toBeNull();
     expect(screen.queryByLabelText("Review")).toBeNull();
-    expect(OFFERED).toContain("Investigate");
+    expect(OFFERED).toContainEqual({ process: whose("investigate") });
   });
 
   /// And the press waits on exactly those roles. Asked over a repo remembering
@@ -2398,7 +2403,7 @@ describe("the pickers a compose page's process draws", () => {
       ],
     };
 
-    composedAs("Investigate");
+    composedAs("investigate");
     theWorkbench(
       whenever(`/api/ui/repos/${REPOS[1]!.id}/pairings`, json(memory)),
       json(null),
@@ -2433,7 +2438,7 @@ describe("the pickers a compose page's process draws", () => {
       ],
     };
 
-    composedAs("Develop");
+    composedAs("develop");
     theWorkbench(
       whenever(`/api/ui/repos/${REPOS[1]!.id}/pairings`, json(memory)),
       json(null),
@@ -2458,7 +2463,7 @@ describe("the pickers a compose page's process draws", () => {
   /// And a Process with one role says one role, which is the whole of what the
   /// table changes about these words.
   it("says one role where the process has one", async () => {
-    composedAs("Investigate");
+    composedAs("investigate");
     theWorkbench(json(null));
     const { container } = mount("/compose");
 
@@ -2641,7 +2646,7 @@ describe("the agent control on a compose page", () => {
       JSON.stringify({
         ...blank(),
         repo: REPOS[1]!.id,
-        process: "Review" satisfies Process,
+        process: whose("review"),
       }),
     );
     theWorkbench(
@@ -2694,7 +2699,7 @@ describe("the agent dropdown on a compose page", () => {
       JSON.stringify({
         ...blank(),
         repo: REPOS[1]!.id,
-        process: "Investigate" satisfies Process,
+        process: whose("investigate"),
       }),
     );
   }
@@ -2945,14 +2950,14 @@ describe("starting the work on the picked device", () => {
       target: { value: "Make the widget" },
     });
     await pickRepoThere(container, THEIRS[1]!.id);
-    pick("Process", named("Tinker"));
+    pick("Process", named("tinker"));
     await rolesAnswered();
 
     fireEvent.click(screen.getByRole("button", { name: "Start work" }));
 
     await waitFor(() =>
       expect(sent(fetching, at(`/conversations/${OPEN.id}/process`))).toEqual({
-        process: "Tinker",
+        process: whose("tinker"),
       }),
     );
     // The first press is the one that starts it: nothing refused, so nothing
@@ -2981,7 +2986,7 @@ describe("starting the work on the picked device", () => {
       target: { value: "Wrap the limiter up." },
     });
     await pickRepoThere(container, THEIRS[1]!.id);
-    pick("Process", named("Review"));
+    pick("Process", named("review"));
     await openRepo(container);
     fireEvent.input(
       await waitFor(() => screen.getByLabelText("Target")),
@@ -3268,6 +3273,8 @@ describe("moving a saved draft to another device", () => {
       whenever(at(`/conversations/${MOVED}/brief`), json("Saved"), "POST"),
       whenever(at(`/conversations/${MOVED}/branch`), json("Renamed"), "POST"),
       whenever(at(`/conversations/${MOVED}/base`), json("Recorded"), "POST"),
+      // The Process goes every time a draft moves, so every move answers it.
+      whenever(at(`/conversations/${MOVED}/process`), json("Picked"), "POST"),
       ...OPEN.attachments.map((attachment) =>
         whenever(
           readable(attachment.id),
@@ -3427,7 +3434,7 @@ describe("moving a saved draft to another device", () => {
     const fetching = moving(
       whenever(
         `/api/ui/conversations/${OPEN.id}`,
-        json({ ...OPEN, process: "Review", target: "#41" }),
+        json({ ...OPEN, process: whose("review"), target: "#41" }),
       ),
       whenever(at(`/conversations/${MOVED}/process`), json("Picked"), "POST"),
       whenever(at(`/conversations/${MOVED}/target`), json("Recorded"), "POST"),
@@ -3439,7 +3446,7 @@ describe("moving a saved draft to another device", () => {
 
     await waitFor(() =>
       expect(sent(fetching, at(`/conversations/${MOVED}/process`))).toEqual({
-        process: "Review",
+        process: whose("review"),
       }),
     );
     expect(sent(fetching, at(`/conversations/${MOVED}/target`))).toEqual({
@@ -3454,18 +3461,24 @@ describe("moving a saved draft to another device", () => {
     await waitFor(() => expect(writes(fetching, moved)).toBe(1));
   });
 
-  /// A Develop pointed at nothing is what the new Conversation already arrived
-  /// as, so there is nothing of either to send — as a compose page left on
-  /// Develop sends nothing.
-  it("sends no process and no target for a develop draft pointed at nothing", async () => {
-    const fetching = moving();
+  /// The Process goes every time, a Develop included: it is the plugin
+  /// providing it and its id there, which means the same on either device, and
+  /// the fill over there would otherwise make a Brief that is one pull request
+  /// URL something else. A target nobody named is what the new Conversation
+  /// already has, so that one still sends nothing.
+  it("sends the process and no target for a draft pointed at nothing", async () => {
+    const fetching = moving(
+      whenever(at(`/conversations/${MOVED}/process`), json("Picked"), "POST"),
+    );
     const { container } = await draft();
 
     await moveTo(container);
     await move(THEIRS[1]!);
 
     await waitFor(() => expect(writes(fetching, moved)).toBe(1));
-    expect(writes(fetching, at(`/conversations/${MOVED}/process`))).toBe(0);
+    expect(sent(fetching, at(`/conversations/${MOVED}/process`))).toEqual({
+      process: whose("develop"),
+    });
     expect(writes(fetching, at(`/conversations/${MOVED}/target`))).toBe(0);
   });
 
@@ -3499,7 +3512,7 @@ describe("moving a saved draft to another device", () => {
       repo_id: THEIRS[1]!.id,
     });
     expect(sent(fetching, at(`/conversations/${MOVED}/process`))).toEqual({
-      process: "Develop",
+      process: whose("develop"),
     });
   });
 
@@ -6106,7 +6119,7 @@ describe("the MCP servers a compose page holds", () => {
         ...blank(),
         repo: REPOS[1]!.id,
         brief: "The limiter will not merge.",
-        process: "FixMergeIssues" satisfies Process,
+        process: whose("fix-merge-issues"),
         target: "#41",
       }),
     );
@@ -6433,8 +6446,7 @@ describe("what a device holds between visits", () => {
       companions: [
         { repo_id: 3, mode: "ReadWrite", base: "trunk", branch: "beside" },
       ],
-      process: "Develop",
-      provided: null,
+      process: whose("develop"),
       processFilled: null,
       pairings: { grilling: "1:opus", implementation: "2:fable" },
       adopting: null,
@@ -6476,12 +6488,26 @@ describe("what a device holds between visits", () => {
     expect(stored()).toEqual({ ...blank(), repo: 2 });
   });
 
-  /// And a word this build has never heard of is discarded with the rest of the
-  /// draft, because it would go straight back out on the wire.
-  it("discards a draft holding a process the wire does not know", () => {
+  /// And a body from before a Process was the plugin providing it holds a word
+  /// there instead — `Develop`, say — which names no Process this build could
+  /// send: it reads as a picker nobody touched, and the rest of the draft is
+  /// kept rather than thrown away with it.
+  it("reads a body holding a process word as one nobody picked", () => {
     localStorage.setItem(
       COMPOSING,
-      JSON.stringify({ ...blank(), repo: 2, process: "Ponder" }),
+      JSON.stringify({ ...blank(), repo: 2, process: "Develop" }),
+    );
+
+    expect(stored()).toEqual({ ...blank(), repo: 2 });
+  });
+
+  /// Anything else in that field is a body no build of this app wrote, and it
+  /// is discarded with the rest of the draft: what is held there goes straight
+  /// back out on the wire.
+  it("discards a draft whose process is no process at all", () => {
+    localStorage.setItem(
+      COMPOSING,
+      JSON.stringify({ ...blank(), repo: 2, process: { plugin: 7 } }),
     );
 
     expect(stored()).toEqual(blank());
@@ -6491,9 +6517,9 @@ describe("what a device holds between visits", () => {
   /// anything else: a page holding one and nothing else is a page worth
   /// nothing, and a page holding a picked one is worth keeping.
   it("keeps a draft whose only touched field is the process", () => {
-    keep({ ...blank(), process: "Develop" });
+    keep({ ...blank(), process: whose("develop") });
 
-    expect(stored()).toEqual({ ...blank(), process: "Develop" });
+    expect(stored()).toEqual({ ...blank(), process: whose("develop") });
   });
 
   it("holds nothing at all for a page nobody has touched", () => {
@@ -6893,7 +6919,7 @@ describe("a brief that is one pull request url", () => {
     const filled = written(blank(), `${URL}\n`, LISTED);
 
     expect(filled.repo).toBe(3);
-    expect(filled.process).toBe("FixMergeIssues");
+    expect(filled.process).toEqual(whose("fix-merge-issues"));
     expect(filled.target).toBe(URL);
   });
 
@@ -6933,11 +6959,11 @@ describe("a brief that is one pull request url", () => {
   });
 
   it("leaves a repo and a process picked by hand standing", () => {
-    const picked: Composed = { ...blank(), repo: 1, process: "Review" };
+    const picked: Composed = { ...blank(), repo: 1, process: whose("review") };
     const filled = written(picked, URL, LISTED);
 
     expect(filled.repo).toBe(1);
-    expect(filled.process).toBe("Review");
+    expect(filled.process).toEqual(whose("review"));
     expect(filled.target).toBe(URL);
   });
 
@@ -6950,7 +6976,7 @@ describe("a brief that is one pull request url", () => {
     );
 
     expect(filled.repo).toBe(1);
-    expect(filled.process).toBe("FixMergeIssues");
+    expect(filled.process).toEqual(whose("fix-merge-issues"));
   });
 
   it("picks neither for prose around the url, or for a bare number", () => {
@@ -6971,6 +6997,6 @@ describe("a brief that is one pull request url", () => {
     );
 
     expect(filled.repo).toBe(3);
-    expect(filled.process).toBe("FixMergeIssues");
+    expect(filled.process).toEqual(whose("fix-merge-issues"));
   });
 });

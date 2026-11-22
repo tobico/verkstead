@@ -263,7 +263,7 @@ pub async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     );
 
     assert_eq!(
-        set_process(pool, id, Process::Develop).await.unwrap(),
+        set_process(pool, id, Process::develop()).await.unwrap(),
         Edited::Saved,
     );
 

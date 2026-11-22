@@ -162,8 +162,8 @@ fn the_viewers_types_are_written_from_these() {
     RepoSwitched::export_all(&config).unwrap();
 
     // And what kind of work it is: the Process, picked beside the Repo and
-    // frozen with the Pairings. The `Process` itself rides in on the view above
-    // as well — it is one of the facts the pane reads back — and these two are
+    // frozen with the Pairings. Which Process rides in on the view above as
+    // well — it is one of the facts the pane reads back — and these two are
     // the press that changes it while the Conversation drafts.
     ProcessChoice::export_all(&config).unwrap();
     ProcessPicked::export_all(&config).unwrap();

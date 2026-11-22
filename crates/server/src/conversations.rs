@@ -44,7 +44,7 @@ use verkstead_render::{
     BaseRecorded, BranchRenamed, BriefSaved, CheckedOut, CompanionAdded, CompanionBaseRecorded,
     CompanionBranchRenamed, CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved,
     Confirming, ConversationClosed, ConversationMove, GrillingStarted, OfferedPack, OtherAuthor,
-    PackAttached, PackRemoved, PairingView, PickedView, Process, ProcessPicked, ProfileEntry,
+    PackAttached, PackRemoved, PairingView, PickedView, ProcessPicked, ProfileEntry,
     ProfileTrouble, RememberedRole, RepoPairingsView, RepoSwitched, RoleWanted, ServerAttached,
     ServerRemoved, Started, TakenUp, TargetRecorded, Uncommitted, Worktree,
 };
@@ -207,7 +207,7 @@ async fn prefill(state: &AppState, id: i64, repo_id: i64) {
 
 /// What [`prefill`] does, with somewhere for a store error to go.
 async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
-    if !crate::processes::offered(state, &store::Process::Develop).await
+    if !crate::processes::offered(state, &store::Process::develop()).await
         && let Some(process) = default_process(state).await
     {
         store::set_process(&state.pool, id, process).await?;
@@ -799,7 +799,7 @@ pub(crate) async fn save_brief(
         crate::targets::pull_request_named(markdown).and_then(|named| named.repository)
     {
         fill_repo(pool, config, id, &repository).await?;
-        store::fill_process(pool, id, store::Process::FixMergeIssues).await?;
+        store::fill_process(pool, id, filled_from_a_pull_request()).await?;
     }
 
     Ok(saved)
@@ -1413,29 +1413,17 @@ async fn other_author_onto(
     Ok(other_author(config, &onto, kept))
 }
 
-/// The Processes a Conversation can actually be started on: the ones whose
-/// stage has landed.
+/// The Process a Brief that is one pull request URL and nothing else fills the
+/// record with: **Fix merge issues**, the pull request being work that exists
+/// already and asking for it to be made mergeable (CONTEXT, *Target*).
 ///
-/// **What the record will accept, which is not what the picker offers**: the
-/// rows the picker draws are the Processes listed to it, in the order
-/// `crate::processes::listed` answers — the viewer keeps no list of its own
-/// (Set 1765, Q29). This is the older question, and the one a pick is refused
-/// by name on: a Process spelled in [`store::Process`] before there is a stage
-/// that can run it waits here.
-///
-/// All five, the last of them landing with Fix Merge Issues: the record reads
-/// and writes exactly this set — see [`store::Process`] — so nothing is held
-/// back here today. The list stays all the same, because it is the mechanism
-/// rather than the tally: a Process is spelled in [`store::Process`] before
-/// there is a stage that can run it, and this is where it waits.
-const LANDED: &[Process] = &[
-    Process::Develop,
-    Process::Tinker,
-    Process::Investigate,
-    Process::Review,
-    Process::FixMergeIssues,
-    Process::Provided,
-];
+/// Named here rather than at the two places that want it — the fill above, and
+/// the Process list the composer mirrors it on, see
+/// [`crate::processes::listed`] — so that the control and the record cannot
+/// come to fill two different rows.
+pub(crate) fn filled_from_a_pull_request() -> store::Process {
+    store::Process::fix_merge_issues()
+}
 
 /// The Process a new Draft is prefilled with where Develop is not offered:
 /// the first one that is, in the order the picker draws its rows — which is
@@ -1461,47 +1449,28 @@ async fn default_process(state: &AppState) -> Option<store::Process> {
         .await
         .into_iter()
         .find(|loaded| loaded.offered)
-        .map(|loaded| {
-            crate::plugins::built_in::stood_for(&loaded.plugin, &loaded.process.id).unwrap_or(
-                store::Process::Provided {
-                    plugin: loaded.plugin,
-                    id: loaded.process.id,
-                },
-            )
-        })
+        .map(|loaded| loaded.whose())
 }
 
 /// Say what kind of work a drafting Conversation is for.
 ///
 /// Thin over the store with one question of its own in front of it, which is
-/// the one the store deliberately does not ask: whether that Process has a stage
-/// behind it yet. The record holds all five and only the landed ones can be
-/// picked on, so the rest are refused here by a name that says why —
-/// rather than under [`ProcessPicked::NotDrafting`], which is about this
-/// Conversation and is something the human could have done differently.
+/// the one the store deliberately does not ask: whether a plugin here provides
+/// that Process at all.
 ///
-/// Asked first, and before the Conversation is so much as looked up: a Process
-/// with no stage behind it is refused for a Conversation that does not exist as
-/// readily as for one that does, because what is wrong with the ask is the ask.
-///
-/// **A plugin's Process is picked only where it is offered**: provided by a
-/// plugin that loaded here, switched on and in no trouble — the rows the
-/// picker draws, which the server sends (ADR-0030, *Process*). One that is
-/// not is refused as [`ProcessPicked::NotOffered`].
+/// **A Process is picked only where it is offered**: provided by a plugin that
+/// loaded here, switched on and in no trouble — the rows the picker draws,
+/// which the server sends (ADR-0030, *Process*). One that is not is refused as
+/// [`ProcessPicked::NotOffered`], which is about the world rather than about
+/// this Conversation: nothing the human does to it makes that Process
+/// pickable.
 pub(crate) async fn pick_process(
     state: &AppState,
     id: i64,
     choice: verkstead_render::ProcessChoice,
 ) -> Result<ProcessPicked> {
     let pool = &state.pool;
-
-    if !LANDED.contains(&choice.process) {
-        return Ok(ProcessPicked::NotLanded);
-    }
-
-    let Some(process) = crate::ui::picked_process(choice) else {
-        return Ok(ProcessPicked::NotOffered);
-    };
+    let process = crate::ui::picked_process(choice);
 
     if !crate::processes::offered(state, &process).await {
         return Ok(ProcessPicked::NotOffered);
@@ -1903,7 +1872,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // — while its tick stands: its first state is the word it lands in, and
     // that state's Activity is what is started.
     let manifest = crate::processes::of(state, &process);
-    let provided = matches!(process, store::Process::Provided { .. });
+    let provided = !process.built_in();
 
     if (provided || manifest.is_some()) && !crate::processes::offered(state, &process).await {
         return Ok(GrillingStarted::ProcessNotOffered);
@@ -3893,7 +3862,7 @@ pub(crate) async fn take_up(state: &AppState, id: i64, confirming: &Confirming) 
     // is on the record; what moves ahead is knowing the links. See
     // [`crate::stacks::walk`].
     let walked = match number {
-        Some(number) if walks_the_stack(&conversation.process) => {
+        Some(number) if walks_the_stack(state, &conversation.process) => {
             crate::stacks::walk(state, &conversation.repo, number).await
         }
         _ => crate::stacks::Walked::Nothing,
@@ -6083,8 +6052,10 @@ pub(crate) fn narrows_the_wrap_up(state: &AppState, process: &store::Process) ->
 /// request: the **stack** walked on GitHub where the pull request is recorded,
 /// and every one of it recorded beside it.
 ///
-/// **Fix Merge Issues**, and nothing else — the same one Process, asked as its
-/// own question because it is its own fact. What this one is about is what the
+/// **Fix Merge Issues**, and nothing else — and said by its manifest's wrapping
+/// state alone, whose options turn the Wrap-up's `stack` on: see
+/// [`crate::processes::walks_the_stack`]. Its own option rather than the
+/// narrowing's, because it is its own fact. What this one is about is what the
 /// wrap-up is *over*: a conflict low in a stack moves every branch above it, so
 /// a Conversation pointed at any link of one is a Conversation over all of them.
 /// Every other Process is pointed at work Verkstead built, on the one branch it
@@ -6094,8 +6065,8 @@ pub(crate) fn narrows_the_wrap_up(state: &AppState, process: &store::Process) ->
 /// narrowing is asked at each of its own: a take-up over a pull request walks at
 /// the press, and a take-up over a bare branch has nothing to walk from until
 /// its `submitting` session has opened one — see [`crate::stacks`].
-pub(crate) fn walks_the_stack(process: &store::Process) -> bool {
-    matches!(process, store::Process::FixMergeIssues)
+pub(crate) fn walks_the_stack(state: &AppState, process: &store::Process) -> bool {
+    crate::processes::walks_the_stack(state, process)
 }
 
 /// Whether git would take this as a branch name.

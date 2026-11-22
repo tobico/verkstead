@@ -36,8 +36,10 @@
   "permitted": [],
   "pinned": [],
   "previews": [],
-  "process": "Review",
-  "provided": null,
+  "process": {
+    "id": "review",
+    "plugin": "0b55843a-7c93-47cc-9655-e5f6ec3cf019"
+  },
   "ready_to_continue": false,
   "ready_to_grill": false,
   "ready_to_resume": false,

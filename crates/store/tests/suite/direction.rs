@@ -705,7 +705,7 @@ async fn a_pick_on_a_declared_state_is_recorded_for_the_manifest_to_judge() {
     set_process(
         &pool,
         id,
-        Process::Provided {
+        Process {
             plugin: "5e0c9a7e-2f4b-4c1d-8a3e-6b9f0d2c7a41".to_owned(),
             id: "two-steps".to_owned(),
         },

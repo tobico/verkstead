@@ -72,7 +72,6 @@ import type {
   PendingSteerView,
   PairingView,
   PreviewView,
-  Process,
   ProfileEntry,
   PinnedEvent,
   PullRequestDetails,
@@ -212,7 +211,7 @@ import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
 // than spelled out again: the pane and this assertion about it would otherwise
 // be two opinions about what Develop is called.
 import { away } from "../src/workbench/roles";
-import { knowProvidedProcesses, targeted } from "../src/workbench/provided";
+import { targeted } from "../src/workbench/provided";
 // The pause card, which is one of the record's and draws itself.
 import { RESOLVE_REFUSAL } from "../src/workbench/PullRequest";
 import prPane from "../src/workbench/PullRequest.module.css";
@@ -300,6 +299,7 @@ import { AUTOMATIC, DRAFT, titled } from "../src/workbench/naming";
 // status and the sidebar's row reads aloud — read off the Process that
 // declares the state, as the page reads them.
 import {
+  declaredAt,
   declaredOn,
   declaredRow,
   described,
@@ -307,7 +307,9 @@ import {
   OFFERED,
   offeringOnly,
   PROCESSES,
+  saying,
   stateOf,
+  whose,
 } from "./processes";
 // And the words a roadmap stage's state is said in, which the card's row, the
 // pane's heading and the pane's nav line are all drawn with.
@@ -3188,7 +3190,7 @@ describe("the page of a draft from before, holding a pull request", () => {
       screen.getByLabelText("Target"),
     )) as HTMLInputElement;
 
-    expect(HOLDING.process).toBe("Review");
+    expect(HOLDING.process).toEqual(whose("review"));
     expect(target.value).toBe(HOLDING.target);
     expect(target.value).toContain("/pull/41");
   });
@@ -4943,20 +4945,21 @@ describe("the target a review is pointed at", () => {
   /// nothing else, which is each manifest's `target` to say — so a Process that
   /// declares one draws the field with no line changing here.
   it("is drawn under the targeted processes and under no other", async () => {
-    for (const process of ["Develop", "Tinker", "Investigate"] satisfies Process[]) {
+    for (const id of ["develop", "tinker", "investigate"]) {
+      const process = whose(id);
       theWorkbenchWith({ process });
       const { container, unmount } = mount(`/conversations/${OPEN.id}`);
       await openRepo(container);
 
       await waitFor(() => screen.getByLabelText("Branch"));
       expect(screen.queryByLabelText("Target")).toBeNull();
-      expect(targeted(process, null)).toBe(false);
+      expect(targeted(process)).toBe(false);
 
       unmount();
     }
 
-    for (const process of ["Review", "FixMergeIssues"] satisfies Process[]) {
-      theWorkbenchWith({ process });
+    for (const id of ["review", "fix-merge-issues"]) {
+      theWorkbenchWith({ process: whose(id) });
       const { container, unmount } = mount(`/conversations/${OPEN.id}`);
       await openRepo(container);
 
@@ -4969,8 +4972,8 @@ describe("the target a review is pointed at", () => {
     }
 
     expect(
-      PROCESSES.filter((entry) => entry.target).map((entry) => entry.built_in),
-    ).toEqual(["Review", "FixMergeIssues"]);
+      PROCESSES.filter((entry) => entry.target).map((entry) => entry.id),
+    ).toEqual(["review", "fix-merge-issues"]);
   });
 
   /// And it takes the one value the Branch field beside it will not: a pull
@@ -4978,7 +4981,7 @@ describe("the target a review is pointed at", () => {
   it("sends a pull request url the branch field would refuse", async () => {
     const url = "https://github.com/tobico/verkstead/pull/41";
     const fetching = theWorkbenchWith(
-      { process: "Review", target: null },
+      { process: whose("review"), target: null },
       json("Recorded"),
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -5003,7 +5006,7 @@ describe("the target a review is pointed at", () => {
   /// which of the three was typed.
   it("sends a bare branch name too", async () => {
     const fetching = theWorkbenchWith(
-      { process: "Review", target: null },
+      { process: whose("review"), target: null },
       json("Recorded"),
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -5023,7 +5026,7 @@ describe("the target a review is pointed at", () => {
   /// What the record holds is what the field shows, which is how a target the
   /// Brief filled in on the server arrives under the human's eyes.
   it("shows what the record was filled with", async () => {
-    theWorkbenchWith({ process: "Review", target: "#41" });
+    theWorkbenchWith({ process: whose("review"), target: "#41" });
     const { container } = mount(`/conversations/${OPEN.id}`);
     await openRepo(container);
 
@@ -5037,7 +5040,7 @@ describe("the target a review is pointed at", () => {
   /// server refuses by then.
   it("is not drawn once the branch has been cut", async () => {
     theWorkbenchWith({
-      process: "Review",
+      process: whose("review"),
       target: "#41",
       worktree: { path: "/var/lib/verkstead/worktrees/open", missing: false },
     });
@@ -5053,7 +5056,7 @@ describe("the target a review is pointed at", () => {
   /// GitHub's own base along, so there is nothing to pick.
   it("takes the base picker away where the target is a pull request", async () => {
     theWorkbenchWith({
-      process: "Review",
+      process: whose("review"),
       target: "https://github.com/tobico/verkstead/pull/41",
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -5066,7 +5069,7 @@ describe("the target a review is pointed at", () => {
   /// And keeps it where the target is a branch, that base being what the
   /// wrap-up will open the pull request against.
   it("keeps the base picker where the target is a branch", async () => {
-    theWorkbenchWith({ process: "Review", target: "rate-limiting" });
+    theWorkbenchWith({ process: whose("review"), target: "rate-limiting" });
     const { container } = mount(`/conversations/${OPEN.id}`);
     await openRepo(container);
 
@@ -5077,7 +5080,7 @@ describe("the target a review is pointed at", () => {
   /// And an empty one keeps it too: nothing is named yet, and a picker that
   /// vanished on the first keystroke of a URL would be the panel guessing.
   it("keeps the base picker where nothing is named", async () => {
-    theWorkbenchWith({ process: "Review", target: null });
+    theWorkbenchWith({ process: whose("review"), target: null });
     const { container } = mount(`/conversations/${OPEN.id}`);
     await openRepo(container);
 
@@ -5387,8 +5390,8 @@ describe("a conversation's process", () => {
     expect(at(`.${setup.processChoice}`)).toBe(1);
     expect(at(`.${setup.agentOption}`)).toBe(2);
 
-    expect(showing("Process")).toBe(named(OPEN.process));
-    expect(OPEN.process).toBe("Develop");
+    expect(showing("Process")).toBe(named(OPEN.process.id));
+    expect(OPEN.process).toEqual(whose("develop"));
   });
 
   /// All five, in the order the server listed them and in the words their
@@ -5418,7 +5421,7 @@ describe("a conversation's process", () => {
     mount(`/conversations/${OPEN.id}`);
     const control = await theProcess();
 
-    expect(control.textContent).not.toContain(described(OPEN.process));
+    expect(control.textContent).not.toContain(described(OPEN.process.id));
 
     opened("Process");
 
@@ -5440,12 +5443,12 @@ describe("a conversation's process", () => {
     mount(`/conversations/${OPEN.id}`);
     await theProcess();
 
-    pick("Process", named("Develop"));
+    pick("Process", named("develop"));
 
     await waitFor(() =>
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/process`),
-      ).toEqual({ process: "Develop" }),
+      ).toEqual({ process: whose("develop") }),
     );
   });
 
@@ -5453,9 +5456,8 @@ describe("a conversation's process", () => {
   /// gives it, and picked by its plugin and its id — the list the server
   /// sends rather than one kept here.
   it("offers a plugin's Process under the five, in its own words", async () => {
-    // What the shell's read of the server's list says, said as a share's
-    // bundle says it — see `provided.ts`.
-    knowProvidedProcesses([
+    // What this server lists, said here and on the wire both — see `saying`.
+    const theirs = saying([
       ...PROCESSES,
       {
         plugin: "5e0c9a7e-2f4b-4c1d-8a3e-6b9f0d2c7a41",
@@ -5472,10 +5474,10 @@ describe("a conversation's process", () => {
         ],
         target: false,
         narrowed: false,
-        built_in: null,
+        filled_from_a_pull_request: false,
       },
     ] satisfies ProcessEntry[]);
-    const fetching = theWorkbench(json("Picked"));
+    const fetching = theWorkbench(theirs, json("Picked"));
     mount(`/conversations/${OPEN.id}`);
     await theProcess();
 
@@ -5495,8 +5497,7 @@ describe("a conversation's process", () => {
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/process`),
       ).toEqual({
-        process: "Provided",
-        provided: {
+        process: {
           plugin: "5e0c9a7e-2f4b-4c1d-8a3e-6b9f0d2c7a41",
           id: "two-steps",
         },
@@ -5507,10 +5508,9 @@ describe("a conversation's process", () => {
   /// One of Verkstead's own, written as data, whose plugin is unticked is off
   /// the picker, and the rest of the five stay on it.
   it("leaves off a built-in Process whose plugin is unticked", async () => {
-    knowProvidedProcesses(
-      offeringOnly(["Develop", "Investigate", "Review", "FixMergeIssues"]),
+    theWorkbench(
+      saying(offeringOnly(["develop", "investigate", "review", "fix-merge-issues"])),
     );
-    theWorkbench();
     mount(`/conversations/${OPEN.id}`);
     await theProcess();
 
@@ -5518,14 +5518,14 @@ describe("a conversation's process", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByRole("option", { name: named("Develop") }),
+        screen.getByRole("option", { name: named("develop") }),
       ).toBeTruthy(),
     );
     expect(
-      screen.queryByRole("option", { name: named("Tinker") }),
+      screen.queryByRole("option", { name: named("tinker") }),
     ).toBeNull();
     expect(
-      screen.getByRole("option", { name: named("Investigate") }),
+      screen.getByRole("option", { name: named("investigate") }),
     ).toBeTruthy();
   });
 
@@ -5538,7 +5538,7 @@ describe("a conversation's process", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
     await theProcess();
 
-    pick("Process", named("Develop"));
+    pick("Process", named("develop"));
 
     const said = await waitFor(() =>
       screen.getByText(PROCESS_REFUSAL.NotDrafting),
@@ -5558,7 +5558,7 @@ describe("a conversation's process", () => {
     mount(`/conversations/${OPEN.id}`);
 
     expect((await theProcess()).disabled).toBe(true);
-    expect(showing("Process")).toBe(named("Develop"));
+    expect(showing("Process")).toBe(named("develop"));
   });
 
   /// And a draft from before there were Processes reads Review off the pull
@@ -5572,9 +5572,9 @@ describe("a conversation's process", () => {
     mount(`/conversations/${HOLDING.id}`);
 
     await theProcess();
-    expect(showing("Process")).toBe(named("Review"));
+    expect(showing("Process")).toBe(named("review"));
     expect(HOLDING.worktree).toBeNull();
-    expect(OFFERED).toContain("Review");
+    expect(OFFERED).toContainEqual({ process: whose("review") });
   });
 });
 
@@ -6682,7 +6682,7 @@ describe("the agent trigger", () => {
   /// sends no Grilling picker for the trigger to be waiting on.
   it("says nothing about a role the process does not declare", async () => {
     theWorkbenchWith({
-      process: "Review",
+      process: whose("review"),
       pairings: pairedAs(OPEN.pairings, {
         review: { Under: onRole(OPEN, "implementation") },
       }).filter((role) => role.role !== "grilling"),
@@ -6704,7 +6704,7 @@ describe("the pickers a conversation's process draws", () => {
   /// Develop uses all three, and with only Develop landed it is the panel every
   /// draft gets.
   it("draws all three under Develop", async () => {
-    theWorkbenchWith({ process: "Develop" });
+    theWorkbenchWith({ process: whose("develop") });
     const { container } = mount(`/conversations/${OPEN.id}`);
     await openAgent(container);
 
@@ -6717,7 +6717,7 @@ describe("the pickers a conversation's process draws", () => {
   /// and nothing else.
   it("draws no grilling picker under Review", async () => {
     theWorkbenchWith({
-      process: "Review",
+      process: whose("review"),
       pairings: OPEN.pairings.filter((role) => role.role !== "grilling"),
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -6734,7 +6734,7 @@ describe("the pickers a conversation's process draws", () => {
   /// that runs no session is offered nowhere on this Process.
   it("offers no row that runs nothing on a Review", async () => {
     theWorkbenchWith({
-      process: "Review",
+      process: whose("review"),
       pairings: OPEN.pairings.filter((role) => role.role !== "grilling"),
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -6743,14 +6743,14 @@ describe("the pickers a conversation's process draws", () => {
     await waitFor(() => picker("Review"));
 
     expect(offers("Review")).toEqual(READINGS);
-    expect(OFFERED).toContain("Review");
+    expect(OFFERED).toContainEqual({ process: whose("review") });
   });
 
   /// And the two that keep theirs still have it, which is what makes the row
   /// above a fact about the Process rather than about the picker.
   it("keeps the no-session row on Develop and on Tinker", async () => {
-    for (const process of ["Develop", "Tinker"] satisfies Process[]) {
-      theWorkbenchWith({ process });
+    for (const id of ["develop", "tinker"]) {
+      theWorkbenchWith({ process: whose(id) });
       const { container, unmount } = mount(`/conversations/${OPEN.id}`);
       await openAgent(container);
 
@@ -6767,7 +6767,7 @@ describe("the pickers a conversation's process draws", () => {
   /// role to run.
   it("draws no grilling picker under Tinker", async () => {
     theWorkbenchWith({
-      process: "Tinker",
+      process: whose("tinker"),
       pairings: OPEN.pairings.filter((role) => role.role !== "grilling"),
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -6777,7 +6777,7 @@ describe("the pickers a conversation's process draws", () => {
     expect(picker("Review")).toBeTruthy();
     expect(screen.queryByLabelText("Grilling")).toBeNull();
 
-    expect(OFFERED).toContain("Tinker");
+    expect(OFFERED).toContainEqual({ process: whose("tinker") });
   });
 
   /// And one under an Investigate: one role, so one picker — and one picker is
@@ -6786,7 +6786,7 @@ describe("the pickers a conversation's process draws", () => {
   /// here to pick a review away on and nothing for the press to wait for.
   it("draws one picker under a process that uses one role", async () => {
     theWorkbenchWith({
-      process: "Investigate",
+      process: whose("investigate"),
       pairings: OPEN.pairings.filter(
         (role) => role.role === "implementation",
       ),
@@ -6798,7 +6798,7 @@ describe("the pickers a conversation's process draws", () => {
     expect(screen.queryByLabelText("Implementation")).toBeNull();
     expect(screen.queryByLabelText("Review")).toBeNull();
 
-    expect(OFFERED).toContain("Investigate");
+    expect(OFFERED).toContainEqual({ process: whose("investigate") });
   });
 
   /// And one under a **Fix Merge Issues**, which is the other Process run under
@@ -6807,7 +6807,7 @@ describe("the pickers a conversation's process draws", () => {
   /// drawn for one — and so no *No review* row anywhere on it either.
   it("draws one picker under a Fix Merge Issues, and no review row", async () => {
     theWorkbenchWith({
-      process: "FixMergeIssues",
+      process: whose("fix-merge-issues"),
       pairings: OPEN.pairings.filter(
         (role) => role.role === "implementation",
       ),
@@ -6825,7 +6825,7 @@ describe("the pickers a conversation's process draws", () => {
     expect(picker("Agent").id).toBe("implementation-pairing");
     expect(offers("Agent")).toEqual(READINGS);
 
-    expect(OFFERED).toContain("FixMergeIssues");
+    expect(OFFERED).toContainEqual({ process: whose("fix-merge-issues") });
   });
 });
 
@@ -6845,7 +6845,7 @@ describe("the agent dropdown on a conversation", () => {
   // `the_roles_a_conversation_is_run_under_are_its_processs_own` in the
   // server suite, which is where that list comes from.
   const INVESTIGATING: Partial<ConversationView> = {
-    process: "Investigate",
+    process: whose("investigate"),
     pairings: OPEN.pairings.filter(
       (role) => role.role === "implementation",
     ),
@@ -7853,7 +7853,7 @@ describe("starting the work", () => {
   /// and says *both roles* — and waits on a target besides, which is the same
   /// table's other column.
   it("names two roles and a target where the process has them", async () => {
-    theWorkbenchWith({ process: "Review", ready_to_grill: false });
+    theWorkbenchWith({ process: whose("review"), ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
@@ -7866,7 +7866,7 @@ describe("starting the work", () => {
   /// And a Process with one role says one, which is an Investigate: the words
   /// are counted off the table rather than written into the sentence.
   it("names one role where the process has one", async () => {
-    theWorkbenchWith({ process: "Investigate", ready_to_grill: false });
+    theWorkbenchWith({ process: whose("investigate"), ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
@@ -7880,7 +7880,7 @@ describe("starting the work", () => {
   /// columns of the table read together: it is pointed at work already somewhere
   /// else the way a Review is, and nothing about it reviews anything.
   it("names one role and a target on a fix merge issues", async () => {
-    theWorkbenchWith({ process: "FixMergeIssues", ready_to_grill: false });
+    theWorkbenchWith({ process: whose("fix-merge-issues"), ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
@@ -7901,7 +7901,7 @@ describe("starting the work", () => {
   /// a first press has been stopped over nothing.
   it("posts to the take-up route where the process is a review", async () => {
     const fetching = theWorkbenchWith(
-      { process: "Review" },
+      { process: whose("review") },
       whenever(
         `/api/ui/conversations/${OPEN.id}/take-up`,
         json("TakenUp" satisfies TakenUp),
@@ -7931,7 +7931,7 @@ describe("starting the work", () => {
   /// somewhere else — `processes.ts`'s list — rather than which of the two it is.
   it("posts to the take-up route where the process is a fix merge issues", async () => {
     const fetching = theWorkbenchWith(
-      { process: "FixMergeIssues" },
+      { process: whose("fix-merge-issues") },
       whenever(
         `/api/ui/conversations/${OPEN.id}/take-up`,
         json("TakenUp" satisfies TakenUp),
@@ -7974,7 +7974,7 @@ describe("starting the work", () => {
     "says in words what a refused review means",
     async (outcome, said) => {
       theWorkbenchWith(
-        { process: "Review" },
+        { process: whose("review") },
         whenever(
           `/api/ui/conversations/${OPEN.id}/take-up`,
           json(outcome as TakenUp),
@@ -7997,7 +7997,7 @@ describe("starting the work", () => {
   /// at work on it rather than a second wrap-up over its branch.
   it("leads to the conversation still at work on the pull request", async () => {
     theWorkbenchWith(
-      { process: "Review" },
+      { process: whose("review") },
       whenever(
         `/api/ui/conversations/${OPEN.id}/take-up`,
         json({ AlreadyHeld: { conversation: 77 } } satisfies TakenUp),
@@ -8026,7 +8026,7 @@ describe("starting the work", () => {
   /// which is what says the losses are agreed to.
   it("names what a start would discard, and presses through it", async () => {
     const fetching = theWorkbenchWith(
-      { process: "Review" },
+      { process: whose("review") },
       whenever(
         `/api/ui/conversations/${OPEN.id}/take-up`,
         json({
@@ -8073,7 +8073,7 @@ describe("starting the work", () => {
   /// checkout back by where it is.
   it("names a checkout of the human's own, and switches it on the press after", async () => {
     const fetching = theWorkbenchWith(
-      { process: "FixMergeIssues" },
+      { process: whose("fix-merge-issues") },
       whenever(
         `/api/ui/conversations/${OPEN.id}/take-up`,
         json({
@@ -8141,7 +8141,7 @@ describe("starting the work", () => {
     let pressed = 0;
 
     const fetching = theWorkbenchWith(
-      { process: "FixMergeIssues" },
+      { process: whose("fix-merge-issues") },
       whenever(
         `/api/ui/conversations/${OPEN.id}/take-up`,
         () => json(answers[Math.min(pressed++, answers.length - 1)])(),
@@ -8186,7 +8186,7 @@ describe("starting the work", () => {
   /// And a switch git refused is said in git's own words, which name the files.
   it("says a refused switch in git's words", async () => {
     theWorkbenchWith(
-      { process: "FixMergeIssues" },
+      { process: whose("fix-merge-issues") },
       whenever(
         `/api/ui/conversations/${OPEN.id}/take-up`,
         json({
@@ -8218,7 +8218,7 @@ describe("starting the work", () => {
   /// four conversations sharing one.
   it("names a whole stack of them as several", async () => {
     theWorkbenchWith(
-      { process: "FixMergeIssues" },
+      { process: whose("fix-merge-issues") },
       whenever(
         `/api/ui/conversations/${OPEN.id}/take-up`,
         json({
@@ -12485,7 +12485,7 @@ describe("steering a conversation", () => {
         ready_to_stop: true,
         working: true,
         pinned: WRAPPING.pinned,
-        process: "FixMergeIssues",
+        process: whose("fix-merge-issues"),
       },
       whenever(STEERING, PRESSED, "POST"),
     );
@@ -20789,7 +20789,7 @@ describe("the configuration on the brief's pane", () => {
   /// different things.
   it("says whichever process the conversation is", async () => {
     theGrillingStanding({
-      process: "Review",
+      process: whose("review"),
       pairings: GRILLING.pairings.filter(
         (role) => role.role !== "grilling",
       ),
@@ -20805,7 +20805,7 @@ describe("the configuration on the brief's pane", () => {
   /// that will not exist — beside a composer that has stopped asking for one.
   it("names only the roles the process is run under", async () => {
     theGrillingStanding({
-      process: "Review",
+      process: whose("review"),
       pairings: GRILLING.pairings.filter(
         (role) => role.role !== "grilling",
       ),
@@ -20823,7 +20823,7 @@ describe("the configuration on the brief's pane", () => {
   /// And all three under Develop, which is the Process every draft gets while
   /// it is the only one offered.
   it("names all three where the process uses all three", async () => {
-    theGrillingStanding({ process: "Develop" });
+    theGrillingStanding({ process: whose("develop") });
     await openBrief(GRILLING);
 
     await waitFor(() =>
@@ -20839,17 +20839,15 @@ describe("the configuration on the brief's pane", () => {
   /// model there is nothing else to tell one account from another.
   it("says the half there is where a pairing named no model", async () => {
     theGrillingStanding({
-      pairings: pairedAs(OPEN.pairings, {
+      pairings: pairedAs(GRILLING.pairings, {
         implementation: {
-          Under: {
-            ...onRole(OPEN, "implementation"),
-            profile: {
-              ...onRole(OPEN, "implementation").profile,
-              broken: "ConfigMissing",
-            },
-          },
+          Under: { ...onRole(GRILLING, "implementation"), model: null },
         },
       }),
+    });
+    await openBrief(GRILLING);
+
+    expect(configuration().Implementation).toBe("Claude Code · opus");
   });
 
   /// And the account's name is dropped where its backend has one account saved:
