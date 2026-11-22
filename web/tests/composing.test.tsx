@@ -82,6 +82,7 @@ import {
   keep,
   leaveRefusals,
   stored,
+  written,
   type Composed,
 } from "../src/workbench/composing";
 import {
@@ -1816,6 +1817,105 @@ describe("the target a compose page is pointed at", () => {
     );
   });
 
+  /// A brief that is nothing but a pull request URL picks the Repo it is a
+  /// clone of and Fix merge issues, and the Target field is drawn filled.
+  it("picks the repo and the process for a brief that is one url", async () => {
+    const LIMITER = REPOS[1]!;
+    const fetching = theWorkbench(
+      ...REMEMBERED,
+      json(null),
+      whenever(
+        "/api/ui/repos",
+        json(
+          REPOS.map((repo) =>
+            repo.id === LIMITER.id
+              ? { ...repo, github: "tobico/limiter" }
+              : repo,
+          ),
+        ),
+      ),
+    );
+    const { container } = mount("/compose");
+
+    const box = await composing(container);
+    // The list landed, which is what the fill picks the Repo off.
+    await waitFor(() =>
+      expect(askedFor(fetching, "/api/ui/repos")).toBeGreaterThan(0),
+    );
+
+    fireEvent.input(box, {
+      target: { value: "https://github.com/tobico/limiter/pull/41\n" },
+    });
+
+    await waitFor(() => expect(stored().repo).toBe(LIMITER.id));
+    expect(stored().process).toBe("FixMergeIssues");
+
+    // And the panel redraws itself for the Process: the Target field, filled.
+    await openRepo(container);
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("Target") as HTMLInputElement).value,
+      ).toBe("https://github.com/tobico/limiter/pull/41"),
+    );
+  });
+
+  /// The draft a press makes fills its Repo from the same Brief on the server,
+  /// where nothing yet says the page's Repo was picked by hand — so a Repo
+  /// picked over the page's fill is sent back after the Brief, and one the
+  /// fill picked is not.
+  it("puts back a repo picked over the fill on the draft it creates", async () => {
+    const url = "https://github.com/tobico/limiter/pull/41";
+    const press = async (repo: number) => {
+      localStorage.clear();
+      composedAsReview({
+        brief: url,
+        target: url,
+        filled: url,
+        repo,
+        repoFilled: REPOS[1]!.id,
+        process: "FixMergeIssues",
+        processFilled: "FixMergeIssues",
+      });
+      const fetching = creating(
+        whenever(
+          `/api/ui/conversations/${OPEN.id}/process`,
+          json("Picked"),
+          "POST",
+        ),
+        whenever(
+          `/api/ui/conversations/${OPEN.id}/target`,
+          json("Recorded"),
+          "POST",
+        ),
+        whenever(
+          `/api/ui/conversations/${OPEN.id}/repo`,
+          json("Switched"),
+          "POST",
+        ),
+      );
+      const { container, unmount } = mount("/compose");
+
+      await composing(container);
+      fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
+      await waitFor(() =>
+        expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/process`)).toBe(
+          1,
+        ),
+      );
+      unmount();
+
+      return fetching;
+    };
+
+    const picked = await press(REPOS[0]!.id);
+    expect(sent(picked, `/api/ui/conversations/${OPEN.id}/repo`)).toEqual({
+      repo_id: REPOS[0]!.id,
+    });
+
+    const filled = await press(REPOS[1]!.id);
+    expect(writes(filled, `/api/ui/conversations/${OPEN.id}/repo`)).toBe(0);
+  });
+
   /// And it lets go the moment the human types in the field, whatever the box
   /// says afterwards: correcting its own fill is not the same as overwriting
   /// theirs.
@@ -3324,6 +3424,40 @@ describe("moving a saved draft to another device", () => {
     expect(writes(fetching, at(`/conversations/${MOVED}/target`))).toBe(0);
   });
 
+  /// A Brief that is one pull request URL is filled from over there as it is
+  /// saved, so the Repo picked for the move and a Develop are both sent after
+  /// it, and stand as the human's.
+  it("keeps the repo it was moved onto, and develop, under a url brief", async () => {
+    const url = "https://github.com/tobico/limiter/pull/41";
+    const fetching = moving(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}`,
+        json({
+          ...OPEN,
+          timeline: OPEN.timeline.map((event) =>
+            "Brief" in event
+              ? { ...event, Brief: { ...event.Brief, markdown: url } }
+              : event,
+          ),
+        }),
+      ),
+      whenever(at(`/conversations/${MOVED}/repo`), json("Switched"), "POST"),
+      whenever(at(`/conversations/${MOVED}/process`), json("Picked"), "POST"),
+    );
+    const { container } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[1]!);
+
+    await waitFor(() => expect(writes(fetching, moved)).toBe(1));
+    expect(sent(fetching, at(`/conversations/${MOVED}/repo`))).toEqual({
+      repo_id: THEIRS[1]!.id,
+    });
+    expect(sent(fetching, at(`/conversations/${MOVED}/process`))).toEqual({
+      process: "Develop",
+    });
+  });
+
   /// And its MCP servers, by name: a name means the declaration of that name
   /// wherever the work goes, so the draft over there is given the same ones —
   /// a chip already saying its server is gone included, the reference being
@@ -3719,6 +3853,7 @@ describe("registering a repo from the Repo dropdown", () => {
     default_branch: "main",
     author: null,
     author_unpicked: false,
+    github: null,
   };
 
   /// The workbench with the registration answered however the test says.
@@ -4453,6 +4588,7 @@ describe("the two repo rows on the picked device", () => {
     default_branch: "main",
     author: null,
     author_unpicked: false,
+    github: null,
   };
 
   /// And one a create made there, in the same place and for the same reason.
@@ -6058,6 +6194,7 @@ describe("what a device holds between visits", () => {
     const held: Composed = {
       device: null,
       repo: 2,
+      repoFilled: null,
       brief: "Make the widget",
       branch: "widget-work",
       target: "#41",
@@ -6067,6 +6204,7 @@ describe("what a device holds between visits", () => {
         { repo_id: 3, mode: "ReadWrite", base: "trunk", branch: "beside" },
       ],
       process: "Develop",
+      processFilled: null,
       grilling: "1:opus",
       implementation: "2:fable",
       review: null,
@@ -6340,6 +6478,7 @@ describe("the repositories the cluster could clone", () => {
     default_branch: "main",
     author: "work",
     author_unpicked: false,
+    github: null,
   };
 
   /// The cluster with the member offering one repository to clone, and whatever
@@ -6485,5 +6624,112 @@ describe("the repositories the cluster could clone", () => {
     await waitFor(() => screen.getByText(said));
     expect(held(WHERE)).toBe("/mnt/code");
     expect(stored().repo).toBeNull();
+  });
+});
+
+/// A brief that is one pull request URL and nothing else picks the Repo whose
+/// origin it is in and the Fix Merge Issues process — while each is still the
+/// fill's, and never over a pick.
+describe("a brief that is one pull request url", () => {
+  const repo = (id: number, github: string | null): RepoEntry => ({
+    id,
+    name: `repo-${id}`,
+    path: `/srv/repo-${id}`,
+    default_branch: "main",
+    author: null,
+    author_unpicked: false,
+    github,
+  });
+  const LISTED = [
+    repo(1, null),
+    repo(2, "tobico/limiter"),
+    repo(3, "Tobico/Askance"),
+    repo(4, "tobico/limiter"),
+  ];
+  const URL = "https://github.com/tobico/askance/pull/41";
+
+  it("picks the repo and the process, and fills the target", () => {
+    const filled = written(blank(), `${URL}\n`, LISTED);
+
+    expect(filled.repo).toBe(3);
+    expect(filled.process).toBe("FixMergeIssues");
+    expect(filled.target).toBe(URL);
+  });
+
+  it("goes on correcting what it picked as the url changes", () => {
+    const first = written(
+      {
+        ...blank(),
+        base: "release",
+        companions: [
+          { repo_id: 2, mode: "ReadOnly", base: "main", branch: "" },
+        ],
+      },
+      URL,
+      LISTED,
+    );
+    const second = written(
+      first,
+      "https://github.com/tobico/limiter/pull/7",
+      LISTED,
+    );
+
+    expect(second.repo).toBe(2);
+    expect(second.target).toBe("https://github.com/tobico/limiter/pull/7");
+    // Moved the way a pick moves it: the base back to the rule, and the
+    // companion that became the repo gone.
+    expect(second.base).toBeNull();
+    expect(second.companions).toEqual([]);
+  });
+
+  it("keeps the clone already picked, and takes the first otherwise", () => {
+    const limiter = "https://github.com/tobico/limiter/pull/7";
+
+    expect(written(blank(), limiter, LISTED).repo).toBe(2);
+
+    const picked = { ...blank(), repo: 4, repoFilled: 4 };
+    expect(written(picked, limiter, LISTED).repo).toBe(4);
+  });
+
+  it("leaves a repo and a process picked by hand standing", () => {
+    const picked: Composed = { ...blank(), repo: 1, process: "Review" };
+    const filled = written(picked, URL, LISTED);
+
+    expect(filled.repo).toBe(1);
+    expect(filled.process).toBe("Review");
+    expect(filled.target).toBe(URL);
+  });
+
+  it("moves nothing where no repo is a clone of it", () => {
+    const picked: Composed = { ...blank(), repo: 1, repoFilled: 1 };
+    const filled = written(
+      picked,
+      "https://github.com/someone/else/pull/1",
+      LISTED,
+    );
+
+    expect(filled.repo).toBe(1);
+    expect(filled.process).toBe("FixMergeIssues");
+  });
+
+  it("picks neither for prose around the url, or for a bare number", () => {
+    for (const brief of [`Wrap up ${URL} please.`, "#41"]) {
+      const filled = written(blank(), brief, LISTED);
+
+      expect(filled.repo, brief).toBeNull();
+      expect(filled.process, brief).toBeNull();
+      expect(filled.target, brief).not.toBe("");
+    }
+  });
+
+  it("undoes nothing when the url leaves the brief", () => {
+    const filled = written(
+      written(blank(), URL, LISTED),
+      "Something else.",
+      LISTED,
+    );
+
+    expect(filled.repo).toBe(3);
+    expect(filled.process).toBe("FixMergeIssues");
   });
 });

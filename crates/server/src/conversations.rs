@@ -731,30 +731,102 @@ async fn take_handoff(state: &AppState, conversation_id: i64) -> Result<()> {
 
 /// Save what the human has written into the Brief.
 ///
-/// **And fill an empty Target out of it.** A pull request URL or a `#number` is
+/// **And fill the Target out of it.** A pull request URL or a `#number` is
 /// unambiguous anywhere in prose, so a Brief that names one names the work this
 /// Conversation is about — and the field is where Start looks, so a page
 /// showing it empty over a name the press would have found would be the field
 /// lying about what is going to happen.
 ///
-/// Never over what is already there. The human's own typing wins: a branch
-/// somebody named survives a URL arriving in the Brief afterwards, which is
-/// [`store::fill_target`]'s whole job. And only where the save landed — a Brief
-/// refused for being frozen is one whose Target froze with it.
-pub(crate) async fn save_brief(pool: &SqlitePool, id: i64, markdown: &str) -> Result<BriefSaved> {
+/// **A Brief that is one pull request URL and nothing else fills two more**: the
+/// Repo, onto the registered one whose origin is the URL's repository, and the
+/// Process, with Fix Merge Issues. Pasting a pull request and nothing besides is
+/// asking for it to be made mergeable; prose about one is not, and nor is a
+/// bare `#41`, which names no repository. See ADR-0020.
+///
+/// Never over what the human picked. Each field is the fill's while it holds
+/// what the fill last wrote — so it corrects itself as the URL is typed — and
+/// the human's own from the moment they write in it, which is
+/// [`store::fill_target`]'s, [`store::fill_repo`]'s and
+/// [`store::fill_process`]'s whole job. Nothing is undone when the name leaves
+/// the Brief. And only where the save landed — a Brief refused for being frozen
+/// is one whose fields froze with it.
+pub(crate) async fn save_brief(
+    pool: &SqlitePool,
+    config: &Config,
+    id: i64,
+    markdown: &str,
+) -> Result<BriefSaved> {
     let saved = match store::save_brief(pool, id, markdown).await? {
         store::Edited::Saved => BriefSaved::Saved,
         store::Edited::NoSuchConversation => BriefSaved::NoSuchConversation,
         store::Edited::NotDrafting => BriefSaved::NotDrafting,
     };
 
-    if saved == BriefSaved::Saved
-        && let Some(named) = crate::targets::pull_request_in(markdown)
-    {
+    if saved != BriefSaved::Saved {
+        return Ok(saved);
+    }
+
+    if let Some(named) = crate::targets::pull_request_in(markdown) {
         store::fill_target(pool, id, &written(&named)).await?;
     }
 
+    if let Some(repository) =
+        crate::targets::pull_request_named(markdown).and_then(|named| named.repository)
+    {
+        fill_repo(pool, config, id, &repository).await?;
+        store::fill_process(pool, id, store::Process::FixMergeIssues).await?;
+    }
+
     Ok(saved)
+}
+
+/// Move a Draft onto the registered Repo whose origin is `repository` on GitHub,
+/// where its Repo is still the Brief's to fill.
+///
+/// **By origin and nothing else**, compared without regard to case: a directory
+/// name is not a repository, which is [`crate::matching`]'s stance. Where two
+/// registered Repos are clones of it, the one the Draft is already on stays,
+/// and otherwise the first the registry lists is taken.
+///
+/// No Repo with that origin leaves the Draft where it is, and so does every
+/// refusal a move would meet — a companion under another Author, an adoption, a
+/// branch already made — without a word: Start names a mismatch between the
+/// Repo and the pull request by itself, should the human press on regardless.
+async fn fill_repo(pool: &SqlitePool, config: &Config, id: i64, repository: &str) -> Result<()> {
+    let Some(standing) = store::repo_to_fill(pool, id).await? else {
+        return Ok(());
+    };
+
+    let registered = store::registered_repos(pool).await?;
+    let repository = repository.to_owned();
+    let matching: Vec<i64> = tokio::task::spawn_blocking(move || {
+        registered
+            .into_iter()
+            .filter(|repo| {
+                crate::repos::origin(&repo.path)
+                    .and_then(|origin| crate::matching::github_repository(&origin))
+                    .is_some_and(|theirs| theirs.eq_ignore_ascii_case(&repository))
+            })
+            .map(|repo| repo.id)
+            .collect()
+    })
+    .await?;
+
+    let onto = if matching.contains(&standing) {
+        standing
+    } else if let Some(&first) = matching.first() {
+        first
+    } else {
+        return Ok(());
+    };
+
+    if onto != standing && other_author_onto(pool, config, id, onto).await?.is_some() {
+        return Ok(());
+    }
+
+    store::fill_repo(pool, id, onto).await?;
+
+    Ok(())
 }
 
 /// A pull request the Brief named, written back into the Target field the way
@@ -1213,19 +1285,8 @@ pub(crate) async fn switch_repo(
     id: i64,
     repo_id: i64,
 ) -> Result<RepoSwitched> {
-    if let (Some(conversation), Some(onto)) = (
-        store::load_conversation(pool, id).await?,
-        store::registered_repo(pool, repo_id).await?,
-    ) {
-        let kept = conversation
-            .companions
-            .iter()
-            .map(|companion| &companion.repo)
-            .filter(|companion| companion.id != onto.id);
-
-        if let Some(other) = other_author(config, &onto, kept) {
-            return Ok(RepoSwitched::OtherAuthor(other));
-        }
+    if let Some(other) = other_author_onto(pool, config, id, repo_id).await? {
+        return Ok(RepoSwitched::OtherAuthor(other));
     }
 
     Ok(match store::switch_repo(pool, id, repo_id).await? {
@@ -1235,6 +1296,31 @@ pub(crate) async fn switch_repo(
         store::Switched::Adopting => RepoSwitched::Adopting,
         store::Switched::NoSuchRepo => RepoSwitched::NoSuchRepo,
     })
+}
+
+/// The companion a move onto `repo_id` would leave under another Author than
+/// that Repo's, where there is one: every companion is kept but the one the
+/// Repo becomes. See [`other_author`].
+async fn other_author_onto(
+    pool: &SqlitePool,
+    config: &Config,
+    id: i64,
+    repo_id: i64,
+) -> Result<Option<OtherAuthor>> {
+    let (Some(conversation), Some(onto)) = (
+        store::load_conversation(pool, id).await?,
+        store::registered_repo(pool, repo_id).await?,
+    ) else {
+        return Ok(None);
+    };
+
+    let kept = conversation
+        .companions
+        .iter()
+        .map(|companion| &companion.repo)
+        .filter(|companion| companion.id != onto.id);
+
+    Ok(other_author(config, &onto, kept))
 }
 
 /// The Processes a Conversation can actually be started on: the ones whose

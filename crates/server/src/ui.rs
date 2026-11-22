@@ -658,6 +658,9 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         )
         .route("/api/ui/profiles", get(profiles).post(create_profile))
         .route("/api/ui/profiles/{id}", post(edit_profile))
+        // Setting a Profile up on this device, a press of its own rather than
+        // a side effect of a save — see [`crate::profiles::bind`].
+        .route("/api/ui/profiles/{id}/bind", post(bind_profile))
         // Removing is a POST to a route of its own, as closing a Set unanswered
         // is: the viewer speaks one method, and the thing being done is named in
         // the path rather than in the verb.
@@ -1233,13 +1236,24 @@ async fn repos(State(state): State<AppState>) -> HttpResponse {
         }
     };
 
-    let config = state.settings.config();
-    let rows: Vec<RepoEntry> = repos
-        .into_iter()
-        .map(|repo| crate::repos::entry(repo, config.authors()))
-        .collect();
+    // Each row asks git for its origin, so the list is read off the runtime's
+    // own threads.
+    let authors = state.settings.config().authors().to_vec();
+    let rows = tokio::task::spawn_blocking(move || {
+        repos
+            .into_iter()
+            .map(|repo| crate::repos::listed(repo, &authors))
+            .collect::<Vec<RepoEntry>>()
+    })
+    .await;
 
-    Json(rows).into_response()
+    match rows {
+        Ok(rows) => Json(rows).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "reading the registered Repos' origins failed");
+            unavailable("The registered repos couldn't be read.")
+        }
+    }
 }
 
 /// `GET /api/ui/repos/clonable` — every **Clonable Repo**: what the other
@@ -4843,7 +4857,8 @@ async fn save_brief(
         return Json(verkstead_render::BriefSaved::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::save_brief(&state.pool, id, &edit.markdown).await {
+    let config = state.settings.config();
+    match crate::conversations::save_brief(&state.pool, &config, id, &edit.markdown).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "saving a Brief failed");
@@ -6223,6 +6238,30 @@ async fn edit_profile(
         Err(error) => {
             tracing::error!(error = ?error, profile_id = %id, "rewriting an Agent Profile failed");
             unavailable("The agent profile couldn't be saved.")
+        }
+    }
+}
+
+/// A Profile bound on other devices set up on this one, at the paths sent —
+/// see [`crate::profiles::bind`]. Answered as a save is, the paths judged and
+/// refused in the same words.
+async fn bind_profile(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(account): Json<verkstead_render::ProfileAccount>,
+) -> HttpResponse {
+    match crate::profiles::bind(&state.pool, &id, &account).await {
+        Ok(Some(outcome)) => {
+            moved_profiles(&state, outcome == verkstead_render::ProfileSaved::Saved);
+            Json(outcome).into_response()
+        }
+        Ok(None) => refused(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::new("That account is for a different agent than this profile."),
+        ),
+        Err(error) => {
+            tracing::error!(error = ?error, profile_id = %id, "binding an Agent Profile here failed");
+            unavailable("The agent profile couldn't be set up on this device.")
         }
     }
 }

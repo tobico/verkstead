@@ -446,6 +446,7 @@ function repo(id: number, name: string): RepoEntry {
     default_branch: "main",
     author: "work",
     author_unpicked: false,
+    github: null,
   };
 }
 

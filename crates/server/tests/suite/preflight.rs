@@ -349,6 +349,123 @@ impl Verkstead {
         )
         .await
     }
+
+    /// And the same reading where it could not be taken: the status, and the
+    /// sentence the dialog puts after *That device couldn't be checked.*
+    async fn preflight_refused(&self, conversation: i64, device: &str) -> (StatusCode, String) {
+        let path = format!("/api/ui/conversations/{conversation}/preflight/{device}");
+
+        let answered = self
+            .workbench
+            .clone()
+            .oneshot(Request::builder().uri(&path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        let status = answered.status();
+        let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+        let said = String::from_utf8_lossy(&bytes).into_owned();
+
+        assert_ne!(status, StatusCode::OK, "GET {path} was taken: {said}");
+
+        let refusal: verkstead_schema::ApiError = serde_json::from_str(&said)
+            .unwrap_or_else(|why| panic!("GET {path} answered {said}: {why}"));
+
+        (status, refusal.error)
+    }
+}
+
+/// A member that is not this checkout's Verkstead: a real identity behind a real
+/// Peer Listener and the Member Gate, answering what the link carries out of
+/// `over_the_link` rather than out of a workbench.
+///
+/// **What a newer or a broken Verkstead is, played.** Every B built from this
+/// checkout answers in this checkout's words, so the far end that names a
+/// harness nobody here has heard of — or refuses the question outright — has to
+/// be one whose answers the test states.
+struct StandIn {
+    device: Device,
+    address: SocketAddr,
+
+    /// Held for the length of the test: the identity and the database live in it.
+    _dir: tempfile::TempDir,
+}
+
+impl StandIn {
+    /// Stood up admitting `a`, and written down on `a` as one of its members —
+    /// the same link both ways that [`link`] makes.
+    async fn linked_to(a: &Verkstead, over_the_link: Router) -> StandIn {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let device = Device::stated(dir.path(), B).unwrap();
+        let members = Members::recorded(pool.clone());
+
+        let listener = peer::Listener::bound("127.0.0.1:0".parse().unwrap(), &device)
+            .expect("the loopback on a port the machine picked is free");
+        let address = listener.address();
+        let at = format!("127.0.0.1:{}", address.port());
+
+        let reading = Reading::advertising(no_tailscale(), Platform::Linux, None, vec![at.clone()]);
+
+        tokio::spawn(listener.serving(peer::router(
+            device.clone(),
+            reading,
+            members,
+            Joins::none(),
+            Nudges::new(),
+            over_the_link,
+        )));
+
+        let stand_in = StandIn {
+            device,
+            address,
+            _dir: dir,
+        };
+
+        let (machine, os) = this_machine();
+        record_member(
+            &pool,
+            &Linking {
+                device: a.device.id().to_owned(),
+                name: machine,
+                os,
+                addresses: vec![a.at()],
+                fingerprint: a.device.fingerprint().to_owned(),
+                kept_by: None,
+                version: None,
+                install: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        a.linked_to(
+            &stand_in.device,
+            B_MACHINE,
+            B_OS,
+            vec![format!("127.0.0.1:{}", stand_in.address.port())],
+        )
+        .await;
+
+        stand_in
+    }
+}
+
+/// What a stand-in answers the two questions of a preflight with: its Repos, and
+/// its harnesses.
+fn answering(repos: serde_json::Value, harnesses: (StatusCode, String)) -> Router {
+    Router::new()
+        .route(
+            peer::repos::REPOS,
+            axum::routing::get(move || async move { axum::Json(repos) }),
+        )
+        .route(
+            peer::harnesses::HARNESSES,
+            axum::routing::get(move || async move { harnesses }),
+        )
 }
 
 /// A machine with no Tailscale on it: `verkstead-no-such-tailscale` is a program
@@ -637,6 +754,102 @@ async fn a_harness_the_far_end_has_not_got_is_named_with_its_pairings() {
             harness(PairingRole::Review),
         ],
         "the repository is there and the harness the three Pairings run is not",
+    );
+}
+
+/// A harness the far end names and this device has never heard of is passed
+/// over, and the ones it has heard of are read as ever — which is a member a
+/// release ahead, with an agent type this one does not have yet.
+#[tokio::test]
+async fn a_harness_only_a_newer_member_knows_is_passed_over() {
+    let a = Verkstead::answering(A).await;
+
+    let origin = "https://github.com/you/widgets.git";
+
+    let _b = StandIn::linked_to(
+        &a,
+        answering(
+            serde_json::json!([{
+                "id": 1,
+                "name": "widgets-clone",
+                "path": "/home/you/widgets-clone",
+                "origin": origin,
+            }]),
+            (
+                StatusCode::OK,
+                serde_json::json!([
+                    { "agent_type": "Claude", "there": false },
+                    { "agent_type": "NotYetInvented", "there": true },
+                ])
+                .to_string(),
+            ),
+        ),
+    )
+    .await;
+
+    let here = a.repo("widgets", Some(origin)).await;
+
+    let profile = a.saves("work").await;
+    let conversation = a.conversation(&here, &profile).await;
+
+    let harness = |role| Lacking::Harness {
+        role,
+        profile: Some("work".to_owned()),
+        agent_type: verkstead_render::AgentType::Claude,
+    };
+
+    assert_eq!(
+        a.preflight(conversation, B).await.lacks,
+        vec![
+            harness(PairingRole::Grilling),
+            harness(PairingRole::Implementation),
+            harness(PairingRole::Review),
+        ],
+        "the harness this device knows is read, and the one it does not is no reason to say \
+         the machine is unreachable",
+    );
+}
+
+/// A device that answered, and refused, is not one that is asleep: the reading
+/// could not be taken, and what the far end said is the reason given — never
+/// *unreachable*, which would send the human to wake a machine that is awake.
+#[tokio::test]
+async fn a_device_that_refuses_the_question_is_not_unreachable() {
+    let a = Verkstead::answering(A).await;
+
+    let origin = "https://github.com/you/widgets.git";
+
+    let _b = StandIn::linked_to(
+        &a,
+        answering(
+            serde_json::json!([{
+                "id": 1,
+                "name": "widgets-clone",
+                "path": "/home/you/widgets-clone",
+                "origin": origin,
+            }]),
+            (StatusCode::INTERNAL_SERVER_ERROR, String::new()),
+        ),
+    )
+    .await;
+
+    let here = a.repo("widgets", Some(origin)).await;
+
+    let profile = a.saves("work").await;
+    let conversation = a.conversation(&here, &profile).await;
+
+    let (status, said) = a.preflight_refused(conversation, B).await;
+
+    assert_eq!(
+        status,
+        StatusCode::BAD_GATEWAY,
+        "the far end's trouble: {said}"
+    );
+    assert!(
+        said.starts_with(&format!(
+            "{B_MACHINE} refused it: 500 Internal Server Error."
+        )),
+        "the machine is named with what it answered: {said}",
     );
 }
 

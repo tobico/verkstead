@@ -637,6 +637,57 @@ describe("a member's accounts", () => {
       memory: MIRROR.memory,
     });
   });
+
+  /// And it can be set up on this device instead, by a press of its own: the
+  /// paths open empty, being this machine's rather than the ones drawn above,
+  /// and go to the bind rather than the save.
+  it("sets one up on this device at the paths typed", async () => {
+    const fetching = serving(
+      whenever("/api/ui/profiles", json(CLUSTER)),
+      whenever(`/api/ui/profiles/${MIRROR.id}/bind`, json("Saved"), "POST"),
+    );
+    mountPane(MIRROR.id);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Set up on this device" }),
+    );
+
+    const dir = document.querySelector<HTMLInputElement>("#bind-claude_dir")!;
+    const config = document.querySelector<HTMLInputElement>(
+      "#bind-config_file",
+    )!;
+
+    expect(dir.value).toBe("");
+    expect(dir.readOnly).toBe(false);
+
+    fireEvent.input(dir, { target: { value: "/home/you/.claude-work" } });
+    fireEvent.input(config, {
+      target: { value: "/home/you/.claude-work.json" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Set up on this device" }),
+    );
+
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/profiles/${MIRROR.id}/bind`)).toEqual({
+        agent_type: "Claude",
+        claude_dir: "/home/you/.claude-work",
+        config_file: "/home/you/.claude-work.json",
+      }),
+    );
+  });
+
+  /// One bound here has nothing to set up.
+  it("offers no set-up over one bound here", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountPane(CLUSTER[0]!.id);
+
+    await waitFor(() => screen.getByLabelText("Name"));
+
+    expect(
+      screen.queryByRole("button", { name: "Set up on this device" }),
+    ).toBeNull();
+  });
 });
 
 /// Under the card's own line, in a cluster, a line per device: this one first,

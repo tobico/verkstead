@@ -185,6 +185,7 @@ import {
   elsewhere,
   keep,
   leaveRefusals,
+  moved,
   on,
   stored,
   written,
@@ -202,7 +203,7 @@ import {
   uses,
   type Role,
 } from "./processes";
-import { namesPullRequest } from "./targets";
+import { namesPullRequest, pullRequestRepository } from "./targets";
 import { useZero } from "./zero";
 
 /// The page: the conversations down the left and the composer beside them.
@@ -373,6 +374,22 @@ function Compose(props: {
     queryFn: () => listRepos(device()),
     freshness: { reconcile: "id" },
   }));
+
+  // And the Brief's fill read again whenever the list lands: a pull request URL
+  // pasted before it had arrived had no Repo to be matched against, and nothing
+  // else would read the box again until somebody typed in it.
+  createEffect(() => {
+    const listed = repos.data;
+    if (listed === undefined) {
+      return;
+    }
+
+    setState((was) =>
+      was.adopting === null && pullRequestRepository(was.brief) !== null
+        ? written(was, was.brief, listed)
+        : was,
+    );
+  });
 
   // And the roadmaps with a stage that could be started now, which is the other
   // way work gets into the pipeline: the rows behind Continue a roadmap under the
@@ -657,17 +674,9 @@ function Compose(props: {
   /// And unloaded, which puts the page back to composing work of its own.
   const unload = () => setState((was) => ({ ...was, adopting: null }));
 
-  /// Moving what is being composed onto another Repo, which takes the same two
-  /// things with it that a switch on a saved draft takes: the base goes back to
-  /// the new repository's rule, and a companion that has just become the
-  /// conversation's own Repo goes away — nothing is ever a companion of itself.
-  const moveTo = (repoId: number) =>
-    setState((was) => ({
-      ...was,
-      repo: repoId,
-      base: null,
-      companions: was.companions.filter((row) => row.repo_id !== repoId),
-    }));
+  /// Moving what is being composed onto another Repo — see [`moved`], which
+  /// the Brief's own fill moves through as well.
+  const moveTo = (repoId: number) => setState((was) => moved(was, repoId));
 
   /// One repo put alongside the work: read-only, off its own default branch,
   /// with no branch of its own — the least there is to say about one, which is
@@ -759,10 +768,13 @@ function Compose(props: {
                     placeholder="What is this piece of work?"
                     value={state().brief}
                     onInput={(ev) =>
-                      // The box, and the Target filled out of it while it is
-                      // empty: the same rule the server keeps when a Brief is
-                      // saved, kept here because nothing is saved yet.
-                      setState((was) => written(was, ev.currentTarget.value))
+                      // The box, and the Target, the Repo and the Process
+                      // filled out of it while they are the fill's: the same
+                      // rule the server keeps when a Brief is saved, kept here
+                      // because nothing is saved yet.
+                      setState((was) =>
+                        written(was, ev.currentTarget.value, repos.data ?? []),
+                      )
                     }
                   />
                 </div>

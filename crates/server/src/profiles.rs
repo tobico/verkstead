@@ -105,6 +105,56 @@ pub(crate) async fn edit(pool: &SqlitePool, id: &str, edit: &ProfileEdit) -> Res
     })
 }
 
+/// **Set a Profile up on this device**: bind it here at the paths `account`
+/// names, judged against this filesystem exactly as a new Profile's are — a new
+/// Claude account made where it is one level from somewhere that is there.
+///
+/// The press [`edit`] leaves to its own. It is how a Profile bound only on
+/// devices that have gone, or are off, becomes one this device runs as its own
+/// account: from then on a session here is launched under these paths rather
+/// than a copy fetched from elsewhere, and its login is made here. The other
+/// devices' bindings are theirs and stay as they are.
+///
+/// `None` is an account of another harness than the Profile's, which nothing
+/// the form sends can be: the record's harness is not this press's to change.
+pub(crate) async fn bind(
+    pool: &SqlitePool,
+    id: &str,
+    account: &ProfileAccount,
+) -> Result<Option<ProfileSaved>> {
+    let Some(held) = store::load_profile(pool, id).await? else {
+        return Ok(Some(ProfileSaved::NoSuchProfile));
+    };
+
+    let account = account.clone();
+    let looked = tokio::task::spawn_blocking(move || {
+        inspect(&account).map(|account| {
+            let login = holds_login(&account);
+
+            (account, login)
+        })
+    })
+    .await?;
+
+    let (account, login) = match looked {
+        Ok(looked) => looked,
+        Err(refusal) => return Ok(Some(refusal)),
+    };
+
+    if account.agent_type() != held.agent_type() {
+        return Ok(None);
+    }
+
+    Ok(Some(
+        match store::bind_profile_here(pool, id, &account, login).await? {
+            store::Saving::Saved => ProfileSaved::Saved,
+            store::Saving::NoSuchProfile => ProfileSaved::NoSuchProfile,
+            store::Saving::NameTaken => ProfileSaved::NameTaken,
+            store::Saving::DefaultTaken => ProfileSaved::DefaultTaken,
+        },
+    ))
+}
+
 /// Remove one, whoever had chosen it.
 ///
 /// Nothing is judged here, which is why there is so little of it: the store
@@ -412,11 +462,52 @@ fn lends(profile: &store::Profile) -> bool {
 }
 
 /// Whether an account at these paths holds its login file, looked at here.
+///
+/// **And, for a Claude account, a login that can still be used.** Claude
+/// writes when its refresh token stops being good beside the token itself, and
+/// a login past that day is a file and nothing more: every session given it
+/// comes up saying *Please run /login*, on this device and on every device
+/// fetching a copy of it. So it reads as no login — the card here offers Log
+/// in, and the binding tells the members there is nothing to fetch. A login
+/// that says no such day is taken at its word, as every login was before.
 fn holds_login(account: &store::Account) -> bool {
-    matches!(
-        resolve(&crate::sandbox::root::login_at(account)),
-        Resolved::At(_)
-    )
+    let Resolved::At(login) = resolve(&crate::sandbox::root::login_at(account)) else {
+        return false;
+    };
+
+    match account {
+        store::Account::Claude { .. } => !refresh_ran_out(&login, std::time::SystemTime::now()),
+        _ => true,
+    }
+}
+
+/// Whether the Claude login at `login` says its refresh token ran out before
+/// `now`.
+///
+/// `refreshTokenExpiresAt` under `claudeAiOauth`, in milliseconds since the
+/// epoch, as Claude Code 2.1.330 writes it. A file that cannot be read or
+/// parsed, or that carries no such field, says nothing of the kind: what that
+/// is, is the harness's to say when a session starts.
+fn refresh_ran_out(login: &Path, now: std::time::SystemTime) -> bool {
+    let Ok(text) = std::fs::read_to_string(login) else {
+        return false;
+    };
+
+    let Ok(said) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return false;
+    };
+
+    let Some(until) = said
+        .pointer("/claudeAiOauth/refreshTokenExpiresAt")
+        .and_then(serde_json::Value::as_u64)
+    else {
+        return false;
+    };
+
+    // A day past what the clock can say is one that has not come.
+    std::time::UNIX_EPOCH
+        .checked_add(std::time::Duration::from_millis(until))
+        .is_some_and(|until| until <= now)
 }
 
 /// How a device a Profile is bound on is read, off the membership.
@@ -699,7 +790,11 @@ fn inspect(account: &ProfileAccount) -> Result<store::Account, ProfileSaved> {
             claude_dir,
             config_file,
         } => {
-            let dir = match resolve(Path::new(claude_dir.trim())) {
+            // A Claude account nobody has run yet is two paths with nothing at
+            // them, and the login that would make them needs a Profile bound
+            // here first — so the save makes them, rather than refusing the one
+            // way there is to start a new account. See [`made`].
+            let dir = match made(Path::new(claude_dir.trim()), Making::Directory) {
                 Resolved::At(path) => path,
                 Resolved::NotAbsolute => return Err(ProfileSaved::DirNotAbsolute),
                 Resolved::Missing => return Err(ProfileSaved::DirMissing),
@@ -709,7 +804,7 @@ fn inspect(account: &ProfileAccount) -> Result<store::Account, ProfileSaved> {
                 return Err(ProfileSaved::NotADirectory);
             }
 
-            let config = match resolve(Path::new(config_file.trim())) {
+            let config = match made(Path::new(config_file.trim()), Making::Config) {
                 Resolved::At(path) => path,
                 Resolved::NotAbsolute => return Err(ProfileSaved::ConfigNotAbsolute),
                 Resolved::Missing => return Err(ProfileSaved::ConfigMissing),
@@ -747,6 +842,72 @@ fn inspect(account: &ProfileAccount) -> Result<store::Account, ProfileSaved> {
             Ok(store::Account::OpenCode { home })
         }
     }
+}
+
+/// What [`made`] puts at a path with nothing at it.
+#[derive(Debug, Clone, Copy)]
+enum Making {
+    /// A Claude account's directory, empty.
+    Directory,
+
+    /// Its config file, as an empty JSON object — what Claude Code fills in
+    /// the first time it runs on the account.
+    Config,
+}
+
+/// `path` resolved, and where there is nothing at it, **made** — a directory
+/// or a config file as `making` says — and resolved again.
+///
+/// **Only one level of it.** The directory it would be made in has to be there
+/// already, so a path with a typo high up in it is refused as having nothing at
+/// it, the way it always was, rather than answered with a tree nobody meant.
+/// And nothing already there is touched: a path that resolves is handed back as
+/// it is, and a file is made only where none has appeared in the meantime.
+///
+/// A path that is not absolute is refused as before. One that still cannot be
+/// made — a parent this server cannot write — is *missing*, which is what it
+/// is.
+fn made(path: &Path, making: Making) -> Resolved {
+    match resolve(path) {
+        Resolved::Missing => {}
+        resolved => return resolved,
+    }
+
+    let Some(parent) = path.parent().filter(|parent| parent.is_dir()) else {
+        return Resolved::Missing;
+    };
+
+    let wrote = match making {
+        Making::Directory => std::fs::create_dir(path),
+        Making::Config => std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .and_then(|mut file| std::io::Write::write_all(&mut file, b"{}\n")),
+    };
+
+    match wrote {
+        Ok(()) => tracing::info!(
+            path = %path.display(),
+            parent = %parent.display(),
+            "a Claude account's path had nothing at it, so the save made it",
+        ),
+
+        // Made by somebody else in between, which is as good.
+        Err(why) if why.kind() == std::io::ErrorKind::AlreadyExists => {}
+
+        Err(why) => {
+            tracing::info!(
+                error = ?why,
+                path = %path.display(),
+                "a Claude account's path had nothing at it and could not be made",
+            );
+
+            return Resolved::Missing;
+        }
+    }
+
+    resolve(path)
 }
 
 /// The two directories an OpenCode account is kept in, under the home a Profile
@@ -956,5 +1117,144 @@ pub(crate) fn agent_type(agent_type: store::AgentType) -> AgentType {
         store::AgentType::Grok => AgentType::Grok,
         store::AgentType::OpenCode => AgentType::OpenCode,
         store::AgentType::Agy => AgentType::Agy,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, UNIX_EPOCH};
+
+    use super::*;
+
+    /// A login as Claude Code 2.1.330 writes one, with its refresh token good
+    /// until `until` milliseconds after the epoch.
+    fn login_until(dir: &Path, until: u64) -> PathBuf {
+        let login = dir.join(".credentials.json");
+
+        std::fs::write(
+            &login,
+            format!(
+                r#"{{"claudeAiOauth":{{"accessToken":"a","refreshToken":"r","expiresAt":0,"refreshTokenExpiresAt":{until}}}}}"#
+            ),
+        )
+        .unwrap();
+
+        login
+    }
+
+    /// A Claude account nobody has run yet is saved: its directory and its
+    /// config file are made, the config as an empty object, where the directory
+    /// they go in is there.
+    #[test]
+    fn a_new_claude_account_is_made_at_the_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude_dir = dir.path().join(".claude-work");
+        let config_file = dir.path().join(".claude-work.json");
+
+        let saved = inspect(&ProfileAccount::Claude {
+            claude_dir: claude_dir.to_string_lossy().into_owned(),
+            config_file: config_file.to_string_lossy().into_owned(),
+        })
+        .expect("made rather than refused");
+
+        assert!(claude_dir.is_dir());
+        assert_eq!(std::fs::read_to_string(&config_file).unwrap(), "{}\n");
+        assert!(matches!(saved, store::Account::Claude { .. }));
+    }
+
+    /// But one level only: a path whose parent is not there is refused as it
+    /// always was, rather than answered with a tree nobody meant.
+    #[test]
+    fn a_new_claude_account_is_not_made_under_a_parent_that_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude_dir = dir.path().join("typo/.claude");
+
+        let refused = inspect(&ProfileAccount::Claude {
+            claude_dir: claude_dir.to_string_lossy().into_owned(),
+            config_file: dir
+                .path()
+                .join(".claude.json")
+                .to_string_lossy()
+                .into_owned(),
+        });
+
+        assert!(matches!(refused, Err(ProfileSaved::DirMissing)));
+        assert!(!dir.path().join("typo").exists(), "and nothing was made");
+    }
+
+    /// And what is already there is left exactly as it is.
+    #[test]
+    fn an_account_already_there_is_not_written_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude_dir = dir.path().join(".claude");
+        let config_file = dir.path().join(".claude.json");
+
+        std::fs::create_dir(&claude_dir).unwrap();
+        std::fs::write(&config_file, r#"{"numStartups":3}"#).unwrap();
+
+        inspect(&ProfileAccount::Claude {
+            claude_dir: claude_dir.to_string_lossy().into_owned(),
+            config_file: config_file.to_string_lossy().into_owned(),
+        })
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&config_file).unwrap(),
+            r#"{"numStartups":3}"#
+        );
+    }
+
+    /// The day it says is the day it stops: one past it is a file and no login,
+    /// and one short of it is a login whatever its access token says.
+    #[test]
+    fn a_claude_login_past_its_refresh_day_has_run_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let login = login_until(dir.path(), 1_759_659_206_247);
+        let then = UNIX_EPOCH + Duration::from_millis(1_759_659_206_247);
+
+        assert!(refresh_ran_out(&login, then + Duration::from_secs(1)));
+        assert!(refresh_ran_out(&login, then));
+        assert!(!refresh_ran_out(&login, then - Duration::from_secs(1)));
+    }
+
+    /// And a login that says no such day, or is not one Verkstead can read, is
+    /// taken at its word.
+    #[test]
+    fn a_login_that_says_no_day_has_not_run_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let login = dir.path().join(".credentials.json");
+        let now = std::time::SystemTime::now();
+
+        std::fs::write(&login, r#"{"claudeAiOauth":{"accessToken":"a"}}"#).unwrap();
+        assert!(!refresh_ran_out(&login, now));
+
+        std::fs::write(&login, "not a login").unwrap();
+        assert!(!refresh_ran_out(&login, now));
+
+        assert!(!refresh_ran_out(&dir.path().join("absent"), now));
+    }
+
+    /// Which is what the binding says: an account whose login has run out holds
+    /// none, so the card offers Log in and no member fetches it.
+    #[test]
+    fn an_account_whose_login_ran_out_holds_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude_dir = dir.path().join(".claude");
+        std::fs::create_dir(&claude_dir).unwrap();
+
+        let account = store::Account::Claude {
+            claude_dir: claude_dir.clone(),
+            config_file: dir.path().join(".claude.json"),
+        };
+
+        login_until(&claude_dir, 1_759_659_206_247);
+        assert!(!holds_login(&account), "ran out in 2025");
+
+        // 2100.
+        login_until(&claude_dir, 4_102_444_800_000);
+        assert!(holds_login(&account), "good for a long while yet");
+
+        login_until(&claude_dir, u64::MAX);
+        assert!(holds_login(&account), "and a day past any clock is not one");
     }
 }

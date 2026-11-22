@@ -344,6 +344,34 @@ pub(crate) fn clone_name(origin: &str) -> String {
     named(&normalised(origin)).to_owned()
 }
 
+/// The `owner/repo` on GitHub that `origin` is, or `None` where it is a
+/// repository somewhere else.
+///
+/// What a Brief that is one pull request URL is matched against, to say which
+/// registered Repo that pull request is in — see
+/// [`crate::conversations::save_brief`]. Off [`placed`], so every spelling this
+/// module already takes as one repository is one here too: `https://`, `ssh://`
+/// and the `scp` form, with or without the `.git` and the trailing slash.
+///
+/// **`github.com` and `www.github.com` and no other host**, the host's case
+/// aside: the pull request URL a Brief is read for is only ever one of those
+/// two, so an Enterprise host or a mirror is a repository no such URL can name.
+/// And exactly two segments after the host, a path any longer or shorter being
+/// no repository GitHub would hand out.
+pub(crate) fn github_repository(origin: &str) -> Option<String> {
+    let bare = normalised(origin);
+    let (host, path) = placed(&bare).split_once('/')?;
+
+    if !host.eq_ignore_ascii_case("github.com") && !host.eq_ignore_ascii_case("www.github.com") {
+        return None;
+    }
+
+    let (owner, repo) = path.split_once('/')?;
+
+    (!owner.is_empty() && !repo.is_empty() && !repo.contains('/'))
+        .then(|| format!("{owner}/{repo}"))
+}
+
 /// What a clone of the [`normalised`] origin `bare` would call its directory:
 /// the last segment of its path.
 ///
@@ -611,5 +639,39 @@ mod tests {
             "thing",
             &there("elsewhere", Some("C:/src/thing")),
         ));
+    }
+
+    /// Every spelling of a GitHub origin says which repository it is, and every
+    /// other host says none.
+    #[test]
+    fn a_github_origin_says_its_owner_and_repository() {
+        for origin in [
+            "https://github.com/o/r",
+            "https://github.com/o/r.git",
+            "https://github.com/o/r/",
+            "http://www.github.com/o/r",
+            "https://GitHub.com/o/r",
+            "git@github.com:o/r.git",
+            "ssh://git@github.com/o/r",
+            "  https://github.com/o/r.git/  ",
+        ] {
+            assert_eq!(
+                github_repository(origin).as_deref(),
+                Some("o/r"),
+                "{origin} is o/r",
+            );
+        }
+
+        for origin in [
+            "https://gitlab.com/o/r",
+            "https://github.example.com/o/r",
+            "git@example.com:o/r.git",
+            "https://github.com/o",
+            "https://github.com/o/r/tree/main",
+            "/srv/repos/r",
+            "",
+        ] {
+            assert_eq!(github_repository(origin), None, "{origin} is not on GitHub");
+        }
     }
 }

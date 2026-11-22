@@ -97,9 +97,12 @@ pub async fn of(
         Ok(answered) => answered,
 
         // The machine said nothing, which is the whole of what there is to say
-        // about it. Anything else is this device's own trouble and is reported
-        // as a failure rather than dressed up as a finding.
-        Err(refusal) if refusal.from_them() => {
+        // about it. One that answered — refused, or said something this device
+        // cannot read — is awake, so its sentence goes back as the failure it
+        // is, naming the machine and any gap between the two releases; called
+        // *unreachable*, it would send the human to wake a machine that is up.
+        // Anything else is this device's own trouble, reported the same way.
+        Err(refusal) if refusal.from_them() && !refusal.answered() => {
             return Ok(Preflight {
                 device: named,
                 lacks: vec![Lacking::Unreachable],
@@ -207,13 +210,22 @@ async fn ask(
 > {
     let matched = crate::matching::each_with_origin(devices, device, repos).await?;
 
-    let harnesses: Vec<HarnessThere> = relaying::word_from(
+    let rows: Vec<serde_json::Value> = relaying::word_from(
         Some(devices),
         device,
         relaying::asking(HARNESSES.to_owned()),
         MOST_THE_HARNESSES_ARE,
     )
     .await?;
+
+    // Read a row at a time, because a Verkstead a release ahead names agent
+    // types this one has never heard of. Such a row is passed over rather than
+    // spoiling the answer: no Pairing here can run a harness this device does
+    // not know, so nothing here was going to ask after it.
+    let harnesses = rows
+        .into_iter()
+        .filter_map(|row| serde_json::from_value::<HarnessThere>(row).ok())
+        .collect();
 
     Ok((matched, harnesses))
 }

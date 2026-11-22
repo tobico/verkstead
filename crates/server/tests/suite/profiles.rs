@@ -462,14 +462,15 @@ async fn profiles_come_back_by_name() {
     );
 }
 
-/// Both halves have to be there, and each is refused by its own name: pointing
-/// the config field at a directory is an easy mistake, and "that path is wrong"
-/// would not say which one.
+/// Both halves have to be there, or be one level from somewhere that is — the
+/// save makes a new account's pair, see the test after this one — and each is
+/// refused by its own name: pointing the config field at a directory is an easy
+/// mistake, and "that path is wrong" would not say which one.
 #[tokio::test]
 async fn a_pair_that_is_not_there_is_refused_by_the_half_that_is_missing() {
     let (accounts, _dir, app) = workbench().await;
     let (claude_dir, config_file) = pair(accounts.path(), "work");
-    let nowhere = accounts.path().join("never-made");
+    let nowhere = accounts.path().join("never-made").join("either");
 
     assert_eq!(
         save(
@@ -489,6 +490,34 @@ async fn a_pair_that_is_not_there_is_refused_by_the_half_that_is_missing() {
     );
 
     assert!(listed(&app).await.is_empty(), "nothing refused was saved");
+}
+
+/// A Claude account nobody has run yet is saved: there is no other way to
+/// start one, the login being made under a Profile that has to exist first. So
+/// the save makes the directory and an empty config file where they are one
+/// level from a directory that is there.
+#[tokio::test]
+async fn a_new_claude_account_is_made_by_its_save() {
+    let (accounts, _dir, app) = workbench().await;
+    let claude_dir = accounts.path().join(".claude-new");
+    let config_file = accounts.path().join(".claude-new.json");
+
+    assert_eq!(
+        save(
+            &app,
+            &edit("new", &claude_dir, &config_file, &["claude-opus-5"])
+        )
+        .await,
+        ProfileSaved::Saved,
+    );
+
+    assert!(claude_dir.is_dir(), "the directory was made");
+    assert_eq!(
+        std::fs::read_to_string(&config_file).unwrap(),
+        "{}\n",
+        "and the config file, empty",
+    );
+    assert_eq!(listed(&app).await.len(), 1);
 }
 
 /// The pair is a directory and a file, in that order. Swapping them is the

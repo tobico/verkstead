@@ -573,17 +573,18 @@ jobs:
       # Maven Central, which carries the same distribution as the Apache
       # archive: the archive is throttled, and took two minutes for it here.
       #
-      # **Both downloads retry, because both are rate limited rather than
-      # unavailable.** Maven Central answers a runner's address with a bare
-      # `429` the moment the pool it shares has asked too often — a tenth of a
-      # second into the step, no download attempted — and an unretried `curl`
-      # makes that the whole job's failure, every proof below it skipped on a
-      # job where a skip is a failure. `--retry` counts 429 among the transient
-      # replies, so curl waits — the `Retry-After` it was handed, or a doubling
-      # backoff where it was handed none — and asks again. `--retry-max-time`
-      # is what stops a host that is down for the day from holding the job
-      # open: it bounds when a further attempt may *start*, so the slow
-      # download the comment above remembers is not cut off by it.
+      # **Central throttles too, and both downloads retry, because being rate
+      # limited is not being unavailable.** Maven Central answers a runner's
+      # address with a bare `429` the moment the pool it shares has asked too
+      # often — a tenth of a second into the step, no download attempted — and
+      # an unretried `curl` makes that one refusal the whole job's failure,
+      # every proof below it skipped on a job where a skip is a failure.
+      # `--retry` counts 429 among the transient replies, so curl waits — the
+      # `Retry-After` it was handed, or a doubling backoff where it was handed
+      # none — and asks again. `--retry-max-time` is what stops a host that is
+      # down for the day from holding the job open: it bounds when a further
+      # attempt may *start*, so the slow download the comment above remembers
+      # is not cut off by it.
       - name: Install JDK 21, Maven 3.9.12 and Gradle 8.14.4
         run: |
           sudo ln -sf /usr/lib/jvm/temurin-21-jdk-amd64/bin/java /usr/local/bin/java
