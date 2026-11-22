@@ -132,12 +132,6 @@ mod forges;
 /// the first time the terminal's tab is opened here until the server stops or
 /// the terminal ends.
 mod forwarding;
-/// Verkstead's own reach into GitHub: the host's `gh`, run against a Repo.
-///
-/// Public for the reason [`sandbox`] is — what Verkstead reaches out to is the
-/// product's business rather than an endpoint's, and standing a router up is
-/// choosing which `gh` it runs.
-pub mod github;
 /// Grilling a Conversation again, where the session that was grilling it died.
 mod grillings;
 mod guides;
@@ -361,6 +355,13 @@ mod stages;
 /// The check that says when a Conversation has Stalled: in a driven state,
 /// with nothing driving it and nothing asking the human about it.
 mod stalls;
+/// GitHub's stand-in, and the Forge that reaches it: what every suite here
+/// stands up where GitHub goes.
+///
+/// Public for the reason [`plugins::component::Redirect`] is: the suites that
+/// need it are integration tests in another crate, and standing a router up is
+/// choosing which GitHub it asks.
+pub mod stand_in;
 /// The stand-in programs the tests run in place of the machine's own.
 #[cfg(test)]
 mod stand_ins;
@@ -432,10 +433,6 @@ mod wrapping;
 /// sandbox is: what a session is launched as is the product's business rather
 /// than an endpoint's, and standing a router up is choosing it.
 pub use sessions::Agents;
-
-/// And how it reaches GitHub, which is the same kind of choice one step out: the
-/// host's `gh`, or something standing where it goes.
-pub use github::Gh;
 
 /// How fast the backlog is worked, which is part of the same choice — see
 /// [`Agents::at_pace`].
@@ -991,7 +988,7 @@ pub fn router(pool: SqlitePool) -> Router {
         nothing_bound(),
         nowhere(),
         sessions::Sessions::none(),
-        Gh::on_path(),
+        None,
         tailnet(),
         key::Gate::open(),
         onboarding::Machine::here(),
@@ -1012,7 +1009,7 @@ pub fn router_keeping(pool: SqlitePool, data_dir: PathBuf) -> Router {
         nothing_bound(),
         data_dir,
         sessions::Sessions::none(),
-        Gh::on_path(),
+        None,
         tailnet(),
         key::Gate::open(),
         onboarding::Machine::here(),
@@ -1022,7 +1019,7 @@ pub fn router_keeping(pool: SqlitePool, data_dir: PathBuf) -> Router {
 }
 
 /// The same, over what the *installation* configured — the Sandbox Configuration
-/// binds its flags named — and reaching GitHub through `gh`.
+/// binds its flags named — and reaching GitHub through `forge`.
 ///
 /// What the settings endpoints are stood up over where the question is about
 /// paths: the page draws both sources at once and says which of the two said
@@ -1032,7 +1029,7 @@ pub fn router_installed(
     pool: SqlitePool,
     binds: sandbox::SandboxConfig,
     data_dir: PathBuf,
-    gh: Gh,
+    forge: stand_in::Forge,
 ) -> Router {
     routed(
         pool,
@@ -1040,7 +1037,7 @@ pub fn router_installed(
         binds,
         data_dir,
         sessions::Sessions::none(),
-        gh,
+        Some(forge),
         tailnet(),
         key::Gate::open(),
         onboarding::Machine::here(),
@@ -1050,17 +1047,17 @@ pub fn router_installed(
 }
 
 /// And the same again, running its sessions under `agents` and reaching GitHub
-/// through `gh` — which is what the served router does, and what a test asking
+/// through `forge` — which is what the served router does, and what a test asking
 /// whether a session's output reaches the Timeline has to stand up for itself.
 ///
-/// The `gh` is a parameter for the reason the agent inside `agents` is one: what
+/// The Forge is a parameter for the reason the agent inside `agents` is one: what
 /// a finish step leaves behind is a pull request on GitHub, and asking the real
 /// one would be a test that needed a network and an account.
 pub fn router_running_sessions(
     pool: SqlitePool,
     data_dir: PathBuf,
     agents: Agents,
-    gh: Gh,
+    forge: stand_in::Forge,
 ) -> Router {
     // Taken off the agents rather than asked for again: the binds a session gets
     // and the binds the settings page draws as the installation's are the one
@@ -1073,7 +1070,7 @@ pub fn router_running_sessions(
         binds,
         data_dir,
         sessions::Sessions::under(agents),
-        gh,
+        Some(forge),
         tailnet(),
         key::Gate::open(),
         onboarding::Machine::here(),
@@ -1089,11 +1086,12 @@ pub fn router_hosting_activities(
     pool: SqlitePool,
     data_dir: PathBuf,
     agents: Agents,
-    gh: Gh,
+    forge: stand_in::Forge,
 ) -> (Router, activities::Hosting) {
     // Taken off the agents for the reason [`router_running_sessions`] does.
     let binds = agents.binds().clone();
     let gate = key::Gate::open();
+    let github = forge_of(Some(forge), &pool, &data_dir);
 
     let state = standing(
         pool,
@@ -1101,7 +1099,7 @@ pub fn router_hosting_activities(
         binds,
         data_dir,
         sessions::Sessions::under(agents),
-        Arc::new(gh),
+        github,
         tailnet(),
         &gate,
         onboarding::Machine::here(),
@@ -1124,7 +1122,7 @@ pub fn router_running_sessions_answering_devices(
     pool: SqlitePool,
     data_dir: PathBuf,
     agents: Agents,
-    gh: Gh,
+    forge: stand_in::Forge,
     devices: device::Devices,
 ) -> Router {
     // Taken off the agents for the reason [`router_running_sessions`] does.
@@ -1136,7 +1134,7 @@ pub fn router_running_sessions_answering_devices(
         binds,
         data_dir,
         sessions::Sessions::under(agents),
-        gh,
+        Some(forge),
         tailnet(),
         key::Gate::open(),
         onboarding::Machine::here(),
@@ -1145,21 +1143,21 @@ pub fn router_running_sessions_answering_devices(
     )
 }
 
-/// A router keeping its files in `data_dir` and reaching GitHub through `gh`,
+/// A router keeping its files in `data_dir` and reaching GitHub through `forge`,
 /// running no session at all.
 ///
 /// What the settings endpoints are stood up over: saving a GitHub token asks
 /// GitHub who it authenticates as, and asking the real one would be a test that
-/// needed a network and somebody's account — so the `gh` is a parameter here for
+/// needed a network and somebody's account — so the Forge is a parameter here for
 /// the reason it is one on [`router_running_sessions`].
-pub fn router_asking_github(pool: SqlitePool, data_dir: PathBuf, gh: Gh) -> Router {
+pub fn router_asking_github(pool: SqlitePool, data_dir: PathBuf, forge: stand_in::Forge) -> Router {
     routed(
         pool,
         updates::Updates::nothing_learned(),
         nothing_bound(),
         data_dir,
         sessions::Sessions::none(),
-        gh,
+        Some(forge),
         tailnet(),
         key::Gate::open(),
         onboarding::Machine::here(),
@@ -1193,22 +1191,22 @@ pub fn router_onboarding(
     data_dir: PathBuf,
     machine: onboarding::Machine,
 ) -> Router {
-    router_onboarding_asking_github(pool, data_dir, machine, Gh::on_path())
+    router_onboarding_asking_github(pool, data_dir, machine, stand_in::Forge::itself())
 }
 
-/// The same, reaching GitHub through `gh`.
+/// The same, reaching GitHub through `forge`.
 ///
 /// What the wizard's last step is stood up over: its token field is prefilled
-/// from the host `gh`'s own login where the environment holds nothing, and
+/// from the environment, and
 /// asking the real one would be a test that answered differently on every box
 /// — see [`router_asking_github`], which is a parameter for the same reason.
 pub fn router_onboarding_asking_github(
     pool: SqlitePool,
     data_dir: PathBuf,
     machine: onboarding::Machine,
-    gh: Gh,
+    forge: stand_in::Forge,
 ) -> Router {
-    router_onboarding_elevating(pool, data_dir, machine, gh, None)
+    router_onboarding_elevating(pool, data_dir, machine, forge, None)
 }
 
 /// And the same again, raising the wizard's install run through `escalation`.
@@ -1227,7 +1225,7 @@ pub fn router_onboarding_elevating(
     pool: SqlitePool,
     data_dir: PathBuf,
     machine: onboarding::Machine,
-    gh: Gh,
+    forge: stand_in::Forge,
     escalation: Option<Arc<dyn remote::Elevate>>,
 ) -> Router {
     routed(
@@ -1236,7 +1234,7 @@ pub fn router_onboarding_elevating(
         nothing_bound(),
         data_dir,
         sessions::Sessions::none(),
-        gh,
+        Some(forge),
         tailnet(),
         key::Gate::open(),
         machine,
@@ -1249,7 +1247,7 @@ pub fn router_onboarding_elevating(
 /// with nothing in it.
 ///
 /// What the Remote access pane's own suite is stood up over, and a parameter for
-/// the reason the `gh` above is one: what it answers is a fact about the machine
+/// the reason the Forge above is one: what it answers is a fact about the machine
 /// running the tests, and a pane that has to say four different things about
 /// four different machines cannot be asked about any of them on the one machine
 /// it happens to be running on. See [`remote::Tailscale::running`].
@@ -1260,7 +1258,7 @@ pub fn router_reading_tailscale(pool: SqlitePool, remote: remote::Tailscale) -> 
         nothing_bound(),
         nowhere(),
         sessions::Sessions::none(),
-        Gh::on_path(),
+        None,
         remote,
         key::Gate::open(),
         onboarding::Machine::here(),
@@ -1290,7 +1288,7 @@ pub fn router_reading_tailscale_keyed(
         nothing_bound(),
         nowhere(),
         sessions::Sessions::none(),
-        Gh::on_path(),
+        None,
         remote,
         key::Gate::keyed(key),
         onboarding::Machine::here(),
@@ -1327,7 +1325,7 @@ pub fn router_answering_devices_checking_updates(
         nothing_bound(),
         nowhere(),
         sessions::Sessions::none(),
-        Gh::on_path(),
+        None,
         tailnet(),
         key::Gate::open(),
         onboarding::Machine::here(),
@@ -1355,7 +1353,7 @@ pub fn router_answering_devices_telling(
         nothing_bound(),
         nowhere(),
         sessions::Sessions::none(),
-        Gh::on_path(),
+        None,
         tailnet(),
         key::Gate::open(),
         onboarding::Machine::here(),
@@ -1379,7 +1377,7 @@ pub fn router_answering_devices_telling_checking_updates(
         nothing_bound(),
         nowhere(),
         sessions::Sessions::none(),
-        Gh::on_path(),
+        None,
         tailnet(),
         key::Gate::open(),
         onboarding::Machine::here(),
@@ -1418,6 +1416,7 @@ pub fn routers_answering_devices_telling(
     machine: onboarding::Machine,
 ) -> Routers {
     let gate = key::Gate::open();
+    let github = forge_of(None, &pool, &nowhere());
 
     let state = standing(
         pool,
@@ -1425,7 +1424,7 @@ pub fn routers_answering_devices_telling(
         nothing_bound(),
         nowhere(),
         sessions::Sessions::none(),
-        Arc::new(Gh::on_path()),
+        github,
         tailnet(),
         &gate,
         machine,
@@ -1452,6 +1451,7 @@ pub fn routers_keeping_answering_devices_telling(
     machine: onboarding::Machine,
 ) -> Routers {
     let gate = key::Gate::open();
+    let github = forge_of(None, &pool, &data_dir);
 
     let state = standing(
         pool,
@@ -1459,7 +1459,7 @@ pub fn routers_keeping_answering_devices_telling(
         nothing_bound(),
         data_dir,
         sessions::Sessions::none(),
-        Arc::new(Gh::on_path()),
+        github,
         tailnet(),
         &gate,
         machine,
@@ -1475,7 +1475,7 @@ pub fn routers_keeping_answering_devices_telling(
 }
 
 /// And both of them over a device that **runs sessions**, keeping what it makes
-/// in `data_dir` and reaching GitHub through `gh`.
+/// in `data_dir` and reaching GitHub through `forge`.
 ///
 /// What a served Verkstead in a cluster is, and what a suite asking whether a
 /// session that runs from a copy comes up logged in has to stand up: the Profile
@@ -1493,7 +1493,7 @@ pub fn routers_running_sessions_answering_devices(
     pool: SqlitePool,
     data_dir: PathBuf,
     agents: Agents,
-    gh: Gh,
+    forge: stand_in::Forge,
     devices: device::Devices,
     nudges: nudge::Nudges,
     machine: onboarding::Machine,
@@ -1503,6 +1503,7 @@ pub fn routers_running_sessions_answering_devices(
     // binds the settings page draws as the installation's are the one set.
     let binds = agents.binds().clone();
     let gate = key::Gate::open();
+    let github = forge_of(Some(forge), &pool, &data_dir);
 
     let state = standing(
         pool,
@@ -1510,7 +1511,7 @@ pub fn routers_running_sessions_answering_devices(
         binds,
         data_dir,
         sessions::Sessions::under(agents),
-        Arc::new(gh),
+        github,
         tailnet(),
         &gate,
         machine,
@@ -1598,7 +1599,7 @@ pub fn router_checking_updates(pool: SqlitePool, releases: Option<&str>) -> Rout
         nothing_bound(),
         nowhere(),
         sessions::Sessions::none(),
-        Gh::on_path(),
+        None,
         tailnet(),
         key::Gate::open(),
         onboarding::Machine::here(),
@@ -1623,7 +1624,7 @@ fn routed(
     binds: sandbox::SandboxConfig,
     data_dir: PathBuf,
     sessions: sessions::Sessions,
-    github: Gh,
+    github: Option<stand_in::Forge>,
     remote: remote::Tailscale,
     gate: key::Gate,
     machine: onboarding::Machine,
@@ -1660,7 +1661,7 @@ fn routed_telling(
     binds: sandbox::SandboxConfig,
     data_dir: PathBuf,
     sessions: sessions::Sessions,
-    github: Gh,
+    github: Option<stand_in::Forge>,
     remote: remote::Tailscale,
     gate: key::Gate,
     machine: onboarding::Machine,
@@ -1668,23 +1669,34 @@ fn routed_telling(
     devices: Option<device::Devices>,
     nudges: nudge::Nudges,
 ) -> Router {
+    let github = forge_of(github, &pool, &data_dir);
+
     serving(
         standing(
-            pool,
-            updates,
-            binds,
-            data_dir,
-            sessions,
-            Arc::new(github),
-            remote,
-            &gate,
-            machine,
-            escalation,
-            devices,
-            nudges,
+            pool, updates, binds, data_dir, sessions, github, remote, &gate, machine, escalation,
+            devices, nudges,
         ),
         &gate,
     )
+}
+
+/// The Forge a router holds: GitHub's own component, reaching GitHub where it
+/// says, with its tokens read out of this router's own Data Directory.
+///
+/// `standing_in` is a stand-in a suite put where GitHub goes, which is the one
+/// thing a router under test is stood up differently with — see
+/// [`stand_in::Forge`]. `None` on every running Verkstead.
+fn forge_of(
+    standing_in: Option<stand_in::Forge>,
+    pool: &SqlitePool,
+    data_dir: &Path,
+) -> Arc<dyn forges::Forge> {
+    let settings = settings::Settings::in_data_dir(data_dir);
+
+    match standing_in {
+        Some(standing_in) => standing_in.forge(settings, pool),
+        None => forges::plugged::github(settings, pool),
+    }
 }
 
 /// The state every router here is built over, and the sweeps a start makes
@@ -2155,7 +2167,7 @@ pub fn router_keyed(pool: SqlitePool, key: key::WorkbenchKey) -> Router {
         nothing_bound(),
         nowhere(),
         sessions::Sessions::none(),
-        Gh::on_path(),
+        None,
         tailnet().keyed(key.clone()),
         key::Gate::keyed(key),
         onboarding::Machine::here(),
@@ -2179,13 +2191,15 @@ pub fn router_keyed(pool: SqlitePool, key: key::WorkbenchKey) -> Router {
 /// an attachment put on a Conversation through the hop is a file on the far
 /// end's disk, and what that suite asserts is that it landed there.
 pub fn router_over_the_link(pool: SqlitePool, data_dir: PathBuf) -> Router {
+    let github = forge_of(None, &pool, &data_dir);
+
     peer::workbench::served(standing(
         pool,
         updates::Updates::nothing_learned(),
         nothing_bound(),
         data_dir,
         sessions::Sessions::none(),
-        Arc::new(Gh::on_path()),
+        github,
         tailnet(),
         &key::Gate::open(),
         onboarding::Machine::here(),
@@ -2209,13 +2223,15 @@ pub fn router_over_the_link_telling(
     data_dir: PathBuf,
     nudges: nudge::Nudges,
 ) -> Router {
+    let github = forge_of(None, &pool, &data_dir);
+
     peer::workbench::served(standing(
         pool,
         updates::Updates::nothing_learned(),
         nothing_bound(),
         data_dir,
         sessions::Sessions::none(),
-        Arc::new(Gh::on_path()),
+        github,
         tailnet(),
         &key::Gate::open(),
         onboarding::Machine::here(),
@@ -2243,13 +2259,15 @@ pub fn router_over_the_link_running_sessions(
     // [`router_running_sessions`] takes them off there.
     let binds = agents.binds().clone();
 
+    let github = forge_of(None, &pool, &data_dir);
+
     peer::workbench::served(standing(
         pool,
         updates::Updates::nothing_learned(),
         binds,
         data_dir,
         sessions::Sessions::under(agents),
-        Arc::new(Gh::on_path()),
+        github,
         tailnet(),
         &key::Gate::open(),
         onboarding::Machine::here(),
@@ -2622,8 +2640,8 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
 
     // And where the credentials are read from, which is the same directory
     // again — both the ones a session runs with and the one the server's own
-    // `gh` authenticates as. Nothing is read here: the files are read as each
-    // session is spawned and as each `gh` is run, so what the human saves
+    // the Forge authenticates as. Nothing is read here: the files are read as
+    // each session is spawned and as each Forge call is made, so what the human saves
     // through the settings page applies without a restart — see [`settings`].
     //
     // Before the build cache below, which wants the descriptors this
@@ -3113,7 +3131,7 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
         // The built-in GitHub plugin's own component, asking as the Author's
         // token for it — read at the moment of each call, and set in the
         // component's environment for that one call (ADR-0030, *Forge*).
-        forges::plugged::github(settings, &pool).await,
+        forges::plugged::github(settings, &pool),
         // And whatever `tailscale` it has, asked about the port this server just
         // bound: a serve is this workbench's when it proxies there, and an
         // install told to listen somewhere else is one whose serve has to point

@@ -56,7 +56,7 @@ use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::terminals::ports;
 use verkstead_server::{
-    Agents, Gh, open_database, router_answering_devices_telling,
+    Agents, open_database, router_answering_devices_telling,
     routers_running_sessions_answering_devices, store,
 };
 use verkstead_store::{Linking, record_member};
@@ -210,7 +210,7 @@ impl Verkstead {
                     pool.clone(),
                     dir.path().to_owned(),
                     agents,
-                    Gh::running(vec!["verkstead-no-such-gh".to_owned()]),
+                    verkstead_server::stand_in::Forge::unanswerable(),
                     Devices::of(
                         device.clone(),
                         reading.clone(),

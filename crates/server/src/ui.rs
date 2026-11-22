@@ -1425,7 +1425,7 @@ async fn register_repo(
 /// The author is read at the moment of the call rather than held from startup,
 /// the way a publish reads it: somebody filling the settings in and coming
 /// straight back has an author. The token the `gh` authenticates as is read the
-/// same way and for the same reason — see [`crate::github`].
+/// same way and for the same reason — see [`crate::forges`].
 async fn create_repo(
     State(state): State<AppState>,
     Json(creation): Json<Creation>,

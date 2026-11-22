@@ -4048,7 +4048,7 @@ pub(crate) async fn take_up(state: &AppState, id: i64, confirming: &Confirming) 
 
     if let Target::PullRequest(held) = &taking {
         // What was taken up, written down where the retired menu used to write
-        // it: out of what `gh` answered rather than out of a row that was
+        // it: out of what the Forge answered rather than out of a row that was
         // pressed. It is not only the record of what this Conversation was
         // started as — see [`store::process`], which reads it back for the whole
         // of its life — it is the one thing that lets a Draft through the door
@@ -4881,7 +4881,7 @@ fn refused_having_made_way(refusal: TakenUp, id: i64, made_way: &[String]) -> Ta
 /// what name goes beside the base commit, and whether the take-up moves the
 /// Conversation itself or leaves that to a pull request being recorded.
 enum Target {
-    /// A pull request, as `gh` answered about it: its number, its title, where it
+    /// A pull request, as the Forge answered about it: its number, its title, where it
     /// is, the branch the work is on and the branch it merges into.
     PullRequest(store::AdoptedPullRequest),
 
@@ -4920,20 +4920,20 @@ impl Target {
 /// the page while the field is empty, so [`TakenUp::NoTarget`] is what a page
 /// whose copy of the world went stale gets back.
 ///
-/// **A pull request's own name is a number, and `gh` answers for it.** One place
+/// **A pull request's own name is a number, and the Forge answers for it.** One place
 /// to look: the Brief fills that field while it is empty — see [`save_brief`] —
 /// so by the time the press happens what the human is looking at is what is read.
 /// What is in the field is a number, with a repository beside it where the name
-/// came as a URL. What comes back from `gh` is
+/// came as a URL. What comes back from the Forge is
 /// everything git cannot say: what the pull request is called, where it is, the
 /// branch the work is on, the branch it merges into, and whether its head is in
 /// a fork.
 ///
-/// **A URL naming another repository is refused by name.** `gh` answers for the
+/// **A URL naming another repository is refused by name.** The Forge answers for the
 /// Conversation's Repo and its origin, so a URL whose owner and repository are
 /// not the ones it answered about is a pull request this Conversation cannot
 /// take up — the number would be asked of the wrong GitHub, and the branch would
-/// be somebody else's. Checked against the URL `gh` handed back rather than
+/// be somebody else's. Checked against the URL the Forge handed back rather than
 /// against anything configured: that URL is GitHub's own statement of which
 /// repository it answered about.
 ///
@@ -4978,7 +4978,7 @@ async fn resolve(
     let found = match asked {
         Ok(found) => found,
 
-        // `gh`'s own way of saying there is nothing under that number, and its
+        // the Forge's own way of saying there is nothing under that number, and its
         // own way of saying it could not be asked at all. The first is the
         // human's number to correct and the second is their machine's to fix,
         // which is why they are told apart rather than both read as *no such
@@ -5000,7 +5000,7 @@ async fn resolve(
         }
     };
 
-    // Which repository `gh` answered about, as its own answer says. Compared
+    // Which repository the Forge answered about, as its own answer says. Compared
     // case-insensitively, GitHub's owners and repositories being spelled
     // whichever way whoever typed the URL spelled them.
     if let Some(wanted) = named.repository

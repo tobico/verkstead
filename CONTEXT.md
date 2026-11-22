@@ -104,12 +104,13 @@ close**: every harness login names its account, and a Profile whose memory is
 shared carries the transcripts of every Repo it worked on, so keeping two
 Authors apart takes a Profile per Author, its memory not shared across them —
 said rather than refused. And everything Verkstead itself does on a Repo —
-every `gh` call, every fetch and push of its own, the GitHub repository
+every call it makes on that Repo's Forge, every fetch and push of its own,
+the GitHub repository
 **Create repo** makes — authenticates as that Author's token, through the
 credential helper publishing already hands one to; an Author with no token
 for the Repo's Forge leaves git to the host's own credentials and the Forge
 unasked, which the wrap-up and `verkstead done` read as the Forge out of reach
-— the host's own `gh` login never stands in. A **Share** is published as its Repo's
+— no login the machine happens to hold ever stands in. A **Share** is published as its Repo's
 Author too, the gist and the comment linking it alike, and an Author with no
 token refuses the publish rather than lending it another's.
 **Refused rather than mixed.** Repointing a Repo is refused while a Conversation
@@ -156,7 +157,7 @@ foot, the way the Repo dropdown carries its two presses. Every Author of the
 cluster is a row of it and of every picker, wherever it was made, with no
 machine on it; two with one name and email are two rows until the human removes
 one. Add, edit and Remove are writes on the device pressed, a token verified
-there with that device's `gh`, and the others pull them. The onboarding wizard
+there through that Forge's own plugin, and the others pull them. The onboarding wizard
 asks for one. The first start moves a single `git_author` and `github_token`
 into the list as that one Author, and records every Repo as its, unregistered
 ones included, so no Repo is ever without one.
@@ -3480,7 +3481,7 @@ back.
 where to send somebody now, and whatever was already sent goes on standing where
 it was.
 This is Verkstead's own write to GitHub rather than a session's, so it happens as
-the configured token and never as whatever login the host's `gh` has — a
+the configured token and never as a login the machine happens to hold — a
 Verkstead with no token configured refuses instead of falling back.
 _Avoid_: upload, hosting, sharing (the Share is the file; publishing is what is
 done with it), gist link (the gist is where it went, not what it is)
@@ -5238,7 +5239,7 @@ pull request itself — its draft flag, its description — is touched.
 
 **And a Fix Merge Issues walks the chain around it**, where the other Processes
 take the one pull request they were pointed at. The Repo's open pull requests
-are read through `gh` once and the **stack** assembled out of that answer, both
+are read off the Forge once and the **stack** assembled out of that answer, both
 ways from what was named — a base that is another open pull request's head, a
 head that is another's base — as far as the chain goes; a fork is no link, its
 head being in another repository, and neither is a branch two pull requests sit
@@ -5252,7 +5253,7 @@ neighbours are watched, and a press pointed straight at one of them meets the
 Conversation that took *it* up — refused where it is still at work, and closed
 where it has finished, exactly as a lone pull request's holder is. A lone pull
 request finds a chain of itself, and nothing is said about a stack there is
-none of — but a `gh` that would not answer the question is said, that and a
+none of — but a Forge that would not answer the question is said, that and a
 lone pull request leaving the same record otherwise and nothing walking a
 second time.
 
@@ -5820,14 +5821,14 @@ check by name, with its own mark and a link to its run.
 
 Never guessed at. A pull request nothing has asked GitHub about has no rollup,
 and neither has one in a repository with no CI — *not known* is a third thing
-beside green and red, exactly as it is for the watcher meeting a `gh` that will
-not answer, and what a card with no rollup draws is no icon.
+beside green and red, exactly as it is for the watcher meeting a Forge that
+will not answer, and what a card with no rollup draws is no icon.
 _Avoid_: status, CI (the word here is checks), green as a state name, one check
 (the rollup is the whole suite)
 
 **Mergeable**:
 Whether GitHub can merge a pull request into its base as it stands, asked of the
-same `gh` call the **check rollup** comes back in and written down per pull
+same call the **check rollup** comes back in and written down per pull
 request. A branch its base has moved under conflicts without anybody having
 touched it, and nothing lands after that — so being mergeable is one of the
 things a wrap-up waits on before it reaches Done, one settlement per pull
@@ -5836,7 +5837,7 @@ request beside the checks and the comments.
 Three answers and each is its own thing: *mergeable* settles it, *conflicting*
 puts it back to waiting, and *unknown* — which is what GitHub says while it is
 still working the answer out — changes nothing at all and is written down
-nowhere, exactly as a `gh` that will not answer about the checks is. So what
+nowhere, exactly as a Forge that will not answer about the checks is. So what
 stands about a pull request is the last thing GitHub actually said about it.
 
 **A conflicting pull request has a session sent at it**, the way a failed check
@@ -5870,10 +5871,12 @@ one pull request per repository and is the paragraph above.
 **And the extension is asked for before anything is sent at a stack.** `gh
 stack` is a separate install and a session's `gh` runs under a home of
 Verkstead's own, so the host having it says nothing about what a session would
-find: it is asked by running it in the environment a session gets, and a
-Sandbox without it stops the run with a Notice naming the extension and the one
-command that installs it — before a go is spent, rather than after two sessions
-have failed at their first command. Nothing else about the wrap-up stops with
+find: it is asked by **looking for the directory it would be in** under that
+home — an extension of a command-line tool being a directory inside the tool's
+own data directory, and the server running no `gh` of its own to ask with — and
+a Sandbox without it stops the run with a Notice naming the extension and the
+one command that installs it, before a go is spent rather than after two
+sessions have failed at their first command. Nothing else about the wrap-up stops with
 it: the checks and the merge are read and written down on that same poll, so
 what the human comes back to says where the stack had got to.
 

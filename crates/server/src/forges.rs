@@ -15,10 +15,9 @@
 //! Author with the token set in the component's environment for the one call.
 //! GitHub's is the built-in plugin's, embedded in this binary.
 //!
-//! **And the host's `gh` still answers it too**, as the suite's stand-in — see
-//! [`crate::github`], the one module that runs a program. What that tool
-//! prints is read into these shapes there and nowhere else, so a caller never
-//! reads any tool's text.
+//! **And the words are read inside the Forge.** What an API or a tool of the
+//! Forge's own answers is read into these shapes there and nowhere else, so a
+//! caller never reads anybody's text: it branches on [`Trouble`]'s kinds.
 //!
 //! **Blocking, every operation.** An implementation may run a process or wait
 //! on the network, so the async callers ask from `spawn_blocking` with a
@@ -124,7 +123,12 @@ pub(crate) trait Forge: Send + Sync + std::fmt::Debug {
     fn create_repository(&self, repo: &Path, name: &str) -> Result<(), Trouble>;
 
     /// Whether the extension `name` of the tool this Forge lends a session is
-    /// there, asked in a session's `environment` — `Ok(())` where it is.
+    /// there — `Ok(())` where it is.
+    ///
+    /// Read off the directory it would be in under the home `environment`
+    /// names, rather than by running the tool: an extension lives inside that
+    /// home, and the server runs none of a Forge's tools itself (Set 1878,
+    /// Q4).
     fn tool_extension(&self, name: &str, environment: &[(String, OsString)])
     -> Result<(), Trouble>;
 
@@ -339,6 +343,32 @@ pub(crate) enum Trouble {
     NoForge(Option<String>),
 }
 
+impl Trouble {
+    /// The sentence the Timeline carries, and the one the viewer draws as plain
+    /// text beside a press that asked the Forge something — which is why
+    /// nothing in it is set as `code`: a backtick there would be drawn as a
+    /// backtick.
+    pub(crate) fn why(&self) -> String {
+        match self {
+            Trouble::NotLoggedIn => {
+                "This repo's author has no GitHub token that works, so Verkstead can't ask \
+                 GitHub anything. Set one in Settings, under Git."
+                    .to_owned()
+            }
+            Trouble::NoRemote => {
+                "This repo has no remote GitHub could be asked about.".to_owned()
+            }
+            Trouble::NoPullRequest => {
+                "GitHub has no pull request on this branch, so the session that finished didn't open one."
+                    .to_owned()
+            }
+            Trouble::Refused(said) => format!("GitHub said: {}", crate::stopping::ended(said)),
+            Trouble::Ours(said) => said.clone(),
+            Trouble::NoForge(host) => unmatched(host.as_deref()),
+        }
+    }
+}
+
 /// Who a token is, and what it may do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Account {
@@ -508,21 +538,10 @@ pub(crate) enum Mergeable {
     /// A word this does not know is read as *not known* rather than as a
     /// conflict, which is the way round that matters: not knowing changes
     /// nothing at all, and a conflict holds a wrap-up up. The opposite of
-    /// [`crate::github`]'s reading of a check, where green is the reading that has to be earned — the
+    /// the Forge's reading of a check, where green is the reading that has to be earned — the
     /// two are different questions, and the honest answer to each is the one
     /// that concludes nothing from a word nobody here has seen before.
     Unknown,
-}
-
-impl Mergeable {
-    /// The one GitHub's word names.
-    pub(crate) fn read(said: &str) -> Self {
-        match said.to_ascii_uppercase().as_str() {
-            "MERGEABLE" => Self::Cleanly,
-            "CONFLICTING" => Self::Conflicting,
-            _ => Self::Unknown,
-        }
-    }
 }
 
 /// Where a pull request has got to, and whether it merges — the two facts one
@@ -566,18 +585,6 @@ pub(crate) enum Stands {
     Unknown,
 }
 
-impl Stands {
-    /// The one GitHub's word names.
-    pub(crate) fn read(said: &str) -> Self {
-        match said.to_ascii_uppercase().as_str() {
-            "OPEN" => Self::Open,
-            "MERGED" => Self::Merged,
-            "CLOSED" => Self::Closed,
-            _ => Self::Unknown,
-        }
-    }
-}
-
 /// What GitHub says about a pull request's checks, and which commit it is
 /// saying it about.
 ///
@@ -617,7 +624,8 @@ pub(crate) struct Suite {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Comment {
     /// What this comment is, for as long as it exists. GitHub's node id where
-    /// there is one, its URL where there is not — see [`crate::github`].
+    /// there is one, its URL where there is not — see the GitHub plugin's `api`
+    /// module.
     pub(crate) which: String,
 
     /// Who said it, empty for an account that has since gone.

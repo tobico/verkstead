@@ -631,7 +631,7 @@ fn listed(paths: &[String]) -> String {
 /// name the branch was pushed as, so that in a stack it is this branch's own
 /// pull request that is asked about.
 ///
-/// **GitHub out of reach reads as accepted.** No `gh`, no account, no remote, a
+/// **GitHub out of reach reads as accepted.** No account, no remote, a
 /// rate limit or an answer nobody can read: none of them is GitHub saying there
 /// is no pull request, and a session is not to be held hostage by somebody
 /// else's outage. What comes after the session asks again either way.
@@ -715,7 +715,7 @@ async fn uncovered(state: &AppState, conversation_id: i64) -> Option<String> {
             let repo = companion.path.clone();
             let head = companion.head.clone();
 
-            // Off the runtime's threads: `gh` is a process, and one that goes to
+            // Off the runtime's threads: a Forge call blocks, and one that goes to
             // the network.
             tokio::task::spawn_blocking(move || gh.pull_request(&repo, &head)).await
         };

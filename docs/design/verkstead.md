@@ -811,7 +811,13 @@ flowchart LR
   as the Forge being out of reach — the host's own login no longer stands in
   (*refined 2026-11-22, Set 1878, Q3*). One token per Forge per Author, the
   Author record carrying a digest of each beside the GitHub one older members
-  read. Agents keep using `gh` inside the sandbox for push/PR as today.
+  read. **And `gh` is gone from the server** (*2026-11-22, roadmap stage
+  plugins/12*): it is no program Verkstead runs, the suites stand an HTTP
+  stand-in behind GitHub's own component rather than a script where `gh` went,
+  and whether a session would find a `gh` extension is read off the directory
+  it would be in under that session's home. Sessions keep using `gh` inside the
+  sandbox — it is the Forge's declared tool — for pushing and for `gh stack`,
+  with the pull request itself opened by `verkstead pull-request open`.
 - **Full Captures** are stored per session; the timeline event summarizes (turn
   count, and what the run was launched under), the details pane shows
   everything. The turns are the session's own Transcript, counted as the pane

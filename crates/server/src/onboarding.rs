@@ -1421,7 +1421,7 @@ impl Onboarding {
     /// reasoning is the cost of the probes and what one of them carries: the
     /// reading above is made every ten seconds while a step is unmet and again
     /// by the workbench's own gate at every start, and neither of those has any
-    /// business running `git config` twice and `gh` once — or handing a GitHub
+    /// business running `git config` twice — or handing a GitHub
     /// token to a page that is drawing a sidebar. This is asked for by the step
     /// that has the fields, while they stand empty.
     pub(crate) async fn prefill(&self, settings: &Settings) -> Result<PrefillView> {
@@ -1933,7 +1933,6 @@ fn shown(platform: Platform) -> verkstead_render::Platform {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::github::Gh;
     use crate::stand_ins::program;
     use verkstead_render::RunPhase;
 
@@ -2121,9 +2120,10 @@ esac
         );
     }
 
-    /// And a `gh` that is logged in as somebody, or is not.
+    /// And a `gh` on the machine that is logged in as somebody, or is not —
+    /// which nothing here runs either way (Set 1878, Q3).
     #[cfg(unix)]
-    fn a_gh(dir: &Path, token: Option<&str>) -> Gh {
+    fn a_gh(dir: &Path, token: Option<&str>) {
         let path = dir.join(sandbox::GH);
 
         program(
@@ -2138,8 +2138,6 @@ echo {token}
                 None => "#!/bin/sh\nexit 1\n".to_owned(),
             },
         );
-
-        Gh::running(vec![path.to_string_lossy().into_owned()])
     }
 
     /// Everything wanted, which is a Verkstead that has been told nothing.

@@ -283,15 +283,20 @@ fn refusal(forge: &dyn crate::forges::Forge, trouble: Trouble) -> Publishing {
     Publishing::Refused(trouble.why())
 }
 
-/// The same shell-script `gh` [`crate::github`]'s own tests run, and asked on
-/// the same platforms — and a git remote made on the local filesystem beside
+/// Asked of GitHub's own component with a stand-in behind it — see
+/// [`crate::stand_in`] — and a git remote made on the local filesystem beside
 /// it, which is what lets a publish be proved without a network.
+///
+/// Every test here runs on a multi-thread runtime: the trait blocks the thread
+/// it is called on and the stand-in answers on the runtime, so a publish is
+/// made from `spawn_blocking` and the answer waited for.
 #[cfg(all(test, unix))]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     use super::*;
-    use crate::github::Gh;
+    use crate::stand_in::{Asked, Asking, Forge, GitHub, Said};
 
     /// The document a share is, standing in for the several megabytes a real one
     /// runs to. What matters about it here is that it arrives byte for byte, so
@@ -299,38 +304,59 @@ mod tests {
     /// closing tag, a line that is not the last, and a character outside ASCII.
     const SHARE: &str = "<!doctype html>\n<script>ok()</script>\n<p>Aperçu</p>\n";
 
-    /// A `gh` that answers the three calls a publish makes, and writes down
-    /// which of them it was asked for — and, in `tokens`, what `GH_TOKEN` each
-    /// was run with.
+    /// A GitHub that answers the three calls a publish makes.
     ///
     /// The gist it makes is a bare repository the test made, which is the whole
     /// reason this can be proved without a network: a gist is a git remote, and
     /// what a publish does with one is clone it, write the file and push. The
-    /// scopes it answers with are whatever token it was run with, so a test
+    /// scopes it answers with are whatever token it was asked with, so a test
     /// hands a scope list where a token goes.
-    fn gh(remote: &std::path::Path, notes: &std::path::Path) -> Gh {
-        let remote = remote.display();
-        let notes = notes.display();
+    async fn github(remote: &std::path::Path) -> Arc<GitHub> {
+        let remote = remote.display().to_string();
 
-        Gh::running(vec![
-            "/bin/sh".to_owned(),
-            "-c".to_owned(),
-            format!(
-                r#"printf '%s\n' "${{GH_TOKEN-unset}}" >> "{notes}/tokens"
-                case "$*" in
-                    "api -i user")
-                        printf 'HTTP/2.0 200 OK\r\nX-Oauth-Scopes: %s\r\n\r\n{{"login":"tobico"}}' "${{GH_TOKEN-unset}}" ;;
-                    "api -X POST /gists --input -")
-                        cat > "{notes}/created.json"
-                        printf '{{"id":"9f1","html_url":"https://gist.github.com/tobico/9f1","git_push_url":"{remote}"}}' ;;
-                    "api -X DELETE /gists/9f1")
-                        : > "{notes}/deleted" ;;
-                    *)
-                        printf 'gh: no such command: %s\n' "$*" >&2; exit 1 ;;
-                esac"#,
+        GitHub::answering(move |asked: &Asked| match asked.asking {
+            Asking::Verifying => Said::Account {
+                login: "tobico".to_owned(),
+                scopes: asked.token.clone(),
+            },
+            Asking::Publishing => Said::This(
+                serde_json::json!({
+                    "id": "9f1",
+                    "html_url": "https://gist.github.com/tobico/9f1",
+                    "git_push_url": remote,
+                })
+                .to_string(),
             ),
-            "gh".to_owned(),
-        ])
+            Asking::Unpublishing => Said::This("{}".to_owned()),
+            _ => Said::Refused(404, "Not Found".to_owned()),
+        })
+        .await
+    }
+
+    /// Publish, off the runtime's threads the way every caller does.
+    async fn published(
+        github: &Arc<GitHub>,
+        token: Option<&str>,
+        description: &str,
+        name: &str,
+        document: &str,
+    ) -> Publishing {
+        let forge = Forge::standing_in(github).alone();
+        let (token, description) = (token.map(str::to_owned), description.to_owned());
+        let (name, document) = (name.to_owned(), document.to_owned());
+
+        tokio::task::spawn_blocking(move || {
+            publish(
+                &*forge,
+                token.as_deref(),
+                &author(),
+                &description,
+                &name,
+                &document,
+            )
+        })
+        .await
+        .unwrap()
     }
 
     /// A bare repository with one commit on it, standing for the gist the API
@@ -400,17 +426,26 @@ mod tests {
         )
     }
 
-    /// A share is published as its Conversation's Repo's Author: every `gh` of
-    /// the publish runs with that Author's token, the gist's commit is by its
+    /// What the gist was asked to be made as, read off what the stand-in was
+    /// asked.
+    fn created(github: &Arc<GitHub>) -> Option<serde_json::Value> {
+        github
+            .asked_about(Asking::Publishing)
+            .first()
+            .and_then(|asked| serde_json::from_str(&asked.body).ok())
+    }
+
+    /// A share is published as its Conversation's Repo's Author: every call of
+    /// the publish is made with that Author's token, the gist's commit is by its
     /// name, and the token handed back for the comments is the same one.
     ///
-    /// The tokens are scope lists, for [`gh`]'s reason, each with the gist
+    /// The tokens are scope lists, for [`github`]'s reason, each with the gist
     /// scope and a word of its own to tell them apart by.
-    #[test]
-    fn a_share_is_published_as_the_repos_own_author() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_share_is_published_as_the_repos_own_author() {
         let dir = tempfile::tempdir().unwrap();
         let remote = gist(dir.path());
-        let gh = gh(&remote, dir.path());
+        let github = github(&remote).await;
 
         let data_dir = tempfile::tempdir().unwrap();
         let settings = Settings::in_data_dir(data_dir.path());
@@ -434,14 +469,22 @@ mod tests {
         )
         .unwrap();
 
-        let (published, token) = publish_as(
-            &gh,
-            &settings,
-            Some("home"),
-            "A Verkstead conversation: sharing",
-            "share.html",
-            SHARE,
-        );
+        let (published, token) = {
+            let forge = Forge::standing_in(&github).alone();
+
+            tokio::task::spawn_blocking(move || {
+                publish_as(
+                    &*forge,
+                    &settings,
+                    Some("home"),
+                    "A Verkstead conversation: sharing",
+                    "share.html",
+                    SHARE,
+                )
+            })
+            .await
+            .unwrap()
+        };
 
         assert_eq!(
             published,
@@ -453,10 +496,18 @@ mod tests {
             "what the comments are left as"
         );
 
-        let tokens = std::fs::read_to_string(dir.path().join("tokens")).unwrap();
+        let tokens: Vec<Option<String>> = github
+            .asked()
+            .into_iter()
+            .map(|asked| asked.token)
+            .collect();
+
         assert!(
-            tokens.lines().count() >= 2 && tokens.lines().all(|line| line == "repo, gist, home"),
-            "every gh of the publish ran as the Repo's Author: {tokens:?}"
+            tokens.len() >= 2
+                && tokens
+                    .iter()
+                    .all(|token| token.as_deref() == Some("repo, gist, home")),
+            "every call of the publish was made as the Repo's Author: {tokens:?}"
         );
 
         let read = dir.path().join("read");
@@ -472,21 +523,21 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_publish_puts_the_share_in_the_gist_byte_for_byte() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_publish_puts_the_share_in_the_gist_byte_for_byte() {
         let dir = tempfile::tempdir().unwrap();
         let remote = gist(dir.path());
-        let gh = gh(&remote, dir.path());
+        let github = github(&remote).await;
 
         assert_eq!(
-            publish(
-                &gh,
+            published(
+                &github,
                 Some("repo, gist"),
-                &author(),
                 "A Verkstead conversation: sharing",
                 "share.html",
                 SHARE,
-            ),
+            )
+            .await,
             Publishing::At("https://gist.github.com/tobico/9f1".to_owned()),
         );
 
@@ -496,25 +547,22 @@ mod tests {
     /// The gist is made secret and named for the Conversation, which is the half
     /// of a publish the API does — the file it is created with is a placeholder,
     /// the bytes above having arrived over git.
-    #[test]
-    fn the_gist_it_makes_is_secret_and_says_what_it_is() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_gist_it_makes_is_secret_and_says_what_it_is() {
         let dir = tempfile::tempdir().unwrap();
         let remote = gist(dir.path());
-        let gh = gh(&remote, dir.path());
+        let github = github(&remote).await;
 
-        publish(
-            &gh,
+        published(
+            &github,
             Some("repo, gist"),
-            &author(),
             "A Verkstead conversation: sharing",
             "share.html",
             SHARE,
-        );
-
-        let asked: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(dir.path().join("created.json")).unwrap(),
         )
-        .unwrap();
+        .await;
+
+        let asked = created(&github).expect("the gist was asked for");
 
         assert_eq!(asked["public"], serde_json::json!(false));
         assert_eq!(
@@ -530,74 +578,76 @@ mod tests {
     /// A token GitHub says cannot write gists is a named refusal, and nothing is
     /// made: the scopes are asked about before the API is asked for anything, so
     /// a token that cannot publish leaves no gist behind to be taken back.
-    #[test]
-    fn a_token_without_the_gist_scope_is_refused_by_name() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_token_without_the_gist_scope_is_refused_by_name() {
         let dir = tempfile::tempdir().unwrap();
         let remote = gist(dir.path());
-        let gh = gh(&remote, dir.path());
+        let github = github(&remote).await;
 
         assert_eq!(
-            publish(
-                &gh,
+            published(
+                &github,
                 Some("read:org, repo, workflow"),
-                &author(),
                 "A Verkstead conversation: sharing",
                 "share.html",
                 SHARE,
-            ),
+            )
+            .await,
             Publishing::NoGistScope,
         );
 
-        assert!(!dir.path().join("created.json").exists());
+        assert_eq!(created(&github), None);
     }
 
     /// And nothing configured is a refusal of its own rather than a publish made
-    /// as whoever the host's `gh` is logged in as. This is the one place reading
-    /// and writing differ: a read falls back, and a write must not.
-    #[test]
-    fn a_verkstead_with_no_token_publishes_as_nobody() {
+    /// as nobody in particular. This is the one place reading and writing
+    /// differ: a read answers that there is nobody to ask as, and a write is
+    /// refused before anything is asked.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_verkstead_with_no_token_publishes_as_nobody() {
         let dir = tempfile::tempdir().unwrap();
         let remote = gist(dir.path());
-        let gh = gh(&remote, dir.path());
+        let github = github(&remote).await;
 
         assert_eq!(
-            publish(
-                &gh,
+            published(
+                &github,
                 None,
-                &author(),
                 "A Verkstead conversation: sharing",
                 "share.html",
                 SHARE,
-            ),
+            )
+            .await,
             Publishing::NoToken,
         );
 
-        assert!(!dir.path().join("created.json").exists());
+        assert!(github.asked().is_empty());
     }
 
     /// A publish that falls over after the gist is made takes it back, so that a
     /// failure leaves no link standing over a placeholder.
-    #[test]
-    fn a_gist_the_share_never_reached_is_taken_back() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_gist_the_share_never_reached_is_taken_back() {
         let dir = tempfile::tempdir().unwrap();
-        let gh = gh(&dir.path().join("no-such-gist.git"), dir.path());
+        let github = github(&dir.path().join("no-such-gist.git")).await;
 
-        let published = publish(
-            &gh,
+        let published = published(
+            &github,
             Some("repo, gist"),
-            &author(),
             "A Verkstead conversation: sharing",
             "share.html",
             SHARE,
-        );
+        )
+        .await;
 
         assert!(
             matches!(published, Publishing::Refused(_)),
             "a clone that could not happen is a refusal, not {published:?}",
         );
 
-        assert!(
-            dir.path().join("deleted").exists(),
+        assert_eq!(
+            github.asked_about(Asking::Unpublishing).len(),
+            1,
             "the gist the share never reached is still standing",
         );
     }
@@ -606,54 +656,47 @@ mod tests {
     /// read off it before the attempt — GitHub refuses the creation instead, and
     /// that refusal is the same thing for the human to go and do as a classic
     /// token's missing scope.
-    #[test]
-    fn a_token_github_itself_refuses_the_gist_to_is_the_same_answer() {
-        let dir = tempfile::tempdir().unwrap();
-        let gh = Gh::running(vec![
-            "/bin/sh".to_owned(),
-            "-c".to_owned(),
-            format!(
-                r#"case "$*" in
-                    "api -i user")
-                        printf 'HTTP/2.0 200 OK\r\n\r\n{{"login":"tobico"}}' ;;
-                    *)
-                        printf 'gh: Not Found (HTTP 404)\n' >&2; exit 1 ;;
-                esac"#,
-            ),
-            "gh".to_owned(),
-        ]);
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_token_github_itself_refuses_the_gist_to_is_the_same_answer() {
+        let github = GitHub::answering(|asked: &Asked| match asked.asking {
+            Asking::Verifying => Said::Account {
+                login: "tobico".to_owned(),
+                // A fine-grained token: GitHub leaves the header off.
+                scopes: None,
+            },
+            _ => Said::Refused(404, "Not Found".to_owned()),
+        })
+        .await;
 
         assert_eq!(
-            publish(
-                &gh,
+            published(
+                &github,
                 Some("github_pat_anything"),
-                &author(),
                 "A Verkstead conversation: sharing",
                 "share.html",
                 SHARE,
-            ),
+            )
+            .await,
             Publishing::NoGistScope,
         );
-
-        assert!(!dir.path().join("created.json").exists());
     }
 
     /// The commit in the gist is by the author the settings page was told,
     /// rather than by whoever the machine's git config says.
-    #[test]
-    fn the_commit_is_by_the_configured_author() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_commit_is_by_the_configured_author() {
         let dir = tempfile::tempdir().unwrap();
         let remote = gist(dir.path());
-        let gh = gh(&remote, dir.path());
+        let github = github(&remote).await;
 
-        publish(
-            &gh,
+        published(
+            &github,
             Some("repo, gist"),
-            &author(),
             "A Verkstead conversation: sharing",
             "share.html",
             SHARE,
-        );
+        )
+        .await;
 
         let said = Command::new("git")
             .args(["log", "-1", "--format=%an <%ae>"])

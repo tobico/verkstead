@@ -327,7 +327,7 @@ pub(crate) async fn opened(
 }
 
 /// Ask `asking` about `named` as its Repo's Author, off the runtime's threads,
-/// and say why not in the world's words where `gh` would not answer.
+/// and say why not in the world's words where the Forge would not answer.
 async fn asked<T, F>(state: &AppState, named: &Named, asking: F) -> Result<T, world::Unforged>
 where
     T: Send + 'static,

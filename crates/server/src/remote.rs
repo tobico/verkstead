@@ -107,7 +107,7 @@ use crate::unseen::Unseen;
 /// for it to be this workbench's.
 ///
 /// A handle rather than a bare port, and the program held as a list, for the
-/// reason [`crate::github::Gh`] holds one: what the suites put where the binary
+/// reason [`crate::stand_in`] exists: what the suites put where the real thing
 /// goes is a shell script, and a handle is what lets them.
 #[derive(Debug, Clone)]
 pub struct Tailscale {

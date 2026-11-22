@@ -2070,12 +2070,12 @@ impl Sessions {
     /// The environment a session of `conversation_id` would run a program in,
     /// as far as one that reads a home and a `PATH` can tell.
     ///
-    /// What it is for is the one question the host cannot answer on a session's
-    /// behalf: whether a `gh` extension is installed. An extension is a
-    /// directory inside the home `gh` is run under, and a session's home is
-    /// Verkstead's own rather than whoever started the server — so the answer
-    /// has to be asked under that home or it is an answer about somebody else.
-    /// See [`crate::forges::Forge::tool_extension`], which is the one caller.
+    /// What it is for is the one question only the host can answer: whether a
+    /// `gh` extension is installed. An extension is a directory inside the home
+    /// `gh` would be run under, and a session's home is Verkstead's own rather
+    /// than whoever started the server — so the directory is looked for under
+    /// that home, or it is an answer about somebody else. See
+    /// [`crate::forges::Forge::tool_extension`], which is the one caller.
     ///
     /// **Both halves are the ones a sandbox is built with** rather than read
     /// again beside it: the home is [`Homes::for_conversation`]'s, which is the

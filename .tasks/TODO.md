@@ -25,4 +25,4 @@ Roadmap stage: [12: The Forge interface and GitHub across](docs/roadmaps/plugins
 - [x] 05: Capabilities — [details](05-capabilities.md)
 - [x] 06: `verkstead pull-request open` and forge-neutral skills — [details](06-pull-request-open.md)
 - [x] 07: GitHub across: the component — [details](07-github-component.md)
-- [ ] 08: `gh` leaves the server — [details](08-gh-leaves-the-server.md)
+- [x] 08: `gh` leaves the server — [details](08-gh-leaves-the-server.md)

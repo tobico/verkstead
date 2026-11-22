@@ -27,17 +27,19 @@
 //! about what crosses the wire — so what these read is the response body, whole,
 //! and what they assert about the token is its absence from it.
 //!
-//! GitHub is a shell script here, standing where `gh` goes. What a token
-//! verifies as is what that script says, which is what lets a test have a good
-//! token and a bad one without an account or a network — see [`app_asking`].
+//! GitHub is a stand-in here, with its own component in front of it. What a
+//! token verifies as is what the stand-in says, which is what lets a test have
+//! a good token and a bad one without an account or a network — see
+//! [`app_asking`].
 //!
-//! **On the platforms with a shell at `/bin/sh`.** Everything here reaches
-//! GitHub through a script standing where `gh` goes, and a script is what a
-//! machine with a shell can be handed. What is asserted — which token verifies,
-//! what a save writes — is nothing a platform changes.
+//! **On the Unixes.** What is asserted — which token verifies, what a save
+//! writes — is nothing a platform changes, and the stand-in is an HTTP listener
+//! rather than the shell script it was; what keeps the gate is that nobody has
+//! made the Windows run yet.
 #![cfg(unix)]
 
 use std::path::Path;
+use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
@@ -58,8 +60,9 @@ use verkstead_server::platform::Platform;
 use verkstead_server::sandbox::{Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::{Config, Settings};
 use verkstead_server::skills::Skills;
+use verkstead_server::stand_in::{Asked, Forge, GitHub, Said};
 use verkstead_server::{
-    Agents, Gh, open_database, router_asking_github, router_installed, router_running_sessions,
+    Agents, open_database, router_asking_github, router_installed, router_running_sessions,
 };
 
 /// A `gh` that answers `gh api user` with the token it was run with, as the
@@ -110,47 +113,64 @@ impl GithubVerified for SettingsSaved {
     }
 }
 
-const SAYS_ITS_TOKEN: &str = r#"printf '{"login":"%s"}' "${GH_TOKEN-unset}""#;
+/// A GitHub that answers `/user` as the token it was asked with, which is how
+/// a test says *this token verifies as somebody of its own*.
+fn says_its_token() -> Github {
+    Arc::new(|asked: &Asked| Said::Account {
+        login: asked.token.clone().unwrap_or_else(|| "unset".to_owned()),
+        scopes: None,
+    })
+}
 
-/// And one that refuses everything, in the words the real `gh` refuses a bad
-/// token in.
-const REFUSES: &str = r#"printf 'gh: Bad credentials (HTTP 401)\n' >&2; exit 1"#;
+/// And one that refuses everything, the way GitHub refuses a bad token.
+fn refuses() -> Github {
+    Arc::new(|_: &Asked| Said::Refused(401, "Bad credentials".to_owned()))
+}
 
-/// And one that answers as an account of its own, whatever token it was run
-/// with — for the test that reads the body looking for the token, where a stub
-/// that repeated it back would be the one doing the leaking.
-const SAYS_AN_ACCOUNT: &str = r#"printf '{"login":"tobico"}'"#;
+/// And one that answers as an account of its own, whatever token it was asked
+/// with — for the test that reads the body looking for the token, where a
+/// stand-in that repeated it back would be the one doing the leaking.
+fn says_an_account() -> Github {
+    Arc::new(|_: &Asked| Said::Account {
+        login: "tobico".to_owned(),
+        scopes: None,
+    })
+}
 
-/// And one that answers with headers, naming the token it was run with as the
-/// scopes GitHub gave it. What a test that is about scopes rather than about
-/// accounts hands a scope list where a token goes.
-const SAYS_ITS_SCOPES: &str = r#"printf 'HTTP/2.0 200 OK\r\nX-Oauth-Scopes: %s\r\n\r\n{"login":"tobico"}' "${GH_TOKEN-unset}""#;
+/// And one that names the token it was asked with as the scopes GitHub gave
+/// it. What a test that is about scopes rather than about accounts hands a
+/// scope list where a token goes.
+fn says_its_scopes() -> Github {
+    Arc::new(|asked: &Asked| Said::Account {
+        login: "tobico".to_owned(),
+        scopes: Some(asked.token.clone().unwrap_or_else(|| "unset".to_owned())),
+    })
+}
+
+/// What a stand-in here answers, which is a function of the question: the
+/// token each call carries is what several of these are about.
+type Github = Arc<dyn Fn(&Asked) -> Said + Send + Sync>;
 
 /// A server keeping its settings files in a directory of its own, reaching
-/// GitHub through `gh`.
-async fn app_asking(gh: &str) -> (tempfile::TempDir, Router) {
+/// `github` where it asks for GitHub.
+async fn app_asking(github: Github) -> (tempfile::TempDir, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
 
     let data_dir = dir.path().to_owned();
+    let standing = GitHub::answering(move |asked| github(asked)).await;
 
-    let gh = Gh::running(vec![
-        "/bin/sh".to_owned(),
-        "-c".to_owned(),
-        gh.to_owned(),
-        // `sh -c` gives `$0` the script's own name, so what Verkstead passes
-        // lands in `$1` onwards.
-        "gh".to_owned(),
-    ]);
-
-    (dir, router_asking_github(pool, data_dir, gh))
+    (
+        dir,
+        router_asking_github(pool, data_dir, Forge::standing_in(&standing)),
+    )
 }
 
-/// The ordinary one: a `gh` that verifies whatever it is given.
+/// The ordinary one: a GitHub that verifies whatever it is given.
 async fn app() -> (tempfile::TempDir, Router) {
-    app_asking(SAYS_ITS_TOKEN).await
+    app_asking(says_its_token()).await
 }
 
 /// And a second server over a Data Directory something has already been written
@@ -158,17 +178,9 @@ async fn app() -> (tempfile::TempDir, Router) {
 /// settings are, and nothing is carried from one process to the next.
 async fn app_over(data_dir: &Path) -> Router {
     let pool = open_database(&data_dir.join("verkstead.db")).await.unwrap();
+    let standing = GitHub::answering(move |asked| says_its_token()(asked)).await;
 
-    router_asking_github(
-        pool,
-        data_dir.to_owned(),
-        Gh::running(vec![
-            "/bin/sh".to_owned(),
-            "-c".to_owned(),
-            SAYS_ITS_TOKEN.to_owned(),
-            "gh".to_owned(),
-        ]),
-    )
+    router_asking_github(pool, data_dir.to_owned(), Forge::standing_in(&standing))
 }
 
 async fn settings(app: &Router) -> SettingsView {
@@ -455,7 +467,7 @@ async fn the_first_save_makes_the_one_author_and_every_save_after_is_about_it() 
 /// every other Author in the file is left exactly as it was.
 #[tokio::test]
 async fn a_save_about_one_author_leaves_the_others_as_they_were() {
-    let (dir, app) = app_asking(SAYS_AN_ACCOUNT).await;
+    let (dir, app) = app_asking(says_an_account()).await;
 
     hand_edit(
         dir.path(),
@@ -592,7 +604,7 @@ async fn a_save_under_a_new_uuid_adds_an_author_and_the_read_carries_every_one()
 async fn the_token_appears_in_no_answer_this_endpoint_gives() {
     // A `gh` answering as an account of its own, so that the only thing that
     // could put the token in the body is the server.
-    let (_dir, app) = app_asking(SAYS_AN_ACCOUNT).await;
+    let (_dir, app) = app_asking(says_an_account()).await;
 
     let saving = save_body(
         &app,
@@ -656,7 +668,7 @@ async fn a_saved_token_is_verified_and_the_account_comes_back_with_the_save() {
             // proof that the token just saved is the one GitHub was asked about.
             login: "ghp_thetoken".to_owned(),
             // And it names no scopes, which says nothing about what the token
-            // may do — see [`SAYS_ITS_SCOPES`] for the half that does.
+            // may do — see [`says_its_scopes`] for the half that does.
         }),
     );
 }
@@ -669,7 +681,7 @@ async fn a_saved_token_is_verified_and_the_account_comes_back_with_the_save() {
 /// Share, or a session's push refused.
 #[tokio::test]
 async fn a_token_short_of_the_declared_scopes_is_refused_naming_them() {
-    let (dir, app) = app_asking(SAYS_ITS_SCOPES).await;
+    let (dir, app) = app_asking(says_its_scopes()).await;
 
     save_token(&app, "repo, gist, workflow").await;
 
@@ -697,7 +709,7 @@ async fn a_token_short_of_the_declared_scopes_is_refused_naming_them() {
 /// And one that carries them all comes back with nothing to do.
 #[tokio::test]
 async fn a_token_carrying_the_declared_scopes_is_missing_nothing() {
-    let (_dir, app) = app_asking(SAYS_ITS_SCOPES).await;
+    let (_dir, app) = app_asking(says_its_scopes()).await;
 
     let saved = save_token(&app, "repo, gist").await;
 
@@ -715,14 +727,14 @@ async fn a_token_carrying_the_declared_scopes_is_missing_nothing() {
 /// words beside it.
 #[tokio::test]
 async fn a_token_github_refuses_is_saved_anyway_and_the_refusal_is_in_words() {
-    let (dir, app) = app_asking(REFUSES).await;
+    let (dir, app) = app_asking(refuses()).await;
 
     let saved = save_token(&app, "ghp_thetoken").await;
 
     assert_eq!(
         saved.verified(),
         Some(Verified::Refused {
-            why: "The gh command said: gh: Bad credentials (HTTP 401).".to_owned(),
+            why: "GitHub said: HTTP 401: Bad credentials.".to_owned(),
         }),
     );
 
@@ -1036,14 +1048,9 @@ async fn app_with_a_cache() -> (tempfile::TempDir, Router, BuildCache) {
         Settings::in_data_dir(&data_dir),
     );
 
-    let gh = Gh::running(vec![
-        "/bin/sh".to_owned(),
-        "-c".to_owned(),
-        SAYS_ITS_TOKEN.to_owned(),
-        "gh".to_owned(),
-    ]);
+    let standing = GitHub::answering(move |asked| says_its_token()(asked)).await;
 
-    let app = router_running_sessions(pool, data_dir, agents, gh);
+    let app = router_running_sessions(pool, data_dir, agents, Forge::standing_in(&standing));
 
     (dir, app, cache)
 }
@@ -2109,12 +2116,7 @@ async fn restarted(data_dir: &Path) -> Router {
     router_asking_github(
         pool,
         data_dir.to_owned(),
-        Gh::running(vec![
-            "/bin/sh".to_owned(),
-            "-c".to_owned(),
-            SAYS_ITS_TOKEN.to_owned(),
-            "gh".to_owned(),
-        ]),
+        Forge::standing_in(&*GitHub::answering(move |asked| says_its_token()(asked)).await),
     )
 }
 
@@ -2135,12 +2137,7 @@ async fn app_installed(binds: &[String]) -> (tempfile::TempDir, Router) {
         pool,
         SandboxConfig::resolve(binds).unwrap(),
         dir.path().to_owned(),
-        Gh::running(vec![
-            "/bin/sh".to_owned(),
-            "-c".to_owned(),
-            SAYS_ITS_TOKEN.to_owned(),
-            "gh".to_owned(),
-        ]),
+        Forge::standing_in(&*GitHub::answering(move |asked| says_its_token()(asked)).await),
     );
 
     (dir, app)
@@ -3168,7 +3165,7 @@ async fn a_headers_name_comes_back_and_its_value_never_does() {
 /// has gone in is never in a response body again, whichever body it is.
 #[tokio::test]
 async fn a_header_value_appears_in_no_answer_this_endpoint_gives() {
-    let (_dir, app) = app_asking(SAYS_AN_ACCOUNT).await;
+    let (_dir, app) = app_asking(says_an_account()).await;
 
     let saving = save_body(
         &app,

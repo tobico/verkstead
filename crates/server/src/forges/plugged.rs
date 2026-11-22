@@ -20,12 +20,14 @@
 //! own git authenticates as, and whether the tool a session is lent carries an
 //! extension. None of the three is a question about the Forge's API — the
 //! first two are about this installation's own files, and the third is about a
-//! session's home — and a component can run no program to answer the last.
+//! session's home, which the host is the only one holding. The last is read
+//! off the directory the extension would be in rather than asked of the tool
+//! — see [`extensions`].
 
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, OnceLock, mpsc};
 use std::time::Duration;
 
 use wasmtime::Store;
@@ -35,7 +37,7 @@ use crate::forges::{
     Numbered, Opening, Scopes, Stands, Suite, Trouble, awaited,
 };
 use crate::plugins::component::worlds::category::forge as world;
-use crate::plugins::component::{Again, Host, Loaded, TICK};
+use crate::plugins::component::{Again, Host, Loaded, Redirect, TICK};
 use crate::plugins::manifest::forge::Tool;
 use crate::settings::Settings;
 use crate::store;
@@ -71,7 +73,44 @@ pub(crate) struct Plugged {
     /// where there is only one.
     author: Option<String>,
 
+    /// What stands in for this installation's own files, where a suite put a
+    /// stand-in where the Forge's API goes — `None` on every running
+    /// Verkstead. See [`StandingIn`].
+    standing_in: Option<StandingIn>,
+
     across: Arc<Across>,
+}
+
+/// What a Forge asked of a stand-in is given in place of this installation's
+/// own files: the account a Repo whose remote names no host is asked about
+/// under, and the token every call is made with.
+///
+/// **A seam for the suites, the way [`Redirect`] is, and nothing a plugin or a
+/// human can set.** A Verkstead under test registers its repositories as
+/// checkouts on this machine, and a checkout's `origin` is a path or nothing
+/// at all — which is no repository on any Forge, and what a Forge answers
+/// about one is [`Trouble::NoRemote`]. So a stand-in's Forge asks about it
+/// under the account named here, as the repository the checkout's own
+/// directory is called: the suite's `verkstead` becomes
+/// `https://github.com/tobico/verkstead.git`, which is the remote it stands
+/// for, and a stand-in telling two repositories apart reads the name out of
+/// what it was asked. A remote that *does* name a host is left exactly as it
+/// is — see [`crate::matching::host_of`].
+///
+/// And the token, because a Forge with nothing behind it to read one out of
+/// asks as nobody, and a component asked as nobody answers
+/// [`Trouble::NotLoggedIn`] of its own accord. A suite that wants the real
+/// reading — as the Repo's Author, and not at all where they hold no token —
+/// hands the Forge its Data Directory's settings instead, and those win.
+#[derive(Debug, Clone)]
+pub(crate) struct StandingIn {
+    /// Where a Repo with a pathless remote is taken to live, with no trailing
+    /// slash: `https://github.com/tobico`.
+    pub(crate) under: String,
+
+    /// The token every call is made with, where there are no settings saying
+    /// whose it should be.
+    pub(crate) token: String,
 }
 
 impl Plugged {
@@ -88,7 +127,17 @@ impl Plugged {
             tool,
             settings,
             author: None,
+            standing_in: None,
             across: Arc::new(Across::standing(again)),
+        }
+    }
+
+    /// And the same asked of a stand-in rather than of the Forge's own API —
+    /// see [`StandingIn`].
+    pub(crate) fn standing_in(self, standing_in: Option<StandingIn>) -> Plugged {
+        Plugged {
+            standing_in,
+            ..self
         }
     }
 
@@ -105,13 +154,19 @@ impl Plugged {
             tool: None,
             settings: None,
             author: None,
+            standing_in: None,
             across: Arc::new(Across::none(why)),
         }
     }
 
-    /// Who to authenticate as, read now — see [`crate::forges::whom`].
+    /// Who to authenticate as, read now — see [`crate::forges::whom`], and
+    /// [`StandingIn`], whose token is whose a Forge with no settings behind it
+    /// asks as under a stand-in.
     fn whom(&self) -> AsWhom {
-        crate::forges::whom(self.settings.as_ref(), self.author.as_deref(), &self.forge)
+        match (&self.settings, &self.standing_in) {
+            (None, Some(standing_in)) => AsWhom::Token(standing_in.token.clone()),
+            _ => crate::forges::whom(self.settings.as_ref(), self.author.as_deref(), &self.forge),
+        }
     }
 
     /// The token to ask with, or why there is to be none.
@@ -135,9 +190,23 @@ impl Plugged {
     /// handle on anybody's checkout.
     ///
     /// A Repo with no remote is handed none, and what the Forge says about
-    /// that is [`Trouble::NoRemote`].
+    /// that is [`Trouble::NoRemote`] — unless a stand-in is standing where the
+    /// Forge's API goes, which is where a checkout's path of a remote is read
+    /// as a repository all the same. See [`StandingIn`].
     fn remote(&self, repo: &Path) -> String {
-        crate::repos::origin(repo).unwrap_or_default()
+        let origin = crate::repos::origin(repo).unwrap_or_default();
+
+        match &self.standing_in {
+            Some(standing_in) if crate::matching::host_of(&origin).is_none() => {
+                let named = repo
+                    .file_name()
+                    .map(|named| named.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+
+                format!("{}/{named}.git", standing_in.under)
+            }
+            _ => origin,
+        }
     }
 
     /// Ask `asking` of the component as this Forge's Author, the token set in
@@ -411,43 +480,25 @@ impl Forge for Plugged {
             return Ok(());
         };
 
-        let mut command = Command::new(&tool.name);
-        command
-            .args([name, "--help"])
-            .env_clear()
-            .unseen()
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped());
+        let where_it_would_be = extensions(tool, name, environment);
 
-        for (name, value) in environment {
-            command.env(name, value);
-        }
-
-        // And the token, for the reason every call gets one: an extension
-        // asked as nobody is one that may refuse for a reason that has
-        // nothing to do with being installed.
-        if let Some(token) = self.token()? {
-            command.env(&tool.token, token);
-        }
-
-        let output = command.output().map_err(|error| {
-            Trouble::Ours(format!(
-                "The {} command couldn't be run: {error}.",
+        if where_it_would_be.is_empty() {
+            return Err(Trouble::Ours(format!(
+                "Verkstead can't tell whether a session would find `{} {name}`: \
+                 it doesn't know which home one runs under.",
                 tool.name
-            ))
-        })?;
+            )));
+        }
 
-        match output.status.success() {
+        // Verkstead's own reading rather than anything the Forge said, so the
+        // host's kind: a sentence of Verkstead's own, which is what
+        // [`Trouble::Ours`] is for.
+        match where_it_would_be.iter().any(|dir| dir.is_dir()) {
             true => Ok(()),
-            false => Err(Trouble::Refused(
-                String::from_utf8_lossy(&output.stderr)
-                    .lines()
-                    .map(str::trim)
-                    .find(|line| !line.is_empty())
-                    .unwrap_or("it would not say why")
-                    .to_owned(),
-            )),
+            false => Err(Trouble::Ours(format!(
+                "There's no `{} {name}` installed under the home a session here runs with.",
+                tool.name
+            ))),
         }
     }
 
@@ -509,6 +560,52 @@ impl Forge for Plugged {
             .ok()
             .flatten()
     }
+}
+
+/// Where the extension `name` of `tool` would be, under the home a session
+/// gets — every directory it could be, since which one it is depends on the
+/// platform and on what the environment says.
+///
+/// **Read rather than run** (Set 1878, Q4). An extension of a command-line
+/// tool is a directory inside the tool's own data directory, and that
+/// directory is under the home the tool is run with — so whether a session
+/// would find one is a question about a directory, and the server answers it
+/// by looking. Running the tool to ask was what `gh stack --help` did, and the
+/// server runs no `gh` any more.
+///
+/// The convention is `gh`'s, which is every tool lent as a Forge's so far:
+/// `<data>/<tool>/extensions/<tool>-<name>`, where `<data>` is
+/// `$XDG_DATA_HOME` or `~/.local/share`. On Windows the data directory is
+/// `%LOCALAPPDATA%` and the directory inside it is `GitHub CLI` rather than
+/// the tool's own name, which is the one thing here that is gh's spelling and
+/// not a convention — so both are looked at, and a tool that keeps its
+/// extensions in neither is one whose Forge would want to say where.
+///
+/// Empty where the environment names no home at all, which is a question that
+/// cannot be answered rather than an extension that is missing.
+fn extensions(tool: &Tool, name: &str, environment: &[(String, OsString)]) -> Vec<PathBuf> {
+    /// What gh calls its data directory on Windows.
+    const ON_WINDOWS: &str = "GitHub CLI";
+
+    let named = |which: &str| {
+        environment
+            .iter()
+            .find(|(said, _)| said == which)
+            .map(|(_, value)| PathBuf::from(value))
+            .filter(|path| !path.as_os_str().is_empty())
+    };
+
+    let mut data: Vec<PathBuf> = Vec::new();
+    data.extend(named("XDG_DATA_HOME"));
+    data.extend(named("HOME").map(|home| home.join(".local").join("share")));
+    data.extend(named("LOCALAPPDATA"));
+
+    let under = format!("{}-{name}", tool.name);
+
+    data.iter()
+        .flat_map(|data| [data.join(&tool.name), data.join(ON_WINDOWS)])
+        .map(|dir| dir.join("extensions").join(&under))
+        .collect()
 }
 
 /// Write `push` as `origin` on the repository at `repo` and push its branch
@@ -792,9 +889,57 @@ where
 /// its tokens read out of `settings`: what every reach into GitHub goes
 /// through on a running Verkstead.
 ///
+/// **Loaded the first time anything asks it something** — see [`Lazily`]. A
+/// router is built where nothing may be awaited and most routers are never
+/// asked a thing, so the component is compiled and started at the first
+/// question rather than at the start that might never ask one.
+///
 /// A component that will not load is a Forge that answers the reason — see
 /// [`Plugged::unloaded`] — rather than a start that fails.
-pub(crate) async fn github(settings: Settings, pool: &sqlx::SqlitePool) -> Arc<dyn Forge> {
+pub(crate) fn github(settings: Settings, pool: &sqlx::SqlitePool) -> Arc<dyn Forge> {
+    standing_in_for_github(Some(settings), Some(pool), Redirect::none(), None)
+}
+
+/// And the same asked of a stand-in rather than of GitHub: the component
+/// reaches `redirect` where it asks for `api.github.com`, and a Repo whose
+/// remote names no host is asked about under `standing_in`.
+///
+/// **A seam for the suites** — see [`StandingIn`] and [`Redirect`], and
+/// [`crate::stand_in`], which is where a suite stands one up.
+pub(crate) fn standing_in_for_github(
+    settings: Option<Settings>,
+    pool: Option<&sqlx::SqlitePool>,
+    redirect: Redirect,
+    standing_in: Option<StandingIn>,
+) -> Arc<dyn Forge> {
+    let uuid = crate::plugins::built_in::GITHUB;
+    let pool = pool.cloned();
+    let holding = settings.clone();
+
+    Arc::new(Lazily {
+        forge: uuid.to_owned(),
+        settings,
+        author: None,
+        loaded: Arc::new(OnceLock::new()),
+        loading: Arc::new(move || {
+            loading(
+                holding.clone(),
+                pool.clone(),
+                redirect.clone(),
+                standing_in.clone(),
+            )
+        }),
+    })
+}
+
+/// GitHub's own plugin, read and loaded now — the whole of what [`Lazily`]
+/// does the once.
+fn loading(
+    settings: Option<Settings>,
+    pool: Option<sqlx::SqlitePool>,
+    redirect: Redirect,
+    standing_in: Option<StandingIn>,
+) -> Arc<dyn Forge> {
     let built_in = crate::plugins::built_in::github();
     let uuid = crate::plugins::built_in::GITHUB;
 
@@ -814,18 +959,227 @@ pub(crate) async fn github(settings: Settings, pool: &sqlx::SqlitePool) -> Arc<d
         Err(refusal) => return unloaded(refusal.why),
     };
 
-    reaching(&mut manifest, &added(pool, uuid).await);
+    // On a thread of its own with a runtime of its own, for the reason every
+    // call into a component is on one: loading is async, and what asks for
+    // this Forge is a blocking call made from inside somebody else's runtime,
+    // where a runtime cannot be started.
+    let loaded = std::thread::Builder::new()
+        .name("forge-loading".to_owned())
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| format!("a runtime to load it on couldn't be made: {error}."))?;
 
-    match of(
-        built_in.files(),
-        &manifest,
-        Some(settings),
-        crate::plugins::component::Redirect::none(),
-    )
-    .await
-    {
-        Ok(plugged) => Arc::new(plugged),
-        Err(trouble) => unloaded(trouble.why),
+            runtime.block_on(async move {
+                if let Some(pool) = &pool {
+                    reaching(&mut manifest, &added(pool, uuid).await);
+                }
+
+                of(built_in.files(), &manifest, settings, redirect, standing_in)
+                    .await
+                    .map(Arc::new)
+                    .map_err(|trouble| trouble.why)
+            })
+        })
+        .map_err(|error| format!("a thread to load it on couldn't be started: {error}."))
+        .and_then(|started| {
+            started
+                .join()
+                .map_err(|_| "loading it stopped part way through.".to_owned())
+        });
+
+    match loaded {
+        Ok(Ok(plugged)) => plugged,
+        Ok(Err(why)) | Err(why) => unloaded(why),
+    }
+}
+
+/// A Forge whose component is loaded the first time anything asks it
+/// something, and never where nothing does.
+///
+/// **Because a router is built where nothing can be awaited.** Every router
+/// holds a Forge, the way the served one does, and a component loads
+/// asynchronously — so what a router is handed is this, and the load happens
+/// inside the first blocking call that needs an answer. Which is also what
+/// makes a Forge on every router cheap: a workbench stood up to ask what a
+/// page draws never loads one.
+///
+/// **What it answers itself** is what is not the component's: whose token a
+/// call would be made with, and what Verkstead's own git authenticates as.
+/// Both are questions about this installation's files — see
+/// [`crate::forges::whom`] — and a `credential()` that loaded a component to
+/// answer would load one for every git on every Repo.
+struct Lazily {
+    /// The uuid of the plugin whose Forge this is, which is what an Author's
+    /// token is held under.
+    forge: String,
+
+    /// Where that token is read from, or `None` where there is nowhere to read
+    /// one.
+    settings: Option<Settings>,
+
+    /// The Author the Repo being asked about recorded — carried here rather
+    /// than through the component, so [`Forge::as_author`] loads nothing.
+    author: Option<String>,
+
+    /// What loading it is, which is run once.
+    loading: Arc<dyn Fn() -> Arc<dyn Forge> + Send + Sync>,
+
+    /// And what it loaded, shared by every [`Forge::as_author`] of it: one
+    /// component per Forge rather than one per Repo asked about.
+    loaded: Arc<OnceLock<Arc<dyn Forge>>>,
+}
+
+impl Clone for Lazily {
+    fn clone(&self) -> Lazily {
+        Lazily {
+            forge: self.forge.clone(),
+            settings: self.settings.clone(),
+            author: self.author.clone(),
+            loading: self.loading.clone(),
+            loaded: self.loaded.clone(),
+        }
+    }
+}
+
+impl std::fmt::Debug for Lazily {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Lazily")
+            .field("forge", &self.forge)
+            .field("author", &self.author)
+            .field("loaded", &self.loaded.get().is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Lazily {
+    /// The Forge itself, loaded if this is the first question, asking as the
+    /// Author this one records.
+    fn forge(&self) -> Arc<dyn Forge> {
+        self.loaded
+            .get_or_init(|| (self.loading)())
+            .as_author(self.author.as_deref())
+    }
+}
+
+impl Forge for Lazily {
+    fn as_author(&self, recorded: Option<&str>) -> Arc<dyn Forge> {
+        Arc::new(Lazily {
+            author: recorded.map(str::to_owned),
+            ..self.clone()
+        })
+    }
+
+    fn credential(&self) -> Credential {
+        Credential(crate::forges::whom(
+            self.settings.as_ref(),
+            self.author.as_deref(),
+            &self.forge,
+        ))
+    }
+
+    fn tokened(&self) -> bool {
+        matches!(
+            crate::forges::whom(self.settings.as_ref(), self.author.as_deref(), &self.forge),
+            AsWhom::Token(_)
+        )
+    }
+
+    fn verify(&self, token: &str) -> Result<Account, Trouble> {
+        self.forge().verify(token)
+    }
+
+    fn pull_request(&self, repo: &Path, branch: &str) -> Result<store::PullRequest, Trouble> {
+        self.forge().pull_request(repo, branch)
+    }
+
+    fn pull_request_numbered(&self, repo: &Path, number: i64) -> Result<Numbered, Trouble> {
+        self.forge().pull_request_numbered(repo, number)
+    }
+
+    fn open_pull_request(&self, repo: &Path, opening: &Opening) -> Result<Numbered, Trouble> {
+        self.forge().open_pull_request(repo, opening)
+    }
+
+    fn open_pull_requests(&self, repo: &Path) -> Result<Vec<Numbered>, Trouble> {
+        self.forge().open_pull_requests(repo)
+    }
+
+    fn details(&self, repo: &Path, number: i64) -> Result<Details, Trouble> {
+        self.forge().details(repo, number)
+    }
+
+    fn checks(&self, repo: &Path, number: i64) -> Result<Suite, Trouble> {
+        self.forge().checks(repo, number)
+    }
+
+    fn landing(&self, repo: &Path, number: i64) -> Result<Landing, Trouble> {
+        self.forge().landing(repo, number)
+    }
+
+    fn comments(&self, repo: &Path, number: i64) -> Result<Vec<Comment>, Trouble> {
+        self.forge().comments(repo, number)
+    }
+
+    fn comment(
+        &self,
+        repo: &Path,
+        token: &str,
+        number: i64,
+        body: &str,
+    ) -> Result<String, Trouble> {
+        self.forge().comment(repo, token, number, body)
+    }
+
+    fn reply(&self, repo: &Path, number: i64, body: &str) -> Result<String, Trouble> {
+        self.forge().reply(repo, number, body)
+    }
+
+    fn create_gist(
+        &self,
+        token: &str,
+        description: &str,
+        name: &str,
+        content: &str,
+    ) -> Result<Gist, Trouble> {
+        self.forge().create_gist(token, description, name, content)
+    }
+
+    fn delete_gist(&self, token: &str, id: &str) -> Result<(), Trouble> {
+        self.forge().delete_gist(token, id)
+    }
+
+    fn create_repository(&self, repo: &Path, name: &str) -> Result<(), Trouble> {
+        self.forge().create_repository(repo, name)
+    }
+
+    fn tool_extension(
+        &self,
+        name: &str,
+        environment: &[(String, OsString)],
+    ) -> Result<(), Trouble> {
+        self.forge().tool_extension(name, environment)
+    }
+
+    fn lacks_scope(&self, trouble: &Trouble) -> bool {
+        self.forge().lacks_scope(trouble)
+    }
+
+    fn target_in(&self, prose: &str) -> Option<NamedPullRequest> {
+        self.forge().target_in(prose)
+    }
+
+    fn target_named(&self, target: &str) -> Option<NamedPullRequest> {
+        self.forge().target_named(target)
+    }
+
+    fn repository_in(&self, url: &str) -> Option<String> {
+        self.forge().repository_in(url)
+    }
+
+    fn repository_of(&self, origin: &str) -> Option<String> {
+        self.forge().repository_of(origin)
     }
 }
 
@@ -879,6 +1233,7 @@ pub(crate) async fn of(
     manifest: &crate::plugins::manifest::Manifest,
     settings: Option<Settings>,
     redirect: crate::plugins::component::Redirect,
+    standing_in: Option<StandingIn>,
 ) -> Result<Plugged, crate::plugins::component::Trouble> {
     let declared = manifest
         .provides
@@ -899,7 +1254,8 @@ pub(crate) async fn of(
         declared.tool.clone(),
         settings,
         loaded.again.clone(),
-    ))
+    )
+    .standing_in(standing_in))
 }
 
 /// Every test here runs GitHub's own component — the one this binary embeds —
@@ -923,7 +1279,6 @@ mod tests {
     use axum::response::IntoResponse;
 
     use super::*;
-    use crate::plugins::component::Redirect;
 
     /// One answer the stand-in gives: the text to look for in the request's
     /// path and body together, the status, and what to say.
@@ -1071,6 +1426,7 @@ mod tests {
             &manifest,
             settings,
             Redirect::to("api.github.com", &stood.address),
+            None,
         )
         .await
         .expect("GitHub's component loads")
@@ -1314,6 +1670,24 @@ mod tests {
         assert_eq!(account.scopes, Scopes::Unsaid);
         assert_eq!(account.short_of(&["gist".to_owned()]), Vec::<String>::new());
         assert_eq!(stood.token().as_deref(), Some("ghp_thepasted"));
+    }
+
+    /// And a token GitHub turns down is that refusal in GitHub's own words,
+    /// rather than nobody being logged in.
+    ///
+    /// **The one place a `401` is not read as having no token**: what is being
+    /// asked about *is* the token, so a page that has just been handed one is
+    /// owed what GitHub said about it — *there is no token* would be telling
+    /// the human to do the thing they have done. See the component's `verify`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_token_github_turns_down_is_verified_as_what_github_said() {
+        let stood = stood(&[refusing("/user", 401, r#"{"message":"Bad credentials"}"#)]).await;
+        let (_dir, forge) = forge(&stood).await;
+
+        assert_eq!(
+            forge.verify("ghp_thepasted").err(),
+            Some(Trouble::Refused("HTTP 401: Bad credentials".to_owned())),
+        );
     }
 
     /// **The token is in the component's environment for the one call it was

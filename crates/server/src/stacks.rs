@@ -99,11 +99,12 @@ pub(crate) const INSTALL: &str = "gh extension install github/gh-stack";
 /// go the human paid for and got nothing from. Two of those and the run would
 /// stop over a conflict nothing had actually tried to resolve.
 ///
-/// **In the environment a session gets rather than the server's own**, which is
+/// **Under the home a session gets rather than the server's own**, which is
 /// the only reason the answer is worth having: an extension lives inside the
-/// home `gh` is run under, and a session's home is Verkstead's own. See
+/// home `gh` would be run under, and a session's home is Verkstead's own. See
 /// [`crate::sessions::Sessions::session_environment`], which composes it, and
-/// [`crate::forges::Forge::tool_extension`], which runs it.
+/// [`crate::forges::Forge::tool_extension`], which looks for it under the home
+/// that environment names.
 ///
 /// A server that runs no session answers as though the extension were there:
 /// there is nothing here to equip, so there is nothing for this to be in front
@@ -125,8 +126,8 @@ pub(crate) async fn missing(state: &AppState, conversation_id: i64) -> Option<St
         }
     };
 
-    // Off the runtime's threads, as every other reach for `gh` is: it is a
-    // process, and running one blocks.
+    // Off the runtime's threads, as every other reach for the Forge is: this
+    // one is a handful of `stat` calls, and reading a disk blocks.
     let asked = tokio::task::spawn_blocking({
         let gh = state.github.as_author(author.as_deref());
 

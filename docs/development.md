@@ -639,8 +639,8 @@ author_tokens:
 ```
 
 An Author with no token for a Repo's Forge leaves that Forge unasked: nothing
-falls back to the host's own `gh` login, and the onboarding wizard prefills the
-token from `GH_TOKEN` or `GITHUB_TOKEN` alone.
+falls back to a login the machine happens to hold, and the onboarding wizard
+prefills the token from `GH_TOKEN` or `GITHUB_TOKEN` alone.
 
 ```yaml
 # config.yaml
@@ -702,16 +702,18 @@ what the server goes by is the union of this file and the installation's own
 flags.
 
 Every session started after that gets the token as `GH_TOKEN`, which `gh`
-honours without being told to — as does the server's own `gh`, the one that
-reads a pull request's checks, commits and comments onto a Timeline — and gets
+honours without being told to — and so does the GitHub plugin's own component,
+the thing that reads a pull request's checks, commits and comments onto a
+Timeline, which the host sets it in the environment of for that one call. The
+server runs no `gh` of its own. A session also gets
 git configured through the
 environment — the author, `gh auth git-credential` as the credential helper for
 GitHub, and SSH GitHub remotes rewritten to HTTPS so a `git push` inside
 authenticates with the token. There is no file to write and nothing to log in
 to inside a sandbox. With no token — no file, an empty one, one that will not
 parse — sessions start anyway and `gh` inside says it is not logged in, and the
-server's own `gh` falls back to whatever login the host has; with no author, git
-inside asks to be told who you are.
+Forge is not asked at all rather than asked as somebody else; with no author,
+git inside asks to be told who you are.
 
 Either file can be written through the viewer's API instead of by hand, which is
 what the settings page saves through:

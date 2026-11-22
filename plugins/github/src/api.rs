@@ -52,7 +52,16 @@ const PAGES: usize = 10;
 /// down.
 pub fn verify() -> Result<Account, Trouble> {
     let answer = http::ask(Verb::Get, DOT_COM, "/user", None)?;
-    answer.refused()?;
+
+    // **A refusal in GitHub's own words, a `401` included**, which is the one
+    // place that status is not read as nobody being logged in: what is being
+    // asked about *is* the token, so GitHub turning it down is an answer about
+    // it rather than a Verkstead with none. The settings page says what GitHub
+    // said beside a token it saved anyway, and *there is no token* would be
+    // telling the human to do the thing they have just done.
+    if !(200..300).contains(&answer.status) {
+        return Err(Trouble::Refused(answer.refusal()));
+    }
 
     let login = serde_json::from_str::<Value>(&answer.body)
         .ok()

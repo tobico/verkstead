@@ -22,8 +22,9 @@
 //! **wasmtime's errors are its own type**, not `std::error::Error`, so they
 //! are worded into a [`Trouble`] here, at the loader's edge, and go no further.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
@@ -490,6 +491,49 @@ async fn started_within(
     redirect: Redirect,
     within: Duration,
 ) -> Result<Loaded, Trouble> {
+    let digest: [u8; 32] = Sha256::digest(bytes).into();
+
+    let again = Again {
+        pre: compiled(&digest, bytes)?,
+        capabilities: capabilities.to_vec(),
+        home: home.map(Path::to_owned),
+        redirect,
+        digest,
+    };
+    let grant = again.granted()?;
+    started(again, grant, within).await
+}
+
+/// The bytes compiled and linked, or whatever an earlier load of the same
+/// bytes compiled.
+///
+/// **Compiling is the expensive half of a load, and the half that depends on
+/// nothing else.** What an [`InstancePre`] is made of is the component and the
+/// host's own linker, and both are fixed: the capabilities, the home and the
+/// redirect belong to the *store*, handed to each instance as it starts — see
+/// [`Again::granted`]. So two loads of one component differ in everything but
+/// this, and the second is a lookup rather than a compile.
+///
+/// Which is what a Verkstead holding a Forge on every router needs: GitHub's
+/// own component is compiled once per process however many routers ask for
+/// one, and a suite standing a router up per test pays for it once.
+///
+/// Keyed by the SHA-256 of the bytes, so a plugin **Update** that changed its
+/// component is compiled again — the digest is what says whether a plugin read
+/// again is running the same code, which is how [`Again::same_as`] reads it
+/// too.
+fn compiled(digest: &[u8; 32], bytes: &[u8]) -> Result<InstancePre<Host>, Trouble> {
+    static COMPILED: LazyLock<Mutex<HashMap<[u8; 32], InstancePre<Host>>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+
+    if let Some(pre) = COMPILED
+        .lock()
+        .expect("nothing panics holding it")
+        .get(digest)
+    {
+        return Ok(pre.clone());
+    }
+
     let component = Component::new(&ENGINE, bytes).map_err(|error| {
         Trouble::of(format!(
             "The component isn't a WebAssembly component Verkstead can load: {}.",
@@ -511,15 +555,12 @@ async fn started_within(
         ))
     })?;
 
-    let again = Again {
-        pre,
-        capabilities: capabilities.to_vec(),
-        home: home.map(Path::to_owned),
-        redirect,
-        digest: Sha256::digest(bytes).into(),
-    };
-    let grant = again.granted()?;
-    started(again, grant, within).await
+    COMPILED
+        .lock()
+        .expect("nothing panics holding it")
+        .insert(*digest, pre.clone());
+
+    Ok(pre)
 }
 
 /// `again`'s component started in a store holding `grant`, stopped where it

@@ -985,7 +985,11 @@ provides:
   the **`hosts`** it answers for, which are `hosts` above where it names none.
 - **`tool`** — optional. The command-line tool a session is lent, by its
   **`name`**, and the environment variable it reads the token from,
-  **`token`**.
+  **`token`**. Whether an extension of it is installed is read off the
+  directory it would be in under the home a session runs with —
+  `<data>/<tool>/extensions/<tool>-<name>`, and `%LOCALAPPDATA%\GitHub CLI` on
+  Windows — rather than by running it: a session's home is Verkstead's own, and
+  the server runs no such tool itself (Set 1878, Q4).
 - **`capabilities`** — optional, a list of what the Forge can do, each once:
   **`checks`**, checks run against a pull request; **`review`**, comments and
   reviews on one; **`publish`**, publishing a Share; **`stacks`**, stacked pull

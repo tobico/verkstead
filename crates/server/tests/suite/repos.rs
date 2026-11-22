@@ -30,6 +30,7 @@
 
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
@@ -43,7 +44,8 @@ use verkstead_render::{
     Repointed,
 };
 use verkstead_server::settings::{Author, Recorded, Settings};
-use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
+use verkstead_server::stand_in::{Asking, Forge, GitHub, Said};
+use verkstead_server::{open_database, router_asking_github, router_keeping, store};
 
 use crate::fixture_repositories::repository;
 
@@ -964,24 +966,16 @@ async fn create_on_github(app: &Router, parent: &Path, name: &str) -> Created {
     .await
 }
 
-/// A workbench with an author configured and `gh` standing in for the real one,
-/// authenticating as whatever token the Data Directory holds — which is how the
-/// served router builds its own: the settings rather than the token, so one
-/// saved through the page reaches the next call without a restart.
+/// A workbench with an author configured and a stand-in where GitHub goes,
+/// asking as whatever token the Data Directory holds — which is how the served
+/// router builds its own: the settings rather than the token, so one saved
+/// through the page reaches the next call without a restart.
 ///
-/// `notes` is where the stub writes down what it was asked; `answering` is the
-/// body of the script, run with Verkstead's arguments from `$1`.
-///
-/// The script is a `/bin/sh` one, which is what leaves this and the three tests
-/// that ask for it off Windows, the way the same stand-in is kept off it in
-/// `sharing.rs` and `ui_content.rs`: a stand-in that is a shell script is a
-/// stand-in for a machine with a shell at that path. What they are about — what
-/// Verkstead asks GitHub for, and what it makes of a refusal — is nothing a
-/// platform changes, and the rest of this file is asked wherever the suite runs.
-#[cfg(unix)]
-async fn workbench_with_gh(answering: &str) -> (tempfile::TempDir, tempfile::TempDir, Router) {
+/// `making` is what GitHub says when it is asked to make a repository. The
+/// stand-in comes back beside the router, which is where a test reads what it
+/// was asked and the token each call carried.
+async fn workbench_with_github(making: Said) -> (tempfile::TempDir, Arc<GitHub>, Router) {
     let dir = tempfile::tempdir().unwrap();
-    let notes = tempfile::tempdir().unwrap();
 
     author(&dir, "Ada Lovelace", "ada@example.com");
     std::fs::write(
@@ -995,76 +989,63 @@ async fn workbench_with_gh(answering: &str) -> (tempfile::TempDir, tempfile::Tem
         .unwrap();
 
     let data_dir = dir.path().to_owned();
-    let gh = Gh::running(vec![
-        "/bin/sh".to_owned(),
-        "-c".to_owned(),
-        format!(
-            r#"printf '%s\n' "$*" > "{notes}/asked"
-               pwd > "{notes}/where"
-               printf '%s\n' "${{GH_TOKEN-unset}}" > "{notes}/token"
-               {answering}"#,
-            notes = notes.path().display(),
-        ),
-        "gh".to_owned(),
-    ])
-    .authenticated_by(Settings::in_data_dir(&data_dir));
+    let github = GitHub::answering(move |asked| match asked.asking {
+        Asking::Making => making.clone(),
+        _ => Said::Nothing,
+    })
+    .await;
 
-    (dir, notes, router_asking_github(pool, data_dir, gh))
+    let app = router_asking_github(pool, data_dir, Forge::as_the_author(&github));
+
+    (dir, github, app)
 }
 
-/// What the stub wrote down under `notes`, one file at a time. Off Windows with
-/// the stub itself, whose only readers are the creates that reach GitHub.
-#[cfg(unix)]
-fn noted(notes: &tempfile::TempDir, what: &str) -> String {
-    std::fs::read_to_string(notes.path().join(what))
-        .unwrap_or_else(|error| panic!("the stub wrote no {what}: {error}"))
-        .trim()
-        .to_owned()
+/// And the repository it answers with: where it is, and the remote the host is
+/// to write as `origin` and push to.
+fn made_on_github(clone_url: &Path) -> Said {
+    Said::This(
+        serde_json::json!({
+            "html_url": "https://github.com/ada/widgets",
+            "clone_url": clone_url.display().to_string(),
+        })
+        .to_string(),
+    )
 }
 
 /// The Repo a create that reached GitHub hands back, which is the same
 /// [`Created::Made`] a create with nothing to push hands back: the tick is not a
 /// second outcome, it is more of the one create.
-#[cfg(unix)]
 #[tokio::test]
 async fn a_created_repository_is_private_on_github_with_origin_set_and_main_pushed() {
     let root = tempfile::tempdir().unwrap();
     let remote = tempfile::tempdir().unwrap();
 
-    // A bare repository where GitHub's would be, so that the `--push` the stub
-    // stands in for is a push that really lands: what comes back then carries
-    // the remote-tracking branch, which is the whole claim about `origin`.
+    // A bare repository where GitHub's would be, so that the remote the host
+    // writes and pushes to is one that really takes it: what comes back then
+    // carries the remote-tracking branch, which is the whole claim about
+    // `origin`.
     let there = remote.path().join("widgets.git");
     git(remote.path(), &["init", "--bare", "--quiet", "widgets.git"]);
 
-    let (_dir, notes, app) = workbench_with_gh(&format!(
-        r#"git remote add origin "{there}"
-           git push --quiet --set-upstream origin main"#,
-        there = there.display(),
-    ))
-    .await;
+    let (_dir, github, app) = workbench_with_github(made_on_github(&there)).await;
 
     let repo = made(create_on_github(&app, root.path(), "widgets").await);
 
-    // Private, sourced from the directory, `origin` written and the branch
-    // pushed — one `gh` rather than a remote added by hand with a push behind
-    // it, which would be two more ways to leave half a remote behind.
-    assert_eq!(
-        noted(&notes, "asked"),
-        "repo create widgets --private --source . --remote origin --push",
-    );
+    // Private, named as the directory is — one call rather than a remote added
+    // by hand with a push behind it, which would be two more ways to leave half
+    // a remote behind.
+    let making = github.asked_about(Asking::Making);
 
-    // Run inside the repository it has just made, which is what `--source .`
-    // means.
-    assert_eq!(
-        noted(&notes, "where"),
-        repo.path,
-        "`gh` was run in the repository it was making a remote for",
-    );
+    assert_eq!(making.len(), 1, "one call to make it: {making:?}");
+    assert_eq!(making[0].body, r#"{"name":"widgets","private":true}"#);
 
     // And as the configured token, read at the moment of the call out of the
     // file the settings page writes.
-    assert_eq!(noted(&notes, "token"), "ghp_thetokenthatwassaved");
+    assert_eq!(
+        making[0].token.as_deref(),
+        Some("ghp_thetokenthatwassaved"),
+        "the Author's token, set in the component's environment for this call",
+    );
 
     // The Repo comes back with the remote already on it: the push happens
     // before the registration, so what the modal is handed is a repository
@@ -1076,27 +1057,34 @@ async fn a_created_repository_is_private_on_github_with_origin_set_and_main_push
     assert_eq!(listed(&app).await.len(), 1, "and it is on the registry");
 }
 
-/// A create that was not asked for a remote does not go near `gh` at all.
-#[cfg(unix)]
+/// A create that was not asked for a remote does not go near GitHub at all.
 #[tokio::test]
 async fn a_create_with_the_tick_off_asks_github_nothing() {
     let root = tempfile::tempdir().unwrap();
-    let (_dir, notes, app) = workbench_with_gh("exit 0").await;
+    let (_dir, github, app) = workbench_with_github(Said::Nothing).await;
 
     made(create(&app, root.path(), "widgets").await);
 
     assert!(
-        !notes.path().join("asked").exists(),
-        "`gh` was never run for a create with nothing to push",
+        github.asked().is_empty(),
+        "GitHub was never asked anything for a create with nothing to push: {:?}",
+        github.asked(),
     );
 }
 
-/// A create under the second of two Authors runs `gh` with the second's token.
-#[cfg(unix)]
+/// A create under the second of two Authors asks GitHub with the second's
+/// token.
 #[tokio::test]
 async fn a_create_on_github_under_the_second_author_pushes_with_its_token() {
     let root = tempfile::tempdir().unwrap();
-    let (dir, notes, app) = workbench_with_gh("exit 0").await;
+    let remote = tempfile::tempdir().unwrap();
+
+    // Somewhere the remote the create writes can really be pushed to, or the
+    // create is a repository made without one.
+    let there = remote.path().join("widgets.git");
+    git(remote.path(), &["init", "--bare", "--quiet", "widgets.git"]);
+
+    let (dir, github, app) = workbench_with_github(made_on_github(&there)).await;
     two_authors(&dir);
     std::fs::write(
         dir.path().join("secrets.yaml"),
@@ -1118,17 +1106,23 @@ async fn a_create_on_github_under_the_second_author_pushes_with_its_token() {
         .await,
     );
 
-    assert_eq!(noted(&notes, "token"), "ghp_thepersonalone");
+    assert_eq!(
+        github
+            .asked_about(Asking::Making)
+            .first()
+            .and_then(|asked| asked.token.clone())
+            .as_deref(),
+        Some("ghp_thepersonalone"),
+    );
 }
 
 /// A create asked onto GitHub under an Author with no token is made here and
-/// registered, and `gh` is never run: it would fall back to the host's own
-/// login, and make the repository in an account nobody picked.
-#[cfg(unix)]
+/// registered, and GitHub is never asked: it would be asked as nobody, and
+/// make the repository in an account nobody picked.
 #[tokio::test]
-async fn a_create_on_github_under_an_author_with_no_token_runs_no_gh() {
+async fn a_create_on_github_under_an_author_with_no_token_asks_nothing() {
     let root = tempfile::tempdir().unwrap();
-    let (dir, notes, app) = workbench_with_gh("exit 0").await;
+    let (dir, github, app) = workbench_with_github(Said::Nothing).await;
     two_authors(&dir);
     // The work one has a token and the personal one has none.
 
@@ -1153,8 +1147,9 @@ async fn a_create_on_github_under_an_author_with_no_token_runs_no_gh() {
         "A. L. has no GitHub token saved, so it wasn't made on GitHub."
     );
     assert!(
-        !notes.path().join("asked").exists(),
-        "`gh` was never run for an Author with nothing to run it as",
+        github.asked().is_empty(),
+        "GitHub was never asked anything for an Author with nothing to ask as: {:?}",
+        github.asked(),
     );
     assert_eq!(repo.author.as_deref(), Some("personal"));
     assert_eq!(listed(&app).await.len(), 1, "and it is on the registry");
@@ -1165,14 +1160,13 @@ async fn a_create_on_github_under_an_author_with_no_token_runs_no_gh() {
 /// The directory, the commit and the registration all stand — what is missing is
 /// a remote that can be added afterwards — so the answer carries the Repo *and*
 /// what failed rather than choosing between them.
-#[cfg(unix)]
 #[tokio::test]
 async fn a_github_that_would_not_make_the_repository_leaves_the_local_one_registered() {
     let root = tempfile::tempdir().unwrap();
-    let (_dir, _notes, app) = workbench_with_gh(
-        r#"printf 'GraphQL: Name already exists on this account (createRepository)\n' >&2
-           exit 1"#,
-    )
+    let (_dir, _github, app) = workbench_with_github(Said::Refused(
+        422,
+        "Name already exists on this account".to_owned(),
+    ))
     .await;
 
     let outcome = create_on_github(&app, root.path(), "widgets").await;
@@ -1206,15 +1200,15 @@ async fn a_github_that_would_not_make_the_repository_leaves_the_local_one_regist
     );
 }
 
-/// And a machine with no `gh` on it at all is the same shape of answer: the
+/// And a GitHub that cannot be reached at all is the same shape of answer: the
 /// repository is made, and Verkstead says why there is no remote on it.
 #[tokio::test]
-async fn a_machine_with_no_gh_leaves_the_local_repository_registered_too() {
+async fn a_github_that_cannot_be_reached_leaves_the_local_repository_registered_too() {
     let root = tempfile::tempdir().unwrap();
     let dir = tempfile::tempdir().unwrap();
 
     author(&dir, "Ada Lovelace", "ada@example.com");
-    // A token to run it as, or there would be nothing to run it for.
+    // A token to ask as, or there would be nothing to ask for.
     std::fs::write(
         dir.path().join("secrets.yaml"),
         "author_tokens:\n  work: ghp_thetokenthatwassaved\n",
@@ -1224,15 +1218,7 @@ async fn a_machine_with_no_gh_leaves_the_local_repository_registered_too() {
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
-    let data_dir = dir.path().to_owned();
-    let app = router_asking_github(
-        pool,
-        data_dir.clone(),
-        Gh::running(vec![
-            dir.path().join("there-is-no-gh-here").display().to_string(),
-        ])
-        .authenticated_by(Settings::in_data_dir(&data_dir)),
-    );
+    let app = router_asking_github(pool, dir.path().to_owned(), Forge::unanswerable());
 
     let outcome = create_on_github(&app, root.path(), "widgets").await;
 
@@ -1241,8 +1227,8 @@ async fn a_machine_with_no_gh_leaves_the_local_repository_registered_too() {
     };
 
     assert!(
-        why.contains("no gh on this machine's PATH"),
-        "the sentence that names what to go and do: {why}",
+        why.contains("couldn't be asked"),
+        "the sentence that says GitHub was not reached: {why}",
     );
     assert_eq!(listed(&app).await.len(), 1);
     assert_eq!(listed(&app).await[0].id, repo.id);

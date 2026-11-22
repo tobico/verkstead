@@ -20,7 +20,7 @@
 //! can most easily be wrong about.
 //!
 //! So this asks the host's `gh` for the PR on the Conversation's branch — see
-//! [`crate::github`] — and records what it finds. Recording it *is* the move,
+//! the Repo's Forge — and records what it finds. Recording it *is* the move,
 //! which is why nothing here sets a state: the store does both in one
 //! transaction, so a Wrapping with no PR under it cannot exist.
 //!

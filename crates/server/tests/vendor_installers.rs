@@ -46,7 +46,6 @@ use verkstead_render::{
     AgentType, Dependency, DependencyState, DependencyView, InstallPress, InstallState,
     OnboardingView, RunPhase,
 };
-use verkstead_server::github::Gh;
 use verkstead_server::onboarding::Machine;
 use verkstead_server::platform::{Environment, Platform};
 use verkstead_server::remote::{Elevate, Raised};
@@ -152,7 +151,7 @@ async fn the_vendor_installers_run_as_the_user_and_what_they_land_is_on_the_path
         pool,
         data.path().to_owned(),
         machine,
-        Gh::on_path(),
+        verkstead_server::stand_in::Forge::itself(),
         Some(dialog.clone() as Arc<dyn Elevate>),
     );
 

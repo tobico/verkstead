@@ -326,3 +326,189 @@ pub fn unscoped(said: &str) -> bool {
         || said.contains("requires authentication")
         || said.contains("not found")
 }
+
+/// The string work's own proofs, which used to be the server's: they came over
+/// with the reading when GitHub crossed the plugin boundary, so that what is
+/// asserted is what the component does rather than what a host once did.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What a Brief carrying a link says, which is a number and the repository
+    /// it is in.
+    #[test]
+    fn a_url_names_its_number_and_its_repository() {
+        let named = pull_request_in(
+            "Wrap up https://github.com/tobico/verkstead/pull/41, which is the rate limiter.",
+        )
+        .expect("that names one");
+
+        assert_eq!(named.number, 41);
+        assert_eq!(named.repository.as_deref(), Some("tobico/verkstead"));
+    }
+
+    /// And a bare number names a number and nothing else: which repository it
+    /// is in is the Conversation's Repo.
+    #[test]
+    fn a_bare_number_names_no_repository() {
+        let named = pull_request_in("Please wrap #41 up.").expect("that names one");
+
+        assert_eq!(named.number, 41);
+        assert_eq!(named.repository, None);
+    }
+
+    /// The first of either, wherever in the prose it falls — and a URL is one
+    /// name rather than a URL and the `#` of its own fragment.
+    #[test]
+    fn the_first_of_either_is_what_is_read() {
+        assert_eq!(
+            pull_request_in("#7 is the one, not https://github.com/tobico/verkstead/pull/41")
+                .expect("that names one")
+                .number,
+            7,
+        );
+
+        let url = pull_request_in(
+            "Start from https://github.com/tobico/verkstead/pull/41#issuecomment-9 and #7 after it",
+        )
+        .expect("that names one");
+
+        assert_eq!(url.number, 41);
+        assert_eq!(url.repository.as_deref(), Some("tobico/verkstead"));
+    }
+
+    /// A heading's `#` is followed by a space rather than by digits, so a Brief
+    /// that opens on one names nothing.
+    #[test]
+    fn a_heading_names_nothing() {
+        assert_eq!(
+            pull_request_in("# Rate limiting\n\nThe public API needs a ceiling.\n"),
+            None,
+        );
+    }
+
+    /// And a `#` that does not start a word is not a bare number: GitHub's
+    /// cross-repository shorthand names a repository this origin is not, and a
+    /// number read out of it would be asked of the wrong GitHub.
+    #[test]
+    fn a_hash_inside_a_word_names_nothing() {
+        assert_eq!(pull_request_in("tobico/askance#41 is the one"), None);
+    }
+
+    /// A Brief that names nothing at all.
+    #[test]
+    fn prose_with_no_pull_request_in_it_names_nothing() {
+        assert_eq!(pull_request_in("The rate limiter needs a review."), None);
+    }
+
+    /// A number at the very start of the Brief is a number all the same.
+    #[test]
+    fn a_number_opening_the_brief_is_read() {
+        assert_eq!(
+            pull_request_in("#41 — the rate limiter")
+                .expect("that names one")
+                .number,
+            41,
+        );
+    }
+
+    /// A Target field holding a URL names that pull request, whichever of the
+    /// addresses GitHub hands out was copied into it.
+    #[test]
+    fn a_target_holding_a_url_names_its_pull_request() {
+        for field in [
+            "https://github.com/tobico/verkstead/pull/41",
+            "http://www.github.com/tobico/verkstead/pull/41",
+            "github.com/tobico/verkstead/pull/41",
+            "https://github.com/tobico/verkstead/pull/41/files",
+            "https://github.com/tobico/verkstead/pull/41#issuecomment-9",
+            "  https://github.com/tobico/verkstead/pull/41  ",
+        ] {
+            let named = pull_request_named(field).unwrap_or_else(|| panic!("{field} names one"));
+
+            assert_eq!(named.number, 41);
+            assert_eq!(named.repository.as_deref(), Some("tobico/verkstead"));
+        }
+    }
+
+    /// And one holding a bare number names a number, in whichever repository
+    /// the Conversation is on.
+    #[test]
+    fn a_target_holding_a_number_names_no_repository() {
+        let named = pull_request_named("#41").expect("that names one");
+
+        assert_eq!(named.number, 41);
+        assert_eq!(named.repository, None);
+    }
+
+    /// Everything else in that field is a branch — a branch name, and prose
+    /// with a number in it just the same. The field holds the name of one
+    /// thing, so a number inside a sentence is not the thing it names.
+    #[test]
+    fn a_target_holding_anything_else_names_no_pull_request() {
+        for field in [
+            "rate-limiting",
+            "feature/rate-limiting",
+            "",
+            "   ",
+            "fix #41 first",
+            "#41 — the rate limiter",
+            "41",
+            "tobico/askance#41",
+        ] {
+            assert_eq!(
+                pull_request_named(field),
+                None,
+                "{field} is a branch, not a pull request",
+            );
+        }
+    }
+
+    /// And what a pull request's own URL says about which repository it is in.
+    #[test]
+    fn a_pull_requests_url_says_which_repository_it_is_in() {
+        assert_eq!(
+            repository_in("https://github.com/tobico/verkstead/pull/41").as_deref(),
+            Some("tobico/verkstead"),
+        );
+        assert_eq!(repository_in("https://example.invalid/whatever"), None);
+    }
+
+    /// Every spelling of a GitHub origin says which repository it is, and every
+    /// other host says none.
+    #[test]
+    fn a_github_origin_says_its_owner_and_repository() {
+        for origin in [
+            "https://github.com/o/r",
+            "https://github.com/o/r.git",
+            "https://github.com/o/r/",
+            "http://www.github.com/o/r",
+            "https://GitHub.com/o/r",
+            "git@github.com:o/r.git",
+            "ssh://git@github.com/o/r",
+            "  https://github.com/o/r.git/  ",
+        ] {
+            assert_eq!(
+                dot_com_repository(origin).as_deref(),
+                Some("o/r"),
+                "{origin} is o/r",
+            );
+        }
+
+        for origin in [
+            "https://gitlab.com/o/r",
+            "https://github.example.com/o/r",
+            "git@example.com:o/r.git",
+            "https://github.com/o",
+            "https://github.com/o/r/tree/main",
+            "/srv/repos/r",
+            "",
+        ] {
+            assert_eq!(
+                dot_com_repository(origin),
+                None,
+                "{origin} is not on GitHub"
+            );
+        }
+    }
+}

@@ -15,12 +15,13 @@
 //! viewer that draws the wrong thing.
 //!
 //! That fixture half is the one thing here that is not built everywhere: the
-//! settings fixture wants a `gh` to answer, and the stand-in for one is a shell
-//! script — see [`told_app`]. Everything the rest of this file asks is about
-//! what the server made of an agent's markup, which is the same answer on any
-//! machine. So the fixture test is left out on Windows and the long tail of
-//! helpers only it uses goes unused there, which is what this says rather than
-//! `cfg`-gating twenty of them one at a time.
+//! files it writes are committed, and they are committed from a Unix run — so a
+//! Windows one would only be a second machine writing the same bytes.
+//! Everything the rest of this file asks is about what the server made of an
+//! agent's markup, which is the same answer on any machine. So the fixture test
+//! is left out on Windows and the long tail of helpers only it uses goes unused
+//! there, which is what this says rather than `cfg`-gating twenty of them one
+//! at a time.
 #![cfg_attr(not(unix), allow(dead_code, unused_imports))]
 
 use std::path::Path;
@@ -46,8 +47,9 @@ use verkstead_server::peer::Members;
 use verkstead_server::peer::joining::Joins;
 use verkstead_server::platform::Platform;
 use verkstead_server::remote::Tailscale;
+use verkstead_server::stand_in::{Forge, GitHub, Said};
 use verkstead_server::{
-    Gh, open_database, router, router_answering_devices, router_asking_github, router_keeping,
+    open_database, router, router_answering_devices, router_asking_github, router_keeping,
     router_reading_tailscale, store,
 };
 
@@ -1769,10 +1771,9 @@ const FIXTURES: &str = "../../web/tests/fixtures";
 /// a run next week write the same bytes: every settling stamp is overwritten
 /// with a stated minute after the fact, and it is the viewer that words one.
 ///
-/// Written where the `gh` it needs can be a shell script — see [`told_app`] —
-/// which is both Unixes. The files are committed and the viewer's own job reads
-/// them, so what a Windows run would add is a second machine writing the same
-/// bytes.
+/// Written on both Unixes, which is where the files it writes are committed
+/// from. The viewer's own job reads them, so what a Windows run would add is a
+/// second machine writing the same bytes.
 #[cfg(unix)]
 #[tokio::test]
 async fn the_viewers_own_tests_are_fed_from_here() {
@@ -4800,15 +4801,13 @@ fn pin_under(json: &str, made: &Path, at: &str) -> String {
     json.replace(made, at)
 }
 
-/// A server keeping settings files of its own, whose `gh` answers `gh api user`
-/// as one stated account.
+/// A server keeping settings files of its own, whose GitHub answers `/user` as
+/// one stated account.
 ///
-/// The stub is what lets a fixture carry a verified token without a network or
-/// somebody's credentials — what a token really verifies as is
-/// `tests/suite/settings.rs`'s subject, and this is only the shape of the answer.
-///
-/// A `/bin/sh` script, which is what keeps it and its one caller off Windows.
-#[cfg(unix)]
+/// The stand-in is what lets a fixture carry a verified token without a network
+/// or somebody's credentials — what a token really verifies as is
+/// `tests/suite/settings.rs`'s subject, and this is only the shape of the
+/// answer.
 async fn told_app() -> (tempfile::TempDir, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
@@ -4816,16 +4815,12 @@ async fn told_app() -> (tempfile::TempDir, Router) {
         .unwrap();
     let data_dir = dir.path().to_owned();
 
-    let gh = Gh::running(vec![
-        "/bin/sh".to_owned(),
-        "-c".to_owned(),
-        r#"printf '{"login":"ada"}'"#.to_owned(),
-        // `sh -c` gives `$0` the script's own name, so what Verkstead passes
-        // lands in `$1` onwards.
-        "gh".to_owned(),
-    ]);
+    let github = GitHub::saying(Said::This(r#"{"login":"ada"}"#.to_owned())).await;
 
-    (dir, router_asking_github(pool, data_dir, gh))
+    (
+        dir,
+        router_asking_github(pool, data_dir, Forge::standing_in(&github)),
+    )
 }
 
 /// Pin when `secrets.yaml` was written, which is the file's own modification
