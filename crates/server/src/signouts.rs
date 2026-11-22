@@ -35,7 +35,8 @@
 //! landed, every run stopped as Signed out on it is started again through
 //! Resume — see [`logged_in`]. Each one builds a fresh root, which is what
 //! picks the new login up: on Linux the old session's bind still holds the old
-//! file.
+//! file. And the members are told, because a run under a Profile not bound on
+//! its device is stopped and recorded there — see [`hearing`].
 //!
 //! **A sign-out after a fresh login resumes by itself.** A session can sign
 //! out after the human has already logged in again: its root was built before
@@ -55,6 +56,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use sqlx::SqlitePool;
 use tokio::sync::mpsc;
+use verkstead_schema::{Nudge, Nudged};
 
 use crate::AppState;
 use crate::limits::{DECORATION, Held};
@@ -609,6 +611,72 @@ pub(crate) async fn logged_in(state: AppState, profile: String) {
                 profile_id = %profile,
                 "starting a run a login unblocked failed"
             ),
+        }
+    }
+}
+
+/// Resume the runs here that a member's login unblocks, from now until the
+/// process stops.
+///
+/// A run under a Profile not bound here runs from a copy of the account,
+/// fetched from a device it is bound on, and its stop is recorded here. So a
+/// login made over there resumes nothing here by itself: [`logged_in`] reads
+/// the runs of the device it runs on. This is what hears that device's
+/// [`Nudge::LoggedIn`] and resumes them, each fetching the new login as it
+/// launches.
+///
+/// **Only where the Profile is not bound here.** A run under one bound here
+/// runs from this device's own login, which a login on another device has not
+/// changed: resumed, it would only sign out again. A Nudge that never lands
+/// leaves the run stopped, the way it was before, for Resume to start.
+///
+/// Nothing on a server with no members or no sessions.
+pub(crate) fn hearing(state: &AppState) {
+    if state.devices.is_none() || state.sessions.agents().is_none() {
+        return;
+    }
+
+    let state = state.clone();
+    let mut moved = state.nudges.subscribe();
+
+    tokio::spawn(async move {
+        loop {
+            match moved.recv().await {
+                Ok(Nudged {
+                    device: Some(device),
+                    moved: Nudge::LoggedIn { profile },
+                    ..
+                }) => {
+                    tokio::spawn(logged_in_on(state.clone(), device, profile));
+                }
+                Ok(_) => {}
+
+                // What was missed is left stopped for Resume, as a Nudge that
+                // never landed is.
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                    tracing::debug!(missed, "the sign-outs fell behind the Nudges");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+            }
+        }
+    });
+}
+
+/// A login on `profile` has landed on the member `device`: resume the runs
+/// here stopped on it, where this device runs it from a copy.
+async fn logged_in_on(state: AppState, device: String, profile: String) {
+    match store::load_profile(&state.pool, &profile).await {
+        Ok(Some(held)) if held.unbound.is_some() => {
+            tracing::info!(
+                device = %device,
+                profile_id = %profile,
+                "a member logged in on a Profile this device runs from a copy",
+            );
+            logged_in(state, profile).await;
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::error!(error = ?error, profile_id = %profile, "reading the Profile a member logged in on failed");
         }
     }
 }

@@ -187,6 +187,16 @@ pub enum Nudge {
     /// login printed, without either of them asking again.
     Login { profile: String },
 
+    /// A login on a Profile landed on this device: the account it is bound on
+    /// holds a fresh one.
+    ///
+    /// **What a member hears to resume its runs stopped as Signed out on that
+    /// Profile.** A run on a device the Profile is not bound on is stopped
+    /// there, and its stop is recorded there, so the device that ran the login
+    /// has no run of it to resume. Each member resumes its own, and a launch
+    /// there fetches the login fresh before it starts.
+    LoggedIn { profile: String },
+
     /// Everything of one device's, which is the widest thing there is to say:
     /// read back whatever of it is on screen.
     ///
