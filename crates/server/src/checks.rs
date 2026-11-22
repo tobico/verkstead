@@ -172,7 +172,9 @@ pub(crate) async fn count_conflict_attempt(
 /// Sandbox without it stops the run with a Notice naming it, and the answer is
 /// that stop's sentence. See [`unsyncable`] and [`crate::stacks::missing`].
 ///
-/// A lone pull request is told the strategy the settings file names, read as
+/// A lone pull request is told the strategy the settings file names — and so
+/// is every pull request on a Forge without `stacks`, whose chain is left to
+/// git and asked nothing of `gh stack` — read as
 /// the session is dispatched rather than held from anywhere: a resolution
 /// configured a minute ago is what the next conflict is resolved by. See
 /// [`resolving`].
@@ -194,7 +196,13 @@ pub(crate) async fn resolution(
             "The stack couldn't be read.".to_owned()
         })?;
 
-    match chained(&stack) {
+    // On a Forge without stacks there is no chain to sync, whatever is
+    // recorded: the take-up walked none, and what is told is the strategy.
+    let stacks = crate::forges::of(state, &watched.repo.path)
+        .await
+        .has(crate::forges::Capability::Stacks);
+
+    match chained(&stack).filter(|_| stacks) {
         Some(branches) => match crate::stacks::missing(state, conversation_id).await {
             Some(why) => Err(unsyncable(state, conversation_id, &watched, &why, writing).await),
             None => Ok(syncing(&watched, &stack, &branches)),

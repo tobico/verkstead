@@ -22,7 +22,7 @@ Roadmap stage: [12: The Forge interface and GitHub across](docs/roadmaps/plugins
 - [x] 02: A Repo's Forge — [details](02-a-repos-forge.md)
 - [x] 03: Tokens per Forge per Author — [details](03-tokens-per-forge.md)
 - [x] 04: The noun — [details](04-the-noun.md)
-- [ ] 05: Capabilities — [details](05-capabilities.md)
+- [x] 05: Capabilities — [details](05-capabilities.md)
 - [ ] 06: `verkstead pull-request open` and forge-neutral skills — [details](06-pull-request-open.md)
 - [ ] 07: GitHub across: the component — [details](07-github-component.md)
 - [ ] 08: `gh` leaves the server — [details](08-gh-leaves-the-server.md)

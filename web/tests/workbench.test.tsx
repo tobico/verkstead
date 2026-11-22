@@ -106,6 +106,7 @@ import type {
   TimelineEvent,
   TranscriptView,
   Turn,
+  ForgeCapability,
 } from "../src/api/types";
 // The one menu, which all three of this page's ⋯ and dropdowns are drawn as.
 // The app's own retry rule, which is what a read that gave up on its deadline
@@ -11819,6 +11820,35 @@ describe("the share pane", () => {
       ),
     ).toBeTruthy();
   });
+
+  /// And so has a Repo on a forge that declares no `publish`, nor the press
+  /// that publishes to its pull requests.
+  it("has no publish on a repo whose forge can't publish, and says why", async () => {
+    theGrillingStanding({
+      repo: {
+        ...GRILLING.repo,
+        forge: {
+          kind: "On",
+          uuid: "x",
+          name: "Workshop",
+          noun: "pull request",
+          capabilities: ["checks", "review"],
+        },
+      },
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openShare(container);
+
+    expect(container.querySelector(`.${sharePane.download}`)).not.toBeNull();
+    expect(container.querySelector(`.${sharePane.publish}`)).toBeNull();
+    expect(container.querySelector(`.${sharePane.comment}`)).toBeNull();
+    expect(
+      screen.getByText(
+        "Workshop can't publish shares, so there's nowhere to publish this one.",
+      ),
+    ).toBeTruthy();
+  });
 });
 
 describe("a repo on no forge", () => {
@@ -18689,6 +18719,13 @@ describe("a forge that calls it a merge request", () => {
       uuid: "7a3d1f20-5b4e-4c8a-9e61-2d0f4b7c9a35",
       name: "GitLab",
       noun: "merge request",
+      capabilities: [
+        "checks",
+        "review",
+        "publish",
+        "stacks",
+        "create",
+      ] as ForgeCapability[],
     },
   };
 

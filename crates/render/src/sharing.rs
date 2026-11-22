@@ -486,6 +486,10 @@ pub enum SharePublished {
     /// The Conversation's Repo is on no Forge — its remote names `host`, which
     /// no enabled Forge answers for — so there is nowhere to publish to.
     NoForge { host: Option<String> },
+
+    /// The Conversation's Repo is on `forge`, which declares no `publish`:
+    /// there is nowhere on it to publish to.
+    NoPublish { forge: String },
 }
 
 /// What became of sharing a Conversation to the pull requests its work is on.

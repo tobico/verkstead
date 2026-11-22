@@ -41,6 +41,13 @@
     "author_unpicked": false,
     "default_branch": "main",
     "forge": {
+      "capabilities": [
+        "checks",
+        "review",
+        "publish",
+        "stacks",
+        "create"
+      ],
       "kind": "On",
       "name": "GitHub",
       "noun": "pull request",

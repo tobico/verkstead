@@ -204,7 +204,7 @@ async fn a_repository_registers_and_appears_on_the_list() {
 /// And a Repo on github.com reads as on GitHub throughout the first two.
 #[tokio::test]
 async fn a_repos_forge_is_read_off_its_remote_against_the_enabled_forges() {
-    use verkstead_render::RepoForge;
+    use verkstead_render::{ForgeCapability, RepoForge};
     use verkstead_server::plugins::built_in::GITHUB;
 
     let src = tempfile::tempdir().unwrap();
@@ -242,6 +242,13 @@ async fn a_repos_forge_is_read_off_its_remote_against_the_enabled_forges() {
         uuid: GITHUB.to_owned(),
         name: "GitHub".to_owned(),
         noun: "pull request".to_owned(),
+        capabilities: vec![
+            ForgeCapability::Checks,
+            ForgeCapability::Review,
+            ForgeCapability::Publish,
+            ForgeCapability::Stacks,
+            ForgeCapability::Create,
+        ],
     });
     let none = Some(RepoForge::Unmatched {
         host: Some("git.example.invalid".to_owned()),

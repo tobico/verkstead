@@ -29,6 +29,7 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
+pub(crate) use crate::plugins::manifest::forge::Capability;
 use crate::store;
 use crate::targets::NamedPullRequest;
 
@@ -641,6 +642,29 @@ pub(crate) struct Enabled {
     /// What it calls a pull request, as its manifest declares: the word the
     /// screen says for one of a Repo on it (ADR-0030, *Forge*).
     pub(crate) noun: String,
+
+    /// What it can do, as its manifest declares. One it does not declare is
+    /// settled rather than failed — see [`Enabled::has`].
+    pub(crate) capabilities: Vec<Capability>,
+}
+
+impl Enabled {
+    /// Whether it declares `capability`.
+    pub(crate) fn has(&self, capability: Capability) -> bool {
+        self.capabilities.contains(&capability)
+    }
+
+    /// The built-in GitHub as it is when nothing could be read about it: every
+    /// capability, its own noun, and no hosts to match by.
+    fn github() -> Enabled {
+        Enabled {
+            uuid: crate::plugins::built_in::GITHUB.to_owned(),
+            name: "GitHub".to_owned(),
+            hosts: Vec::new(),
+            noun: PULL_REQUEST.to_owned(),
+            capabilities: Capability::ALL.to_vec(),
+        }
+    }
 }
 
 /// What a Forge calls a pull request where nothing better is known: GitHub's
@@ -648,6 +672,15 @@ pub(crate) struct Enabled {
 pub(crate) const PULL_REQUEST: &str = "pull request";
 
 impl Matched {
+    /// Whether the Repo's Forge declares `capability`. A Repo on none has
+    /// nothing to have it of.
+    pub(crate) fn has(&self, capability: Capability) -> bool {
+        match self {
+            Matched::On(forge) => forge.has(capability),
+            Matched::Unmatched { .. } => false,
+        }
+    }
+
     /// The noun the Repo's Forge calls a pull request, or the documents' own
     /// word for a Repo on none — which has no pull request to call anything.
     pub(crate) fn noun(&self) -> &str {
@@ -726,6 +759,11 @@ impl Matched {
                 uuid: forge.uuid.clone(),
                 name: forge.name.clone(),
                 noun: forge.noun.clone(),
+                capabilities: forge
+                    .capabilities
+                    .iter()
+                    .map(|capability| drawn(*capability))
+                    .collect(),
             },
             Matched::Unmatched { host } => {
                 verkstead_render::RepoForge::Unmatched { host: host.clone() }
@@ -734,16 +772,52 @@ impl Matched {
     }
 }
 
-/// The Forges enabled on this cluster, in the order the built-ins are listed.
+/// A capability as the viewer is handed it.
+fn drawn(capability: Capability) -> verkstead_render::ForgeCapability {
+    match capability {
+        Capability::Checks => verkstead_render::ForgeCapability::Checks,
+        Capability::Review => verkstead_render::ForgeCapability::Review,
+        Capability::Publish => verkstead_render::ForgeCapability::Publish,
+        Capability::Stacks => verkstead_render::ForgeCapability::Stacks,
+        Capability::Create => verkstead_render::ForgeCapability::Create,
+    }
+}
+
+/// The Forges enabled on this cluster: every one registered in-process on
+/// this server first — see [`crate::forge::Registered`] — then the built-ins,
+/// in the order they are listed.
 ///
-/// **Only the built-in GitHub for now**: it is the one Forge the server has an
-/// implementation of, answered in-process. An installed plugin declaring a
-/// Forge is matched once its component can answer — until then a Repo on its
-/// host would be a Repo on a Forge nothing can ask.
+/// **Of the built-ins, only GitHub for now**: it is the one Forge the server
+/// has an implementation of, answered in-process. An installed plugin
+/// declaring a Forge is matched once its component can answer — until then a
+/// Repo on its host would be a Repo on a Forge nothing can ask.
 ///
 /// Read off the Plugins records each time: a tick or a host added on any
 /// device reaches the next question without a restart.
-pub(crate) async fn enabled(pool: &sqlx::SqlitePool) -> anyhow::Result<Vec<Enabled>> {
+pub(crate) async fn enabled(state: &crate::AppState) -> anyhow::Result<Vec<Enabled>> {
+    let mut enabled = state.forge.registered();
+    enabled.extend(built_in(&state.pool).await?);
+
+    Ok(enabled)
+}
+
+/// The same, where reading the records failed left as the built-in GitHub
+/// alone, after whatever is registered: what [`of`] matches against.
+pub(crate) async fn enabled_now(state: &crate::AppState) -> Vec<Enabled> {
+    match enabled(state).await {
+        Ok(enabled) => enabled,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading which forges are enabled failed");
+
+            let mut enabled = state.forge.registered();
+            enabled.push(Enabled::github());
+            enabled
+        }
+    }
+}
+
+/// The built-in Forges the Plugins records leave enabled.
+async fn built_in(pool: &sqlx::SqlitePool) -> anyhow::Result<Vec<Enabled>> {
     use crate::replicating::plugins::{Plugins, SettingValue};
 
     let records = crate::store::replicated::live_records::<Plugins>(pool).await?;
@@ -782,6 +856,7 @@ pub(crate) async fn enabled(pool: &sqlx::SqlitePool) -> anyhow::Result<Vec<Enabl
                 name: manifest.name.clone(),
                 hosts,
                 noun: declared.noun.clone(),
+                capabilities: declared.capabilities.clone(),
             })
         })
         .collect())
@@ -811,29 +886,22 @@ pub(crate) fn matched(enabled: &[Enabled], origin: Option<&str>) -> Matched {
 /// The Forge of the Repo at `repo`, read now: its `origin` asked of git and
 /// matched against the Forges enabled at this moment.
 ///
-/// A store that cannot be read leaves the Repo to the first Forge there is,
-/// rather than to none: a Repo read as on no Forge lands its work Done with
-/// nothing watching, which is not a thing to do over a read that failed.
-pub(crate) async fn of(pool: &sqlx::SqlitePool, repo: &Path) -> Matched {
-    let enabled = match enabled(pool).await {
-        Ok(enabled) => enabled,
-        Err(error) => {
-            tracing::error!(error = ?error, "reading which forges are enabled failed");
-            return Matched::On(Enabled {
-                uuid: crate::plugins::built_in::GITHUB.to_owned(),
-                name: "GitHub".to_owned(),
-                hosts: Vec::new(),
-                noun: PULL_REQUEST.to_owned(),
-            });
-        }
-    };
+/// A store that cannot be read leaves the Repo to the built-in GitHub, rather
+/// than to none: a Repo read as on no Forge lands its work Done with nothing
+/// watching, which is not a thing to do over a read that failed. See
+/// [`enabled_now`].
+pub(crate) async fn of(state: &crate::AppState, repo: &Path) -> Matched {
+    among(&enabled_now(state).await, repo).await
+}
 
+/// The same, matched against `enabled` as already read.
+pub(crate) async fn among(enabled: &[Enabled], repo: &Path) -> Matched {
     let repo = repo.to_owned();
     let origin = tokio::task::spawn_blocking(move || crate::repos::origin(&repo))
         .await
         .unwrap_or_default();
 
-    matched(&enabled, origin.as_deref())
+    matched(enabled, origin.as_deref())
 }
 
 /// Why there is nothing for a Forge to say about a Repo on none, in a
@@ -845,6 +913,42 @@ pub(crate) fn unmatched(host: Option<&str>) -> String {
              forge's hosts in Plugins to have it watched."
         ),
         None => "No forge is enabled, so there's no pull request to wrap up.".to_owned(),
+    }
+}
+
+/// Why a wrap-up does not wait on what a Forge lacking `capability` — checks,
+/// or review — would have said about pull request `number`, in a sentence for
+/// the Timeline. `None` for a capability no wrap-up watcher waits on.
+pub(crate) fn unwatched(
+    forge: &str,
+    noun: &str,
+    capability: Capability,
+    number: i64,
+) -> Option<String> {
+    match capability {
+        Capability::Checks => Some(format!(
+            "{forge} has no checks, so the wrap-up doesn't wait on any for {noun} #{number}."
+        )),
+        Capability::Review => Some(format!(
+            "{forge} has no reviews, so the wrap-up doesn't wait on anything said on {noun} \
+             #{number}."
+        )),
+        Capability::Publish | Capability::Stacks | Capability::Create => None,
+    }
+}
+
+/// Why a Share on a Repo whose Forge can't publish has no Publish, in a
+/// sentence.
+pub(crate) fn publishless(forge: &str) -> String {
+    format!("{forge} can't publish shares, so there's nowhere to publish this one.")
+}
+
+/// Why a repository made with a remote asked for was made here only, its
+/// Forge being one that can't create one.
+pub(crate) fn createless(forge: Option<&str>) -> String {
+    match forge {
+        Some(forge) => format!("{forge} can't create repositories, so no remote was made."),
+        None => "No forge is enabled, so no remote was made.".to_owned(),
     }
 }
 
@@ -866,6 +970,7 @@ mod tests {
             name: "GitHub".to_owned(),
             hosts: hosts.iter().map(|host| (*host).to_owned()).collect(),
             noun: PULL_REQUEST.to_owned(),
+            capabilities: Capability::ALL.to_vec(),
         }
     }
 

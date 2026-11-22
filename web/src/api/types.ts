@@ -3503,6 +3503,11 @@ export type FolderListing = { "Listed": {
 path: string, entries: Array<FolderEntry>, } } | "Outside" | "UnderGit" | "RootGone" | "Missing" | "NotAFolder" | { "Unreadable": { why: string, } };
 
 /**
+ * Something a Forge can do, in ADR-0030's words.
+ */
+export type ForgeCapability = "checks" | "review" | "publish" | "stacks" | "create";
+
+/**
  * One Author's token for one Forge, as everything but the token.
  */
 export type ForgeToken = { 
@@ -6107,7 +6112,12 @@ forge: RepoForge | null, };
 /**
  * Which Forge a Repo is on, by its remote's host (ADR-0030, *Forge*).
  */
-export type RepoForge = { "kind": "On", uuid: string, name: string, noun: string, } | { "kind": "Unmatched", host: string | null, };
+export type RepoForge = { "kind": "On", uuid: string, name: string, noun: string, 
+/**
+ * What it can do, as its manifest declares — where one is absent,
+ * the viewer draws nothing that would ask for it, and says so.
+ */
+capabilities: Array<ForgeCapability>, } | { "kind": "Unmatched", host: string | null, };
 
 /**
  * What a Repo was last grilled with, as a Conversation started on it would
@@ -7179,7 +7189,7 @@ export type ShareCommented = { "Commented": { share: ShareView, on: Array<Commen
  * each is named rather than folded into one refusal. Two of the three are about
  * the token on the settings page, and the page is where they are answered.
  */
-export type SharePublished = { "Published": { share: ShareView, } } | "NoToken" | "NoGistScope" | { "Refused": { why: string, } } | { "NoForge": { host: string | null, } };
+export type SharePublished = { "Published": { share: ShareView, } } | "NoToken" | "NoGistScope" | { "Refused": { why: string, } } | { "NoForge": { host: string | null, } } | { "NoPublish": { forge: string, } };
 
 /**
  * One published share, as the workbench draws it: the link, the gist behind it,

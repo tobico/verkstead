@@ -33,6 +33,23 @@ export function unpublishable(host: string | null): string {
     : `No forge for ${host}, so there's nowhere to publish the share.`;
 }
 
+/// Why a Share on this Repo has no Publish — no Forge, or one that declares
+/// no `publish` — in the server's own sentence for the refusal, and `null`
+/// where it has one.
+export function unpublished(repo: RepoEntry): string | null {
+  const forge = repo.forge;
+  if (forge === null) return null;
+  if (forge.kind === "Unmatched") return unpublishable(forge.host);
+  return forge.capabilities.includes("publish")
+    ? null
+    : publishless(forge.name);
+}
+
+/// Why a Share on a Repo whose Forge declares no `publish` has no Publish.
+export function publishless(forge: string): string {
+  return `${forge} can't publish shares, so there's nowhere to publish this one.`;
+}
+
 /// What a Repo's row says where its Author holds no token for the Forge it is
 /// on — *No GitHub token for Work* — which leaves the Forge unasked: no
 /// wrap-up there. `null` where it holds one, where the Repo is on no Forge,

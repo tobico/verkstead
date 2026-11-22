@@ -56,6 +56,7 @@ use crate::unseen::Unseen;
 /// the thread it borrows costs nothing.
 pub(crate) async fn register(
     pool: &SqlitePool,
+    enabled: &[crate::forges::Enabled],
     config: &Config,
     asked: &str,
     author: Option<&str>,
@@ -69,6 +70,7 @@ pub(crate) async fn register(
     // see [`Registration::reported`], which is where it is put in.
     Ok(registering(
         pool,
+        enabled,
         config.authors(),
         author.map(Author::id),
         PathBuf::from(asked),
@@ -139,6 +141,7 @@ impl From<Unpicked> for Created {
 /// revived keeps the Author it had — see [`store::register_repo_as`].
 async fn registering(
     pool: &SqlitePool,
+    enabled: &[crate::forges::Enabled],
     authors: &[Author],
     author: Option<&str>,
     asked: PathBuf,
@@ -167,7 +170,7 @@ async fn registering(
     )
     .await?
     {
-        Some(repo) => Registered::Added(forged(pool, entry(repo, authors)).await),
+        Some(repo) => Registered::Added(forged(enabled, entry(repo, authors)).await),
         None => {
             let held = store::registered_repo_at(pool, &facts.path)
                 .await?
@@ -183,7 +186,7 @@ async fn registering(
                     )
                 })?;
 
-            Registered::AlreadyRegistered(forged(pool, entry(held, authors)).await)
+            Registered::AlreadyRegistered(forged(enabled, entry(held, authors)).await)
         }
     };
 
@@ -285,8 +288,8 @@ pub(crate) fn listed(
 /// The same row with the Forge its origin is on read in — what the registry's
 /// own pane is handed back after a press on it, so the row it redraws says
 /// what the list does.
-async fn forged(pool: &SqlitePool, entry: RepoEntry) -> RepoEntry {
-    let forge = crate::forges::of(pool, Path::new(&entry.path))
+async fn forged(enabled: &[crate::forges::Enabled], entry: RepoEntry) -> RepoEntry {
+    let forge = crate::forges::among(enabled, Path::new(&entry.path))
         .await
         .drawn();
 
@@ -342,6 +345,7 @@ fn unpicked(author: Option<&str>, authors: &[Author]) -> bool {
 /// rare enough that the thread it borrows costs nothing.
 pub(crate) async fn create(
     pool: &SqlitePool,
+    enabled: &[crate::forges::Enabled],
     config: &Config,
     gh: &dyn crate::forges::Forge,
     creation: &Creation,
@@ -389,8 +393,18 @@ pub(crate) async fn create(
     // return: a repository that is on somebody's disk is made, whatever GitHub
     // said about it, and taking the local one back over a token that has
     // expired would be the worse of the two mistakes.
+    // The Forge it is made on is the first enabled, which is the one a Repo
+    // with no remote is on: and one that declares no `create` makes nothing,
+    // the repository being made here only and the answer saying so.
+    let creating = enabled.first();
+
     let unpushed = match github {
         false => None,
+        true if !creating.is_some_and(|forge| forge.has(crate::forges::Capability::Create)) => {
+            Some(crate::forges::createless(
+                creating.map(|forge| forge.name.as_str()),
+            ))
+        }
         true => {
             // As the Author it was committed as, whose Repo it is about to be.
             let gh = gh.as_author(picked.map(Author::id));
@@ -425,7 +439,7 @@ pub(crate) async fn create(
     // The outcome alone: a repository made a moment ago has no remote yet, and a
     // create answers with the Repo rather than with what git would clone it from
     // — see [`Registration`].
-    let registered = registering(pool, authors, picked.map(Author::id), path.clone())
+    let registered = registering(pool, enabled, authors, picked.map(Author::id), path.clone())
         .await?
         .outcome;
 
@@ -643,6 +657,7 @@ fn is_a_name(name: &str) -> bool {
 /// patience, as it is for a local press.
 pub(crate) async fn clone(
     pool: &SqlitePool,
+    enabled: &[crate::forges::Enabled],
     config: &Config,
     gh: &dyn crate::forges::Forge,
     cloning: &verkstead_render::Cloning,
@@ -685,7 +700,7 @@ pub(crate) async fn clone(
         && let Some(held) = store::registered_repo_at(pool, &there).await?
     {
         return Ok(Cloned::AlreadyRegistered(
-            forged(pool, entry(held, authors)).await,
+            forged(enabled, entry(held, authors)).await,
         ));
     }
 
@@ -717,7 +732,7 @@ pub(crate) async fn clone(
     Ok(
         // The origin is the registration endpoint's to report and not this
         // one's, so the outcome is taken and it is left — see [`Registration`].
-        match registering(pool, authors, picked.map(Author::id), path.clone())
+        match registering(pool, enabled, authors, picked.map(Author::id), path.clone())
             .await?
             .outcome
         {
@@ -1003,6 +1018,7 @@ pub(crate) async fn remove(pool: &SqlitePool, id: i64) -> Result<RepoRemoved> {
 /// reads the Author at launch, so the next one is the new Author's.
 pub(crate) async fn repoint(
     pool: &SqlitePool,
+    enabled: &[crate::forges::Enabled],
     config: &Config,
     id: i64,
     author: &str,
@@ -1013,7 +1029,7 @@ pub(crate) async fn repoint(
 
     Ok(match store::repoint_repo(pool, id, author).await? {
         store::Repointing::Repointed(repo) => {
-            Repointed::Repointed(forged(pool, entry(repo, config.authors())).await)
+            Repointed::Repointed(forged(enabled, entry(repo, config.authors())).await)
         }
         store::Repointing::NoSuchRepo => Repointed::NoSuchRepo,
         store::Repointing::InUse { on, beside } => Repointed::InUse { on, beside },
@@ -1103,7 +1119,7 @@ pub(crate) async fn repoint_authors(
 
     for one in pointing {
         let why = match &one.on {
-            None => match repoint(pool, &config, one.id, to).await? {
+            None => match repoint(pool, &[], &config, one.id, to).await? {
                 Repointed::Repointed(_) | Repointed::NoSuchRepo => None,
                 Repointed::NoSuchAuthor => Some(Unrepointing::NoSuchAuthor),
                 Repointed::InUse { on, beside } => Some(Unrepointing::InUse { on, beside }),

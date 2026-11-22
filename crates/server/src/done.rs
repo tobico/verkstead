@@ -705,7 +705,7 @@ async fn uncovered(state: &AppState, conversation_id: i64) -> Option<String> {
     for companion in committed {
         // On no Forge, there is no pull request to hold the signal for.
         if let crate::forges::Matched::Unmatched { .. } =
-            crate::forges::of(&state.pool, &companion.path).await
+            crate::forges::of(state, &companion.path).await
         {
             continue;
         }

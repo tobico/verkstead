@@ -44,6 +44,7 @@ import type {
   DirectoryListing,
   RepoEntry,
   SettingsView,
+  ForgeCapability,
 } from "../src/api/types";
 import card from "../src/CardButton.module.css";
 import { Reaching, type Device } from "../src/reaching";
@@ -330,7 +331,19 @@ describe("the pane it opens", () => {
     const on: RepoEntry = {
       ...FIRST,
       author: null,
-      forge: { kind: "On", uuid: GITHUB, name: "GitHub", noun: "pull request" },
+      forge: {
+        kind: "On",
+        uuid: GITHUB,
+        name: "GitHub",
+        noun: "pull request",
+        capabilities: [
+          "checks",
+          "review",
+          "publish",
+          "stacks",
+          "create",
+        ] as ForgeCapability[],
+      },
     };
     const author = {
       id: "6f1c2a52-7d0e-4c55-9a43-0d6b8f3e2a11",
@@ -352,7 +365,13 @@ describe("the pane it opens", () => {
     const on: RepoEntry = {
       ...FIRST,
       author: null,
-      forge: { kind: "On", uuid: GITHUB, name: "GitHub", noun: "pull request" },
+      forge: {
+        kind: "On",
+        uuid: GITHUB,
+        name: "GitHub",
+        noun: "pull request",
+        capabilities: ["checks", "review", "publish", "stacks", "create"],
+      },
     };
     serving(
       whenever("/api/ui/repos", json([on])),

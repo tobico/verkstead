@@ -1272,7 +1272,7 @@ async fn repos(State(state): State<AppState>) -> HttpResponse {
     // Each row asks git for its origin, so the list is read off the runtime's
     // own threads.
     let authors = state.settings.config().authors().to_vec();
-    let enabled = match crate::forges::enabled(&state.pool).await {
+    let enabled = match crate::forges::enabled(&state).await {
         Ok(enabled) => enabled,
         Err(error) => {
             tracing::error!(error = ?error, "reading which forges are enabled failed");
@@ -1396,6 +1396,7 @@ async fn register_repo(
 ) -> HttpResponse {
     match crate::repos::register(
         &state.pool,
+        &crate::forges::enabled_now(&state).await,
         &state.settings.config(),
         &registration.path,
         registration.author.as_deref(),
@@ -1433,6 +1434,7 @@ async fn create_repo(
 
     match crate::repos::create(
         &state.pool,
+        &crate::forges::enabled_now(&state).await,
         &config,
         &*state.github,
         &creation,
@@ -1462,7 +1464,9 @@ async fn create_repo(
 async fn clone_repo(State(state): State<AppState>, Json(cloning): Json<Cloning>) -> HttpResponse {
     let config = state.settings.config();
 
-    match crate::repos::clone(&state.pool, &config, &*state.github, &cloning).await {
+    let enabled = crate::forges::enabled_now(&state).await;
+
+    match crate::repos::clone(&state.pool, &enabled, &config, &*state.github, &cloning).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "cloning a Repo failed");
@@ -1685,6 +1689,7 @@ async fn repoint_repo(
 
     match crate::repos::repoint(
         &state.pool,
+        &crate::forges::enabled_now(&state).await,
         &state.settings.config(),
         id,
         &repointing.author,
@@ -2829,7 +2834,7 @@ pub(crate) async fn conversation_view(
 
     // And the Forge its Repo is on, read off the remote now — what the card
     // says *No forge for* where a pull request would have been.
-    let forge = crate::forges::of(&state.pool, &conversation.repo.path)
+    let forge = crate::forges::of(state, &conversation.repo.path)
         .await
         .drawn();
 
@@ -3399,15 +3404,20 @@ async fn publishing(
 ) -> Result<Published, Unpublished> {
     let conversation_id = bundle.conversation.id;
 
-    // On no Forge there is nowhere to publish to, and nothing is asked.
+    // On no Forge there is nowhere to publish to, nor on one that declares no
+    // `publish`, and nothing is asked.
     match store::load_conversation(&state.pool, conversation_id).await {
-        Ok(Some(conversation)) => {
-            if let crate::forges::Matched::Unmatched { host } =
-                crate::forges::of(&state.pool, &conversation.repo.path).await
-            {
+        Ok(Some(conversation)) => match crate::forges::of(state, &conversation.repo.path).await {
+            crate::forges::Matched::Unmatched { host } => {
                 return Err(Unpublished::Refused(SharePublished::NoForge { host }));
             }
-        }
+            crate::forges::Matched::On(forge) if !forge.has(crate::forges::Capability::Publish) => {
+                return Err(Unpublished::Refused(SharePublished::NoPublish {
+                    forge: forge.name,
+                }));
+            }
+            crate::forges::Matched::On(_) => {}
+        },
         Ok(None) => {}
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading the Conversation to publish failed");

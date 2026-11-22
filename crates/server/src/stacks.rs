@@ -154,8 +154,8 @@ pub(crate) async fn missing(state: &AppState, conversation_id: i64) -> Option<St
 /// what makes the wrap-up wait on them, and that belongs after the take-up's own
 /// pull request is on the record. See [`walk`] and [`record`].
 pub(crate) enum Walked {
-    /// Nothing to walk: a Process that does not walk a chain, or a Conversation
-    /// with no pull request recorded to walk from.
+    /// Nothing to walk: a Process that does not walk a chain, a Conversation
+    /// with no pull request recorded to walk from, or a Forge without stacks.
     Nothing,
 
     /// The chain from the bottom, the pull request walked from included. Fewer
@@ -198,7 +198,18 @@ impl Walked {
 /// One `gh pr list` is the whole of it: a stack is plain GitHub, an open pull
 /// request's base being another open pull request's head. See
 /// [`crate::forges::Forge::open_pull_requests`] and [`chain`].
+///
+/// **And nothing at all on a Forge without `stacks`**: a chain there is left
+/// to the rebases a roadmap's join already does, so there is no chain to walk
+/// and the pull request taken up is a lone one.
 pub(crate) async fn walk(state: &AppState, repo: &store::Repo, own: i64) -> Walked {
+    if !crate::forges::of(state, &repo.path)
+        .await
+        .has(crate::forges::Capability::Stacks)
+    {
+        return Walked::Nothing;
+    }
+
     // Off the runtime's threads, as every other reach into GitHub is: `gh` is a
     // process, and running one blocks.
     let asked = tokio::task::spawn_blocking({

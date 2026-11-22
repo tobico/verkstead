@@ -3715,6 +3715,56 @@ async fn bench_at_pace(
     bench_serving(spill, stub, gh, pace, signature, Serving::Sessions).await
 }
 
+thread_local! {
+    /// The Forge the next bench built on this thread registers ahead of
+    /// GitHub, taken as it is — see [`on_a_forge_declaring`].
+    static DECLARING: std::cell::RefCell<Option<verkstead_server::forge::Declared>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// What the suite's Forge is called, which is what the Timeline says has no
+/// checks or no review.
+const WORKSHOP: &str = "Workshop";
+
+/// Build `fixture` with its bench's server holding a Forge that declares
+/// `capabilities` and nothing else, registered ahead of GitHub — so the bench's
+/// Repo, whose remote is a path, is on it. The operations are still answered
+/// by the bench's own `gh` stand-in: what changes is what the Forge says it
+/// can do.
+///
+/// Through a thread-local rather than one more argument to every fixture: the
+/// bench is built on the test's own thread, before anything it starts could
+/// ask about the Forge, and the take-up's walk at the press is one of those.
+async fn on_a_forge_declaring<T>(
+    capabilities: &[verkstead_server::forge::Capability],
+    fixture: impl std::future::Future<Output = T>,
+) -> T {
+    DECLARING.with(|declaring| {
+        *declaring.borrow_mut() = Some(verkstead_server::forge::Declared {
+            uuid: "5f0c1d8e-6a3b-4f7e-9c2d-1b8a7e6f5d4c".to_owned(),
+            name: WORKSHOP.to_owned(),
+            noun: "pull request".to_owned(),
+            hosts: Vec::new(),
+            capabilities: capabilities.to_vec(),
+        });
+    });
+
+    let built = fixture.await;
+
+    DECLARING.with(|declaring| declaring.borrow_mut().take());
+    built
+}
+
+/// Every capability but `lacking`.
+fn all_but(
+    lacking: verkstead_server::forge::Capability,
+) -> Vec<verkstead_server::forge::Capability> {
+    verkstead_server::forge::Capability::ALL
+        .into_iter()
+        .filter(|capability| *capability != lacking)
+        .collect()
+}
+
 /// What a bench's server is besides a workbench running sessions.
 enum Serving {
     /// Nothing: no device identity, which is every bench but one.
@@ -3828,6 +3878,15 @@ async fn bench_serving(
             (app, None)
         }
     };
+
+    // A Forge the test asked for, ahead of GitHub, before anything is
+    // registered or started — see [`on_a_forge_declaring`].
+    if let Some(declared) = DECLARING.with(|declaring| declaring.borrow_mut().take()) {
+        hosting
+            .as_ref()
+            .expect("a Forge is registered on a bench that hosts Activities")
+            .registering(declared);
+    }
 
     let repo = repository(elsewhere.path().join("verkstead"));
     let registered: Registered =
@@ -10274,18 +10333,15 @@ async fn a_wrap_up_over_a_forge_lacking_checks_settles_them_and_never_asks() {
     let asked = spill.path().join("checks-asked");
     let written = spill.path().join("fix-prompts");
 
-    let fixture = grilling_spilling(
-        spill,
-        &a_backlog_then_fixes(&written),
-        &gh_telling_of_checks(&asked),
+    let fixture = on_a_forge_declaring(
+        &all_but(verkstead_server::forge::Capability::Checks),
+        grilling_spilling(
+            spill,
+            &a_backlog_then_fixes(&written),
+            &gh_telling_of_checks(&asked),
+        ),
     )
     .await;
-
-    fixture
-        .hosting
-        .as_ref()
-        .expect("this bench hosts Activities")
-        .lacking(verkstead_server::forge::Capability::Checks);
 
     worked_to_empty(&fixture).await;
 
@@ -10321,18 +10377,20 @@ async fn a_wrap_up_over_a_forge_lacking_review_settles_it_and_sends_nobody() {
     let dispatched = spill.path().join("fix-prompts");
     let batches = spill.path().join("batch-prompts");
 
-    let fixture = grilling_spilling(
-        spill,
-        &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
-        &gh_about(GREEN, THREE_COMMENTS, ""),
+    let fixture = on_a_forge_declaring(
+        &all_but(verkstead_server::forge::Capability::Review),
+        grilling_spilling(
+            spill,
+            &a_backlog_then_answers_comments(
+                &reviews,
+                &dispatched,
+                &batches,
+                RESPOND_AND_FIND_NOTHING,
+            ),
+            &gh_about(GREEN, THREE_COMMENTS, ""),
+        ),
     )
     .await;
-
-    fixture
-        .hosting
-        .as_ref()
-        .expect("this bench hosts Activities")
-        .lacking(verkstead_server::forge::Capability::Review);
 
     worked_to_empty(&fixture).await;
 
@@ -10354,6 +10412,330 @@ async fn a_wrap_up_over_a_forge_lacking_review_settles_it_and_sends_nobody() {
         notices(&view).is_empty(),
         "and nothing stopped: {:?}",
         notices(&view),
+    );
+}
+
+/// Every line the Timeline carries saying the wrap-up doesn't wait on
+/// something its Forge has not got — see [`unwatched`].
+fn unwatched_lines(view: &ConversationView) -> Vec<String> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Notice(notice) if unwatched(notice) => Some(notice.html.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A Forge declaring none of the five capabilities has no checks and no
+/// review, so a wrap-up on it waits on whether the pull request merges and on
+/// nothing else: no check is asked about, nobody is sent to read the branch or
+/// answer what is said on it, and the Timeline says so for each of the two.
+#[tokio::test]
+async fn a_wrap_up_on_a_forge_declaring_nothing_waits_on_the_merge_alone_and_says_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let asked = spill.path().join("checks-asked");
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let fixture = on_a_forge_declaring(
+        &[],
+        grilling_spilling(
+            spill,
+            &a_backlog_then_answers_comments(
+                &reviews,
+                &dispatched,
+                &batches,
+                RESPOND_AND_FIND_NOTHING,
+            ),
+            &gh_telling_of_checks(&asked),
+        ),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    assert!(
+        merge_settled(&fixture).await,
+        "whether it merges is the one thing the wrap-up waited on",
+    );
+    assert!(
+        !asked.exists(),
+        "nothing asked about checks a Forge without them can't answer",
+    );
+    assert!(
+        !reviews.exists() && !batches.exists() && !dispatched.exists(),
+        "and nobody was sent to read the branch, answer it or fix it: {:?} {:?} {:?}",
+        std::fs::read_to_string(&reviews).ok(),
+        std::fs::read_to_string(&batches).ok(),
+        std::fs::read_to_string(&dispatched).ok(),
+    );
+
+    let lines = unwatched_lines(&view);
+
+    assert!(
+        lines.iter().any(|line| line.contains(&format!("{WORKSHOP} has no checks"))
+            && line.contains("#41")),
+        "the Timeline says there were no checks to wait on: {lines:?}",
+    );
+    assert!(
+        lines.iter().any(
+            |line| line.contains(&format!("{WORKSHOP} has no reviews")) && line.contains("#41")
+        ),
+        "and no review: {lines:?}",
+    );
+    assert_eq!(lines.len(), 2, "each said once: {lines:?}");
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped: {:?}",
+        notices(&view),
+    );
+}
+
+/// A `gh` with a three-deep stack open — #41 in the middle of it, and #41 the
+/// one that conflicts until `resolved` is written — that writes `stacked` the
+/// moment anything runs `gh stack`.
+fn gh_a_stack_conflicting_in_the_middle(resolved: &Path, stacked: &Path) -> String {
+    let script = gh_stacked_and_conflicting(resolved, true);
+    let script = script.replacen(
+        "if [ \"$1\" = stack ]; then exit 0; fi",
+        &format!(
+            "if [ \"$1\" = stack ]; then : > {stacked}; exit 0; fi",
+            stacked = quoted(stacked),
+        ),
+        1,
+    );
+
+    let conflicting = "if [ \"$3\" = 40 ]; then merges=\"$bottom\"";
+    assert!(script.contains(conflicting), "{script}");
+
+    script.replacen(
+        conflicting,
+        "if [ \"$3\" = 41 ]; then merges=\"$bottom\"",
+        1,
+    )
+}
+
+/// A Fix Merge Issues taken up inside a stack on a Forge without `stacks` is a
+/// lone pull request: the chain is not walked, nothing beside #41 is recorded,
+/// its conflict is sent the configured strategy rather than a sync, and
+/// nothing ever asks after `gh stack`.
+#[tokio::test]
+async fn a_conflict_on_a_forge_without_stacks_is_resolved_alone_and_never_synced() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let batches = spill.path().join("batch-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let resolved = spill.path().join("conflict-resolved");
+    let stacked = spill.path().join("stack-asked");
+
+    let fixture = on_a_forge_declaring(
+        &all_but(verkstead_server::forge::Capability::Stacks),
+        taking_up_to_fix(
+            spill,
+            &a_conflict_and_nothing_beside_it(&reviews, &batches, &dispatched, None, &resolved),
+            &gh_a_stack_conflicting_in_the_middle(&resolved, &stacked),
+        ),
+    )
+    .await;
+
+    let told = until_written_by(&dispatched, 1).await;
+    let prompt = prompts(&told)[0];
+
+    assert!(
+        prompt.contains("Merge the pull request's base branch"),
+        "the conflict is sent the configured strategy: {prompt}",
+    );
+    assert!(
+        !prompt.contains("gh stack") && !prompt.contains("stack of"),
+        "and nothing of a stack: {prompt}",
+    );
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    let recorded: Vec<i64> = verkstead_server::store::pull_requests(&pool, fixture.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(_, opened)| opened.number)
+        .collect();
+    pool.close().await;
+
+    assert_eq!(
+        recorded,
+        [41],
+        "the chain was never walked, so #41 is the whole of it"
+    );
+    assert!(
+        !stacked.exists(),
+        "and nothing asked after `gh stack` at all",
+    );
+    assert!(
+        notices_since_the_take_up(&view).is_empty(),
+        "nothing stopped on the way: {:?}",
+        notices_since_the_take_up(&view),
+    );
+}
+
+/// A roadmap on a Forge without `stacks` is left to the rebases the join
+/// already does: the second stage's finish is told to rebase onto the stage
+/// below and open its pull request against it, and nothing asks after
+/// `gh stack` on the way.
+#[tokio::test]
+async fn a_roadmap_on_a_forge_without_stacks_opens_each_stage_against_the_one_below() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let finishing = spill.path().join("finish-prompts");
+    let stacked = spill.path().join("stack-asked");
+
+    // Whether it merges is said on the pull request itself, which is where a
+    // wrap-up with no checks to ask reads it.
+    let gh = format!(
+        "if [ \"$1\" = stack ]; then : > {stacked}; exit 0; fi\n{}",
+        gh_about(GREEN, "", "").replacen(
+            r#""state":"OPEN"}"#,
+            r#""state":"OPEN","mergeable":"MERGEABLE"}"#,
+            1
+        ),
+        stacked = quoted(&stacked),
+    );
+
+    let fixture = on_a_forge_declaring(
+        &[],
+        adopting_asking(
+            spill,
+            &a_stage_finished_saying_what_it_was_told(&planning, &finishing, ANNOTATES_THE_STAGE),
+            &gh,
+        ),
+    )
+    .await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let below = fixture.view().await.branch;
+    let next = stage_of(&fixture).await;
+    let deadline = Instant::now() + *PATIENCE;
+
+    let settled = loop {
+        let view: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{}", next.id)).await;
+
+        if view.state == Lifecycle::Done {
+            break view;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the stage after it never settled. It says: {:?}",
+            notices(&view),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    };
+
+    let second = told_at_the_finish(&finishing, &settled.branch);
+    let chain = second
+        .split_once("# The chain this stage joins")
+        .unwrap_or_else(|| panic!("the second stage was told no chain at all: {second}"))
+        .1;
+
+    assert!(
+        chain.contains(&format!(
+            "**rebase this branch onto `{below}` before anything is pushed**"
+        )) && chain.contains(&format!("open the pull request against `{below}`")),
+        "the stage's pull request goes against the branch below it: {chain}",
+    );
+    assert!(
+        !stacked.exists(),
+        "and nothing asked after `gh stack` for either stage",
+    );
+}
+
+/// On a Forge declaring no `publish` a Share has nowhere to go: the publish is
+/// refused naming the Forge, and nothing is asked of it. And on one declaring
+/// no `create`, **Create repo** makes the repository here, registers it, and
+/// says no remote was made.
+#[tokio::test]
+async fn a_forge_without_publish_or_create_publishes_nothing_and_makes_no_remote() {
+    let spill = tempfile::tempdir().unwrap();
+    let asked = spill.path().join("gh-asked");
+    let parent = tempfile::tempdir().unwrap();
+
+    let gh = format!(
+        "case \"$1\" in gist|repo) : > {asked} ;; esac\n{PULL_REQUEST}",
+        asked = quoted(&asked),
+    );
+
+    let fixture = on_a_forge_declaring(
+        &[],
+        grilling_spilling(spill, "printf 'grilling\\n'\nsleep 300\n", &gh),
+    )
+    .await;
+
+    let view = fixture.view().await;
+    assert_eq!(
+        view.repo.forge,
+        Some(verkstead_render::RepoForge::On {
+            uuid: "5f0c1d8e-6a3b-4f7e-9c2d-1b8a7e6f5d4c".to_owned(),
+            name: WORKSHOP.to_owned(),
+            noun: "pull request".to_owned(),
+            capabilities: Vec::new(),
+        }),
+        "the viewer is told the Forge declares nothing, which is what draws no \
+         Publish",
+    );
+
+    let published: verkstead_render::SharePublished = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/share/publish", fixture.id),
+        &serde_json::json!({}),
+    )
+    .await;
+
+    assert_eq!(
+        published,
+        verkstead_render::SharePublished::NoPublish {
+            forge: WORKSHOP.to_owned()
+        },
+    );
+
+    let created: verkstead_render::Created = post(
+        &fixture.app,
+        "/api/ui/repos/new",
+        &serde_json::json!({
+            "parent": parent.path(),
+            "name": "widgets",
+            "github": true,
+        }),
+    )
+    .await;
+
+    let verkstead_render::Created::MadeWithoutRemote { repo, why } = created else {
+        panic!("the create did not make the local repository alone: {created:?}");
+    };
+
+    assert_eq!(
+        why,
+        format!("{WORKSHOP} can't create repositories, so no remote was made.")
+    );
+    assert!(
+        parent.path().join("widgets").join(".git").exists(),
+        "the repository is made here",
+    );
+    assert_eq!(repo.name, "widgets", "and registered");
+    assert!(
+        !asked.exists(),
+        "and the Forge was asked for neither a gist nor a repository",
     );
 }
 
@@ -21172,7 +21554,14 @@ fn waiting_on_checks(view: &ConversationView) -> Vec<&NoticeEvent> {
 /// Which of the two a Notice is, by what it opens with — the rendered markdown
 /// the settling loop writes.
 fn narrowing(notice: &NoticeEvent) -> bool {
-    notice.html.contains("Waiting on checks")
+    notice.html.contains("Waiting on checks") || unwatched(notice)
+}
+
+/// And whether a Notice is the line a wrap-up on a Forge without checks or
+/// review writes saying it doesn't wait on them — a label on a condition, the
+/// way [`narrowing`]'s own is, and read past with it.
+fn unwatched(notice: &NoticeEvent) -> bool {
+    notice.html.contains("so the wrap-up doesn")
 }
 
 /// And whether a Notice is the Rescue's escalation rather than a stop — the one
@@ -44393,8 +44782,10 @@ const ALL_AS_MEANT: &str = "tick first:steered second:done standing:cleanly:open
 async fn a_component_waits_on_sessions_asks_the_forge_and_keeps_the_wrap_ups_records() {
     use verkstead_server::store::WaitingOn;
 
-    let fixture = grilling(
-        r#"
+    let fixture = on_a_forge_declaring(
+        &all_but(verkstead_server::forge::Capability::Checks),
+        grilling(
+            r#"
 case "$2" in
 *"first session waits"*)
     printf 'the first session is waiting\n'
@@ -44411,15 +44802,10 @@ case "$2" in
     ;;
 esac
 "#,
+        ),
     )
     .await;
     fixture.grilling_printed().await;
-
-    fixture
-        .hosting
-        .as_ref()
-        .expect("this bench hosts Activities")
-        .lacking(verkstead_server::forge::Capability::Checks);
 
     let component = std::fs::read(ACTIVITY_FIXTURE).expect("the fixture's component is built");
     let running = fixture.activity_of(component, &[ALL_AS_MEANT], &["verkstead/implementing"]);

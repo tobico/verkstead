@@ -238,10 +238,7 @@ pub(crate) async fn record(
             // notification and never the pull request.
             // Named in the word the Repo's Forge calls one.
             let noun = match store::registered_repo(&state.pool, repo_id).await {
-                Ok(Some(repo)) => crate::forges::of(&state.pool, &repo.path)
-                    .await
-                    .noun()
-                    .to_owned(),
+                Ok(Some(repo)) => crate::forges::of(state, &repo.path).await.noun().to_owned(),
                 _ => crate::forges::PULL_REQUEST.to_owned(),
             };
 
@@ -637,7 +634,7 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
         // A companion on no Forge has no pull request to be missing: its work
         // is committed, and there is nobody to open one on.
         if let crate::forges::Matched::Unmatched { host } =
-            crate::forges::of(&state.pool, &companion.path).await
+            crate::forges::of(&state, &companion.path).await
         {
             tracing::info!(
                 conversation_id,
@@ -1169,8 +1166,7 @@ pub(crate) async fn asked(
 
     // On no Forge, nothing is asked at all: there is nobody to ask, and what
     // meets this lands the work Done rather than stopping it — see [`record`].
-    if let crate::forges::Matched::Unmatched { host } = crate::forges::of(&state.pool, &repo).await
-    {
+    if let crate::forges::Matched::Unmatched { host } = crate::forges::of(state, &repo).await {
         return Some((repo_id, head, Err(crate::forges::Trouble::NoForge(host))));
     }
 

@@ -59,7 +59,7 @@ import { keyOf, useDevice } from "../reaching";
 import { PaneHead } from "./PaneHead";
 import styles from "./Share.module.css";
 import { onAPullRequest } from "./Steer";
-import { nounOf, unforged, unpublishable } from "../forges";
+import { nounOf, publishless, unpublishable, unpublished } from "../forges";
 
 /// What a publish came back with, as the toast it is said in.
 ///
@@ -101,6 +101,10 @@ export function published(outcome: SharePublished): JSX.Element {
 
   if ("NoForge" in outcome) {
     return <>{unpublishable(outcome.NoForge.host)}</>;
+  }
+
+  if ("NoPublish" in outcome) {
+    return <>{publishless(outcome.NoPublish.forge)}</>;
   }
 
   // Through the share viewer, which is what the server composed it as — see
@@ -290,7 +294,7 @@ export function Share(props: {
             rather than instead of it — one is a file to attach and the other is
             a link to paste, and which of the two a colleague wants is not this
             pane's to decide. */}
-        <Show when={unforged(props.conversation.repo) === null}>
+        <Show when={unpublished(props.conversation.repo) === null}>
           <button
             type="button"
             class={styles.publish}
@@ -311,8 +315,14 @@ export function Share(props: {
 
             Offered only where there is a pull request to say it on, which is
             what the pinned cards already say: a conversation with none has
-            nowhere for this press to go. */}
-        <Show when={onAPullRequest(props.conversation)}>
+            nowhere for this press to go. And only where there is a publish
+            for it to carry. */}
+        <Show
+          when={
+            onAPullRequest(props.conversation) &&
+            unpublished(props.conversation.repo) === null
+          }
+        >
           <button
             type="button"
             class={styles.comment}
@@ -326,24 +336,19 @@ export function Share(props: {
         </Show>
       </div>
 
-      {/* And on a Repo no forge answers for, there is nowhere to publish
-          to: the download is the whole of it, and the pane says why. */}
+      {/* And on a Repo no forge answers for, or on one that can't publish,
+          there is nowhere to publish to: the download is the whole of it,
+          and the pane says why. */}
       <Show
-        when={unforged(props.conversation.repo) === null}
+        when={unpublished(props.conversation.repo)}
         fallback={
           <Note>
-            {unpublishable(
-              props.conversation.repo.forge?.kind === "Unmatched"
-                ? props.conversation.repo.forge.host
-                : null,
-            )}
+            Publishing takes a fresh snapshot every time. What was already sent
+            stays where it is.
           </Note>
         }
       >
-        <Note>
-          Publishing takes a fresh snapshot every time. What was already sent
-          stays where it is.
-        </Note>
+        {(why) => <Note>{why()}</Note>}
       </Show>
     </>
   );

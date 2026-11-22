@@ -17,7 +17,13 @@ const ON: RepoEntry = {
   author_unpicked: false,
   github: null,
   origin: null,
-  forge: { kind: "On", uuid: "x", name: "GitLab", noun: "merge request" },
+  forge: {
+    kind: "On",
+    uuid: "x",
+    name: "GitLab",
+    noun: "merge request",
+    capabilities: ["checks", "review", "publish", "stacks", "create"],
+  },
 };
 
 describe("a forge's noun", () => {

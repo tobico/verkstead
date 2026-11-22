@@ -8,63 +8,88 @@
 //! does not know which Forge answered.
 //!
 //! **A capability the Forge lacks is settled at once.** A Forge declares what
-//! it can do — checks, review, create — and a wrap-up watcher over one it has
-//! not got has nothing to wait for: the call says `lacking`, and the watcher
-//! it was asked for is settled before the answer goes back, so the wrap-up is
-//! never held up by something that will never come. GitHub has every
-//! capability, so with only GitHub behind it this path is fed by
-//! [`Forge::lacking`], the suite's seam; stage 12 feeds it from the Forge's
-//! declaration.
+//! it can do — `checks`, `review`, and the rest of ADR-0030's five — and a
+//! wrap-up watcher over one the Repo's Forge has not got has nothing to wait
+//! for: the call says `lacking`, the watcher it was asked for is settled
+//! before the answer goes back, and the Timeline says why, so the wrap-up is
+//! never held up by something that will never come. Read off the declaration
+//! of the Forge the Repo's remote is on, at the moment of the call — see
+//! [`crate::forges::of`]. GitHub declares all five.
+//!
+//! **And a Forge can be registered in-process**, beside the plugins, which is
+//! how the suite stands one up declaring what it likes — see [`Registered`].
 
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use verkstead_store as store;
 
 use crate::AppState;
+pub use crate::plugins::manifest::forge::Capability;
+
 use crate::forges::{Checked, Mergeable, Stands};
 use crate::plugins::component::worlds::category::activity::verkstead::plugin::activity_types as world;
 
-/// Something a Forge may or may not be able to do, in ADR-0030's words.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Capability {
-    /// Running checks against a pull request, which the `checks` watcher
-    /// waits on.
-    Checks,
-
-    /// Comments and reviews on a pull request, which the `comments` watcher
-    /// reads and replies on.
-    Review,
-
-    /// Opening a pull request.
-    Create,
+/// A Forge as the suite declares one: a plugin's `forge` block, without the
+/// plugin. See [`Registered`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Declared {
+    pub uuid: String,
+    pub name: String,
+    pub noun: String,
+    /// The hosts it answers for. A Repo whose remote names no host — a path —
+    /// is on the first Forge enabled, which a registered one is.
+    pub hosts: Vec<String>,
+    pub capabilities: Vec<Capability>,
 }
 
-/// What the Forge is said to lack — nothing, behind GitHub.
+/// The Forges registered on this server in-process rather than through a
+/// plugin — none on a served one.
+///
+/// **What answers for one is the router's own Forge**, the one every operation
+/// goes through: a registered Forge is a declaration — its name, its noun, its
+/// hosts and what it can do — over the same implementation, which is what the
+/// suite needs to stand up a Forge declaring no capabilities over its own
+/// GitHub stand-in. Each comes before every built-in in
+/// [`crate::forges::enabled`], so a Repo whose remote is a path is on it.
 #[derive(Clone, Default)]
-pub(crate) struct Forge {
-    lacking: Arc<Mutex<HashSet<Capability>>>,
+pub(crate) struct Registered {
+    forges: Arc<Mutex<Vec<crate::forges::Enabled>>>,
 }
 
-impl Forge {
-    pub(crate) fn new() -> Forge {
-        Forge::default()
+impl Registered {
+    pub(crate) fn new() -> Registered {
+        Registered::default()
     }
 
-    /// Say the Forge lacks `capability` from now on.
-    pub(crate) fn lacking(&self, capability: Capability) {
-        self.lacking
+    /// Register `declared` from now on.
+    pub(crate) fn register(&self, declared: Declared) {
+        let mut hosts: Vec<String> = Vec::new();
+        for host in declared.hosts {
+            let host = host.trim().to_ascii_lowercase();
+            if !host.is_empty() && !hosts.contains(&host) {
+                hosts.push(host);
+            }
+        }
+
+        self.forges
             .lock()
             .expect("nothing panics holding it")
-            .insert(capability);
+            .push(crate::forges::Enabled {
+                uuid: declared.uuid,
+                name: declared.name,
+                hosts,
+                noun: declared.noun,
+                capabilities: declared.capabilities,
+            });
     }
 
-    fn lacks(&self, capability: Capability) -> bool {
-        self.lacking
+    /// Every one registered, in the order they were.
+    pub(crate) fn registered(&self) -> Vec<crate::forges::Enabled> {
+        self.forges
             .lock()
             .expect("nothing panics holding it")
-            .contains(&capability)
+            .clone()
     }
 }
 
@@ -171,11 +196,8 @@ pub(crate) async fn checks(
         .await
         .map_err(world::Unforged::Unasked)?;
 
-    if state.forge.lacks(Capability::Checks) {
-        return lacking(state, conversation_id, &named, |repo_id, number| {
-            store::WaitingOn::Checks { repo_id, number }
-        })
-        .await;
+    if let Some(forge) = lacks(state, &named, Capability::Checks).await {
+        return lacking(state, conversation_id, &named, &forge, Capability::Checks).await;
     }
 
     let suite = asked(state, &named, |forge, repo, number| {
@@ -232,8 +254,8 @@ pub(crate) async fn comments(
         .await
         .map_err(world::Unforged::Unasked)?;
 
-    if state.forge.lacks(Capability::Review) {
-        return lacking(state, conversation_id, &named, comments_on).await;
+    if let Some(forge) = lacks(state, &named, Capability::Review).await {
+        return lacking(state, conversation_id, &named, &forge, Capability::Review).await;
     }
 
     let said = asked(state, &named, |forge, repo, number| {
@@ -264,8 +286,8 @@ pub(crate) async fn reply(
         .await
         .map_err(world::Unforged::Unasked)?;
 
-    if state.forge.lacks(Capability::Review) {
-        return lacking(state, conversation_id, &named, comments_on).await;
+    if let Some(forge) = lacks(state, &named, Capability::Review).await {
+        return lacking(state, conversation_id, &named, &forge, Capability::Review).await;
     }
 
     asked(state, &named, move |gh, repo, number| {
@@ -284,11 +306,6 @@ pub(crate) async fn opened(
     let repo = repo_named(state, conversation_id, &repo)
         .await
         .map_err(world::Unforged::Unasked)?;
-
-    // Nothing to settle: no watcher waits on a pull request being opened.
-    if state.forge.lacks(Capability::Create) {
-        return Err(world::Unforged::Lacking);
-    }
 
     let gh = state.github.as_author(repo.author.as_deref());
     let path = repo.path.clone();
@@ -335,25 +352,59 @@ where
     }
 }
 
-/// Settle the watcher `waiting_on` names over `named`, there being nothing for
-/// it to wait for, and answer `lacking`.
+/// The Forge `named`'s Repo is on, where it lacks `capability` — `None` where
+/// it has it. A Repo on no Forge is not answered for here: nothing would be
+/// asked of one, and what meets it is [`crate::wrapping::unforged`].
+async fn lacks(
+    state: &AppState,
+    named: &Named,
+    capability: Capability,
+) -> Option<crate::forges::Enabled> {
+    match crate::forges::of(state, &named.repo.path).await {
+        crate::forges::Matched::On(forge) if !forge.has(capability) => Some(forge),
+        crate::forges::Matched::On(_) | crate::forges::Matched::Unmatched { .. } => None,
+    }
+}
+
+/// Settle the watcher over `named` that waits on what `forge` lacks, there
+/// being nothing for it to wait for, and answer `lacking` — saying so on the
+/// Timeline the first time, so a wrap-up that went Done without a check or a
+/// review says why.
 async fn lacking<T>(
     state: &AppState,
     conversation_id: i64,
     named: &Named,
-    waiting_on: fn(i64, i64) -> store::WaitingOn,
+    forge: &crate::forges::Enabled,
+    capability: Capability,
 ) -> Result<T, world::Unforged> {
-    let waiting_on = waiting_on(named.repo.id, named.number);
+    let (repo_id, number) = (named.repo.id, named.number);
+    let waiting_on = match capability {
+        Capability::Checks => store::WaitingOn::Checks { repo_id, number },
+        _ => store::WaitingOn::Comments { repo_id, number },
+    };
+
+    let already = match store::wrap_up_settled(&state.pool, conversation_id).await {
+        Ok(settled) => settled.contains(&waiting_on),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what a wrap-up has settled failed");
+            false
+        }
+    };
+
+    if already {
+        return Err(world::Unforged::Lacking);
+    }
 
     if let Err(error) = store::settle_wrap_up(&state.pool, conversation_id, waiting_on).await {
         tracing::error!(error = ?error, conversation_id, ?waiting_on, "settling a watcher the Forge can't feed failed");
+    } else if let Some(said) =
+        crate::forges::unwatched(&forge.name, &forge.noun, capability, number)
+        && let Err(error) = store::note(&state.pool, conversation_id, &said).await
+    {
+        tracing::error!(error = ?error, conversation_id, "saying what the Forge has not got failed");
     }
 
     Err(world::Unforged::Lacking)
-}
-
-fn comments_on(repo_id: i64, number: i64) -> store::WaitingOn {
-    store::WaitingOn::Comments { repo_id, number }
 }
 
 fn mergeable(mergeable: Mergeable) -> world::Mergeable {

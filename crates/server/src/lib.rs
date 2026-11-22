@@ -125,7 +125,7 @@ mod files;
 /// What a follow-up session is started on, and read back from where it stands.
 mod follow_ups;
 mod followers;
-/// The Forge as an Activity reaches it, wrapping [`github`] until stage 12.
+/// The Forge as an Activity reaches it, over [`forges::Forge`].
 pub mod forge;
 mod forges;
 /// The ports of members' terminals held on this device's own `localhost`, from
@@ -557,9 +557,9 @@ pub(crate) struct AppState {
     /// [`forges`].
     github: Arc<dyn forges::Forge>,
 
-    /// And what the Forge an Activity reaches through is said to lack — see
-    /// [`forge`].
-    forge: forge::Forge,
+    /// And the Forges registered on it in-process, ahead of every built-in —
+    /// none on a served one. See [`forge::Registered`].
+    forge: forge::Registered,
 
     /// And which Conversations have a **Wrap-up** Activity running, with the
     /// stops the host's watchers have given each up with — see [`wrapping`].
@@ -1738,7 +1738,7 @@ fn standing(
         binds,
 
         github: Arc::new(github),
-        forge: forge::Forge::new(),
+        forge: forge::Registered::new(),
         wrap_ups: wrapping::WrapUps::new(),
 
         // And the host's `tailscale`, which is the whole of what the Remote access

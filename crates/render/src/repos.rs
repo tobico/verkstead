@@ -97,11 +97,27 @@ pub enum RepoForge {
         uuid: String,
         name: String,
         noun: String,
+
+        /// What it can do, as its manifest declares — where one is absent,
+        /// the viewer draws nothing that would ask for it, and says so.
+        capabilities: Vec<ForgeCapability>,
     },
 
     /// None does: the host the remote names, which the row and the card say
     /// *No forge for* — or no host, where no Forge is enabled at all.
     Unmatched { host: Option<String> },
+}
+
+/// Something a Forge can do, in ADR-0030's words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+#[serde(rename_all = "snake_case")]
+pub enum ForgeCapability {
+    Checks,
+    Review,
+    Publish,
+    Stacks,
+    Create,
 }
 
 /// One registered Repo as a member across the link is told of it: the row, and
@@ -374,6 +390,15 @@ pub struct Repointing {
 /// Refused while work that is neither Done nor Closed has the Repo in it, the
 /// rule unregistering follows and for the reason ADR-0025 gives: a branch half
 /// committed as one Author would carry on as another.
+///
+/// One variant carries a whole Repo and the other three carry little or
+/// nothing, which is what the size lint is about — the row's `origin` and the
+/// Forge its remote is on are what make it big. Left as it is for
+/// [`crate::PickedView`]'s reason: these are made one at a time on the way to
+/// being serialized, none of them is held in a collection, and a `Box` in a
+/// view type would be a pointer written into the shape the viewer is generated
+/// from.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Repointed {

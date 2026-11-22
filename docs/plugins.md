@@ -989,8 +989,13 @@ provides:
   **`checks`**, checks run against a pull request; **`review`**, comments and
   reviews on one; **`publish`**, publishing a Share; **`stacks`**, stacked pull
   requests; and **`create`**, creating a repository. Anything else is refused,
-  naming the entry. A Forge without one is not failed for it: what would have
-  waited on it is settled at once.
+  naming the entry. A Forge without one is not failed for it: without
+  `checks` or `review` the wrap-up's watcher over it is settled at once and the
+  Timeline says so; without `publish` the Share pane has no Publish and says
+  why; without `create` **Create repo** makes the repository locally and says
+  no remote was made; and without `stacks` a roadmap's chain is left to the
+  rebases its stages already join it by, every stage's pull request opened
+  against the branch below, with no stack walked or synced.
 - **`scopes`** — optional, a list: the scopes a token needs for everything
   Verkstead asks of the Forge.
 
