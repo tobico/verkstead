@@ -46,6 +46,11 @@ pub enum Lifecycle {
     /// steer out of anywhere, and leading back to wherever it was entered from.
     Investigating,
 
+    /// One of the states a plugin's Process declares: which one is the view's
+    /// `declared_state`, and its word is the Process's — see
+    /// [`ProcessEntry::states`].
+    Declared,
+
     Done,
 
     /// Off the ladder rather than on it: the work stopped wherever it had got
@@ -90,6 +95,52 @@ pub enum Process {
 
     /// A wrap-up narrowed to what GitHub refuses a merge for.
     FixMergeIssues,
+
+    /// One a plugin provides: which one is the view's `provided`, and what it
+    /// is called is the plugin's — see [`ProcessEntry`].
+    Provided,
+}
+
+/// Which of a plugin's Processes: the plugin's uuid and the id its manifest
+/// gives the Process (Set 1877, Q6).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ProvidedProcess {
+    pub plugin: String,
+    pub id: String,
+}
+
+/// One Process a plugin loaded here provides, as the picker draws it and as
+/// a Conversation on it is worded: read off the manifest rather than kept in
+/// the viewer (ADR-0030, *Process*).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ProcessEntry {
+    pub plugin: String,
+    pub id: String,
+
+    /// What the picker's row says, and the Configuration under a frozen Brief.
+    pub name: String,
+
+    /// The sentence under its name in the picker's dropped rows.
+    pub description: String,
+
+    /// Whether the picker offers it. A disabled plugin's Process is still
+    /// listed while Conversations on it run to the end, so that they are
+    /// worded; it is not offered to a new one.
+    pub offered: bool,
+
+    /// Each state it declares, in order, with the word the card draws.
+    pub states: Vec<DeclaredStateEntry>,
+}
+
+/// A declared state and its word.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct DeclaredStateEntry {
+    /// What the `conversations.state` column holds.
+    pub id: String,
+    pub word: String,
 }
 
 /// One row of the conversations sidebar.
@@ -140,6 +191,10 @@ pub struct ConversationEntry {
     pub repo: String,
 
     pub state: Lifecycle,
+
+    /// Where `state` is [`Lifecycle::Declared`], its Process and the state's
+    /// id, for the word to be read off the Process list.
+    pub declared: Option<DeclaredState>,
 
     /// Whether a session is running on this Conversation right now.
     ///
@@ -550,6 +605,9 @@ pub struct ConversationView {
     /// So it is one of the facts a published share says.
     pub process: Process,
 
+    /// Which plugin's Process, where `process` is [`Process::Provided`].
+    pub provided: Option<ProvidedProcess>,
+
     pub branch: String,
 
     /// Whether that name is one somebody settled on, rather than the one
@@ -585,6 +643,10 @@ pub struct ConversationView {
     pub companions: Vec<CompanionView>,
 
     pub state: Lifecycle,
+
+    /// Where `state` is [`Lifecycle::Declared`], the id of the state its
+    /// Process declares — the word is the Process's, in [`ProcessEntry`].
+    pub declared_state: Option<String>,
 
     /// The Profile and model the grilling session will run under, whole rather
     /// than by id: the pane says what they are, and whether the Profile is
@@ -2727,6 +2789,20 @@ pub struct MovedEvent {
     pub at: String,
 
     pub state: Lifecycle,
+
+    /// Where `state` is [`Lifecycle::Declared`], the id of the state its
+    /// Process declares. Left off every other move.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "typescript", ts(optional))]
+    pub declared: Option<String>,
+}
+
+/// A Conversation's declared state, named by its Process and its id there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct DeclaredState {
+    pub process: ProvidedProcess,
+    pub state: String,
 }
 
 /// The Brief as the page receives it: rendered for reading, and as it was
@@ -3290,7 +3366,22 @@ pub enum TerminalClosed {
 /// A move as an Event. Nothing to render — see [`MovedEvent`] — but built here
 /// beside the Brief so that one place knows how a Timeline is made.
 pub fn moved_event(id: i64, at: String, state: Lifecycle) -> TimelineEvent {
-    TimelineEvent::Moved(MovedEvent { id, at, state })
+    TimelineEvent::Moved(MovedEvent {
+        id,
+        at,
+        state,
+        declared: None,
+    })
+}
+
+/// And a move into a declared state, `state` its id in the Process.
+pub fn entered_event(id: i64, at: String, state: String) -> TimelineEvent {
+    TimelineEvent::Moved(MovedEvent {
+        id,
+        at,
+        state: Lifecycle::Declared,
+        declared: Some(state),
+    })
 }
 
 /// The grilling's proposal as the Set carrying it needs it, with the rationale
@@ -4071,10 +4162,16 @@ pub struct RepoChoice {
 /// Any of the five may be asked for — the wire carries all of them, and whether
 /// the one asked for can be started yet is the server's list to keep rather than
 /// something the shape of this refuses. See [`ProcessPicked::NotLanded`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// A plugin's Process is [`Process::Provided`] with `provided` saying which.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ProcessChoice {
     pub process: Process,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "typescript", ts(optional))]
+    pub provided: Option<ProvidedProcess>,
 }
 
 /// What became of picking one.
@@ -4105,6 +4202,10 @@ pub enum ProcessPicked {
     /// server's list; the rows the picker draws are the viewer's, and a stage
     /// that adds one adds the other.
     NotLanded,
+
+    /// No plugin loaded here offers that Process: it was never installed, its
+    /// plugin is switched off, or it is in trouble — see the Plugins page.
+    NotOffered,
 }
 
 /// Where a saved draft's work has gone: the device it was moved onto, and the
@@ -4891,6 +4992,11 @@ pub enum GrillingStarted {
     /// The Brief is empty, and the Brief is what the grilling starts from.
     /// Freezing an empty one would freeze nothing worth having.
     EmptyBrief,
+
+    /// Its Process is a plugin's that isn't offered here any more: the
+    /// plugin was switched off, removed, or is in trouble. Pick another, or
+    /// put the plugin right on the Plugins page.
+    ProcessNotOffered,
 
     /// No git author is configured, so there is nobody for Verkstead to commit
     /// on the branch as — and the first thing it commits there is the clearing

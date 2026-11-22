@@ -473,6 +473,27 @@ trouble rather than a refusal at the card. A Process whose dependency is
 missing, disabled or outdated loads **in trouble**, its row saying which
 dependency is wanted, and is not offered until it is put right.
 
+**How a Conversation on it runs.** A Process that loaded is on the Process
+picker under Verkstead's own, by its `name` and `description`. **Start**
+enters its first state: the state's `id` is what the Conversation's record
+holds, its `word` is what the card says, and its Activity is started with the
+Conversation's facts and the state's `options`. Where the options name a
+`skill`, the `prompt` the Activity is handed is the option's own words — or,
+where it writes none, *read the skill and do what it says* — over the Brief
+and what the grilling settled, as every session Verkstead starts is told the
+work. When the Activity ends, its Outcome's transition is followed: into the
+next state, the same way; to Done; to Closed, as though the human had pressed
+Close; or to `stopped`, where it waits on **Resume**, which starts the state's
+Activity again. A server coming back up does the same for every Conversation
+it finds in one of a Process's states, so an Activity works out where it was
+from its facts rather than from anything kept.
+
+A Conversation whose Process is in trouble — its plugin, or the plugin of an
+Activity it runs, missing or in trouble — stops where it stands, its notice
+saying which plugin is wanted, and carries on from that state once it's put
+right. Unticking a Process's plugin takes it off the picker; Conversations
+already on it run to the end.
+
 ### What its wasm component may reach
 
 **`component`** — optional. A path to a `.wasm` file inside the plugin's

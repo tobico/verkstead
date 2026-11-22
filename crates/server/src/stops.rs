@@ -192,6 +192,7 @@ pub(crate) fn ready(lifecycle: Lifecycle, stopped: bool) -> bool {
             | Lifecycle::Wrapping
             | Lifecycle::FollowUp
             | Lifecycle::Investigating
+            | Lifecycle::Declared
     ) && !stopped
 }
 

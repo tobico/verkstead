@@ -628,6 +628,20 @@ async fn recompute(
         // Refused above, where the refusal belongs: before the stop is read and
         // before a registration is taken. Answered again here because the match
         // has to be whole, and answered the same way.
+        // A state a plugin's Process declares: its Activity entered again,
+        // which works out where it was from its facts — the restart rule
+        // (ADR-0030, *Activity*). A Process in trouble stops it where it
+        // stands, saying which dependency is wanted. See [`crate::processes`].
+        Lifecycle::Declared => {
+            starting(state, conversation_id, resuming).await?;
+
+            tokio::spawn(crate::processes::run(
+                state.clone(),
+                conversation_id,
+                driving,
+            ));
+        }
+
         Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => {
             return Ok(Resumed::NotDriven);
         }
@@ -1175,6 +1189,7 @@ fn driven(lifecycle: Lifecycle) -> bool {
             | Lifecycle::Wrapping
             | Lifecycle::FollowUp
             | Lifecycle::Investigating
+            | Lifecycle::Declared
     )
 }
 

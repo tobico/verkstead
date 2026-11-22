@@ -1666,6 +1666,11 @@ naming: boolean,
  */
 repo: string, state: Lifecycle, 
 /**
+ * Where `state` is [`Lifecycle::Declared`], its Process and the state's
+ * id, for the word to be read off the Process list.
+ */
+declared: DeclaredState | null, 
+/**
  * Whether a session is running on this Conversation right now.
  *
  * The server's own registry of running processes and nothing else, so a
@@ -1954,7 +1959,11 @@ repo: RepoEntry,
  * the machine the work was done on, and a Process is a fact about the work.
  * So it is one of the facts a published share says.
  */
-process: Process, branch: string, 
+process: Process, 
+/**
+ * Which plugin's Process, where `process` is [`Process::Provided`].
+ */
+provided: ProvidedProcess | null, branch: string, 
 /**
  * Whether that name is one somebody settled on, rather than the one
  * Verkstead prefilled the record with — see
@@ -1991,6 +2000,11 @@ base_commit: string | null,
  * while the Brief drafts, frozen when grilling starts.
  */
 companions: Array<CompanionView>, state: Lifecycle, 
+/**
+ * Where `state` is [`Lifecycle::Declared`], the id of the state its
+ * Process declares — the word is the Process's, in [`ProcessEntry`].
+ */
+declared_state: string | null, 
 /**
  * The Profile and model the grilling session will run under, whole rather
  * than by id: the pane says what they are, and whether the Profile is
@@ -2554,6 +2568,20 @@ github: boolean,
  * and refused the way a [`Registration`]'s is.
  */
 author?: string, };
+
+/**
+ * A Conversation's declared state, named by its Process and its id there.
+ */
+export type DeclaredState = { process: ProvidedProcess, state: string, };
+
+/**
+ * A declared state and its word.
+ */
+export type DeclaredStateEntry = { 
+/**
+ * What the `conversations.state` column holds.
+ */
+id: string, word: string, };
 
 /**
  * What a row is about.
@@ -3570,7 +3598,7 @@ export type FoundOn = "Lan" | "Tailscale";
  * the Repo they are about. Nothing gates the button on a companion: the
  * configuration is always complete, so refusal at the start is the whole story.
  */
-export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "EmptyBrief" | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "EmptyBrief" | "ProcessNotOffered" | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
 /**
  * What the companion Repo is called, which is what the human picked it
  * by and what they will go and look at.
@@ -3922,7 +3950,7 @@ compiling: CompileCaching | null, };
  * the domain's, and the page says which one a Conversation is in rather than
  * assuming the only one it can currently be.
  */
-export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Investigating" | "Done" | "Closed";
+export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Investigating" | "Declared" | "Done" | "Closed";
 
 /**
  * One device linked to this one: what it says it is, and whether the last dial
@@ -4317,7 +4345,12 @@ export type MovedEvent = { id: number,
 /**
  * When it moved, RFC 3339.
  */
-at: string, state: Lifecycle, };
+at: string, state: Lifecycle, 
+/**
+ * Where `state` is [`Lifecycle::Declared`], the id of the state its
+ * Process declares. Left off every other move.
+ */
+declared?: string, };
 
 /**
  * Starting one to adopt a roadmap with: which Repo, and which of its roadmaps.
@@ -5336,7 +5369,7 @@ description?: string, };
  *
  * See ADR-0020.
  */
-export type Process = "Develop" | "Investigate" | "Review" | "Tinker" | "FixMergeIssues";
+export type Process = "Develop" | "Investigate" | "Review" | "Tinker" | "FixMergeIssues" | "Provided";
 
 /**
  * What kind of work a drafting Conversation is for.
@@ -5347,13 +5380,40 @@ export type Process = "Develop" | "Investigate" | "Review" | "Tinker" | "FixMerg
  * Any of the five may be asked for — the wire carries all of them, and whether
  * the one asked for can be started yet is the server's list to keep rather than
  * something the shape of this refuses. See [`ProcessPicked::NotLanded`].
+ *
+ * A plugin's Process is [`Process::Provided`] with `provided` saying which.
  */
-export type ProcessChoice = { process: Process, };
+export type ProcessChoice = { process: Process, provided?: ProvidedProcess, };
+
+/**
+ * One Process a plugin loaded here provides, as the picker draws it and as
+ * a Conversation on it is worded: read off the manifest rather than kept in
+ * the viewer (ADR-0030, *Process*).
+ */
+export type ProcessEntry = { plugin: string, id: string, 
+/**
+ * What the picker's row says, and the Configuration under a frozen Brief.
+ */
+name: string, 
+/**
+ * The sentence under its name in the picker's dropped rows.
+ */
+description: string, 
+/**
+ * Whether the picker offers it. A disabled plugin's Process is still
+ * listed while Conversations on it run to the end, so that they are
+ * worded; it is not offered to a new one.
+ */
+offered: boolean, 
+/**
+ * Each state it declares, in order, with the word the card draws.
+ */
+states: Array<DeclaredStateEntry>, };
 
 /**
  * What became of picking one.
  */
-export type ProcessPicked = "Picked" | "NoSuchConversation" | "NotDrafting" | "NotLanded";
+export type ProcessPicked = "Picked" | "NoSuchConversation" | "NotDrafting" | "NotLanded" | "NotOffered";
 
 /**
  * The account a Profile names: which harness runs it, and each of the paths
@@ -5615,6 +5675,12 @@ export type Prose = {
  * reconciles rows by, so a fold opened on one survives a re-read.
  */
 id: number, html: string, };
+
+/**
+ * Which of a plugin's Processes: the plugin's uuid and the id its manifest
+ * gives the Process (Set 1877, Q6).
+ */
+export type ProvidedProcess = { plugin: string, id: string, };
 
 /**
  * One check GitHub is running against a pull request, as the details pane

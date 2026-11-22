@@ -2813,3 +2813,107 @@ async fn got<T: serde::de::DeserializeOwned>(app: &Router, path: &str) -> T {
     let bytes = answered.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).unwrap()
 }
+
+/// A whole plugin, PLUGIN, providing the Process *Two steps* over the One
+/// session Activity Verkstead ships.
+fn two_steps() -> String {
+    format!(
+        "uuid: {PLUGIN}\n\
+         name: Two steps\n\
+         author:\n  name: Ada Lovelace\n  email: ada@example.com\n\
+         version: 1.0.0\n\
+         interface: 1\n\
+         dependencies:\n\
+         \x20 - uuid: {ACTIVITIES}\n\
+         \x20   name: Activities\n\
+         \x20   author:\n      name: Tobias Cohen\n      email: tobi@tobico.net\n\
+         \x20   version: ^0.1\n\
+         \x20 - uuid: {VERKSTEAD}\n\
+         \x20   name: Verkstead\n\
+         \x20   author:\n      name: Tobias Cohen\n      email: tobi@tobico.net\n\
+         \x20   version: ^0.1\n\
+         provides:\n\
+         \x20 - category: process\n\
+         \x20   id: two-steps\n\
+         \x20   name: Two steps\n\
+         \x20   description: Draft the change, then check it.\n\
+         \x20   roles:\n\
+         \x20     - {{ name: implementation, label: Implementation, building: true }}\n\
+         \x20   states:\n\
+         \x20     - {{ id: drafting, word: Drafting, activity: one-session, options: {{ skill: verkstead/instruction }} }}\n\
+         \x20     - {{ id: checking, word: Checking, activity: one-session, options: {{ skill: verkstead/instruction }} }}\n\
+         \x20   transitions:\n\
+         \x20     drafting: {{ done: checking, refused: stopped }}\n\
+         \x20     checking: {{ done: done, refused: stopped }}\n\
+         capabilities: []\n"
+    )
+}
+
+/// The Processes the picker is sent, as `GET /api/ui/processes` answers.
+async fn processes(app: &Router) -> Vec<verkstead_render::ProcessEntry> {
+    let answered = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/ui/processes")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(answered.status(), StatusCode::OK);
+    let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+/// An installed plugin's Process is on the list the picker is sent, with its
+/// name, its description and its states' words, and offered; unticked, it is
+/// no longer offered, and ticked again it is back.
+#[tokio::test]
+async fn an_installed_process_is_offered_to_the_picker_until_its_plugin_is_disabled() {
+    let (app, dir) = kept().await;
+    let path = plugin(dir.path(), "two-steps", &two_steps());
+
+    assert!(processes(&app).await.is_empty(), "nothing installed yet");
+
+    let view = installs(&app, &path).await;
+    assert_eq!(row(&view, PLUGIN).trouble, None);
+
+    let listed = processes(&app).await;
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    assert_eq!(listed[0].plugin, PLUGIN);
+    assert_eq!(listed[0].id, "two-steps");
+    assert_eq!(listed[0].name, "Two steps");
+    assert_eq!(listed[0].description, "Draft the change, then check it.");
+    assert!(listed[0].offered);
+    assert_eq!(
+        listed[0]
+            .states
+            .iter()
+            .map(|state| (state.id.as_str(), state.word.as_str()))
+            .collect::<Vec<_>>(),
+        [("drafting", "Drafting"), ("checking", "Checking")],
+    );
+
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{PLUGIN}/enabled"),
+        serde_json::json!({ "enabled": false }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert!(
+        processes(&app).await.iter().all(|entry| !entry.offered),
+        "a disabled plugin's Process is off the picker: {:?}",
+        processes(&app).await,
+    );
+
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{PLUGIN}/enabled"),
+        serde_json::json!({ "enabled": true }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert!(processes(&app).await[0].offered, "ticked, it is back");
+}

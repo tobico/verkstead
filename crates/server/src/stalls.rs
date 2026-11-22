@@ -259,6 +259,7 @@ pub(crate) fn driving(lifecycle: Lifecycle) -> &'static str {
         Lifecycle::Wrapping => "wrapping the work up",
         Lifecycle::FollowUp => "following the work up",
         Lifecycle::Investigating => "finding out what was asked",
+        Lifecycle::Declared => "running the conversation's process",
         Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => "driving the conversation",
     }
 }

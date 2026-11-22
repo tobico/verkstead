@@ -103,6 +103,7 @@ import type {
   CompanionMode,
   ConversationView,
   Process,
+  ProvidedProcess,
   RepoEntry,
   Started,
   TakenUp,
@@ -255,6 +256,8 @@ export type Composed = {
   /// last. So the control stands on Develop for every repo, and this is `null`
   /// until somebody says otherwise.
   process: Process | null;
+  /// And which plugin's, where [`Composed.process`] is `Provided`.
+  provided: ProvidedProcess | null;
   /// And what the fill last wrote into [`Composed.process`], `null` until it
   /// has written anything.
   processFilled: Process | null;
@@ -351,6 +354,7 @@ export function written(
     next = {
       ...next,
       process: "FixMergeIssues",
+      provided: null,
       processFilled: "FixMergeIssues",
     };
   }
@@ -408,6 +412,7 @@ export function blank(): Composed {
     base: null,
     companions: [],
     process: null,
+    provided: null,
     processFilled: null,
     grilling: null,
     implementation: null,
@@ -688,7 +693,7 @@ export async function create(
   // does, and the server's own reading of a Conversation with no row of its own
   // is what stands.
   if (state.process !== null) {
-    const outcome = await pickProcess(to, id, state.process);
+    const outcome = await pickProcess(to, id, state.process, state.provided);
     said(
       outcome === "Picked",
       `The process couldn't be picked. ${PROCESS_REFUSAL[outcome]}`,
@@ -1091,7 +1096,12 @@ export async function moveTo(
   }
 
   if (draft.process !== "Develop" || oneUrl) {
-    const outcome = await pickProcess(to.reaching, id, draft.process);
+    const outcome = await pickProcess(
+      to.reaching,
+      id,
+      draft.process,
+      draft.provided,
+    );
     said(
       outcome === "Picked",
       `The process couldn't be picked. ${PROCESS_REFUSAL[outcome]}`,
@@ -1293,6 +1303,8 @@ function parsed(body: string): Composed | null {
     !(held.base === null || typeof held.base === "string") ||
     !Array.isArray(held.companions) ||
     !kind(held.process) ||
+    // A body from before a plugin's Process could be picked has none.
+    !whose(held.provided) ||
     !picked(held.grilling) ||
     !picked(held.implementation) ||
     !picked(held.review) ||
@@ -1355,6 +1367,7 @@ function parsed(body: string): Composed | null {
     base: held.base,
     companions,
     process: held.process ?? null,
+    provided: held.provided ?? null,
     processFilled: held.processFilled ?? null,
     grilling: held.grilling,
     implementation: held.implementation,
@@ -1412,6 +1425,18 @@ function kind(value: unknown): value is Process | null | undefined {
     value === undefined ||
     (typeof value === "string" && Object.hasOwn(PROCESS, value))
   );
+}
+
+/// Whether this names a plugin's Process, or nothing.
+function whose(value: unknown): value is ProvidedProcess | null | undefined {
+  if (value === null || value === undefined) {
+    return true;
+  }
+  if (typeof value !== "object") {
+    return false;
+  }
+  const named = value as Record<string, unknown>;
+  return typeof named.plugin === "string" && typeof named.id === "string";
 }
 
 /// Whether this is a Device Id, this device, or a body that never said — the

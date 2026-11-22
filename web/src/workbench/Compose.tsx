@@ -1030,9 +1030,19 @@ function Compose(props: {
                   last. So it stands on Develop for every repo, and a picker left
                   on it sends nothing when this is created. */}
               <ProcessPicker
-                chosen={process()}
+                chosen={{
+                  process: process(),
+                  ...(state().provided === null
+                    ? {}
+                    : { provided: state().provided! }),
+                }}
                 disabled={make.isPending}
-                pick={(picked) => change({ process: picked })}
+                pick={(picked) =>
+                  change({
+                    process: picked.process,
+                    provided: picked.provided ?? null,
+                  })
+                }
               />
 
               {/* And who runs it, which is one control: a picker per role the

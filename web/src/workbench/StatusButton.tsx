@@ -50,7 +50,7 @@ import { useDevice } from "../reaching";
 import { Actions } from "./Actions";
 import { WAITING_ON_CHECKS, WAITING_TO_JOIN, parked } from "./conditions";
 import { pressed } from "./eager";
-import { ENDED, STATE } from "./states";
+import { ENDED, stateWord } from "./states";
 import styles from "./StatusButton.module.css";
 
 /// What the first line says.
@@ -81,7 +81,11 @@ export type Status = {
 /// where a finished one got to is the state itself — so the line is the state
 /// on its own rather than the same word said twice with a colour between.
 export function status(conversation: ConversationView): Status {
-  const state = STATE[conversation.state];
+  const state = stateWord(
+    conversation.state,
+    conversation.provided,
+    conversation.declared_state,
+  );
 
   // The work is on its way to another machine, which is the one thing that
   // outranks everything below: from the press until it lands, what this

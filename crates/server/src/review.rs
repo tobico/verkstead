@@ -638,7 +638,7 @@ async fn skipping(state: &AppState, conversation_id: i64) -> bool {
     match store::load_conversation(&state.pool, conversation_id).await {
         Ok(Some(conversation)) => {
             conversation.review_pairing.skipped()
-                || crate::conversations::narrows_the_wrap_up(conversation.process)
+                || crate::conversations::narrows_the_wrap_up(&conversation.process)
         }
         Ok(None) => false,
         Err(error) => {

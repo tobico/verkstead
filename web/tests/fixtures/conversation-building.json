@@ -44,6 +44,7 @@
     }
   ],
   "compiles_uncached": false,
+  "declared_state": null,
   "direction": "inline",
   "drafted_on": "aa00bb11cc22dd33ee44ff5566778899",
   "driven": false,
@@ -101,6 +102,7 @@
   "pinned": [],
   "previews": [],
   "process": "Develop",
+  "provided": null,
   "ready_to_continue": false,
   "ready_to_grill": false,
   "ready_to_resume": true,

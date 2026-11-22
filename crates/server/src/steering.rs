@@ -1022,7 +1022,7 @@ async fn refusal(
         return Ok(Some(ConversationSteered::EmptyBrief));
     }
 
-    let roles = roles(submission.target, conversation.process);
+    let roles = roles(submission.target, &conversation.process);
 
     if roles.is_empty() {
         return Ok(None);
@@ -1281,7 +1281,7 @@ fn settling<'a>(conversation: &Conversation, submission: &'a SteerSubmission) ->
         return Vec::new();
     };
 
-    roles(submission.target, conversation.process)
+    roles(submission.target, &conversation.process)
         .iter()
         .copied()
         .filter(|role| {
@@ -1496,7 +1496,7 @@ pub(crate) async fn standing(
 /// Review Pairing is ever waited on. Waiting on one here would refuse the steer on
 /// account of a role whose sessions this Conversation has none of. See
 /// [`crate::conversations::narrows_the_wrap_up`].
-fn roles(target: SteerTarget, process: store::Process) -> &'static [Role] {
+fn roles(target: SteerTarget, process: &store::Process) -> &'static [Role] {
     match target {
         SteerTarget::Grilling => &[Role::Grilling],
         SteerTarget::Implementing | SteerTarget::FollowUp | SteerTarget::Investigating => {
@@ -2721,7 +2721,8 @@ pub(crate) fn steered(state: Lifecycle) -> Option<SteerTarget> {
         Lifecycle::FollowUp => SteerTarget::FollowUp,
         Lifecycle::Investigating => SteerTarget::Investigating,
         Lifecycle::Done => SteerTarget::Done,
-        Lifecycle::Draft | Lifecycle::Closed => return None,
+        // A declared state's steer marks are the stage's fourth task's.
+        Lifecycle::Draft | Lifecycle::Closed | Lifecycle::Declared => return None,
     })
 }
 

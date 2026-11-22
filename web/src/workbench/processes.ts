@@ -15,6 +15,10 @@
 
 import type { Process } from "../api/types";
 
+/// The five Verkstead runs itself, which this module words. A plugin's is
+/// worded by its manifest — see `provided.ts`.
+export type BuiltIn = Exclude<Process, "Provided">;
+
 /// What each Process is called on the page.
 ///
 /// All five, which is every one the picker offers and every one the wire
@@ -26,6 +30,9 @@ export const PROCESS: Record<Process, string> = {
   Review: "Review",
   Tinker: "Tinker",
   FixMergeIssues: "Fix merge issues",
+  // A plugin's, whose name is its manifest's — see `processName` in
+  // `provided.ts`, which every place naming a Conversation's Process asks.
+  Provided: "Plugin process",
 };
 
 /// And the sentence under each one's name in the picker's dropped rows: what
@@ -39,7 +46,9 @@ export const PROCESS: Record<Process, string> = {
 ///
 /// All five, for [`PROCESS`]'s reason: a row offered with no sentence under it
 /// would be the one row of the list that left the human guessing.
-export const DESCRIPTION: Record<Process, string> = {
+///
+/// Not a plugin's, whose sentence is its manifest's — see `provided.ts`.
+export const DESCRIPTION: Record<BuiltIn, string> = {
   Develop:
     "Work on something complex, starting with a grilling session and proceeding through a step-by-step development process",
   Investigate: "Ask questions about a code base without committing any code",
@@ -61,7 +70,7 @@ export const DESCRIPTION: Record<Process, string> = {
 /// its stage has landed, as an agent type is offered only once it can launch the
 /// real thing — and *Fix merge issues* sits under the Review it is the narrowed
 /// form of, the order being the order the rows are drawn in.
-export const OFFERED: Process[] = [
+export const OFFERED: BuiltIn[] = [
   "Develop",
   "Tinker",
   "Investigate",
@@ -176,6 +185,13 @@ export const ROLES: Record<Process, Roles> = {
     control: "panel",
   },
   FixMergeIssues: {
+    uses: ["implementation"],
+    away: [],
+    control: "dropdown",
+  },
+  // A plugin's runs its sessions as the implementation until its own roles
+  // are put behind the control, which is what the server's start waits on.
+  Provided: {
     uses: ["implementation"],
     away: [],
     control: "dropdown",

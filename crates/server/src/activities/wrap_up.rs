@@ -96,7 +96,7 @@ pub(crate) async fn run(
         ),
     ];
 
-    if crate::conversations::narrows_the_wrap_up(process) {
+    if crate::conversations::narrows_the_wrap_up(&process) {
         options.push(("review".to_owned(), "off".to_owned()));
         options.push(("comments".to_owned(), "off".to_owned()));
     } else if reviewing == crate::wrapping::Reviewing::Afresh {

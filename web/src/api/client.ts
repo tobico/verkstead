@@ -93,6 +93,7 @@ import type {
   Preflight,
   PrefillView,
   Process,
+  ProcessEntry,
   ProcessPicked,
   ProfileAccount,
   ProfileChoice,
@@ -101,6 +102,7 @@ import type {
   ProfileEdit,
   ProfileEntry,
   ProfileSaved,
+  ProvidedProcess,
   PullRequestDetails,
   PushKey,
   Registered,
@@ -1511,14 +1513,24 @@ export function switchRepo(
 /// nothing else. Whether that Process can be started yet is the server's list to
 /// keep — a picker offering only the landed ones is a courtesy, and this route
 /// is reachable without one — so a refusal is another outcome to read here too.
+///
+/// A plugin's Process is `Provided`, with `provided` saying which.
 export function pickProcess(
   device: Device,
   id: number,
   process: Process,
+  provided: ProvidedProcess | null = null,
 ): Promise<ProcessPicked> {
   return post<ProcessPicked>(
-    on(device, `/api/ui/conversations/${id}/process`), { process },
+    on(device, `/api/ui/conversations/${id}/process`),
+    provided === null ? { process } : { process, provided },
   );
+}
+
+/// Every Process the plugins loaded on this server provide — see
+/// `processes.ts`.
+export function listProcesses(): Promise<ProcessEntry[]> {
+  return get<ProcessEntry[]>("/api/ui/processes");
 }
 
 /// Name the branch the work will be done on. Whether git would take the name is

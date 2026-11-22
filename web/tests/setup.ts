@@ -3,6 +3,7 @@ import { afterEach, beforeEach } from "vitest";
 
 import type { HarnessEntry } from "../src/api/types";
 import { knowHarnesses } from "../src/harnesses";
+import { knowProvidedProcesses } from "../src/workbench/provided";
 import harnesses from "./fixtures/harnesses.json" with { type: "json" };
 
 // The library cleans up after itself only when vitest's globals are on, and
@@ -17,6 +18,10 @@ afterEach(cleanup);
 // restores what it finds there would come up holding it. A test that is *about*
 // the storage puts what it means in it and reads it back inside itself.
 beforeEach(() => localStorage.clear());
+
+// And no plugin's Process known, which is what a server with nothing installed
+// says — a test about one says its own with `knowProvidedProcesses`.
+beforeEach(() => knowProvidedProcesses([]));
 
 // How long a wait is given, which is a budget on the machine rather than on the
 // code — the same thing `testTimeout` in `vite.config.ts` is, and said here

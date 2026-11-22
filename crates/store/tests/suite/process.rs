@@ -172,12 +172,37 @@ async fn all_five_round_trip_through_their_stored_words() {
         Process::FixMergeIssues,
     ] {
         assert_eq!(
-            set_process(&pool, id, picked).await.unwrap(),
+            set_process(&pool, id, picked.clone()).await.unwrap(),
             Edited::Saved,
             "picking {picked:?}",
         );
         assert_eq!(process(&pool, id).await.unwrap(), picked);
     }
+}
+
+/// A plugin's Process round-trips by its plugin's uuid and its id, and picking
+/// one of Verkstead's own after it leaves no plugin behind.
+#[tokio::test]
+async fn a_plugins_process_round_trips_by_its_plugin_and_its_id() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafting(&pool).await;
+    let provided = Process::Provided {
+        plugin: "5e0c9a7e-2f4b-4c1d-8a3e-6b9f0d2c7a41".to_owned(),
+        id: "review".to_owned(),
+    };
+
+    assert_eq!(
+        set_process(&pool, id, provided.clone()).await.unwrap(),
+        Edited::Saved
+    );
+    assert_eq!(
+        process(&pool, id).await.unwrap(),
+        provided,
+        "its id is `review` and it is still the plugin's, not Verkstead's Review"
+    );
+
+    set_process(&pool, id, Process::Tinker).await.unwrap();
+    assert_eq!(process(&pool, id).await.unwrap(), Process::Tinker);
 }
 
 /// The words themselves, which are the half of the round trip a database opened

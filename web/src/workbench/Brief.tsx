@@ -57,7 +57,8 @@ import * as pairing from "../pairing";
 import { authorLabel, useAuthors } from "../authors";
 import styles from "./Brief.module.css";
 import { chosen } from "./naming";
-import { PROCESS, ROLE, uses } from "./processes";
+import { ROLE, uses } from "./processes";
+import { processName } from "./provided";
 import { PaneHead } from "./PaneHead";
 import { ABBREVIATED } from "./Timeline";
 
@@ -197,7 +198,12 @@ function Configuration(props: {
             because a Process is a fact about the work rather than about the
             machine it was worked on — so a share says it, as it says the three
             around it. */}
-        <Fact term="Process">{PROCESS[props.conversation.process]}</Fact>
+        <Fact term="Process">
+          {processName(
+            props.conversation.process,
+            props.conversation.provided,
+          )}
+        </Fact>
         {/* The name where there is one, and the rule that will pick one where
             there is not — which is what a Conversation adopting a roadmap
             reads, its Brief being frozen from the start and its branch being

@@ -41,6 +41,10 @@ const COMPONENTS = "/api/ui/components";
 /// name and mark the page draws — see the default below.
 const HARNESSES = "/api/ui/harnesses";
 
+/// And the Processes the plugins loaded on the server provide, which the
+/// shell reads once for the picker and the words — see the default below.
+const PROCESSES = "/api/ui/processes";
+
 /// One answer per fetch in the order given. The last answer is repeated,
 /// because a page polls for as long as it is open and a test should not have to
 /// say how many times.
@@ -92,6 +96,11 @@ export function serving(...answers: Array<Answer>) {
   // And the harnesses, as the real endpoint lists them — see `src/harnesses.ts`
   // and `setup.ts`, which says the same list before anything is mounted.
   held.set(`GET ${HARNESSES}`, json(harnesses as HarnessEntry[]));
+
+  // And no plugin's Process, which is what a server with nothing installed
+  // has — see `src/workbench/provided.ts`. A test about one answers with a
+  // `whenever` of its own.
+  held.set(`GET ${PROCESSES}`, json([]));
 
   for (const answer of answers) {
     if (typeof answer === "function") {

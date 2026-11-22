@@ -82,6 +82,7 @@ import type {
   Resolved,
   Resumed,
   RoadmapPane,
+  ProcessEntry,
   Screen,
   ShareCommented,
   SharePublished,
@@ -212,6 +213,7 @@ import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
 // Develop is called.
 import {
   away,
+  type BuiltIn,
   DESCRIPTION,
   OFFERED,
   PROCESS,
@@ -220,6 +222,7 @@ import {
   targeted,
   uses,
 } from "../src/workbench/processes";
+import { knowProvidedProcesses } from "../src/workbench/provided";
 // The pause card, which is one of the record's and draws itself.
 import { RESOLVE_REFUSAL } from "../src/workbench/PullRequest";
 import prPane from "../src/workbench/PullRequest.module.css";
@@ -5403,7 +5406,9 @@ describe("a conversation's process", () => {
     mount(`/conversations/${OPEN.id}`);
     const control = await theProcess();
 
-    expect(control.textContent).not.toContain(DESCRIPTION[OPEN.process]);
+    expect(control.textContent).not.toContain(
+      DESCRIPTION[OPEN.process as BuiltIn],
+    );
 
     opened("Process");
 
@@ -5431,6 +5436,54 @@ describe("a conversation's process", () => {
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/process`),
       ).toEqual({ process: "Develop" }),
+    );
+  });
+
+  /// A plugin's Process is offered under the five in the words its manifest
+  /// gives it, and picked by its plugin and its id — the list the server
+  /// sends rather than one kept here.
+  it("offers a plugin's Process under the five, in its own words", async () => {
+    // What the shell's read of the server's list says, said as a share's
+    // bundle says it — see `provided.ts`.
+    knowProvidedProcesses([
+      {
+        plugin: "5e0c9a7e-2f4b-4c1d-8a3e-6b9f0d2c7a41",
+        id: "two-steps",
+        name: "Two steps",
+        description: "Draft the change, then check it.",
+        offered: true,
+        states: [
+          { id: "drafting", word: "Drafting" },
+          { id: "checking", word: "Checking" },
+        ],
+      },
+    ] satisfies ProcessEntry[]);
+    const fetching = theWorkbench(json("Picked"));
+    mount(`/conversations/${OPEN.id}`);
+    await theProcess();
+
+    opened("Process");
+
+    const row = await waitFor(() =>
+      screen.getByRole("option", { name: "Two steps" }),
+    );
+    expect(
+      document.getElementById(row.getAttribute("aria-describedby")!)!
+        .textContent,
+    ).toBe("Draft the change, then check it.");
+
+    pick("Process", "Two steps");
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/process`),
+      ).toEqual({
+        process: "Provided",
+        provided: {
+          plugin: "5e0c9a7e-2f4b-4c1d-8a3e-6b9f0d2c7a41",
+          id: "two-steps",
+        },
+      }),
     );
   });
 

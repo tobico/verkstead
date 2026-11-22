@@ -130,10 +130,13 @@ impl Drivers {
             Lifecycle::Grilling => {
                 working.contains(&conversation_id) || self.registered(conversation_id)
             }
+            // And a declared state, whose Activity's run holds a registration
+            // for as long as it runs — see [`crate::processes`].
             Lifecycle::Implementing
             | Lifecycle::Wrapping
             | Lifecycle::FollowUp
-            | Lifecycle::Investigating => self.registered(conversation_id),
+            | Lifecycle::Investigating
+            | Lifecycle::Declared => self.registered(conversation_id),
             Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => true,
         }
     }

@@ -42,22 +42,22 @@ use verkstead_render::{
     CompanionView, CompileCaching, ComponentsView, Confirming, ConflictResolution,
     ConversationArchived, ConversationClosed, ConversationEntry, ConversationMove,
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Creation,
-    Cursor, DevicesView, DiskUse, DroppedRow, Eviction, FileDeleted, FileDeleting, FileListsView,
-    FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView,
-    FileWrite, FileWritten, FolderListing, GrillingStarted, HeaderEdit, IgnoreRule,
+    Cursor, DeclaredState, DevicesView, DiskUse, DroppedRow, Eviction, FileDeleted, FileDeleting,
+    FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView,
+    FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted, HeaderEdit, IgnoreRule,
     IgnoredCommentsEdit, InstallPress, InstructionsEdit, LanguageCleared, LanguageView, Lifecycle,
     Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption,
     NewAnnex, NewCompanion, NewConversation, NewJoin, NewRank, OfferedPack, OpenTerminal,
     PackAttached, PackRemoved, PairingView, Parked, PendingSteerView, Permitting, Picking, Process,
-    ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
-    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
-    RuleField, RuleRefused, Running, ServeEdit, ServePress, ServerAttached, ServerField,
-    ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
-    ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
-    SteerSaved, SteerSubmission, StoreView, Submitted, Subscribed, Subscription, TakenUp,
-    TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
-    TransferredTo, Transferring, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    ProcessChoice, ProcessEntry, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry,
+    ProvidedProcess, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
+    RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, Running, ServeEdit,
+    ServePress, ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading, SetView,
+    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit,
+    SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled, SteerForm,
+    SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, StoreView, Submitted, Subscribed,
+    Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit,
+    TokenSaved, TransferredTo, Transferring, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -671,6 +671,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             post(choose_review_pairing),
         )
         .route("/api/ui/harnesses", get(harnesses))
+        .route("/api/ui/processes", get(processes))
         .route("/api/ui/profiles", get(profiles).post(create_profile))
         .route("/api/ui/profiles/{id}", post(edit_profile))
         // Setting a Profile up on this device, a press of its own rather than
@@ -1830,6 +1831,13 @@ async fn conversations(
                 naming: conversation.naming,
                 repo: conversation.repo,
                 state: row_state(conversation.id, conversation.state),
+                declared: conversation.declared.map(|declared| DeclaredState {
+                    process: ProvidedProcess {
+                        plugin: declared.plugin,
+                        id: declared.process,
+                    },
+                    state: declared.state,
+                }),
                 working,
                 // Idle is a thing a running session is, and the two sets are
                 // read a moment apart — so the pair is made consistent here
@@ -2384,7 +2392,7 @@ pub(crate) async fn conversation_view(
 
     let ready_to_grill = crate::conversations::ready_to_grill(
         conversation.state,
-        conversation.process,
+        &conversation.process,
         grilling_pairing.as_ref(),
         implementation_pairing.as_ref(),
         &review_pairing,
@@ -2831,13 +2839,15 @@ pub(crate) async fn conversation_view(
     let view = ConversationView {
         id: conversation.id,
         repo: crate::repos::entry(conversation.repo, config.authors()),
-        process: process(conversation.process),
+        process: process(&conversation.process),
+        provided: provided(&conversation.process),
         branch: conversation.branch,
         branch_named: conversation.branch_named,
         naming: conversation.naming,
         base_commit: conversation.base_commit,
         companions,
         state: lifecycle(conversation.state),
+        declared_state: conversation.declared_state,
         ready_to_grill,
         compiles_uncached,
         ready_to_resume,
@@ -2924,6 +2934,9 @@ pub(crate) async fn conversation_view(
                     ),
                     store::Event::Moved(state) => {
                         verkstead_render::moved_event(event.id, event.at, lifecycle(state))
+                    }
+                    store::Event::Entered(state) => {
+                        verkstead_render::entered_event(event.id, event.at, state)
                     }
                     // The summary and not the Capture: a Timeline is read every
                     // time an open page hears the world moved, and a session's
@@ -5437,7 +5450,7 @@ async fn pick_process(
         return Json(ProcessPicked::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::pick_process(&state.pool, id, choice.process).await {
+    match crate::conversations::pick_process(&state, id, choice).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "picking a conversation's Process failed");
@@ -6285,6 +6298,22 @@ async fn choose_review_pairing(
     }
 }
 
+/// `GET /api/ui/processes` — every Process the plugins loaded here provide,
+/// in the order they were installed: what the picker offers beside the five
+/// Verkstead runs itself, and what a Conversation on one is worded from. A
+/// switched-off plugin's are listed, not offered, while Conversations on them
+/// run to the end.
+async fn processes(State(state): State<AppState>) -> Json<Vec<ProcessEntry>> {
+    Json(
+        state
+            .plugins
+            .processes()
+            .iter()
+            .map(crate::processes::Loaded::entry)
+            .collect(),
+    )
+}
+
 /// `GET /api/ui/harnesses` — every harness this server can run a session on,
 /// with what the Profile form, the cards and the pickers draw of each.
 async fn harnesses(State(state): State<AppState>) -> HttpResponse {
@@ -6737,6 +6766,7 @@ pub(crate) fn lifecycle(state: store::Lifecycle) -> Lifecycle {
         store::Lifecycle::Wrapping => Lifecycle::Wrapping,
         store::Lifecycle::FollowUp => Lifecycle::FollowUp,
         store::Lifecycle::Investigating => Lifecycle::Investigating,
+        store::Lifecycle::Declared => Lifecycle::Declared,
         store::Lifecycle::Done => Lifecycle::Done,
         store::Lifecycle::Closed => Lifecycle::Closed,
     }
@@ -6745,25 +6775,42 @@ pub(crate) fn lifecycle(state: store::Lifecycle) -> Lifecycle {
 /// And the store's Process as the viewer receives it. One word either side, and
 /// this is where those two vocabularies are held to each other — the pair
 /// [`lifecycle`] above is, for the fact beside it.
-pub(crate) fn process(process: store::Process) -> Process {
+pub(crate) fn process(process: &store::Process) -> Process {
     match process {
         store::Process::Develop => Process::Develop,
         store::Process::Investigate => Process::Investigate,
         store::Process::Review => Process::Review,
         store::Process::Tinker => Process::Tinker,
         store::Process::FixMergeIssues => Process::FixMergeIssues,
+        store::Process::Provided { .. } => Process::Provided,
     }
 }
 
-/// And back the other way, for the one press that writes one.
-pub(crate) fn picked_process(process: Process) -> store::Process {
+/// And which plugin's Process, where it is one.
+pub(crate) fn provided(process: &store::Process) -> Option<ProvidedProcess> {
     match process {
+        store::Process::Provided { plugin, id } => Some(ProvidedProcess {
+            plugin: plugin.clone(),
+            id: id.clone(),
+        }),
+        _ => None,
+    }
+}
+
+/// And back the other way, for the one press that writes one: `None` for a
+/// plugin's Process the choice doesn't say which of.
+pub(crate) fn picked_process(choice: ProcessChoice) -> Option<store::Process> {
+    Some(match choice.process {
         Process::Develop => store::Process::Develop,
         Process::Investigate => store::Process::Investigate,
         Process::Review => store::Process::Review,
         Process::Tinker => store::Process::Tinker,
         Process::FixMergeIssues => store::Process::FixMergeIssues,
-    }
+        Process::Provided => {
+            let ProvidedProcess { plugin, id } = choice.provided?;
+            store::Process::Provided { plugin, id }
+        }
+    })
 }
 
 /// And the same word read the other way, which is what a Conversation arriving
@@ -6781,6 +6828,7 @@ pub(crate) fn state_of(lifecycle: Lifecycle) -> store::Lifecycle {
         Lifecycle::Wrapping => store::Lifecycle::Wrapping,
         Lifecycle::FollowUp => store::Lifecycle::FollowUp,
         Lifecycle::Investigating => store::Lifecycle::Investigating,
+        Lifecycle::Declared => store::Lifecycle::Declared,
         Lifecycle::Done => store::Lifecycle::Done,
         Lifecycle::Closed => store::Lifecycle::Closed,
     }

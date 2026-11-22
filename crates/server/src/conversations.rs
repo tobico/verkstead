@@ -1391,6 +1391,7 @@ const LANDED: &[Process] = &[
     Process::Investigate,
     Process::Review,
     Process::FixMergeIssues,
+    Process::Provided,
 ];
 
 /// Say what kind of work a drafting Conversation is for.
@@ -1405,22 +1406,37 @@ const LANDED: &[Process] = &[
 /// Asked first, and before the Conversation is so much as looked up: a Process
 /// with no stage behind it is refused for a Conversation that does not exist as
 /// readily as for one that does, because what is wrong with the ask is the ask.
+///
+/// **A plugin's Process is picked only where it is offered**: provided by a
+/// plugin that loaded here, switched on and in no trouble — the rows the
+/// picker draws, which the server sends (ADR-0030, *Process*). One that is
+/// not is refused as [`ProcessPicked::NotOffered`].
 pub(crate) async fn pick_process(
-    pool: &SqlitePool,
+    state: &AppState,
     id: i64,
-    process: Process,
+    choice: verkstead_render::ProcessChoice,
 ) -> Result<ProcessPicked> {
-    if !LANDED.contains(&process) {
+    let pool = &state.pool;
+
+    if !LANDED.contains(&choice.process) {
         return Ok(ProcessPicked::NotLanded);
     }
 
-    Ok(
-        match store::set_process(pool, id, crate::ui::picked_process(process)).await? {
-            store::Edited::Saved => ProcessPicked::Picked,
-            store::Edited::NoSuchConversation => ProcessPicked::NoSuchConversation,
-            store::Edited::NotDrafting => ProcessPicked::NotDrafting,
-        },
-    )
+    let Some(process) = crate::ui::picked_process(choice) else {
+        return Ok(ProcessPicked::NotOffered);
+    };
+
+    if let store::Process::Provided { plugin, id } = &process
+        && !state.plugins.offers(plugin, id)
+    {
+        return Ok(ProcessPicked::NotOffered);
+    }
+
+    Ok(match store::set_process(pool, id, process).await? {
+        store::Edited::Saved => ProcessPicked::Picked,
+        store::Edited::NoSuchConversation => ProcessPicked::NoSuchConversation,
+        store::Edited::NotDrafting => ProcessPicked::NotDrafting,
+    })
 }
 
 /// Add a registered Repo for the work to run alongside.
@@ -1788,7 +1804,11 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // so it is the same answer.
     let unready = match process {
         store::Process::Tinker => unready_to_wrap(implementation.as_ref(), &review),
-        store::Process::Investigate => unready_to_investigate(implementation.as_ref()),
+        // A plugin's Process runs its sessions as the implementation until its
+        // roles are put behind the Agent control.
+        store::Process::Investigate | store::Process::Provided { .. } => {
+            unready_to_investigate(implementation.as_ref())
+        }
         _ => unready(grilling.as_ref(), implementation.as_ref(), &review),
     };
 
@@ -1803,6 +1823,19 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     if brief.trim().is_empty() {
         return Ok(GrillingStarted::EmptyBrief);
     }
+
+    // A plugin's Process starts in the first state its manifest declares, and
+    // only while it is offered: a plugin switched off or in trouble since the
+    // pick is one nothing new starts on.
+    let declared = match &process {
+        store::Process::Provided { plugin, id } => match state.plugins.process(plugin, id) {
+            Some(loaded) if loaded.offered => {
+                loaded.process.states.first().map(|first| first.id.clone())
+            }
+            _ => return Ok(GrillingStarted::ProcessNotOffered),
+        },
+        _ => None,
+    };
 
     // And whoever the commit Verkstead makes on a fresh branch is by: the
     // clearing of whatever task list the base was carrying — see
@@ -2050,9 +2083,12 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // And where the press lands it, which is the one thing about the record
     // that the Process decides: the same transaction either way, with the state
     // it comes out in as the word that differs.
-    let moved = match process {
-        store::Process::Tinker => store::start_tinkering(pool, id, base, &path, &checkouts).await?,
-        store::Process::Investigate => {
+    let moved = match (&process, &declared) {
+        (_, Some(first)) => store::start_declared(pool, id, first, base, &path, &checkouts).await?,
+        (store::Process::Tinker, _) => {
+            store::start_tinkering(pool, id, base, &path, &checkouts).await?
+        }
+        (store::Process::Investigate, _) => {
             store::start_investigating(pool, id, base, &path, &checkouts).await?
         }
         _ => store::start_grilling(pool, id, base, &path, &checkouts).await?,
@@ -2102,6 +2138,14 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // it — what drives the Conversation from here is that run, and the human is
     // standing at the button this is answering. See
     // [`crate::activities::follow_up_rounds::run`].
+    // And a plugin's Process, whose first state's Activity is what drives it
+    // from here — see [`crate::processes`].
+    if declared.is_some() {
+        tokio::spawn(crate::processes::run(state.clone(), id, driving));
+
+        return Ok(GrillingStarted::Started);
+    }
+
     if process == store::Process::Tinker {
         tokio::spawn(crate::activities::follow_up_rounds::run(
             state.clone(),
@@ -3648,7 +3692,7 @@ pub(crate) async fn take_up(state: &AppState, id: i64, confirming: &Confirming) 
     // [`store::process`] — so it reaches this by the one road every other
     // targeted Process does, and anything pointed at nothing has nothing to
     // wrap up.
-    if !takes_a_target(conversation.process) {
+    if !takes_a_target(&conversation.process) {
         return Ok(TakenUp::NotHoldingOne);
     }
 
@@ -3676,7 +3720,7 @@ pub(crate) async fn take_up(state: &AppState, id: i64, confirming: &Confirming) 
     // anything, so it waits on the Implementation Pairing alone — exactly as an
     // Investigate does, and reusing that reading rather than writing it out
     // again beside this one.
-    let unready = match conversation.process {
+    let unready = match &conversation.process {
         store::Process::FixMergeIssues => unready_to_investigate(implementation.as_ref()),
         _ => unready_to_wrap(implementation.as_ref(), &review),
     };
@@ -3739,7 +3783,7 @@ pub(crate) async fn take_up(state: &AppState, id: i64, confirming: &Confirming) 
     // is on the record; what moves ahead is knowing the links. See
     // [`crate::stacks::walk`].
     let walked = match number {
-        Some(number) if walks_the_stack(conversation.process) => {
+        Some(number) if walks_the_stack(&conversation.process) => {
             crate::stacks::walk(state, &conversation.repo, number).await
         }
         _ => crate::stacks::Walked::Nothing,
@@ -4012,7 +4056,7 @@ pub(crate) async fn take_up(state: &AppState, id: i64, confirming: &Confirming) 
     // buys is that there is no instant in which a wrapping Conversation on a pull
     // request is not narrowed, which is what a sweep or a restart between the move
     // and the first poll would otherwise find.
-    let narrowed = narrows_the_wrap_up(conversation.process);
+    let narrowed = narrows_the_wrap_up(&conversation.process);
 
     let mut settled = Vec::new();
 
@@ -5876,7 +5920,7 @@ pub(crate) async fn worktree(path: Option<PathBuf>) -> Result<Option<Worktree>> 
 /// itself, and it is the one thing this waits on.
 pub(crate) fn ready_to_grill(
     state: store::Lifecycle,
-    process: store::Process,
+    process: &store::Process,
     grilling: Option<&PairingView>,
     implementation: Option<&PairingView>,
     review: &PickedView,
@@ -5887,9 +5931,11 @@ pub(crate) fn ready_to_grill(
         store::Process::Review | store::Process::Tinker => {
             crate::profiles::ready_to_wrap(implementation, review)
         }
-        store::Process::Investigate | store::Process::FixMergeIssues => {
-            crate::profiles::ready_to_investigate(implementation)
-        }
+        // A plugin's Process runs its sessions as the implementation for now:
+        // its roles go behind the Agent control with the stage's sixth task.
+        store::Process::Investigate
+        | store::Process::FixMergeIssues
+        | store::Process::Provided { .. } => crate::profiles::ready_to_investigate(implementation),
         _ => crate::profiles::ready_to_grill(grilling, implementation, review),
     };
 
@@ -5914,7 +5960,7 @@ pub(crate) fn ready_to_grill(
 /// Which is the question the take-up asks of a press as well — see [`take_up`],
 /// whose door this is: *is this Process pointed at work that is already
 /// somewhere else* rather than *is this a Review*.
-pub(crate) fn takes_a_target(process: store::Process) -> bool {
+pub(crate) fn takes_a_target(process: &store::Process) -> bool {
     matches!(
         process,
         store::Process::Review | store::Process::FixMergeIssues
@@ -5944,7 +5990,7 @@ pub(crate) fn takes_a_target(process: store::Process) -> bool {
 /// behaves alike, with no bookkeeping per door — and a wrap-up that lost a settle
 /// by some road nobody thought of gets it back on the next poll rather than
 /// waiting for ever on it.
-pub(crate) fn narrows_the_wrap_up(process: store::Process) -> bool {
+pub(crate) fn narrows_the_wrap_up(process: &store::Process) -> bool {
     matches!(process, store::Process::FixMergeIssues)
 }
 
@@ -5963,7 +6009,7 @@ pub(crate) fn narrows_the_wrap_up(process: store::Process) -> bool {
 /// narrowing is asked at each of its own: a take-up over a pull request walks at
 /// the press, and a take-up over a bare branch has nothing to walk from until
 /// its `submitting` session has opened one — see [`crate::stacks`].
-pub(crate) fn walks_the_stack(process: store::Process) -> bool {
+pub(crate) fn walks_the_stack(process: &store::Process) -> bool {
     matches!(process, store::Process::FixMergeIssues)
 }
 

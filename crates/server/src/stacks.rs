@@ -264,7 +264,7 @@ pub(crate) async fn walking(
         }
     };
 
-    if !crate::conversations::walks_the_stack(conversation.process) {
+    if !crate::conversations::walks_the_stack(&conversation.process) {
         return None;
     }
 

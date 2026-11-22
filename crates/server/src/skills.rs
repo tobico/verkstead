@@ -822,6 +822,32 @@ pub(crate) fn instruction(
     )
 }
 
+/// What a session a plugin's Process launches is started on: the opening
+/// line its state's options write, or one sending it into `skill` where they
+/// write none, over the Brief and what the grilling settled (ADR-0030,
+/// *Process*).
+///
+/// The documents are Verkstead's to put under it, as they are under every
+/// prompt here: a manifest says what the session is for, and what the work
+/// is comes from the Conversation.
+pub(crate) fn declared(
+    skills: &Skills,
+    skill: &str,
+    opening: Option<&str>,
+    brief: &str,
+    handoff: Option<&str>,
+) -> String {
+    let opening = match opening {
+        Some(opening) => opening.trim().to_owned(),
+        None => format!(
+            "Read {} and do what it says.",
+            skills.named(&format!("{skill}/SKILL.md"))
+        ),
+    };
+
+    on_the_documents(&opening, brief, handoff)
+}
+
 /// What an investigating session is started on: the question to find out about,
 /// and under it the rounds it has already been through.
 ///

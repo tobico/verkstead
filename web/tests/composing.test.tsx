@@ -6418,6 +6418,7 @@ describe("what a device holds between visits", () => {
         { repo_id: 3, mode: "ReadWrite", base: "trunk", branch: "beside" },
       ],
       process: "Develop",
+      provided: null,
       processFilled: null,
       grilling: "1:opus",
       implementation: "2:fable",

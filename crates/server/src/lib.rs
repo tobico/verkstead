@@ -282,6 +282,7 @@ pub mod preflight;
 /// Suggesting a Preview for trying the work by hand, from a building session
 /// alone (ADR-0024).
 mod previews;
+mod processes;
 mod profiles;
 /// Putting a share where a link reaches it, which is Verkstead's own write to
 /// GitHub.

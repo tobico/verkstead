@@ -121,13 +121,13 @@ import type {
   ConversationView,
   GrillingStarted,
   HandoffEvent,
-  Lifecycle,
   ManualTaskEvent,
   MemoEvent,
   MovedEvent,
   NoticeEvent,
   OtherAuthor,
   PendingSteerView,
+  ProvidedProcess,
   PinnedEvent,
   ProfileEntry,
   ProfileTrouble,
@@ -173,7 +173,7 @@ import { StatusButton } from "./StatusButton";
 import styles from "./Timeline.module.css";
 import { titled } from "./naming";
 import { inFlight, settled, stageState } from "./stages";
-import { STATE } from "./states";
+import { STATE, stateWord } from "./states";
 import { opensRoadmap, type Opening } from "./openings";
 import { windowed } from "./windowing";
 
@@ -212,6 +212,8 @@ const GRILL_REFUSAL: Record<Extract<GrillingStarted, string>, string> = {
   NoReviewProfile:
     "Pick a review profile and model, or No review, on the brief first.",
   EmptyBrief: "Write the brief first. The work starts from it.",
+  ProcessNotOffered:
+    "This process's plugin is switched off or in trouble. Pick another process, or fix the plugin in Settings.",
   NoGitAuthor:
     "No git author is set, so Verkstead can't commit on the branch. Set one in Settings first.",
   FetchFailed:
@@ -346,14 +348,20 @@ export function profileRefusal(why: ProfileTrouble): string {
 ///
 /// A move records only the state it went to, so the other half of the
 /// transition is the Timeline's own to work out by reading back up itself.
-function movedFrom(timeline: TimelineEvent[], index: number): Lifecycle {
+///
+/// The move itself rather than its state, so that a declared state it went to
+/// is said in its own word; `null` is the Draft.
+function movedFrom(
+  timeline: TimelineEvent[],
+  index: number,
+): MovedEvent | null {
   for (const event of timeline.slice(0, index).reverse()) {
     if ("Moved" in event) {
-      return event.Moved.state;
+      return event.Moved;
     }
   }
 
-  return "Draft";
+  return null;
 }
 
 /// How many lines of a document a card shows before it is cut off.
@@ -838,6 +846,7 @@ export function Timeline(props: {
                     <Moved
                       from={movedFrom(props.conversation.timeline, index())}
                       moved={moved()}
+                      provided={props.conversation.provided}
                     />
                   )}
                 </Match>
@@ -2069,13 +2078,26 @@ function ManualTask(props: { manual: ManualTaskEvent }): JSX.Element {
 /// that was moved to: where the work has got to is a step from somewhere, and a
 /// line saying only where it arrived leaves the reader to remember where it
 /// was. The state it came from is [`movedFrom`]'s to say.
-function Moved(props: { from: Lifecycle; moved: MovedEvent }): JSX.Element {
+///
+/// A state a plugin's Process declares is said in the word its manifest gives
+/// it, read off the Conversation's Process — see `provided.ts`.
+function Moved(props: {
+  from: MovedEvent | null;
+  moved: MovedEvent;
+  provided: ProvidedProcess | null;
+}): JSX.Element {
+  const word = (moved: MovedEvent | null) =>
+    moved === null
+      ? STATE.Draft
+      : stateWord(moved.state, props.provided, moved.declared);
+  const tone = () => styles[props.moved.state.toLowerCase()];
+
   return (
     <p
       class={styles.moved}
-      classList={{ [styles[props.moved.state.toLowerCase()]!]: true }}
+      classList={tone() === undefined ? {} : { [tone()!]: true }}
     >
-      {STATE[props.from]} → {STATE[props.moved.state]}
+      {word(props.from)} → {word(props.moved)}
     </p>
   );
 }

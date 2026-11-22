@@ -102,6 +102,12 @@ pub(crate) struct Installed {
     /// they were installed: what this server offers beside its built-ins —
     /// see [`crate::harness::plugged`].
     harnesses: Arc<Mutex<Vec<crate::store::AgentType>>>,
+
+    /// The Processes the plugins that loaded here provide, in the order they
+    /// were installed, each with the Activities its states run found — see
+    /// [`crate::processes`]. A switched-off plugin's are kept, not offered,
+    /// for the Conversations already on them.
+    processes: Arc<Mutex<Vec<crate::processes::Loaded>>>,
 }
 
 impl Installed {
@@ -139,6 +145,31 @@ impl Installed {
             .lock()
             .expect("nothing panics holding the harnesses")
             .clone()
+    }
+
+    /// Every Process held here, offered or not.
+    pub(crate) fn processes(&self) -> Vec<crate::processes::Loaded> {
+        self.processes
+            .lock()
+            .expect("nothing panics holding the processes")
+            .clone()
+    }
+
+    /// The Process `id` of the plugin `plugin`, where it is held here —
+    /// offered, or kept for the Conversations on a plugin switched off.
+    pub(crate) fn process(&self, plugin: &str, id: &str) -> Option<crate::processes::Loaded> {
+        self.processes
+            .lock()
+            .expect("nothing panics holding the processes")
+            .iter()
+            .find(|loaded| loaded.plugin == plugin && loaded.process.id == id)
+            .cloned()
+    }
+
+    /// Whether a new Conversation may be started on that Process.
+    pub(crate) fn offers(&self, plugin: &str, id: &str) -> bool {
+        self.process(plugin, id)
+            .is_some_and(|loaded| loaded.offered)
     }
 
     /// The presses that would put right the dependencies `uuid` is in
@@ -356,6 +387,27 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
         offered
     };
 
+    // And the Processes the plugins in no trouble provide, a switched-off
+    // plugin's kept from the last load for the Conversations still on them.
+    let processes = {
+        let before = state.plugins.processes();
+        provided(&records, &manifests, &dirs, &before)
+    };
+    let processes_moved = {
+        let mut held = state
+            .plugins
+            .processes
+            .lock()
+            .expect("nothing panics holding the processes");
+        let moved = processes_differ(&held, &processes);
+        *held = processes;
+        moved
+    };
+    if processes_moved {
+        let state = state.clone();
+        tokio::spawn(async move { crate::processes::taken_back(&state).await });
+    }
+
     let moved = {
         let mut held = state
             .plugins
@@ -369,7 +421,7 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
 
     // A harness offered or taken away moves the harness list the viewer
     // reads with the Plugins, and which Profiles are runnable.
-    if moved || offered {
+    if moved || offered || processes_moved {
         state.nudges.announce_here(Nudge::Plugins);
     }
     if offered {
@@ -392,6 +444,121 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
     // session — an installer's language this device has only now read taken
     // up first.
     crate::replicating::plugins::taken_up(&state.pool, &state.settings, &state.device).await
+}
+
+/// The Processes the plugins in `manifests` provide — every one of them in no
+/// trouble — in the order `records` installed them, each with the Activities
+/// its states run found in the plugin itself or a dependency, in the order
+/// written. A plugin switched off keeps what `before` held of it, not offered.
+fn provided(
+    records: &[Record<Fields>],
+    manifests: &BTreeMap<String, Manifest>,
+    dirs: &BTreeMap<String, PathBuf>,
+    before: &[crate::processes::Loaded],
+) -> Vec<crate::processes::Loaded> {
+    use crate::processes::{Loaded, Provided, Source};
+
+    let built_ins: Vec<(super::built_in::BuiltIn, Manifest)> = BUILT_INS
+        .iter()
+        .filter_map(|built_in| Some((*built_in, built_in.manifest(Platform::HERE).ok()?)))
+        .collect();
+
+    // Where a plugin's files are, and what it was granted.
+    let source = |uuid: &str| -> Option<(Source, &Manifest)> {
+        if let (Some(manifest), Some(dir)) = (manifests.get(uuid), dirs.get(uuid)) {
+            return Some((Source::Dir(dir.clone()), manifest));
+        }
+        built_ins
+            .iter()
+            .find(|(_, manifest)| manifest.uuid == uuid)
+            .map(|(built_in, manifest)| (Source::BuiltIn(*built_in), manifest))
+    };
+
+    let mut held = Vec::new();
+    for record in records {
+        let Some(manifest) = manifests.get(&record.uuid) else {
+            if !record.fields.enabled {
+                held.extend(
+                    before
+                        .iter()
+                        .filter(|loaded| loaded.plugin == record.uuid)
+                        .map(|loaded| Loaded {
+                            offered: false,
+                            ..loaded.clone()
+                        }),
+                );
+            }
+            continue;
+        };
+
+        // The plugin itself, then each dependency in the order written.
+        let reached: Vec<(Source, &Manifest)> = std::iter::once(manifest.uuid.as_str())
+            .chain(
+                manifest
+                    .dependencies
+                    .iter()
+                    .map(|dependency| dependency.uuid.as_str()),
+            )
+            .filter_map(source)
+            .collect();
+
+        for process in &manifest.processes {
+            let mut activities: Vec<Provided> = Vec::new();
+            let mut found = true;
+            for state in &process.states {
+                for (_, id) in state.activity.activities() {
+                    if activities.iter().any(|provided| provided.activity.id == id) {
+                        continue;
+                    }
+                    match reached.iter().find_map(|(source, theirs)| {
+                        theirs
+                            .activities
+                            .iter()
+                            .find(|activity| activity.id == id)
+                            .map(|activity| (source, theirs, activity))
+                    }) {
+                        Some((source, theirs, activity)) => activities.push(Provided {
+                            activity: activity.clone(),
+                            files: source.clone(),
+                            capabilities: theirs.capabilities.clone(),
+                        }),
+                        None => found = false,
+                    }
+                }
+            }
+
+            // The can't-reach check above refuses a Process naming an
+            // Activity nothing provides, so this is only ever a plugin it
+            // took out already.
+            if !found {
+                continue;
+            }
+
+            held.push(Loaded {
+                plugin: record.uuid.clone(),
+                process: process.clone(),
+                offered: true,
+                activities,
+            });
+        }
+    }
+    held
+}
+
+/// Whether two holdings of the Processes say anything different: which are
+/// held, and which offered.
+fn processes_differ(
+    before: &[crate::processes::Loaded],
+    after: &[crate::processes::Loaded],
+) -> bool {
+    let key = |loaded: &crate::processes::Loaded| {
+        (
+            loaded.plugin.clone(),
+            loaded.process.clone(),
+            loaded.offered,
+        )
+    };
+    before.iter().map(key).ne(after.iter().map(key))
 }
 
 /// The harness `manifest` declares, stood up with its mark read out of `dir`

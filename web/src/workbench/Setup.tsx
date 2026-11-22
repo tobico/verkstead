@@ -114,6 +114,7 @@ import type {
   PairingView,
   Permitting,
   Process,
+  ProcessChoice,
   ProcessPicked,
   ProfileChosen,
   ProfileEntry,
@@ -137,11 +138,16 @@ import {
   DESCRIPTION,
   label,
   OFFERED,
-  PROCESS,
   ROLES,
   targeted,
   uses,
 } from "./processes";
+import {
+  choiceValue,
+  offeredProcesses,
+  processName,
+  providedProcess,
+} from "./provided";
 import { namesPullRequest } from "./targets";
 import styles from "./Setup.module.css";
 import { keeping } from "./settling";
@@ -190,6 +196,8 @@ export const PROCESS_REFUSAL: Record<ProcessPicked, string> = {
   NoSuchConversation: "This conversation is gone.",
   NotDrafting:
     "The branch exists now, so the process is settled.",
+  NotOffered:
+    "That process's plugin is switched off or in trouble here. Check it in Settings.",
   NotLanded: "Verkstead can't run that process yet.",
 };
 
@@ -1289,8 +1297,13 @@ function ProcessOption(props: { conversation: ConversationView }): JSX.Element {
   const [refused, setRefused] = createSignal<ProcessPicked | null>(null);
 
   const say = useMutation(() => ({
-    mutationFn: (picked: Process) =>
-      pickProcess(device(), props.conversation.id, picked),
+    mutationFn: (picked: ProcessChoice) =>
+      pickProcess(
+        device(),
+        props.conversation.id,
+        picked.process,
+        picked.provided ?? null,
+      ),
     onSuccess: (outcome: ProcessPicked) => {
       if (outcome !== "Picked") {
         setRefused(outcome);
@@ -1317,7 +1330,12 @@ function ProcessOption(props: { conversation: ConversationView }): JSX.Element {
 
   return (
     <ProcessPicker
-      chosen={props.conversation.process}
+      chosen={{
+        process: props.conversation.process,
+        ...(props.conversation.provided === null
+          ? {}
+          : { provided: props.conversation.provided }),
+      }}
       disabled={branched() || say.isPending}
       pick={(picked) => say.mutate(picked)}
     >
@@ -1347,10 +1365,12 @@ function ProcessOption(props: { conversation: ConversationView }): JSX.Element {
 ///
 /// Which Processes it offers is [`OFFERED`]'s, and the server keeps the other
 /// list — a Process is offered only once its stage has landed, as an agent type
-/// is offered only once it can launch the real thing.
+/// is offered only once it can launch the real thing. Under them, every
+/// Process a plugin loaded on the server offers, worded as its manifest words
+/// it — see `provided.ts`.
 export function ProcessPicker(props: {
-  chosen: Process;
-  pick: (picked: Process) => void;
+  chosen: ProcessChoice;
+  pick: (picked: ProcessChoice) => void;
   disabled?: boolean;
   /// What the caller has to say under it — the refusals above all, which are
   /// facts about the caller's record rather than about this control.
@@ -1361,8 +1381,22 @@ export function ProcessPicker(props: {
   /// a pull request up reads *Review*, which cannot be picked until its own
   /// stage lands, and a control showing nothing there would be the row missing
   /// the one thing that tells a Review apart.
-  const options = (): Process[] =>
-    OFFERED.includes(props.chosen) ? OFFERED : [props.chosen, ...OFFERED];
+  const options = (): ProcessChoice[] => {
+    const offered: ProcessChoice[] = [
+      ...OFFERED.map((process) => ({ process })),
+      ...offeredProcesses().map(
+        (entry): ProcessChoice => ({
+          process: "Provided",
+          provided: { plugin: entry.plugin, id: entry.id },
+        }),
+      ),
+    ];
+    const chosen = choiceValue(props.chosen);
+
+    return offered.some((choice) => choiceValue(choice) === chosen)
+      ? offered
+      : [props.chosen, ...offered];
+  };
 
   return (
     <div class={styles.processChoice}>
@@ -1377,12 +1411,23 @@ export function ProcessPicker(props: {
         class={styles.processPick}
         heading={{ words: "Process", class: styles.optionLabel }}
         options={options()}
-        value={(process) => process}
-        label={(process) => PROCESS[process]}
-        says={(process) => DESCRIPTION[process]}
-        chosen={props.chosen}
+        value={choiceValue}
+        label={(choice) => processName(choice.process, choice.provided ?? null)}
+        says={(choice) =>
+          choice.process === "Provided"
+            ? (providedProcess(choice.provided ?? null)?.description ?? "")
+            : DESCRIPTION[choice.process]
+        }
+        chosen={choiceValue(props.chosen)}
         disabled={props.disabled}
-        pick={(picked) => props.pick(picked as Process)}
+        pick={(picked) => {
+          const choice = options().find(
+            (option) => choiceValue(option) === picked,
+          );
+          if (choice !== undefined) {
+            props.pick(choice);
+          }
+        }}
       />
 
       {props.children}

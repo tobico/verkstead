@@ -30,7 +30,11 @@ import {
 import type { Role } from "../src/workbench/processes";
 
 /// Every Process the wire carries, which is every word the viewer has for one.
-const EVERY = Object.keys(PROCESS) as Process[];
+/// The five Verkstead runs itself. A plugin's is worded by its manifest —
+/// see `provided.ts`.
+const EVERY = (Object.keys(PROCESS) as Process[]).filter(
+  (process) => process !== "Provided",
+);
 
 describe("the roles a process is run under", () => {
   /// The table ADR-0020 carries, row for row — and Develop's row is the one
@@ -130,7 +134,7 @@ describe("the roles a process is run under", () => {
   /// worded: a record naming one this viewer had no roles for would be a
   /// composer with nothing in its setup row.
   it("has a row for every process there is a word for", () => {
-    expect(Object.keys(ROLES).sort()).toEqual(EVERY.sort());
+    expect(Object.keys(ROLES).sort()).toEqual(Object.keys(PROCESS).sort());
   });
 
   /// Nothing runs without something building it, whichever Process it is.

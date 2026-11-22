@@ -44392,3 +44392,319 @@ async fn a_force_stop_ends_a_components_session_and_the_component() {
         })
         .await;
 }
+
+/// The uuid of the fixture plugin providing the Process *Two steps*.
+const TWO_STEPS: &str = "5e0c9a7e-2f4b-4c1d-8a3e-6b9f0d2c7a41";
+
+/// Install a plugin written under `elsewhere` providing the Process *Two
+/// steps* — two states, `drafting` and `checking`, each over the One session
+/// Activity Verkstead ships — through the presses the Plugins page makes.
+///
+/// Each state's session is told which it is by the opening line its options
+/// write: *Draft the change.* and *Check the change.*. One that ends without
+/// its Done signal stops the Conversation where it stands.
+async fn installing_two_steps(app: &axum::Router, elsewhere: &std::path::Path) {
+    let plugin = elsewhere.join("two-steps");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(
+        plugin.join("plugin.yaml"),
+        format!(
+            "uuid: {TWO_STEPS}\n\
+             name: Two steps\n\
+             author:\n  name: Ada Lovelace\n  email: ada@example.com\n\
+             version: 1.0.0\n\
+             interface: 1\n\
+             dependencies:\n\
+             \x20 - uuid: d7a5e719-8491-46a7-b7d7-8f9f85e57bd6\n\
+             \x20   name: Activities\n\
+             \x20   author:\n      name: Tobias Cohen\n      email: tobi@tobico.net\n\
+             \x20   version: ^0.1\n\
+             \x20 - uuid: 15447a8d-f28d-4573-8b8b-a7226d477755\n\
+             \x20   name: Verkstead\n\
+             \x20   author:\n      name: Tobias Cohen\n      email: tobi@tobico.net\n\
+             \x20   version: ^0.1\n\
+             provides:\n\
+             \x20 - category: process\n\
+             \x20   id: two-steps\n\
+             \x20   name: Two steps\n\
+             \x20   description: Draft the change, then check it.\n\
+             \x20   roles:\n\
+             \x20     - {{ name: implementation, label: Implementation, building: true }}\n\
+             \x20   states:\n\
+             \x20     - id: drafting\n\
+             \x20       word: Drafting\n\
+             \x20       activity: one-session\n\
+             \x20       options: {{ skill: verkstead/instruction, prompt: Draft the change., evidence: nothing }}\n\
+             \x20     - id: checking\n\
+             \x20       word: Checking\n\
+             \x20       activity: one-session\n\
+             \x20       options: {{ skill: verkstead/instruction, prompt: Check the change., evidence: nothing }}\n\
+             \x20   transitions:\n\
+             \x20     drafting: {{ done: checking, refused: stopped }}\n\
+             \x20     checking: {{ done: done, refused: stopped }}\n\
+             capabilities: []\n"
+        ),
+    )
+    .unwrap();
+    let consent: verkstead_render::PluginConsent = post(
+        app,
+        "/api/ui/plugins/read",
+        &serde_json::json!({ "source": plugin }),
+    )
+    .await;
+    let view: verkstead_render::PluginsView = post(
+        app,
+        "/api/ui/plugins",
+        &serde_json::json!({ "source": plugin, "granted": consent.capabilities }),
+    )
+    .await;
+    let row = view
+        .installed
+        .iter()
+        .find(|row| row.uuid == TWO_STEPS)
+        .expect("the plugin is listed");
+    assert_eq!(row.trouble, None, "and loads: {row:?}");
+}
+
+/// A Conversation on *Two steps*, its stub `stub`, picked, briefed and
+/// started through the presses the composer makes.
+async fn two_steps(spill: tempfile::TempDir, stub: &str) -> Grilling {
+    let bench = bench_at_pace(spill, stub, PULL_REQUEST, *BRISKLY, None).await;
+    let app = bench.app.clone();
+
+    installing_two_steps(&app, bench.elsewhere.path()).await;
+
+    let started: Started = post(
+        &app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+    bench.the_one_an_investigation_runs_under(id).await;
+
+    let picked: ProcessPicked = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/process"),
+        &serde_json::json!({
+            "process": Process::Provided,
+            "provided": { "plugin": TWO_STEPS, "id": "two-steps" },
+        }),
+    )
+    .await;
+    assert_eq!(picked, ProcessPicked::Picked);
+
+    let saved: BriefSaved = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": BRIEF }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    let start: GrillingStarted = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/grill"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(start, GrillingStarted::Started);
+
+    bench.holding(id)
+}
+
+/// A stub for *Two steps*: it appends which state's session it is to
+/// `{spill}/ran`, runs `drafting` or `checking` for that state's, and then
+/// idles.
+fn two_steps_stub(spill: &Path, drafting: &str, checking: &str) -> String {
+    let ran = spill.join("ran");
+    format!(
+        r#"case "$2" in
+*'Draft the change.'*) echo drafting >> {ran}
+{drafting}
+;;
+*'Check the change.'*) echo checking >> {ran}
+{checking}
+;;
+esac
+while :; do sleep 1; done"#,
+        ran = ran.display(),
+    )
+}
+
+/// The state word the column holds for this fixture's Conversation, read
+/// straight off the database.
+async fn stored_state(fixture: &Grilling) -> String {
+    let pool = open_database(&fixture.database).await.unwrap();
+    sqlx::query_scalar("SELECT state FROM conversations WHERE id = ?")
+        .bind(fixture.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+}
+
+/// The declared states and Verkstead's own a Timeline's moves entered, in
+/// order.
+fn entered(view: &ConversationView) -> Vec<String> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Moved(moved) => Some(
+                moved
+                    .declared
+                    .clone()
+                    .unwrap_or_else(|| format!("{:?}", moved.state)),
+            ),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A Conversation on a plugin's Process runs Draft → its first declared
+/// state → its second → Done, over the One session Activity, each state's
+/// id what the `conversations.state` column holds while it is there.
+#[tokio::test]
+async fn a_conversation_on_a_plugins_process_runs_its_states_to_done() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = two_steps_stub(
+        spill.path(),
+        "while [ ! -f /tmp/verkstead/drafted ]; do sleep 0.05; done\n: > /tmp/verkstead/done",
+        "while [ ! -f /tmp/verkstead/checked ]; do sleep 0.05; done\n: > /tmp/verkstead/done",
+    );
+    let ran = spill.path().join("ran");
+    let fixture = two_steps(spill, &stub).await;
+
+    let view = fixture
+        .until(|view| (view.declared_state.as_deref() == Some("drafting")).then(|| view.clone()))
+        .await;
+    assert_eq!(view.state, Lifecycle::Declared);
+    assert_eq!(view.process, Process::Provided);
+    assert_eq!(stored_state(&fixture).await, "drafting");
+
+    std::fs::write(handoff_directory(&fixture).join("drafted"), "").unwrap();
+
+    fixture
+        .until(|view| (view.declared_state.as_deref() == Some("checking")).then_some(()))
+        .await;
+    assert_eq!(stored_state(&fixture).await, "checking");
+
+    std::fs::write(handoff_directory(&fixture).join("checked"), "").unwrap();
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+    assert_eq!(stored_state(&fixture).await, "done");
+    assert_eq!(
+        entered(&view),
+        ["drafting", "checking", "Done"],
+        "each move on the Timeline, in order"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&ran).unwrap(),
+        "drafting\nchecking\n",
+        "one session per state, each told which it is",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped: {:?}",
+        notices(&view)
+    );
+}
+
+/// A server that comes back up while a plugin's Process is in a declared
+/// state enters that state's Activity again, and the Conversation carries on
+/// from there.
+#[tokio::test]
+async fn a_restart_carries_a_plugins_process_on_from_the_state_it_was_in() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = two_steps_stub(spill.path(), ": > /tmp/verkstead/done", "");
+    let ran = spill.path().join("ran");
+    let again = two_steps_stub(spill.path(), "", ": > /tmp/verkstead/done-again");
+    let fixture = two_steps(spill, &stub).await;
+
+    fixture
+        .until(|view| (view.declared_state.as_deref() == Some("checking")).then_some(()))
+        .await;
+    let deadline = Instant::now() + *PATIENCE;
+    while std::fs::read_to_string(&ran).unwrap_or_default() != "drafting\nchecking\n" {
+        assert!(Instant::now() < deadline, "the checking session never ran");
+        pause(Duration::from_millis(25)).await;
+    }
+
+    // A second server over the same database: nothing drives the
+    // Conversation as far as it is concerned, and its own sessions signal
+    // through a marker of their own, posted to it here.
+    let restarted = fixture.restarted(&again, PULL_REQUEST).await;
+    let marker = handoff_directory(&fixture).join("done-again");
+    let deadline = Instant::now() + *PATIENCE;
+    while !marker.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the restart never entered checking again"
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+    let (status, said) = fetch(
+        &restarted,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/conversations/{}/api/v1/done", fixture.id))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+    assert_eq!(
+        std::fs::read_to_string(&ran).unwrap(),
+        "drafting\nchecking\nchecking\n",
+        "the state it was in entered again, and the one before it not",
+    );
+    assert_eq!(entered(&view), ["drafting", "checking", "Done"]);
+}
+
+/// An Outcome a plugin's Process maps to `stopped` leaves the Conversation
+/// Stopped in the state it was in, with a Notice saying what the Activity
+/// ended in; Resume enters that state again.
+#[tokio::test]
+async fn an_outcome_mapped_to_stopped_stops_it_where_it_stands_until_resumed() {
+    let spill = tempfile::tempdir().unwrap();
+    let once = spill.path().join("once");
+    let stub = two_steps_stub(
+        spill.path(),
+        ": > /tmp/verkstead/done",
+        &format!(
+            "if [ ! -f {once} ]; then : > {once}; exit 0; fi\n: > /tmp/verkstead/done",
+            once = once.display()
+        ),
+    );
+    let ran = spill.path().join("ran");
+    let fixture = two_steps(spill, &stub).await;
+
+    let stopped = fixture.stopped().await;
+    assert!(
+        stopped.html.contains("ended in <code>refused</code>"),
+        "the Notice says what the Activity ended in: {:?}",
+        stopped.html,
+    );
+    let view = fixture.view().await;
+    assert_eq!(view.state, Lifecycle::Declared);
+    assert_eq!(view.declared_state.as_deref(), Some("checking"));
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+    assert_eq!(
+        std::fs::read_to_string(&ran).unwrap(),
+        "drafting\nchecking\nchecking\n",
+        "Resume entered checking again",
+    );
+    assert_eq!(entered(&view), ["drafting", "checking", "Done"]);
+}

@@ -262,6 +262,7 @@ pub(crate) async fn undriven(state: &AppState, conversation_id: i64) -> bool {
             | store::Lifecycle::Wrapping
             | store::Lifecycle::FollowUp
             | store::Lifecycle::Investigating
+            | store::Lifecycle::Declared
     ) {
         return false;
     }

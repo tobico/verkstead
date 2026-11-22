@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AgentOutputEvent, ConversationView } from "../src/api/types";
 import { status } from "../src/workbench/StatusButton";
+import { knowProvidedProcesses } from "../src/workbench/provided";
 
 import building from "./fixtures/conversation-building.json" with {
   type: "json",
@@ -308,5 +309,45 @@ describe("the status word", () => {
         attention: false,
       },
     );
+  });
+});
+
+describe("a declared state", () => {
+  /// A state a plugin's Process declares is said in the word its manifest
+  /// gives it, read off the list the server sends — and as its id where the
+  /// server holds no such Process any more, which is a plugin removed under it.
+  it("says the word its Process's manifest gives it, or its id", () => {
+    const provided = {
+      plugin: "5e0c9a7e-2f4b-4c1d-8a3e-6b9f0d2c7a41",
+      id: "two-steps",
+    };
+    const declared = like({
+      state: "Declared",
+      process: "Provided",
+      provided,
+      declared_state: "checking",
+      waiting: true,
+    });
+
+    expect(status(declared).state).toBe("checking");
+
+    knowProvidedProcesses([
+      {
+        ...provided,
+        name: "Two steps",
+        description: "Draft the change, then check it.",
+        offered: true,
+        states: [
+          { id: "drafting", word: "Drafting" },
+          { id: "checking", word: "Checking" },
+        ],
+      },
+    ]);
+
+    expect(status(declared)).toEqual({
+      word: "Waiting on you",
+      state: "Checking",
+      attention: true,
+    });
   });
 });

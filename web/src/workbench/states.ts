@@ -10,7 +10,8 @@
 //! Timeline, the steer above it, and the sidebar row read aloud. A state worded
 //! two ways is two states to the person reading them.
 
-import type { Lifecycle } from "../api/types";
+import type { Lifecycle, ProvidedProcess } from "../api/types";
+import { declaredWord } from "./provided";
 
 /// What each state is called on the page.
 export const STATE: Record<Lifecycle, string> = {
@@ -20,6 +21,10 @@ export const STATE: Record<Lifecycle, string> = {
   Wrapping: "Wrapping",
   FollowUp: "Follow-up",
   Investigating: "Investigating",
+  // One a plugin's Process declares, whose word is its manifest's — see
+  // `declaredWord` in `provided.ts`. This is only ever read where the state's
+  // id has gone missing.
+  Declared: "In progress",
   Done: "Done",
   Closed: "Closed",
 };
@@ -34,3 +39,16 @@ export const ENDED: ReadonlySet<Lifecycle> = new Set<Lifecycle>([
   "Done",
   "Closed",
 ]);
+
+/// What a state is called on the page, a declared one included: the word its
+/// Process's manifest gives the state `declared`, where `state` is one a
+/// plugin's Process declares — see `provided.ts`.
+export function stateWord(
+  state: Lifecycle,
+  provided: ProvidedProcess | null,
+  declared: string | null | undefined,
+): string {
+  return state === "Declared" && declared
+    ? declaredWord(provided, declared)
+    : STATE[state];
+}
