@@ -110,8 +110,22 @@ async fn linked(pool: &SqlitePool, device: &str, name: &str, os: &str, addresses
 
 /// The machine this device is on where nothing about it is interesting: this
 /// platform, no Tailscale, and no interface worth advertising.
+///
+/// **This machine's kernel with it**, because that is what makes it this
+/// machine rather than a Linux in the abstract: a WSL is told from an ordinary
+/// Linux by its kernel release and by nothing else, so a reading stated without
+/// one is a device that reads *Linux* on a machine that is a WSL — and
+/// [`the_row_names_the_machine_this_device_is_on`], which holds the row against
+/// the one real reading of this box, is the test that catches it. Stating
+/// `None` here is the WSL tests' own business, where the kernel is the thing
+/// being stated.
 fn plainly() -> Reading {
-    Reading::stated(no_tailscale(), Platform::HERE, None, Vec::new())
+    Reading::stated(
+        no_tailscale(),
+        Platform::HERE,
+        platform::kernel_release(),
+        Vec::new(),
+    )
 }
 
 /// What the endpoint answered, parsed as the pane's own type — which is what
