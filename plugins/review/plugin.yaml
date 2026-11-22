@@ -1,6 +1,9 @@
 # Review as data: the wrap-up run over a pull request or a branch the Target
 # names, the branch read and what is said on the pull request answered. Built
 # in with a tick, as Tinker is; the state id is the word already stored.
+# Each state marked `steer` is a row on the Steer form: the wrap-up, a
+# follow-up of the pull request, and `investigating`, the detour a question
+# takes, which goes back to where it was steered from.
 uuid: 0b55843a-7c93-47cc-9655-e5f6ec3cf019
 name: Review
 author:
@@ -35,5 +38,18 @@ provides:
       - id: wrapping
         word: Wrapping
         activity: wrap-up
+        steer: { brief: none }
+      - id: follow-up
+        word: Follow-up
+        activity: follow-up-rounds
+        options: { skill: verkstead/following-up }
+        steer: { brief: follow-up }
+      - id: investigating
+        word: Investigating
+        activity: follow-up-rounds
+        options: { skill: verkstead/investigating, evidence: investigated }
+        steer: { brief: question }
+        detour: true
     transitions:
       wrapping: { settled: done, merged: done, closed: stopped, given-up: stopped }
+      follow-up: { committed: wrapping, nothing: done }

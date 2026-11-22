@@ -419,8 +419,12 @@ provides:
     of Verkstead's brief kinds the Steer form draws for it — `round`, a new
     round's Brief; `instruction`, what the human wants done; `follow-up`, what
     to take up about work already pushed; `question`, the question an
-    investigation answers; or `none`. A state with no `steer` is not on the
-    Steer form.
+    investigation answers; or `none`. What the human writes reaches the
+    state's Activity as an option named by the kind — `instruction`,
+    `follow-up`, `question` — and a `round` lands as the Conversation's own
+    Brief. A state with no `steer` is not on the Steer form; **Close** is on
+    every form whatever a Process declares, being Verkstead's own and not a
+    state.
   - **`detour`** — optional, `true` or `false`: when its Activity ends, the
     Conversation goes back to the state it was steered from, whatever the
     Outcome — or to Done, where it was steered in from a state nothing returns

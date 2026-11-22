@@ -4475,6 +4475,7 @@ async fn the_form_is_saved_onto_the_pending_steer_and_read_back() {
 
     let form = serde_json::json!({
         "target": "Implementing",
+        "state": null,
         "brief": "# Retries\n",
         "digest": true,
         "instruction": "Rebase this onto main.",
@@ -4509,6 +4510,7 @@ async fn the_form_is_saved_onto_the_pending_steer_and_read_back() {
     // went.
     let emptied = serde_json::json!({
         "target": serde_json::Value::Null,
+        "state": serde_json::Value::Null,
         "brief": serde_json::Value::Null,
         "digest": false,
         "instruction": serde_json::Value::Null,

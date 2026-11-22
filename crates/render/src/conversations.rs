@@ -1066,6 +1066,11 @@ pub struct ConversationView {
     /// a Share, which is the record, carries no trace of it.
     pub pending_steer: Option<PendingSteerView>,
 
+    /// The rows the Steer form draws, in the order it draws them: each state
+    /// the Conversation's Process marks as taking a steer, then Close, which
+    /// is Verkstead's and on every form (ADR-0030, *Process*).
+    pub steer_rows: Vec<SteerRow>,
+
     /// The Previews standing on this Conversation, oldest first: what a
     /// building session suggested for trying its work by hand (ADR-0024).
     ///
@@ -1223,6 +1228,10 @@ pub struct SteerForm {
     /// the Timeline's item reads *Steer* for.
     #[serde(default)]
     pub target: Option<SteerTarget>,
+
+    /// And the declared state's id, where the picker is on one.
+    #[serde(default)]
+    pub state: Option<String>,
 
     /// The new round's Brief, for a steer into Grilling.
     #[serde(default)]
@@ -5374,6 +5383,18 @@ pub enum SteerTarget {
     /// Finished with. Nothing runs, so there is no Pairing to settle and no
     /// payload to carry: a steer into Done is the move alone.
     Done,
+
+    /// One of the states the Conversation's Process declares, named by the
+    /// submission's [`SteerSubmission::state`]: a state its manifest marks as
+    /// taking a steer, with the brief that mark says (ADR-0030, *Process*;
+    /// Set 1765, Q28). What runs there is the state's Activity, started with
+    /// what the human wrote.
+    Declared,
+
+    /// Closed, which is Verkstead's rather than a state any Process declares,
+    /// and so on every Steer form whatever the Process: the ordinary Close,
+    /// made from the form.
+    Close,
 }
 
 impl SteerTarget {
@@ -5390,10 +5411,64 @@ impl SteerTarget {
             | Self::Implementing
             | Self::Wrapping
             | Self::FollowUp
-            | Self::Investigating => true,
-            Self::Done => false,
+            | Self::Investigating
+            | Self::Declared => true,
+            Self::Done | Self::Close => false,
         }
     }
+}
+
+/// One row of the Steer form: somewhere the Conversation can be steered into.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct SteerRow {
+    /// What a submit names it by.
+    pub target: SteerTarget,
+
+    /// The declared state's id, where [`Self::target`] is
+    /// [`SteerTarget::Declared`].
+    pub state: Option<String>,
+
+    /// What the row reads: the state's word, as its manifest writes it.
+    pub word: String,
+
+    /// What the form draws under it, and the field a submit carries it in.
+    pub brief: SteerBrief,
+
+    /// Whether the state returns to where it was steered from once its
+    /// Activity ends.
+    pub detour: bool,
+
+    /// The role whose Pairing the row's sessions run under — `grilling` for a
+    /// state running the interview, `implementation` otherwise — or nothing
+    /// where nothing runs.
+    pub role: Option<String>,
+}
+
+/// The brief a steer into a state takes, as its manifest's steer mark says
+/// (Set 1877, Q5): each a set of fields Verkstead knows how to draw, and the
+/// field of [`SteerSubmission`] it is carried in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum SteerBrief {
+    /// A new round's Brief and the digest tick: [`SteerSubmission::brief`] and
+    /// [`SteerSubmission::digest`].
+    Round,
+
+    /// What the human wants done, or nothing where the branch has something
+    /// standing: [`SteerSubmission::instruction`].
+    Instruction,
+
+    /// What to take up about work already pushed, required:
+    /// [`SteerSubmission::follow_up`].
+    FollowUp,
+
+    /// The question an investigation answers, required:
+    /// [`SteerSubmission::investigation`].
+    Question,
+
+    /// Nothing written.
+    None,
 }
 
 /// What the human settled on the form: where the Conversation goes, what runs
@@ -5403,6 +5478,12 @@ impl SteerTarget {
 pub struct SteerSubmission {
     /// Which state to move it into.
     pub target: SteerTarget,
+
+    /// The declared state's id, where [`Self::target`] is
+    /// [`SteerTarget::Declared`]. What the human writes under it is carried in
+    /// the field its brief kind draws — see [`SteerBrief`].
+    #[serde(default)]
+    pub state: Option<String>,
 
     /// Whether to end the session that is running where it stands.
     ///
@@ -5670,6 +5751,13 @@ pub enum ConversationSteered {
     /// an investigation is a question about the work, and the follow-up's words
     /// name a pull request that a steer into Investigating need not have.
     NoInvestigationBrief,
+
+    /// The state named takes no steer: the Conversation's Process declares no
+    /// such state, or declares it without marking it as one a steer goes
+    /// into. Named, so the refusal says which.
+    NotSteerable {
+        state: String,
+    },
 
     /// Grilling was named with no brief written, for a Conversation whose newest
     /// Brief is empty.

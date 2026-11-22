@@ -2070,6 +2070,9 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // Where the Steer form may send it, out of its Process's steer marks.
+    let steer_rows = crate::steering::rows(state, &conversation);
+
     // Which of this Conversation's output Events is still being written into,
     // which is a question about a process rather than about the record: a
     // restarted server has no sessions, and every Capture it holds is of one
@@ -2888,6 +2891,7 @@ pub(crate) async fn conversation_view(
         mcp_servers: servers,
         skill_packs: packs,
         pending_steer,
+        steer_rows,
         previews,
         // And where the live record is, where this copy is not it: what takes
         // the page off a tombstone and onto the device doing the work — see

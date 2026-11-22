@@ -5954,6 +5954,7 @@ pub async fn resolve_conflicts(pool: &SqlitePool, id: i64) -> Result<Resolving> 
 pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) -> Result<Steering> {
     let Steer {
         target,
+        declared,
         pairings,
         brief,
         instruction,
@@ -5976,6 +5977,16 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
     // under it.
     let steer = Event::Steer(target, instruction.map(str::to_owned), None);
 
+    // Where it goes, as the column holds it: a declared state by its own id.
+    let destination = match declared {
+        Some(declared) if target == Lifecycle::Declared => Destination::Declared(declared),
+        _ => Destination::Built(target),
+    };
+    let body = match instruction {
+        None => destination.stored().to_owned(),
+        Some(instruction) => format!("{}\n{instruction}", destination.stored()),
+    };
+
     // Selected from `conversations` rather than trusting the id, as every other
     // Event is written: a steer attributed to a Conversation that is not there
     // would be on nobody's Timeline — and this is also what says whether there
@@ -5986,7 +5997,7 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
          FROM conversations WHERE id = ?",
     )
     .bind(steer.kind())
-    .bind(steer.body().into_owned())
+    .bind(body)
     .bind(id)
     .execute(&mut *tx)
     .await
@@ -6053,11 +6064,11 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
     }
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
-        .bind(target.stored())
+        .bind(destination.stored())
         .bind(id)
         .execute(&mut *tx)
         .await
-        .with_context(|| format!("steering Conversation {id} into {}", target.stored()))?;
+        .with_context(|| format!("steering Conversation {id} into {}", destination.stored()))?;
 
     // And off the archive, whatever the target: only a Closed Conversation is
     // ever archived, and a steer is the one move out of Closed, so an archived
@@ -6173,7 +6184,7 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Review).await?;
     }
 
-    moved(&mut tx, id, target).await?;
+    destination.moved(&mut tx, id).await?;
 
     // The new round's Brief under the move, because the move is where the round
     // boundary falls and the Brief under it belongs to the round that starts
@@ -6248,6 +6259,10 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
 pub struct Steer<'a> {
     /// Which state the human moved it into.
     pub target: Lifecycle,
+
+    /// The declared state's id, where [`Self::target`] is
+    /// [`Lifecycle::Declared`]: what the state column and the Steer Event hold.
+    pub declared: Option<&'a str>,
 
     /// What the work runs under from here, where they picked something new —
     /// one entry per role the state steered into runs its sessions under, so a

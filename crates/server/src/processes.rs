@@ -32,7 +32,7 @@ use std::path::PathBuf;
 use crate::AppState;
 use crate::drivers::Driving;
 use crate::plugins::built_in::BuiltIn;
-use crate::plugins::manifest::process::{Process, Runs, State, To};
+use crate::plugins::manifest::process::{Brief, Process, Runs, State, To};
 use crate::plugins::manifest::{Activity, Capability, Files, STEERED};
 use crate::store;
 
@@ -353,6 +353,101 @@ pub(crate) fn narrows_the_wrap_up(state: &AppState, process: &store::Process) ->
 /// The state a built-in Process wraps up in, by the word the record holds.
 pub(crate) const WRAPPING: &str = "wrapping";
 
+/// What a steer into the state `standing` of a Process takes, where its
+/// manifest marks it as taking one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Mark {
+    /// The brief the form draws and the Activity is started with.
+    pub(crate) brief: Brief,
+    /// Whether it goes back to where it was steered from once its Activity
+    /// ends.
+    pub(crate) detour: bool,
+    /// Whether it runs the interview, whose sessions run under the grilling
+    /// role.
+    pub(crate) grills: bool,
+}
+
+impl Mark {
+    fn of(declared: &State) -> Option<Mark> {
+        Some(Mark {
+            brief: declared.steer?,
+            detour: declared.detour,
+            grills: declared
+                .activity
+                .activities()
+                .iter()
+                .any(|(_, id)| *id == "interview"),
+        })
+    }
+}
+
+/// The steer mark of the state `standing` of `loaded`, where it takes one.
+pub(crate) fn mark(loaded: &Loaded, standing: &str) -> Option<Mark> {
+    Mark::of(loaded.process.state(standing)?)
+}
+
+/// Each state of `loaded` a steer may go into, in the order written, with
+/// its mark.
+pub(crate) fn steerable(loaded: &Loaded) -> Vec<(&State, Mark)> {
+    loaded
+        .process
+        .states
+        .iter()
+        .filter_map(|declared| Some((declared, Mark::of(declared)?)))
+        .collect()
+}
+
+/// What the human wrote under the steer that put the Conversation in
+/// `standing`, where it is still there and they wrote something.
+///
+/// Read off the record rather than carried in, so a restart or a Resume
+/// starts the Activity with it again: the newest Steer went into this state,
+/// and nothing has moved the Conversation since.
+async fn steered_with(state: &AppState, conversation_id: i64, standing: &str) -> Option<String> {
+    let steer = match store::latest_steer(&state.pool, conversation_id).await {
+        Ok(steer) => steer?,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what a steer was written with failed");
+            return None;
+        }
+    };
+
+    (steer.into == standing && steer.moves_since <= 1)
+        .then_some(steer.written)
+        .flatten()
+}
+
+/// Where a detour of `loaded`, standing in `standing`, goes back to once its
+/// Activity ends: the state the steer into it found the Conversation in, or
+/// Done where that is one nothing returns to — Draft, Done, Closed, the
+/// detour itself — or a state the Process doesn't declare.
+async fn homeward(state: &AppState, conversation_id: i64, loaded: &Loaded, standing: &str) -> To {
+    let from = match store::latest_steer(&state.pool, conversation_id).await {
+        Ok(Some(steer)) if steer.into == standing => steer.from,
+        Ok(_) => None,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading where a detour was steered from failed");
+            None
+        }
+    };
+
+    match from {
+        Some(from) if from != standing && loaded.process.state(&from).is_some() => To::State(from),
+        _ => To::Done,
+    }
+}
+
+/// The heading a brief of kind `brief` goes under in a session's prompt.
+fn heading(brief: Brief) -> Option<&'static str> {
+    match brief {
+        Brief::Round => Some("The brief for this round"),
+        Brief::Instruction => Some("What I want done"),
+        Brief::FollowUp => Some("What I want followed up"),
+        Brief::Question => Some("What I want found out"),
+        Brief::None => None,
+    }
+}
+
 /// Drive `conversation_id` from the declared state it stands in until its
 /// Process stops driving it: Done, Closed, stopped, or moved elsewhere by the
 /// human. `driving` is held throughout.
@@ -427,6 +522,10 @@ async fn step(state: &AppState, conversation_id: i64, driving: &Driving) -> anyh
 
     let doing = doing(declared);
 
+    // The newest steer as the Activity starts: one after it is the human
+    // taking the Conversation elsewhere while it ran.
+    let steered = newest_steer(state, conversation_id).await;
+
     let Some(provided) = activity(&loaded, declared, &conversation) else {
         stop(
             state,
@@ -444,7 +543,7 @@ async fn step(state: &AppState, conversation_id: i64, driving: &Driving) -> anyh
         return Ok(false);
     };
 
-    let Some(options) = options(state, conversation_id, declared).await else {
+    let Some(options) = options(state, conversation_id, &standing, declared).await else {
         return Ok(false);
     };
 
@@ -472,33 +571,50 @@ async fn step(state: &AppState, conversation_id: i64, driving: &Driving) -> anyh
         return Ok(false);
     };
 
-    // Taken elsewhere by the human, whose steer says where it goes.
-    if ran.outcome == STEERED {
+    // Taken elsewhere by the human, whose steer says where it goes — and so
+    // is an Activity whose session a steer ended as it moved the Conversation
+    // on, whatever that ending read as: what it ended in is no longer this
+    // state's to follow.
+    if ran.outcome == STEERED || !still_in(state, conversation_id, &standing, steered).await {
         return Ok(false);
     }
 
-    let Some((_, to)) = declared
-        .transitions
-        .iter()
-        .find(|(outcome, _)| *outcome == ran.outcome)
-    else {
-        // A detour's Outcomes lead back where it was steered from, which is
-        // the steer's to say; and the loader refuses a Process leaving any
-        // other unmapped, so this is a manifest changed under a running
-        // Activity.
-        stop(
-            state,
+    // A detour goes back where it was steered from, whatever it ended in.
+    let back;
+    let to = if declared.detour {
+        back = homeward(state, conversation_id, &loaded, &standing).await;
+        tracing::info!(
             conversation_id,
-            crate::stopping::Decided::Verkstead,
-            &doing,
-            &format!(
-                "{} ended in `{}`, which {} doesn't say where to go from.",
-                provided.activity.name, ran.outcome, loaded.process.name
-            ),
-            ran.writing,
-        )
-        .await;
-        return Ok(false);
+            state = standing,
+            to = ?back,
+            "a detour's Activity ended, so it goes back where it was steered from"
+        );
+        &back
+    } else {
+        let Some((_, to)) = declared
+            .transitions
+            .iter()
+            .find(|(outcome, _)| *outcome == ran.outcome)
+        else {
+            // A detour's Outcomes lead back where it was steered from, which is
+            // the steer's to say; and the loader refuses a Process leaving any
+            // other unmapped, so this is a manifest changed under a running
+            // Activity.
+            stop(
+                state,
+                conversation_id,
+                crate::stopping::Decided::Verkstead,
+                &doing,
+                &format!(
+                    "{} ended in `{}`, which {} doesn't say where to go from.",
+                    provided.activity.name, ran.outcome, loaded.process.name
+                ),
+                ran.writing,
+            )
+            .await;
+            return Ok(false);
+        };
+        to
     };
 
     match to {
@@ -540,6 +656,38 @@ async fn step(state: &AppState, conversation_id: i64, driving: &Driving) -> anyh
             )
             .await;
             Ok(false)
+        }
+    }
+}
+
+/// Whether `conversation_id` still stands in the declared state `standing`
+/// with no steer since the one that was newest as its Activity started,
+/// `steered` — a steer back into the same state included.
+async fn still_in(
+    state: &AppState,
+    conversation_id: i64,
+    standing: &str,
+    steered: Option<i64>,
+) -> bool {
+    let here = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation.declared_state.as_deref() == Some(standing),
+        Ok(None) => false,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading where a Conversation stands failed");
+            false
+        }
+    };
+
+    here && newest_steer(state, conversation_id).await == steered
+}
+
+/// The newest Steer Event of `conversation_id`, by its id.
+async fn newest_steer(state: &AppState, conversation_id: i64) -> Option<i64> {
+    match store::latest_steer(&state.pool, conversation_id).await {
+        Ok(steer) => steer.map(|steer| steer.event),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading a Conversation's newest steer failed");
+            None
         }
     }
 }
@@ -620,9 +768,25 @@ fn direction_word(direction: verkstead_schema::Direction) -> &'static str {
 async fn options(
     state: &AppState,
     conversation_id: i64,
+    standing: &str,
     declared: &State,
 ) -> Option<Vec<(String, String)>> {
     let mut options = declared.options.clone();
+
+    // What the human wrote under the steer into it, as the option its kind
+    // names — `instruction`, `follow-up`, `question` — and under its heading
+    // in the prompt a skill's session is started on.
+    let steered = match declared.steer {
+        Some(brief @ (Brief::Instruction | Brief::FollowUp | Brief::Question)) => {
+            steered_with(state, conversation_id, standing)
+                .await
+                .map(|written| (brief, written))
+        }
+        _ => None,
+    };
+    if let Some((brief, written)) = &steered {
+        options.push((brief.word().to_owned(), written.clone()));
+    }
 
     let skill = options
         .iter()
@@ -636,16 +800,23 @@ async fn options(
             .position(|(key, _)| key == "prompt")
             .map(|at| options.remove(at).1);
 
-        options.push((
-            "prompt".to_owned(),
-            crate::skills::declared(
-                documents.skills,
-                &skill,
-                written.as_deref(),
-                &documents.brief,
-                documents.handoff(),
-            ),
-        ));
+        let mut prompt = crate::skills::declared(
+            documents.skills,
+            &skill,
+            written.as_deref(),
+            &documents.brief,
+            documents.handoff(),
+        );
+        if let Some((brief, written)) = &steered
+            && let Some(heading) = heading(*brief)
+        {
+            prompt = format!(
+                "{}\n\n# {heading}\n\n{}\n",
+                prompt.trim_end(),
+                written.trim()
+            );
+        }
+        options.push(("prompt".to_owned(), prompt));
     }
 
     Some(options)

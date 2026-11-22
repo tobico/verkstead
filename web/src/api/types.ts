@@ -1892,7 +1892,7 @@ export type ConversationPorts = { conversation: number, terminals: Array<Termina
  * the target's work can be set going rather than about where the work has got
  * to here.
  */
-export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "NoInvestigationBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | { "AlreadyHeld": { 
+export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "NoInvestigationBrief" | { "NotSteerable": { state: string, } } | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | { "AlreadyHeld": { 
 /**
  * The Conversation that has it, for the way there.
  */
@@ -2449,6 +2449,12 @@ skill_packs: Array<AttachedPackView>,
  * a Share, which is the record, carries no trace of it.
  */
 pending_steer: PendingSteerView | null, 
+/**
+ * The rows the Steer form draws, in the order it draws them: each state
+ * the Conversation's Process marks as taking a steer, then Close, which
+ * is Verkstead's and on every form (ADR-0030, *Process*).
+ */
+steer_rows: Array<SteerRow>, 
 /**
  * The Previews standing on this Conversation, oldest first: what a
  * building session suggested for trying its work by hand (ADR-0024).
@@ -7628,6 +7634,13 @@ base_ref: string | null,
 branch: string, };
 
 /**
+ * The brief a steer into a state takes, as its manifest's steer mark says
+ * (Set 1877, Q5): each a set of fields Verkstead knows how to draw, and the
+ * field of [`SteerSubmission`] it is carried in.
+ */
+export type SteerBrief = "Round" | "Instruction" | "FollowUp" | "Question" | "None";
+
+/**
  * What cancelling a pending steer came to.
  *
  * Cancel is a press now rather than a modal being dismissed: it takes the
@@ -7733,6 +7746,10 @@ export type SteerForm = {
  * the Timeline's item reads *Steer* for.
  */
 target: SteerTarget | null, 
+/**
+ * And the declared state's id, where the picker is on one.
+ */
+state: string | null, 
 /**
  * The new round's Brief, for a steer into Grilling.
  */
@@ -7853,6 +7870,39 @@ added: Array<SteerAdditionView>,
 upgraded: Array<SteerUpgradeView>, };
 
 /**
+ * One row of the Steer form: somewhere the Conversation can be steered into.
+ */
+export type SteerRow = { 
+/**
+ * What a submit names it by.
+ */
+target: SteerTarget, 
+/**
+ * The declared state's id, where [`Self::target`] is
+ * [`SteerTarget::Declared`].
+ */
+state: string | null, 
+/**
+ * What the row reads: the state's word, as its manifest writes it.
+ */
+word: string, 
+/**
+ * What the form draws under it, and the field a submit carries it in.
+ */
+brief: SteerBrief, 
+/**
+ * Whether the state returns to where it was steered from once its
+ * Activity ends.
+ */
+detour: boolean, 
+/**
+ * The role whose Pairing the row's sessions run under — `grilling` for a
+ * state running the interview, `implementation` otherwise — or nothing
+ * where nothing runs.
+ */
+role: string | null, };
+
+/**
  * What became of saving one.
  *
  * Both refusals are permanent, which is what the pane does with them: a field
@@ -7872,6 +7922,12 @@ export type SteerSubmission = {
  * Which state to move it into.
  */
 target: SteerTarget, 
+/**
+ * The declared state's id, where [`Self::target`] is
+ * [`SteerTarget::Declared`]. What the human writes under it is carried in
+ * the field its brief kind draws — see [`SteerBrief`].
+ */
+state: string | null, 
 /**
  * Whether to end the session that is running where it stands.
  *
@@ -8044,7 +8100,7 @@ discarding: Array<number>, };
  * at any stage, but there is no wrapping up and no following up of work nobody
  * can see.
  */
-export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Investigating" | "Done";
+export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Investigating" | "Done" | "Declared" | "Close";
 
 /**
  * And one companion the steer opened up, which carries the one field an

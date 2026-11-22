@@ -3,6 +3,9 @@
 # none. Built in with a tick: unticked, it is off the Process picker, and the
 # conversations already on it run to the end. The state ids are the words the
 # conversations table already holds, so a Tinker stored before this reads on.
+# Each state marked `steer` is a row on the Steer form: a follow-up and the
+# wrap-up, and `investigating`, the detour a question takes, which goes back
+# to where it was steered from.
 uuid: 591db9f3-2cb1-4adb-bf35-ff046f5be6f0
 name: Tinker
 author:
@@ -37,9 +40,17 @@ provides:
         word: Follow-up
         activity: follow-up-rounds
         options: { skill: verkstead/following-up }
+        steer: { brief: follow-up }
       - id: wrapping
         word: Wrapping
         activity: wrap-up
+        steer: { brief: none }
+      - id: investigating
+        word: Investigating
+        activity: follow-up-rounds
+        options: { skill: verkstead/investigating, evidence: investigated }
+        steer: { brief: question }
+        detour: true
     transitions:
       follow-up: { committed: wrapping, nothing: done }
       wrapping: { settled: done, merged: done, closed: stopped, given-up: stopped }

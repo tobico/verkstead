@@ -201,6 +201,7 @@ async fn what_is_trimmable_is_what_has_been_archived_for_long_enough() {
 fn steer(target: Lifecycle) -> Steer<'static> {
     Steer {
         target,
+        declared: None,
         pairings: &[],
         brief: None,
         instruction: None,

@@ -1,6 +1,8 @@
 # Investigate as data: questions about the code answered in rounds, nothing
 # committed, and Done once the human has nothing else they want found out.
 # Built in with a tick, as Tinker is; the state id is the word already stored.
+# Its one state is marked `steer`, so a further question is a row on the
+# Steer form.
 uuid: 53f22a43-806b-4019-8798-c014fa9a0239
 name: Investigate
 author:
@@ -34,5 +36,6 @@ provides:
         word: Investigating
         activity: follow-up-rounds
         options: { skill: verkstead/investigating, evidence: investigated }
+        steer: { brief: question }
     transitions:
       investigating: { committed: done, nothing: done }

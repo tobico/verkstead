@@ -258,6 +258,7 @@ async fn following_up(pool: &SqlitePool, conversation: i64) {
             conversation,
             Steer {
                 target: Lifecycle::FollowUp,
+                declared: None,
                 pairings: &[],
                 brief: None,
                 instruction: Some("Does it count the 429s it sends?\n"),
@@ -680,6 +681,7 @@ async fn investigating(pool: &SqlitePool, conversation: i64) {
             conversation,
             Steer {
                 target: Lifecycle::Investigating,
+                declared: None,
                 pairings: &[],
                 brief: None,
                 instruction: Some("Where does it get the window from?\n"),

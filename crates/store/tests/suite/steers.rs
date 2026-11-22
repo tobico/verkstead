@@ -64,6 +64,7 @@ const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
 fn into(target: Lifecycle) -> Steer<'static> {
     Steer {
         target,
+        declared: None,
         pairings: &[],
         brief: None,
         instruction: None,

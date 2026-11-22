@@ -294,6 +294,10 @@ pub fn shared(
             // work might be going rather than where it went.
             pending_steer: None,
 
+            // And where a steer could send it, which is the same: nothing the
+            // reader has a form to submit.
+            steer_rows: Vec::new(),
+
             // And the Previews suggested for trying the work, which are not on
             // the record either: a press in a Code pane the reader does not
             // have, typing a command into a terminal that is not theirs.

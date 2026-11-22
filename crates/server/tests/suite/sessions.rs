@@ -44403,7 +44403,10 @@ const TWO_STEPS: &str = "5e0c9a7e-2f4b-4c1d-8a3e-6b9f0d2c7a41";
 /// Each state's session is told which it is by the opening line its options
 /// write: *Draft the change.* and *Check the change.*. One that ends without
 /// its Done signal stops the Conversation where it stands.
-async fn installing_two_steps(app: &axum::Router, elsewhere: &std::path::Path) {
+///
+/// `more` is written under its two states: further states, each a YAML list
+/// item indented as the two are.
+async fn installing_two_steps_with(app: &axum::Router, elsewhere: &std::path::Path, more: &str) {
     let plugin = elsewhere.join("two-steps");
     std::fs::create_dir_all(&plugin).unwrap();
     std::fs::write(
@@ -44439,6 +44442,7 @@ async fn installing_two_steps(app: &axum::Router, elsewhere: &std::path::Path) {
              \x20       word: Checking\n\
              \x20       activity: one-session\n\
              \x20       options: {{ skill: verkstead/instruction, prompt: Check the change., evidence: nothing }}\n\
+             {more}\
              \x20   transitions:\n\
              \x20     drafting: {{ done: checking, refused: stopped }}\n\
              \x20     checking: {{ done: done, refused: stopped }}\n\
@@ -44469,10 +44473,16 @@ async fn installing_two_steps(app: &axum::Router, elsewhere: &std::path::Path) {
 /// A Conversation on *Two steps*, its stub `stub`, picked, briefed and
 /// started through the presses the composer makes.
 async fn two_steps(spill: tempfile::TempDir, stub: &str) -> Grilling {
+    two_steps_with(spill, stub, "").await
+}
+
+/// The same Conversation, on the plugin with `more` states — see
+/// [`installing_two_steps_with`].
+async fn two_steps_with(spill: tempfile::TempDir, stub: &str, more: &str) -> Grilling {
     let bench = bench_at_pace(spill, stub, PULL_REQUEST, *BRISKLY, None).await;
     let app = bench.app.clone();
 
-    installing_two_steps(&app, bench.elsewhere.path()).await;
+    installing_two_steps_with(&app, bench.elsewhere.path(), more).await;
 
     let started: Started = post(
         &app,
@@ -44707,4 +44717,246 @@ async fn an_outcome_mapped_to_stopped_stops_it_where_it_stands_until_resumed() {
         "Resume entered checking again",
     );
     assert_eq!(entered(&view), ["drafting", "checking", "Done"]);
+}
+
+/// A Conversation on *Two steps* — whose manifest marks neither state as
+/// taking a steer — is offered Close alone on its Steer form, and a steer
+/// naming either state, or one of Verkstead's own, is refused naming it.
+#[tokio::test]
+async fn a_process_with_no_steerable_state_offers_close_alone() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = two_steps_stub(spill.path(), "", "");
+    let fixture = two_steps(spill, &stub).await;
+
+    let view = fixture
+        .until(|view| (view.declared_state.as_deref() == Some("drafting")).then(|| view.clone()))
+        .await;
+    let rows: Vec<_> = view
+        .steer_rows
+        .iter()
+        .map(|row| (row.target, row.word.as_str()))
+        .collect();
+    assert_eq!(rows, [(verkstead_render::SteerTarget::Close, "Close")]);
+
+    fixture.steer().await;
+    for (target, state, named) in [
+        ("Declared", Some("checking"), "checking"),
+        ("Declared", Some("nowhere"), "nowhere"),
+        ("Wrapping", None, "wrapping"),
+    ] {
+        let refused: ConversationSteered = post(
+            &fixture.app,
+            &format!("/api/ui/conversations/{}/steer/submit", fixture.id),
+            &serde_json::json!({ "target": target, "state": state, "interrupt": false }),
+        )
+        .await;
+        assert_eq!(
+            refused,
+            ConversationSteered::NotSteerable {
+                state: named.to_owned()
+            },
+            "{target} {state:?}"
+        );
+    }
+    assert_eq!(
+        stored_state(&fixture).await,
+        "drafting",
+        "and nothing moved"
+    );
+
+    // And Close, which is Verkstead's: the ordinary Close, made from the form.
+    let closed: ConversationSteered = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/steer/submit", fixture.id),
+        &serde_json::json!({ "target": "Close", "interrupt": true }),
+    )
+    .await;
+    assert_eq!(closed, ConversationSteered::Steered);
+    let view = fixture.view().await;
+    assert_eq!(view.state, Lifecycle::Closed);
+    assert!(view.pending_steer.is_none(), "the form went with it");
+}
+
+/// *Two steps* with a third state, `asking`, marked as a detour that takes a
+/// steer with the brief kind `brief`, over the One session Activity.
+fn asking(brief: &str) -> String {
+    format!(
+        "\x20     - id: asking\n\
+         \x20       word: Asking\n\
+         \x20       activity: one-session\n\
+         \x20       options: {{ skill: verkstead/instruction, prompt: Answer the question., evidence: nothing }}\n\
+         \x20       steer: {{ brief: {brief} }}\n\
+         \x20       detour: true\n"
+    )
+}
+
+/// A stub for *Two steps* with `asking`: drafting waits on its marker,
+/// asking writes the prompt it was given to `{spill}/asked` and signals at
+/// once, and each appends which it is to `{spill}/ran`.
+fn asking_stub(spill: &Path) -> String {
+    format!(
+        r#"case "$2" in
+*'Draft the change.'*) echo drafting >> {ran}
+while [ ! -f /tmp/verkstead/drafted ]; do sleep 0.05; done
+: > /tmp/verkstead/done
+;;
+*'Answer the question.'*) echo asking >> {ran}
+printf '%s' "$2" > {asked}
+: > /tmp/verkstead/done
+;;
+*'Check the change.'*) echo checking >> {ran}
+;;
+esac
+while :; do sleep 1; done"#,
+        ran = spill.join("ran").display(),
+        asked = spill.join("asked").display(),
+    )
+}
+
+/// A steer into a declared detour runs its Activity with what the human
+/// wrote under it, and once that Activity ends the Conversation goes back to
+/// the state it was steered from — whose Activity is entered again.
+#[tokio::test]
+async fn a_steer_into_a_detour_returns_to_the_state_it_left() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = asking_stub(spill.path());
+    let ran = spill.path().join("ran");
+    let asked = spill.path().join("asked");
+    let fixture = two_steps_with(spill, &stub, &asking("instruction")).await;
+
+    let view = fixture
+        .until(|view| (view.declared_state.as_deref() == Some("drafting")).then(|| view.clone()))
+        .await;
+    let rows: Vec<_> = view
+        .steer_rows
+        .iter()
+        .map(|row| {
+            (
+                row.target,
+                row.state.as_deref(),
+                row.word.as_str(),
+                row.brief,
+                row.detour,
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (
+                verkstead_render::SteerTarget::Declared,
+                Some("asking"),
+                "Asking",
+                verkstead_render::SteerBrief::Instruction,
+                true
+            ),
+            (
+                verkstead_render::SteerTarget::Close,
+                None,
+                "Close",
+                verkstead_render::SteerBrief::None,
+                false
+            ),
+        ]
+    );
+    let deadline = Instant::now() + *PATIENCE;
+    while std::fs::read_to_string(&ran).unwrap_or_default() != "drafting\n" {
+        assert!(Instant::now() < deadline, "the drafting session never ran");
+        pause(Duration::from_millis(25)).await;
+    }
+
+    fixture.steer().await;
+    let steered: ConversationSteered = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/steer/submit", fixture.id),
+        &serde_json::json!({
+            "target": "Declared",
+            "state": "asking",
+            "interrupt": true,
+            "instruction": "Find where the counter lives.",
+        }),
+    )
+    .await;
+    assert_eq!(steered, ConversationSteered::Steered);
+
+    let deadline = Instant::now() + *PATIENCE;
+    while std::fs::read_to_string(&ran).unwrap_or_default() != "drafting\nasking\ndrafting\n" {
+        assert!(
+            Instant::now() < deadline,
+            "the detour never went back to drafting: {:?}",
+            std::fs::read_to_string(&ran)
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+    let view = fixture
+        .until(|view| (view.declared_state.as_deref() == Some("drafting")).then(|| view.clone()))
+        .await;
+    assert_eq!(entered(&view), ["drafting", "asking", "drafting"]);
+    let prompt = std::fs::read_to_string(&asked).unwrap();
+    assert!(
+        prompt.contains("# What I want done") && prompt.contains("Find where the counter lives."),
+        "the detour's session was started on what was written: {prompt}"
+    );
+    assert!(
+        notices(&view)
+            .iter()
+            .all(|notice| !notice.contains("ended in")),
+        "and nothing stopped: {:?}",
+        notices(&view)
+    );
+}
+
+/// A declared state whose brief is a question takes the question in the
+/// field Investigating takes it in: refused without one, and with one its
+/// session is started on it.
+#[tokio::test]
+async fn a_declared_question_is_required_and_reaches_the_activity() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = asking_stub(spill.path());
+    let asked = spill.path().join("asked");
+    let fixture = two_steps_with(spill, &stub, &asking("question")).await;
+
+    fixture
+        .until(|view| (view.declared_state.as_deref() == Some("drafting")).then_some(()))
+        .await;
+    fixture.steer().await;
+
+    let submit = |investigation: Option<&str>| {
+        let body = serde_json::json!({
+            "target": "Declared",
+            "state": "asking",
+            "interrupt": true,
+            "investigation": investigation,
+        });
+        let app = fixture.app.clone();
+        let uri = format!("/api/ui/conversations/{}/steer/submit", fixture.id);
+        async move { post::<ConversationSteered>(&app, &uri, &body).await }
+    };
+    assert_eq!(
+        submit(Some("  ")).await,
+        ConversationSteered::NoInvestigationBrief
+    );
+    assert_eq!(
+        submit(Some("Does it count the 429s?")).await,
+        ConversationSteered::Steered
+    );
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !asked.exists() {
+        if Instant::now() >= deadline {
+            let view = fixture.view().await;
+            panic!(
+                "the question's session never ran: {:?} {:?} {:?}",
+                view.declared_state,
+                notices(&view),
+                entered(&view)
+            );
+        }
+        pause(Duration::from_millis(25)).await;
+    }
+    let prompt = std::fs::read_to_string(&asked).unwrap();
+    assert!(
+        prompt.contains("# What I want found out") && prompt.contains("Does it count the 429s?"),
+        "{prompt}"
+    );
 }

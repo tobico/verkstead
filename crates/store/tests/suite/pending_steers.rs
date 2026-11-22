@@ -86,6 +86,7 @@ async fn profile(pool: &SqlitePool, name: &str, models: &[&str]) -> String {
 fn into(target: Lifecycle) -> Steer<'static> {
     Steer {
         target,
+        declared: None,
         pairings: &[],
         brief: None,
         instruction: None,
@@ -257,6 +258,7 @@ async fn a_save_writes_the_whole_form_and_reads_it_back() {
 
     let filled = PendingForm {
         target: Some(Lifecycle::Implementing),
+        declared: None,
         brief: Some("# A second round\n".to_owned()),
         digest: true,
         instruction: Some("Take the modal out".to_owned()),

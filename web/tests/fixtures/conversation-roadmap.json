@@ -150,6 +150,64 @@
   "shared": null,
   "skill_packs": [],
   "state": "Grilling",
+  "steer_rows": [
+    {
+      "brief": "Round",
+      "detour": false,
+      "role": "grilling",
+      "state": null,
+      "target": "Grilling",
+      "word": "Grilling"
+    },
+    {
+      "brief": "Instruction",
+      "detour": false,
+      "role": "implementation",
+      "state": null,
+      "target": "Implementing",
+      "word": "Implementing"
+    },
+    {
+      "brief": "None",
+      "detour": false,
+      "role": "implementation",
+      "state": null,
+      "target": "Wrapping",
+      "word": "Wrapping up"
+    },
+    {
+      "brief": "FollowUp",
+      "detour": false,
+      "role": "implementation",
+      "state": null,
+      "target": "FollowUp",
+      "word": "Follow-up"
+    },
+    {
+      "brief": "Question",
+      "detour": true,
+      "role": "implementation",
+      "state": null,
+      "target": "Investigating",
+      "word": "Investigating"
+    },
+    {
+      "brief": "None",
+      "detour": false,
+      "role": null,
+      "state": null,
+      "target": "Done",
+      "word": "Done"
+    },
+    {
+      "brief": "None",
+      "detour": false,
+      "role": null,
+      "state": null,
+      "target": "Close",
+      "word": "Close"
+    }
+  ],
   "stop_asked": false,
   "stopped_by_hand": false,
   "target": null,

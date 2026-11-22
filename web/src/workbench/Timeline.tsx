@@ -127,6 +127,8 @@ import type {
   NoticeEvent,
   OtherAuthor,
   PendingSteerView,
+  SteerForm,
+  SteerRow,
   ProvidedProcess,
   PinnedEvent,
   ProfileEntry,
@@ -1051,6 +1053,7 @@ export function Timeline(props: {
               <li ref={item} class={styles.timelineEvent}>
                 <PendingSteer
                   pending={pending()}
+                  rows={props.conversation.steer_rows}
                   selected={props.selected === "steer"}
                   open={() => {
                     props.select("steer");
@@ -2130,6 +2133,10 @@ function Steered(props: {
   selected: boolean;
   open: () => void;
 }): JSX.Element {
+  // Asked for by name, as the move below it is, and a target the module has no
+  // class for — a state a plugin's process declares — is drawn without one.
+  const tone = () => styles[props.steer.target.toLowerCase()];
+
   return (
     <Openable
       kind={styles.steeredWith!}
@@ -2138,7 +2145,7 @@ function Steered(props: {
     >
       <p
         class={styles.steered}
-        classList={{ [styles[props.steer.target.toLowerCase()]!]: true }}
+        classList={tone() === undefined ? {} : { [tone()!]: true }}
       >
         You steered this into {STATE[props.steer.target]}.
       </p>
@@ -2147,6 +2154,18 @@ function Steered(props: {
       </Show>
     </Openable>
   );
+}
+
+/// The word for where a half-written steer is going: the row its picker is on,
+/// as the Steer form draws it.
+function steeringInto(form: SteerForm, rows: SteerRow[]): string {
+  const row = rows.find(
+    (one) =>
+      one.target === form.target &&
+      (one.target !== "Declared" || one.state === form.state),
+  );
+
+  return row?.word ?? form.state ?? form.target ?? "";
 }
 
 /// The steer being written: the one item on this pane that has not happened
@@ -2170,6 +2189,7 @@ function Steered(props: {
 /// human ever moved the radio.
 function PendingSteer(props: {
   pending: PendingSteerView;
+  rows: SteerRow[];
   selected: boolean;
   open: () => void;
 }): JSX.Element {
@@ -2182,7 +2202,7 @@ function PendingSteer(props: {
       <p class={styles.pendingSteerLine}>
         {props.pending.form.target === null
           ? "Steer"
-          : `Steering into ${STATE[props.pending.form.target]}`}
+          : `Steering into ${steeringInto(props.pending.form, props.rows)}`}
       </p>
       <p class={styles.pendingSteerNote}>
         The run has stopped while you decide.

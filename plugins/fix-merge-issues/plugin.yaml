@@ -3,6 +3,9 @@
 # by its state's options, which is the whole of the narrowing: nothing reads
 # the branch and nothing said on the pull request is answered. Built in with a
 # tick, as Tinker is; the state id is the word already stored.
+# Each state marked `steer` is a row on the Steer form: the wrap-up, a
+# follow-up of the pull request, and `investigating`, the detour a question
+# takes, which goes back to where it was steered from.
 uuid: 0b4f33da-1f61-46dd-aa82-3983d627e192
 name: Fix merge issues
 author:
@@ -37,5 +40,18 @@ provides:
         word: Wrapping
         activity: wrap-up
         options: { review: "off", comments: "off" }
+        steer: { brief: none }
+      - id: follow-up
+        word: Follow-up
+        activity: follow-up-rounds
+        options: { skill: verkstead/following-up }
+        steer: { brief: follow-up }
+      - id: investigating
+        word: Investigating
+        activity: follow-up-rounds
+        options: { skill: verkstead/investigating, evidence: investigated }
+        steer: { brief: question }
+        detour: true
     transitions:
       wrapping: { settled: done, merged: done, closed: stopped, given-up: stopped }
+      follow-up: { committed: wrapping, nothing: done }

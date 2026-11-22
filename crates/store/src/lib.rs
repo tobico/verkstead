@@ -221,8 +221,8 @@ pub use slices::{
     Cell, MOST_A_SLICE_IS, Marks, Renaming, Rows, STAYS_BEHIND, Slice, carried_tables, land, slice,
 };
 pub use steers::{
-    PickedPairing, Recorded, RecordedPairing, Scratch, SteerAddition, SteerRecord, SteerUpgrade,
-    scratch,
+    LatestSteer, PickedPairing, Recorded, RecordedPairing, Scratch, SteerAddition, SteerRecord,
+    SteerUpgrade, latest_steer, scratch,
 };
 pub use stops::{
     Decision, Stopped, Stopping, ask_to_stop, asked_to_stop, clear_stop, forget_stop,

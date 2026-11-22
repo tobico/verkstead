@@ -126,6 +126,8 @@ import type {
   SteerForm,
   SteerPairingView,
   SteerRecordView,
+  SteerBrief,
+  SteerRow,
   SteerSaved,
   SteerTarget,
   TimelineEvent,
@@ -163,7 +165,10 @@ import styles from "./Steer.module.css";
 export const STEER_REFUSAL: Record<
   Exclude<
     ConversationSteered,
-    { Companion: unknown } | { AlreadyHeld: unknown } | { WouldDiscard: unknown }
+    | { Companion: unknown }
+    | { AlreadyHeld: unknown }
+    | { WouldDiscard: unknown }
+    | { NotSteerable: unknown }
   >,
   string
 > = {
@@ -245,10 +250,18 @@ const STEER_COMPANION_REFUSAL: Record<
 ///
 /// Asked of [`narrowed`](./processes.ts) rather than of the Process by name, that
 /// being where a fact about a Process is kept.
-function note(offered: (typeof TARGETS)[number], process: Process): string {
-  return offered.narrowedNote !== undefined && narrowed(process)
-    ? offered.narrowedNote
-    : offered.note;
+function note(offered: SteerRow, process: Process): string {
+  if (offered.target === "Declared") {
+    const said = BRIEF_NOTE[offered.brief];
+
+    return offered.detour ? `${said} ${DETOUR_NOTE}` : said;
+  }
+
+  const known = NOTE[offered.target];
+
+  return known.narrowed !== undefined && narrowed(process)
+    ? known.narrowed
+    : known.note;
 }
 
 /// What every drawing of `WouldDiscard` ends on: what would be lost, and what to
@@ -280,6 +293,10 @@ export function steerRefusal(outcome: ConversationSteered): string {
   if (typeof outcome === "object") {
     if ("AlreadyHeld" in outcome) {
       return ALREADY_HELD;
+    }
+
+    if ("NotSteerable" in outcome) {
+      return `This conversation's process doesn't take a steer into ${outcome.NotSteerable.state}.`;
     }
 
     if ("WouldDiscard" in outcome) {
@@ -389,85 +406,81 @@ export function SteerRefusal(props: {
   );
 }
 
-/// Where a steer can send a conversation, and what each target means.
+/// What each of Verkstead's own targets means, said under its row.
 ///
-/// Draft and Closed are not here and never will be: each has a way in of its
-/// own; follow-up and investigating are here because a steer is the only way
-/// into either at all. Wrapping up and follow-up are the two that are not always
+/// The rows themselves are the server's — see `steer_rows` on the conversation
+/// — drawn from the steer marks its Process's manifest declares, with Close on
+/// every form. Wrapping up and follow-up are the two that are not always
 /// offered, which is what `offered` below draws them out by: a conversation whose
 /// work is on no pull request has no wrap-up to be steered into and nothing to
 /// follow up, and following up is for work the pipeline has seen through, or
 /// that was closed over its pull request, rather than work still being built.
 ///
-/// Investigating is offered from everywhere, unlike either of those: a question
-/// about the work is not a step of it, so there is nowhere the work can have got
-/// to that makes asking one wrong — including work on no pull request at all.
-///
-/// `runs` is whether work goes on in that state, which is the one question the
-/// rest of the form follows from: a target something runs in needs a pairing
-/// settled, and one nothing runs in needs none. `role` is which pairing that
-/// is, there being one for the interviewing, one for everything that builds and
-/// one for the review — and wrapping up settles the review one alongside the
-/// building one from the same pick, a wrap-up doing both, unless the Process's
-/// wrap-up is a narrowed one and there is no review for it to do.
-///
-/// `narrowedNote` is what that one target says instead where the wrap-up it sends
-/// the work to is narrowed — see [`note`], which is the whole of why it is here.
-///
-/// In the order the work goes through them, because that is the order the human
-/// reads the pipeline in everywhere else.
-const TARGETS: {
-  target: SteerTarget;
-  label: string;
-  note: string;
-  narrowedNote?: string;
-  runs: boolean;
-  role?: "grilling" | "implementation";
-}[] = [
-  {
-    target: "Grilling",
-    label: "Grilling",
+/// `narrowed` is what wrapping up says instead where the wrap-up it sends the
+/// work to is narrowed — see [`note`], which is the whole of why it is here.
+const NOTE: Record<
+  Exclude<SteerTarget, "Declared">,
+  { note: string; narrowed?: string }
+> = {
+  Grilling: {
     note: "A new round of questions, from a fresh brief if you write one. A missing branch or worktree is made again.",
-    runs: true,
-    role: "grilling",
   },
-  {
-    target: "Implementing",
-    label: "Implementing",
+  Implementing: {
     note: "The agent does what you write here first, then carries on with the backlog or wraps the pull request up again.",
-    runs: true,
-    role: "implementation",
   },
-  {
-    target: "Wrapping",
-    label: "Wrapping up",
+  Wrapping: {
     note: "The checks are watched, the review is run, and the comments are answered again, with the fix attempts started over. What you pick runs the fixes, and the review where nothing was picked for it.",
-    narrowedNote:
+    narrowed:
       "The checks and whether it merges are watched again, with the fix attempts started over. Only what GitHub refuses a merge for is fixed, so nothing reviews the branch or answers comments.",
-    runs: true,
-    role: "implementation",
   },
-  {
-    target: "FollowUp",
-    label: "Follow-up",
+  FollowUp: {
     note: "The agent answers what you ask about the pull request and does what you want done about it, until you're finished.",
-    runs: true,
-    role: "implementation",
   },
-  {
-    target: "Investigating",
-    label: "Investigating",
+  Investigating: {
     note: "The agent answers a question about this work without committing anything. It then returns to the state you steered it from.",
-    runs: true,
-    role: "implementation",
   },
-  {
-    target: "Done",
-    label: "Done",
+  Done: {
     note: "Finished. Nothing runs, so there's nothing to pick or write.",
-    runs: false,
   },
-];
+  Close: {
+    note: "Closed, as the close press closes it: the worktree goes and the branch stays.",
+  },
+};
+
+/// And what a state a plugin's process declares means, by the brief its steer
+/// mark takes — the state's own word being the row's label.
+const BRIEF_NOTE: Record<SteerBrief, string> = {
+  Round: "A new round, from a fresh brief if you write one.",
+  Instruction: "The agent starts on what you write here.",
+  FollowUp: "The agent takes up what you write about the work already pushed.",
+  Question: "The agent finds out what you ask.",
+  None: "Nothing to write: the state starts on what the conversation holds.",
+};
+
+/// What a detour adds to its note.
+const DETOUR_NOTE = "It then returns to the state you steered it from.";
+
+/// The role whose pairing a row settles, where something runs there.
+function roleOf(
+  row: SteerRow | undefined,
+): "grilling" | "implementation" | undefined {
+  return row?.role === "grilling"
+    ? "grilling"
+    : row?.role
+      ? "implementation"
+      : undefined;
+}
+
+/// What a row is told apart by: its target, and a declared state's id beside
+/// it, there being any number of those.
+export function rowKey(row: {
+  target: SteerTarget | null;
+  state: string | null;
+}): string | null {
+  if (row.target === null) return null;
+
+  return row.target === "Declared" ? `Declared:${row.state ?? ""}` : row.target;
+}
 
 /// Whether this conversation's work is on a pull request.
 ///
@@ -548,6 +561,7 @@ const MIRRORING: Upgrade = { branch: "" };
 /// pane letting go of the address.
 const UNANSWERED: SteerForm = {
   target: null,
+  state: null,
   brief: null,
   digest: false,
   instruction: null,
@@ -596,6 +610,7 @@ function opened(upgraded: CompanionUpgrade[]): Record<number, Upgrade> {
 function reading(form: SteerForm): string {
   return JSON.stringify([
     form.target,
+    form.state ?? "",
     form.brief ?? "",
     form.digest,
     form.instruction ?? "",
@@ -1009,7 +1024,7 @@ export function Steer(props: {
   /// an instruction can always be written, and what that instruction says is
   /// the one thing about this form nothing can work out in advance.
   const offered = createMemo(() =>
-    TARGETS.filter((offered) => {
+    props.conversation.steer_rows.filter((offered) => {
       switch (offered.target) {
         case "Wrapping":
           return onAPullRequest(props.conversation);
@@ -1062,7 +1077,7 @@ export function Steer(props: {
   // grilling there has ever been: the card at the end of the timeline would
   // read *Steer* for the life of the form, and the pairing below would have no
   // target to be read back against.
-  const [target, setTarget] = createSignal<SteerTarget | null>(null);
+  const [target, setTarget] = createSignal<string | null>(null);
 
   /// What the picker is on: what has been picked here, what the record holds,
   /// or the first target offered.
@@ -1073,25 +1088,28 @@ export function Steer(props: {
   /// back with it: the form is drawn against the live conversation, so a
   /// wrap-up saved while there was a pull request is not a wrap-up now there is
   /// none.
-  const going = createMemo<SteerTarget>(() => {
-    const said = target() ?? held().target;
+  const going = createMemo<string>(() => {
+    const said = target() ?? rowKey(held());
 
-    return said && offered().some((one) => one.target === said)
+    return said && offered().some((one) => rowKey(one) === said)
       ? said
-      : (offered()[0]?.target ?? "Done");
+      : (rowKey(offered()[0] ?? { target: "Close", state: null }) ?? "Close");
   });
+
+  /// The row the picker is on, and what a submit names it by.
+  const row = createMemo(() => offered().find((one) => rowKey(one) === going()));
+  const aim = createMemo<SteerTarget>(() => row()?.target ?? "Close");
+
+  /// And the brief it takes, which is what draws the fields under it.
+  const kind = createMemo<SteerBrief>(() => row()?.brief ?? "None");
 
   /// Whether the target picked is one work goes on in, which is what draws the
   /// pairing picker under it.
-  const runs = createMemo(
-    () => offered().find((one) => one.target === going())?.runs ?? false,
-  );
+  const runs = createMemo(() => (row()?.role ?? null) !== null);
 
   /// And which role that picker settles — the one the target's sessions run
   /// under, and for wrapping up the review role beside it.
-  const role = createMemo(
-    () => offered().find((one) => one.target === going())?.role,
-  );
+  const role = createMemo(() => roleOf(row()));
 
   // The profile list is read here rather than passed in, so the picker is whole
   // wherever the form is opened from — the setup pane does the same.
@@ -1122,8 +1140,8 @@ export function Steer(props: {
 
   /// Which role the record's own pairing answers for, which is the role its
   /// target runs under: the row holds one pairing because a submit sends one.
-  const answered = createMemo(
-    () => TARGETS.find((one) => one.target === held().target)?.role,
+  const answered = createMemo(() =>
+    roleOf(offered().find((one) => rowKey(one) === rowKey(held()))),
   );
 
   /// The one the target picked runs under, and nothing where nothing runs.
@@ -1223,7 +1241,7 @@ export function Steer(props: {
   /// the button shut rather than a message after the press.
   const needsInstruction = createMemo(
     () =>
-      going() === "Implementing" &&
+      aim() === "Implementing" &&
       !props.conversation.ready_to_continue &&
       !doing().trim(),
   );
@@ -1232,7 +1250,7 @@ export function Steer(props: {
   /// round has to be about something, and where nothing is written down yet the
   /// pane is the only place it can be said.
   const needsBrief = createMemo(
-    () => going() === "Grilling" && !stands() && !written().trim(),
+    () => kind() === "Round" && !stands() && !written().trim(),
   );
 
   /// The repos to put in the sandbox, by the id of each, as their rows are
@@ -1301,13 +1319,13 @@ export function Steer(props: {
   /// And the same again on the one payload that is required whatever the record
   /// holds.
   const needsFollowUp = createMemo(
-    () => going() === "FollowUp" && !following().trim(),
+    () => kind() === "FollowUp" && !following().trim(),
   );
 
   /// And on the other: an investigation is a question somebody wanted asked, so
   /// there is nothing an empty one could mean either.
   const needsInvestigation = createMemo(
-    () => going() === "Investigating" && !finding().trim(),
+    () => kind() === "Question" && !finding().trim(),
   );
 
   const [interrupt, setInterrupt] = createSignal<boolean | null>(null);
@@ -1329,7 +1347,8 @@ export function Steer(props: {
   /// for the life of the form, and [`answered`] with nothing to read the saved
   /// pairing back against.
   const form = createMemo<SteerForm>(() => ({
-    target: going(),
+    target: aim(),
+    state: row()?.state ?? null,
     brief: written() || null,
     digest: priming(),
     instruction: doing() || null,
@@ -1359,7 +1378,7 @@ export function Steer(props: {
         return;
       }
 
-      const moved = sent.target !== held().target;
+      const moved = rowKey(sent) !== rowKey(held());
 
       setUnkept(null);
       setKept(sent);
@@ -1396,7 +1415,8 @@ export function Steer(props: {
     // it had would lose it. What the pane shows is what goes.
     mutationFn: () =>
       steer(device(), props.conversation.id, {
-        target: going(),
+        target: aim(),
+        state: row()?.state ?? null,
         interrupt: ending(),
         // Sent only where the target runs something. A target nothing runs in
         // settles no pairing, and a null there would be the form arguing with
@@ -1405,19 +1425,19 @@ export function Steer(props: {
         // And the payload of the one target that has one, for the same reason:
         // a brief under a wrap-up would be a document about nothing, and a
         // digest is what primes a grilling and nothing else.
-        brief: going() === "Grilling" && written().trim() ? written() : null,
-        digest: going() === "Grilling" && priming(),
+        brief: kind() === "Round" && written().trim() ? written() : null,
+        digest: kind() === "Round" && priming(),
         // And the sandbox the sessions to come run in, which every target work
         // goes on in carries: it is setup rather than a payload of one state.
         // Into done nothing runs, so there is nothing for a companion to be for.
         added: runs() ? additions() : [],
         upgraded: runs() ? upgrades() : [],
         instruction:
-          going() === "Implementing" && doing().trim() ? doing() : null,
+          kind() === "Instruction" && doing().trim() ? doing() : null,
         follow_up:
-          going() === "FollowUp" && following().trim() ? following() : null,
+          kind() === "FollowUp" && following().trim() ? following() : null,
         investigation:
-          going() === "Investigating" && finding().trim() ? finding() : null,
+          kind() === "Question" && finding().trim() ? finding() : null,
         // And what the last submit was stopped over, sent back: this submit is
         // the human saying to go ahead with it. Empty on every submit the last
         // one did not stop, which is every first submit — and the server reads
@@ -1507,21 +1527,21 @@ export function Steer(props: {
                     target. */}
                 <label
                   onClick={rowPress(() => {
-                    setTarget(offered.target);
+                    setTarget(rowKey(offered));
                     keeper.keep();
                   })}
                 >
                   <input
                     type="radio"
                     name="steer-target"
-                    value={offered.target}
-                    checked={going() === offered.target}
+                    value={rowKey(offered) ?? ""}
+                    checked={going() === rowKey(offered)}
                     onChange={() => {
-                      setTarget(offered.target);
+                      setTarget(rowKey(offered));
                       keeper.keep();
                     }}
                   />
-                  {offered.label}
+                  {offered.word}
                 </label>
                 <Note class={styles.optionNote}>
                   {note(offered, props.conversation.process)}
@@ -1535,7 +1555,7 @@ export function Steer(props: {
             written. Both are optional and both default to the quietest thing
             they could mean: no brief is the round starting on the one already
             there, and no digest is the interview starting from the brief alone. */}
-        <Show when={going() === "Grilling"}>
+        <Show when={kind() === "Round"}>
           <div class={styles.steerBrief}>
             <label for="steer-brief">A brief for the new round</label>
             <textarea
@@ -1587,7 +1607,7 @@ export function Steer(props: {
             what the branch holds, which is only something it can mean where
             there is something there — so where there is not, the field is what
             the target is, and the submit is held shut until it says something. */}
-        <Show when={going() === "Implementing"}>
+        <Show when={kind() === "Instruction"}>
           <div>
             <label for="steer-instruction">What to do first</label>
             <textarea
@@ -1614,7 +1634,7 @@ export function Steer(props: {
             empty: there is no follow-up to start without something to follow
             up on, so the field is the target and the submit is held shut until
             it says something. */}
-        <Show when={going() === "FollowUp"}>
+        <Show when={kind() === "FollowUp"}>
           <div>
             <label for="steer-follow-up">What to follow up on</label>
             <textarea
@@ -1638,7 +1658,7 @@ export function Steer(props: {
         {/* And under investigating, the other payload with nothing it could mean
             empty: there is no question to answer without one, so the field is
             the target and the submit is held shut until it says something. */}
-        <Show when={going() === "Investigating"}>
+        <Show when={kind() === "Question"}>
           <div>
             <label for="steer-investigation">What to find out</label>
             <textarea

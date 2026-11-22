@@ -79,6 +79,10 @@ pub struct PendingForm {
     /// them between the press and the first thing typed or ticked.
     pub target: Option<Lifecycle>,
 
+    /// The declared state's id, where [`Self::target`] is
+    /// [`Lifecycle::Declared`]: what the `target` column holds for it.
+    pub declared: Option<String>,
+
     /// The new round's Brief, for a steer into Grilling.
     pub brief: Option<String>,
 
@@ -321,7 +325,9 @@ pub async fn pending_steer(
     // Read rather than guessed past, as every other stored state word is: a
     // target this build does not understand is a database written by a
     // Verkstead this one is not.
+    let declared = target.clone();
     let target = target.as_deref().map(Lifecycle::read).transpose()?;
+    let declared = declared.filter(|_| target == Some(Lifecycle::Declared));
 
     let added: Vec<(i64, String, Option<String>, String)> = sqlx::query_as(
         "SELECT repo_id, mode, base_ref, branch
@@ -349,6 +355,7 @@ pub async fn pending_steer(
         at,
         form: PendingForm {
             target,
+            declared,
             brief,
             digest: digest != 0,
             instruction,
@@ -407,7 +414,11 @@ pub async fn save_pending_steer(
              investigation = ?, profile_id = ?, model = ?, interrupt = ?
          WHERE conversation_id = ?",
     )
-    .bind(form.target.map(Lifecycle::stored))
+    .bind(match form.target {
+        // A declared state is written by its own word.
+        Some(Lifecycle::Declared) => form.declared.as_deref(),
+        target => target.map(Lifecycle::stored),
+    })
     .bind(form.brief.as_deref())
     .bind(i64::from(form.digest))
     .bind(form.instruction.as_deref())

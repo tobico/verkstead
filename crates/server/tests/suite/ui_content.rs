@@ -3108,6 +3108,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         wrapping,
         verkstead_store::Steer {
             target: store::Lifecycle::Grilling,
+            declared: None,
             pairings: &[],
             brief: Some("# Rate limiting, per account\n\n"),
             instruction: None,

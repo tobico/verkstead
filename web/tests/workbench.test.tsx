@@ -46,6 +46,7 @@ import type {
   ConversationClosed,
   ConversationEntry,
   ConversationSteered,
+  SteerRow,
   CompanionAdded,
   ConversationStopped,
   ConversationUnarchived,
@@ -12365,6 +12366,7 @@ describe("steering a conversation", () => {
       "Implementing",
       "Investigating",
       "Done",
+      "Close",
     ]);
     expect(screen.getByText(/Finished. Nothing runs/)).toBeTruthy();
     unmount();
@@ -12383,6 +12385,7 @@ describe("steering a conversation", () => {
       "Wrapping",
       "Investigating",
       "Done",
+      "Close",
     ]);
     expect(screen.getByText(/The checks are watched, the review is run/)).toBeTruthy();
   });
@@ -12432,6 +12435,7 @@ describe("steering a conversation", () => {
       "Wrapping",
       "Investigating",
       "Done",
+      "Close",
     ]);
     unmount();
 
@@ -12453,6 +12457,7 @@ describe("steering a conversation", () => {
       "FollowUp",
       "Investigating",
       "Done",
+      "Close",
     ]);
     expect(screen.getByText(/The agent answers what you ask about the pull request/)).toBeTruthy();
     finished.unmount();
@@ -12522,6 +12527,7 @@ describe("steering a conversation", () => {
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
         target: "FollowUp",
+        state: null,
         interrupt: false,
         // Work being built, so it is the implementation pairing a follow-up
         // runs under.
@@ -12617,6 +12623,7 @@ describe("steering a conversation", () => {
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
         target: "Investigating",
+        state: null,
         interrupt: false,
         pairing: { profile_id: building.profile.id, model: building.model },
         brief: null,
@@ -12791,6 +12798,7 @@ describe("steering a conversation", () => {
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
         target: "Implementing",
+        state: null,
         interrupt: false,
         pairing: { profile_id: building.profile.id, model: building.model },
         // No round is being opened, so neither half of what one carries is
@@ -12861,6 +12869,7 @@ describe("steering a conversation", () => {
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
         target: "Wrapping",
+        state: null,
         interrupt: false,
         pairing: { profile_id: PROFILES[0]!.id, model: PROFILES[0]!.models[0] },
         // No round is being opened and no session is being written a job, so
@@ -12927,6 +12936,7 @@ describe("steering a conversation", () => {
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
         target: "Grilling",
+        state: null,
         interrupt: false,
         pairing: { profile_id: own.profile.id, model: own.model },
         brief: "# Retries\n\nThe backoff is wrong.\n",
@@ -13082,6 +13092,7 @@ describe("steering a conversation", () => {
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
         target: "Done",
+        state: null,
         interrupt: true,
         // Nothing runs in done and no round is opened there, so none of what
         // those carry is sent.
@@ -13281,6 +13292,7 @@ describe("steering a conversation", () => {
       ready_to_continue: true,
       pending_steer: pending({
         target: "Implementing",
+        state: null,
         instruction: "Note the window the count is against.",
         interrupt: true,
       }),
@@ -13337,6 +13349,7 @@ describe("steering a conversation", () => {
     // Somebody else's save, found on the next read of the conversation.
     elsewhere = pending({
       target: "Implementing",
+      state: null,
       instruction: "From the phone.",
     });
     readAgain();
@@ -13378,6 +13391,7 @@ describe("steering a conversation", () => {
     await waitFor(() => expect(writes(fetching, STEER_SAVE)).toBe(1));
     expect(sent(fetching, STEER_SAVE)).toMatchObject({
       target: "Implementing",
+      state: null,
     });
   });
 
@@ -13411,6 +13425,7 @@ describe("steering a conversation", () => {
     expect(writes(fetching, STEER_SAVE)).toBe(1);
     expect(sent(fetching, STEER_SAVE)).toMatchObject({
       target: "Implementing",
+      state: null,
       instruction: "Rebase this onto main.",
     });
   });
@@ -13536,6 +13551,7 @@ describe("steering a conversation", () => {
         sent(fetching, STEER_SAVE, writes(fetching, STEER_SAVE) - 1),
       ).toEqual({
         target: "Investigating",
+        state: null,
         brief: "# Retries\n",
         digest: true,
         instruction: "Rebase this onto main.",
@@ -13633,6 +13649,7 @@ describe("steering a conversation", () => {
     await waitFor(() => expect(writes(fetching, STEER_SAVE)).toBe(1));
     expect(sent(fetching, STEER_SAVE)).toMatchObject({
       target: "Grilling",
+      state: null,
       pairing: { profile_id: PROFILES[2]!.id, model: "claude-sonnet-5" },
     });
   });
@@ -13645,6 +13662,7 @@ describe("steering a conversation", () => {
     theGrillingSteering({
       pending_steer: pending({
         target: "Grilling",
+        state: null,
         pairing: { profile_id: PROFILES[2]!.id, model: "claude-sonnet-5" },
       }),
     });
@@ -13733,6 +13751,7 @@ describe("steering a conversation", () => {
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toMatchObject({
         target: "Implementing",
+        state: null,
         instruction: "Rebase this onto main.",
       }),
     );
@@ -31474,5 +31493,147 @@ describe("the remote access banner", () => {
     await drawn(container, `.${timeline.timeline}`);
 
     expect(container.querySelector(`.${banner.banner}`)).toBeNull();
+  });
+});
+
+describe("steering into a process's declared states", () => {
+  /// A row of the form as the server sends it, for a state a plugin's process
+  /// declares.
+  function declared(
+    state: string,
+    word: string,
+    brief: SteerRow["brief"],
+    detour = false,
+  ): SteerRow {
+    return {
+      target: "Declared",
+      state,
+      word,
+      brief,
+      detour,
+      role: "implementation",
+    };
+  }
+
+  const CLOSE: SteerRow = {
+    target: "Close",
+    state: null,
+    word: "Close",
+    brief: "None",
+    detour: false,
+    role: null,
+  };
+
+  /// Every row is the server's, drawn from the steer marks: a process that
+  /// marks no state as taking a steer is offered Close alone, which is
+  /// Verkstead's and on every form.
+  it("draws Close alone for a process with no steerable state", async () => {
+    theGrillingSteering(
+      { ready_to_stop: true, working: true, steer_rows: [CLOSE] },
+      whenever(STEERING, PRESSED, "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pane = await openSteer(container);
+
+    expect(targets(pane)).toEqual(["Close"]);
+    expect(pane.querySelector("textarea")).toBeNull();
+  });
+
+  /// Each brief kind draws its own field, whatever the state it marks is
+  /// called — and the row reads the state's own word.
+  it("draws each brief kind's own field under a declared state", async () => {
+    theGrillingSteering(
+      {
+        ready_to_stop: true,
+        working: true,
+        steer_rows: [
+          declared("sketching", "Sketching", "Round"),
+          declared("asking", "Asking", "Instruction", true),
+          declared("touching-up", "Touching up", "FollowUp"),
+          declared("probing", "Probing", "Question"),
+          declared("exporting", "Exporting", "None"),
+          CLOSE,
+        ],
+      },
+      whenever(STEERING, PRESSED, "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pane = await openSteer(container);
+
+    expect(targets(pane)).toEqual([
+      "Declared:sketching",
+      "Declared:asking",
+      "Declared:touching-up",
+      "Declared:probing",
+      "Declared:exporting",
+      "Close",
+    ]);
+    expect(pane.textContent).toContain("Touching up");
+    expect(pane.textContent).toContain(
+      "It then returns to the state you steered it from.",
+    );
+
+    const fields = () =>
+      [...pane.querySelectorAll("textarea")].map((field) => field.id);
+
+    for (const [state, field] of [
+      ["sketching", ["steer-brief"]],
+      ["asking", ["steer-instruction"]],
+      ["touching-up", ["steer-follow-up"]],
+      ["probing", ["steer-investigation"]],
+      ["exporting", []],
+    ] as const) {
+      fireEvent.click(
+        await drawn(
+          pane,
+          `.${steerForm.steerTarget} input[value="Declared:${state}"]`,
+        ),
+      );
+      await waitFor(() => expect(fields()).toEqual(field));
+    }
+  });
+
+  /// And a submit names the state, carrying what was written in the field its
+  /// brief kind draws.
+  it("sends the declared state and what was written under it", async () => {
+    const fetching = theGrillingSteering(
+      {
+        ready_to_stop: true,
+        working: true,
+        steer_rows: [declared("asking", "Asking", "Instruction", true), CLOSE],
+      },
+      whenever(STEERING, PRESSED, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json("Steered" satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pane = await openSteer(container);
+
+    fireEvent.input(await drawn(pane, "#steer-instruction"), {
+      target: { value: "Find where the counter lives." },
+    });
+
+    const press = (await drawn(
+      pane,
+      `.${steerForm.steerButtons} .${steerForm.steer}`,
+    )) as HTMLButtonElement;
+    await waitFor(() => expect(press.disabled).toBe(false));
+    fireEvent.click(press);
+
+    await waitFor(() =>
+      expect(sent(fetching, STEER_SUBMIT)).toMatchObject({
+        target: "Declared",
+        state: "asking",
+        instruction: "Find where the counter lives.",
+        follow_up: null,
+        investigation: null,
+      }),
+    );
   });
 });

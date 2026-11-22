@@ -649,3 +649,74 @@ async fn upgrades(
 
     Ok(upgraded)
 }
+
+/// The newest Steer on a Conversation's Timeline, by the words its rows hold —
+/// a declared state by its own id, which [`Lifecycle`] reads as nothing but
+/// declared.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LatestSteer {
+    /// The Steer Event's id.
+    pub event: i64,
+
+    /// The state it went into, as the column held it after.
+    pub into: String,
+
+    /// And the one it was found in, where that was written down.
+    pub from: Option<String>,
+
+    /// What the human wrote under it, where they wrote anything.
+    pub written: Option<String>,
+
+    /// How many moves the Timeline holds after it, its own included: one is
+    /// a Conversation still where the steer put it.
+    pub moves_since: i64,
+}
+
+/// The newest Steer of `conversation_id`, or `None` where it was never
+/// steered.
+///
+/// What a declared state's Activity is started with, where the steer that
+/// entered it wrote a brief, and where a detour goes back to once it ends —
+/// see the server's `processes`.
+pub async fn latest_steer(pool: &SqlitePool, conversation_id: i64) -> Result<Option<LatestSteer>> {
+    let row: Option<(i64, String, Option<String>)> = sqlx::query_as(
+        "SELECT e.id, e.body, f.state
+         FROM timeline_events e
+         LEFT JOIN steer_sources f ON f.event_id = e.id
+         WHERE e.conversation_id = ? AND e.kind = 'steer'
+         ORDER BY e.id DESC LIMIT 1",
+    )
+    .bind(conversation_id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("reading the newest steer of Conversation {conversation_id}"))?;
+
+    let Some((event, body, from)) = row else {
+        return Ok(None);
+    };
+
+    let moves_since: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM timeline_events
+         WHERE conversation_id = ? AND id > ? AND kind IN ('moved', 'entered')",
+    )
+    .bind(conversation_id)
+    .bind(event)
+    .fetch_one(pool)
+    .await
+    .with_context(|| {
+        format!("counting the moves of Conversation {conversation_id} since its steer")
+    })?;
+
+    let (into, written) = match body.split_once('\n') {
+        Some((into, written)) => (into.to_owned(), Some(written.to_owned())),
+        None => (body, None),
+    };
+
+    Ok(Some(LatestSteer {
+        event,
+        into,
+        from,
+        written,
+        moves_since,
+    }))
+}

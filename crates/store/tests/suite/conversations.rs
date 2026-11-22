@@ -1923,6 +1923,7 @@ async fn stage(pool: &SqlitePool, repo_id: i64, roadmap: &str, label: &str) -> i
 fn steer(target: Lifecycle) -> Steer<'static> {
     Steer {
         target,
+        declared: None,
         pairings: &[],
         brief: None,
         instruction: None,

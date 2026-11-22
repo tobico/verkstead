@@ -351,6 +351,7 @@ async fn everything(pool: &SqlitePool) -> i64 {
         id,
         verkstead_store::Steer {
             target: store::Lifecycle::Implementing,
+            declared: None,
             pairings: &[],
             brief: None,
             instruction: Some("Take the diffs out of the bundle and see what it weighs."),
@@ -1744,6 +1745,7 @@ async fn a_steer_that_boards_carries_no_path_to_the_account_it_picked() {
         id,
         verkstead_store::Steer {
             target: store::Lifecycle::Wrapping,
+            declared: None,
             pairings: &[],
             brief: None,
             instruction: None,
