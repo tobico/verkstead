@@ -236,11 +236,21 @@ pub(crate) async fn record(
             // human's own part of it starts. Behind the record, which the store
             // has already taken — a push service that cannot be reached costs a
             // notification and never the pull request.
+            // Named in the word the Repo's Forge calls one.
+            let noun = match store::registered_repo(&state.pool, repo_id).await {
+                Ok(Some(repo)) => crate::forges::of(&state.pool, &repo.path)
+                    .await
+                    .noun()
+                    .to_owned(),
+                _ => crate::forges::PULL_REQUEST.to_owned(),
+            };
+
             crate::push::told(
                 &state.pool,
                 conversation_id,
                 crate::push::News::OnAPullRequest {
                     number: opened.number,
+                    noun,
                 },
             );
 

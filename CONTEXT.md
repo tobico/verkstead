@@ -3027,6 +3027,16 @@ one token per Forge. GitHub is the one Verkstead ships, a wasm component over
 HTTP since `gh` left the server; GitLab is the demonstration written against it.
 _Avoid_: git host, provider, remote, backend, SCM, platform
 
+**Pull request**:
+What a Forge holds a branch's work in for review and merging: the documents'
+word for it, whatever the Forge calls it. **The screen says what the Forge
+says** — the noun the Repo's Forge declares, *merge request* on one that calls
+it that, with its article and plural — on the pinned card, the pane, the
+Target field's placeholder, the Share row, Steer's notes and the push
+notification; a Repo on GitHub reads *pull request*, and a Repo on no Forge
+has none and says *No forge*.
+_Avoid_: PR, merge request (in the documents)
+
 **Skill Pack**:
 A directory of Skills a Plugin provides, named `<pack>/<skill>` and mounted
 read-only at `/verkstead/skills/<pack>/<skill>/` in every session that has it;

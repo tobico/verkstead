@@ -6107,7 +6107,7 @@ forge: RepoForge | null, };
 /**
  * Which Forge a Repo is on, by its remote's host (ADR-0030, *Forge*).
  */
-export type RepoForge = { "kind": "On", uuid: string, name: string, } | { "kind": "Unmatched", host: string | null, };
+export type RepoForge = { "kind": "On", uuid: string, name: string, noun: string, } | { "kind": "Unmatched", host: string | null, };
 
 /**
  * What a Repo was last grilled with, as a Conversation started on it would

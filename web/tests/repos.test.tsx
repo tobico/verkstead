@@ -330,7 +330,7 @@ describe("the pane it opens", () => {
     const on: RepoEntry = {
       ...FIRST,
       author: null,
-      forge: { kind: "On", uuid: GITHUB, name: "GitHub" },
+      forge: { kind: "On", uuid: GITHUB, name: "GitHub", noun: "pull request" },
     };
     const author = {
       id: "6f1c2a52-7d0e-4c55-9a43-0d6b8f3e2a11",
@@ -352,7 +352,7 @@ describe("the pane it opens", () => {
     const on: RepoEntry = {
       ...FIRST,
       author: null,
-      forge: { kind: "On", uuid: GITHUB, name: "GitHub" },
+      forge: { kind: "On", uuid: GITHUB, name: "GitHub", noun: "pull request" },
     };
     serving(
       whenever("/api/ui/repos", json([on])),

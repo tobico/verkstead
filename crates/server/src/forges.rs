@@ -637,6 +637,25 @@ pub(crate) struct Enabled {
     pub(crate) uuid: String,
     pub(crate) name: String,
     pub(crate) hosts: Vec<String>,
+
+    /// What it calls a pull request, as its manifest declares: the word the
+    /// screen says for one of a Repo on it (ADR-0030, *Forge*).
+    pub(crate) noun: String,
+}
+
+/// What a Forge calls a pull request where nothing better is known: GitHub's
+/// word, and the documents'.
+pub(crate) const PULL_REQUEST: &str = "pull request";
+
+impl Matched {
+    /// The noun the Repo's Forge calls a pull request, or the documents' own
+    /// word for a Repo on none — which has no pull request to call anything.
+    pub(crate) fn noun(&self) -> &str {
+        match self {
+            Matched::On(forge) => &forge.noun,
+            Matched::Unmatched { .. } => PULL_REQUEST,
+        }
+    }
 }
 
 /// The key of the `list` setting a Forge's manifest declares for the hosts the
@@ -706,6 +725,7 @@ impl Matched {
             Matched::On(forge) => verkstead_render::RepoForge::On {
                 uuid: forge.uuid.clone(),
                 name: forge.name.clone(),
+                noun: forge.noun.clone(),
             },
             Matched::Unmatched { host } => {
                 verkstead_render::RepoForge::Unmatched { host: host.clone() }
@@ -761,6 +781,7 @@ pub(crate) async fn enabled(pool: &sqlx::SqlitePool) -> anyhow::Result<Vec<Enabl
                 uuid: manifest.uuid.clone(),
                 name: manifest.name.clone(),
                 hosts,
+                noun: declared.noun.clone(),
             })
         })
         .collect())
@@ -802,6 +823,7 @@ pub(crate) async fn of(pool: &sqlx::SqlitePool, repo: &Path) -> Matched {
                 uuid: crate::plugins::built_in::GITHUB.to_owned(),
                 name: "GitHub".to_owned(),
                 hosts: Vec::new(),
+                noun: PULL_REQUEST.to_owned(),
             });
         }
     };
@@ -843,6 +865,7 @@ mod tests {
             uuid: crate::plugins::built_in::GITHUB.to_owned(),
             name: "GitHub".to_owned(),
             hosts: hosts.iter().map(|host| (*host).to_owned()).collect(),
+            noun: PULL_REQUEST.to_owned(),
         }
     }
 

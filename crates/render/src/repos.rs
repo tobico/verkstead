@@ -87,11 +87,17 @@ pub struct RepoEntry {
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 #[serde(tag = "kind")]
 pub enum RepoForge {
-    /// An enabled Forge answers for its remote's host: the plugin's uuid and
-    /// its name. Whether the Repo's Author holds a token for it is the
-    /// Author's — see [`crate::AuthorEntry::tokens`] — which the row reads to
-    /// say where it holds none.
-    On { uuid: String, name: String },
+    /// An enabled Forge answers for its remote's host: the plugin's uuid, its
+    /// name, and the noun it calls a pull request — *pull request*, *merge
+    /// request* — which the viewer says wherever this Repo's is drawn. Whether
+    /// the Repo's Author holds a token for it is the Author's — see
+    /// [`crate::AuthorEntry::tokens`] — which the row reads to say where it
+    /// holds none.
+    On {
+        uuid: String,
+        name: String,
+        noun: String,
+    },
 
     /// None does: the host the remote names, which the row and the card say
     /// *No forge for* — or no host, where no Forge is enabled at all.

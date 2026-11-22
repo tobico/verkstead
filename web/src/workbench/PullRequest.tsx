@@ -40,6 +40,7 @@ import type {
   PullRequestEvent,
   Resolved,
 } from "../api/types";
+import { forgeName, headed, nounOf } from "../forges";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { keyOf, useDevice } from "../reaching";
@@ -62,6 +63,13 @@ import { ABBREVIATED } from "./Timeline";
 /// conversation stays finished with for as long as nobody merges its pull
 /// request, which is time enough for a directory to go — and the press sees to
 /// that before it moves anything, so what it says here is why nothing moved.
+///
+/// Said of a pull request in the word its Repo's Forge calls one — see
+/// [`resolveRefusal`].
+export function resolveRefusal(outcome: Resolved, noun: string): string {
+  return RESOLVE_REFUSAL[outcome].replace("pull request", noun);
+}
+
 export const RESOLVE_REFUSAL: Record<Resolved, string> = {
   Resolving: "",
   NoSuchConversation: "This conversation is gone.",
@@ -81,6 +89,11 @@ export function PullRequest(props: {
   back: () => void;
 }): JSX.Element {
   const queries = useQueryClient();
+
+  /// What the Repo's Forge calls one, and its name — the words this pane is
+  /// headed and spoken in (ADR-0030, *Forge*).
+  const noun = () => nounOf(props.conversation.repo);
+  const forge = () => forgeName(props.conversation.repo);
   const device = useDevice();
 
   /// What the press was refused with, and `null` while nothing has been.
@@ -129,7 +142,7 @@ export function PullRequest(props: {
   return (
     <>
       <PaneSticky>
-        <PaneHead back={{ to: "Timeline", go: props.back }} title="Pull Request" />
+        <PaneHead back={{ to: "Timeline", go: props.back }} title={headed(noun())} />
       </PaneSticky>
 
       <div class={styles.summary}>
@@ -185,7 +198,7 @@ export function PullRequest(props: {
           <Show when={refused()}>
             {(outcome) => (
               <ErrorLine class={styles.refused}>
-                {RESOLVE_REFUSAL[outcome()]}
+                {resolveRefusal(outcome(), noun())}
               </ErrorLine>
             )}
           </Show>
@@ -200,14 +213,16 @@ export function PullRequest(props: {
 
       <Switch>
         <Match when={carried.isPending}>
-          <Empty>Reading this pull request from GitHub…</Empty>
+          <Empty>
+            Reading this {noun()} from {forge()}…
+          </Empty>
         </Match>
         {/* The server's own wording, which is the thing to act on: no `gh` on
             the machine, an account not logged in, and a GitHub that would not
             answer are three different afternoons. */}
         <Match when={carried.isError}>
           <ErrorLine>
-            This pull request couldn't be read. {carried.error?.message}
+            This {noun()} couldn't be read. {carried.error?.message}
           </ErrorLine>
         </Match>
         <Match when={carried.data}>

@@ -241,6 +241,7 @@ async fn a_repos_forge_is_read_off_its_remote_against_the_enabled_forges() {
     let github = Some(RepoForge::On {
         uuid: GITHUB.to_owned(),
         name: "GitHub".to_owned(),
+        noun: "pull request".to_owned(),
     });
     let none = Some(RepoForge::Unmatched {
         host: Some("git.example.invalid".to_owned()),

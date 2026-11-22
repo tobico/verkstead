@@ -156,6 +156,7 @@ import { useReading } from "../freshness";
 import { Reaching, keyOf, type Device } from "../reaching";
 import { setDraftingOn } from "../remembered";
 import { holding } from "../holding";
+import { nounOf } from "../forges";
 import { ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { ShowArchived } from "./Archived";
@@ -179,7 +180,7 @@ import {
   RepoOptions,
   RepoSelect,
   RolePicker,
-  TARGET,
+  targetPlaceholder,
 } from "./Setup";
 import setup from "./Setup.module.css";
 import { AUTOMATIC } from "./naming";
@@ -961,7 +962,9 @@ function Compose(props: {
                                   id="target"
                                   label="Target"
                                   class={setup.target!}
-                                  placeholder={TARGET}
+                                  placeholder={targetPlaceholder(
+                                    nounOf(chosen()),
+                                  )}
                                   value={state().target}
                                   set={(target) => change({ target })}
                                 />

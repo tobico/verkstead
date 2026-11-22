@@ -59,7 +59,7 @@ import { keyOf, useDevice } from "../reaching";
 import { PaneHead } from "./PaneHead";
 import styles from "./Share.module.css";
 import { onAPullRequest } from "./Steer";
-import { unforged, unpublishable } from "../forges";
+import { nounOf, unforged, unpublishable } from "../forges";
 
 /// What a publish came back with, as the toast it is said in.
 ///
@@ -126,9 +126,14 @@ export function published(outcome: SharePublished): JSX.Element {
 /// moved. And a share that went says where it went, naming whatever missed out
 /// beside what worked: the file is up either way, and a human told which pull
 /// request it never reached can paste the link there themselves.
-export function commented(outcome: ShareCommented): JSX.Element {
+///
+/// `noun` is what the Repo's Forge calls a pull request (ADR-0030, *Forge*).
+export function commented(
+  outcome: ShareCommented,
+  noun = "pull request",
+): JSX.Element {
   if (outcome === "NoPullRequest") {
-    return <>This conversation has no pull request.</>;
+    return <>This conversation has no {noun}.</>;
   }
 
   if ("NotPublished" in outcome) {
@@ -203,7 +208,7 @@ export function Share(props: {
   const comment = useMutation(() => ({
     mutationFn: (id: number) => shareToPullRequests(device(), id),
     onSuccess: (outcome: ShareCommented) => {
-      toast(() => commented(outcome));
+      toast(() => commented(outcome, nounOf(props.conversation.repo)));
       reread();
     },
     onError: (error: Error) => {
@@ -314,7 +319,9 @@ export function Share(props: {
             disabled={comment.isPending}
             onClick={() => comment.mutate(props.conversation.id)}
           >
-            {comment.isPending ? "Sharing…" : "Share to pull request"}
+            {comment.isPending
+              ? "Sharing…"
+              : `Share to ${nounOf(props.conversation.repo)}`}
           </button>
         </Show>
       </div>

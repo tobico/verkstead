@@ -18679,6 +18679,48 @@ const SHAPED = {
   Failed: faXmark,
 } as const;
 
+describe("a forge that calls it a merge request", () => {
+  /// The conversation's Repo on a Forge declaring *merge request* (ADR-0030,
+  /// *Forge*): the screen says what the Forge says.
+  const MERGING_REPO = {
+    ...WRAPPING.repo,
+    forge: {
+      kind: "On" as const,
+      uuid: "7a3d1f20-5b4e-4c8a-9e61-2d0f4b7c9a35",
+      name: "GitLab",
+      noun: "merge request",
+    },
+  };
+
+  it("heads the pinned card and the pane it opens with the forge's noun", async () => {
+    theWrapping({ repo: MERGING_REPO });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
+    expect(opened.querySelector("h2")!.textContent).toBe("Merge Request");
+    expect(opened.textContent).not.toContain("Pull Request");
+
+    fireEvent.click(opened);
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${shell.detailsPane} h1`)?.textContent,
+      ).toBe("Merge Request"),
+    );
+  });
+
+  it("offers the share to the forge's noun", async () => {
+    theWrapping({ repo: MERGING_REPO });
+    const { container } = mount(`/conversations/${WRAPPING.id}/share`);
+
+    await drawn(container, `.${shell.detailsPane} .${sharePane.doing}`);
+    await waitFor(() =>
+      screen.getByRole("button", { name: "Share to merge request" }),
+    );
+    expect(screen.queryByRole("button", { name: "Share to pull request" })).toBeNull();
+  });
+});
+
 describe("the pinned pull request", () => {
   it("says what it is called and what number it answers to", async () => {
     theWrapping();

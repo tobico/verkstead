@@ -59,3 +59,56 @@ export function untokened(
 
   return `No ${forge.name} token for ${authorLabel(author)}`;
 }
+
+/// What the Repo's Forge calls a pull request — *pull request*, *merge
+/// request* — lowercase, as it sits in a sentence. GitHub's word, and the
+/// documents', where the Forge was not read or the Repo is on none.
+export function nounOf(repo: RepoEntry | null | undefined): string {
+  const forge = repo?.forge;
+  return forge && forge.kind === "On" ? forge.noun : "pull request";
+}
+
+/// The noun at the head of a sentence or a label: *Merge request*.
+export function opening(noun: string): string {
+  return noun.charAt(0).toUpperCase() + noun.slice(1);
+}
+
+/// The noun in a heading, which is Title Case: *Merge Request*.
+export function headed(noun: string): string {
+  return noun.replace(/\b\w/g, (first) => first.toUpperCase());
+}
+
+/// The noun with its indefinite article: *a pull request*, *an issue*.
+export function aNoun(noun: string): string {
+  return /^[aeiou]/i.test(noun) ? `an ${noun}` : `a ${noun}`;
+}
+
+/// And more than one: *merge requests*.
+export function nouns(noun: string): string {
+  return noun.endsWith("s") ? noun : `${noun}s`;
+}
+
+/// The name of the Repo's Forge — *GitHub* — and GitHub's where it was not
+/// read or the Repo is on none.
+export function forgeName(repo: RepoEntry | null | undefined): string {
+  const forge = repo?.forge;
+  return forge && forge.kind === "On" ? forge.name : "GitHub";
+}
+
+/// `text`, written about a pull request, said in the word the Repo's Forge
+/// calls one: *a pull request* and *pull requests* and *Pull request* each in
+/// the noun's own article, plural and capital. GitHub's word comes back as it
+/// was written.
+export function spoken(text: string, noun: string): string {
+  if (noun === "pull request") return text;
+
+  return text
+    .replace(/\b([Aa]) pull request\b/g, (_, a: string) => {
+      const said = aNoun(noun);
+      return a === "A" ? opening(said) : said;
+    })
+    .replace(/\bpull requests\b/g, nouns(noun))
+    .replace(/\bPull requests\b/g, opening(nouns(noun)))
+    .replace(/\bpull request\b/g, noun)
+    .replace(/\bPull request\b/g, opening(noun));
+}

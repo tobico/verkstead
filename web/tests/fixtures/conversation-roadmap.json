@@ -117,6 +117,7 @@
     "forge": {
       "kind": "On",
       "name": "GitHub",
+      "noun": "pull request",
       "uuid": "b357e557-3716-4ea6-a3a8-d904c92c5eac"
     },
     "github": null,
