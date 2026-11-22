@@ -8,9 +8,10 @@
 //! reading rather than a gap. Nothing is backfilled into an old row, and the
 //! same rule answers for whichever kind of row a Conversation lacks.
 //!
-//! Only Develop can start anything yet. All five are here all the same, because
-//! the record reads and writes every one of them and what a stage after this
-//! adds is a start path rather than a variant.
+//! All five are Processes written as data in built-in plugins of their own, and
+//! the record holds each of them by the word it always held — so a
+//! Conversation stored before any of that reads its Process and its state with
+//! nothing rewritten.
 
 use std::path::Path;
 
@@ -326,44 +327,86 @@ async fn a_process_survives_a_restart() {
     assert_eq!(loaded(&pool, id).await, Process::FixMergeIssues);
 }
 
-/// A Conversation of each of the four Processes that are data now, stored by
-/// a Verkstead from before there were plugin Processes — the `processes`
-/// table with no `plugin` column, and each state the word it always held —
-/// reads its Process and its state on a database opened again, with nothing
-/// rewritten.
+/// A Conversation of each of the five Processes, stored by a Verkstead from
+/// before there were plugin Processes — the `processes` table with no `plugin`
+/// column, and each state the word it always held — reads its Process and its
+/// state on a database opened again, with nothing rewritten.
+///
+/// Develop in every one of its five states, and its `implementing` under each
+/// Direction: what the state column holds is the word the manifest now names
+/// the state by, so the word that was stored is the word that is read.
 #[tokio::test]
-async fn the_four_stored_before_processes_were_data_read_on() {
+async fn the_five_stored_before_processes_were_data_read_on() {
+    use verkstead_schema::Direction;
+    use verkstead_store::Lifecycle;
+
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("verkstead.db");
     let stored = [
+        (Process::Develop, "grilling", Lifecycle::Grilling, None),
         (
-            Process::Tinker,
-            "follow-up",
-            verkstead_store::Lifecycle::FollowUp,
+            Process::Develop,
+            "implementing",
+            Lifecycle::Implementing,
+            Some(Direction::Inline),
         ),
+        (
+            Process::Develop,
+            "implementing",
+            Lifecycle::Implementing,
+            Some(Direction::TaskList),
+        ),
+        (
+            Process::Develop,
+            "implementing",
+            Lifecycle::Implementing,
+            Some(Direction::Roadmap),
+        ),
+        (Process::Develop, "wrapping", Lifecycle::Wrapping, None),
+        (Process::Develop, "follow-up", Lifecycle::FollowUp, None),
+        (
+            Process::Develop,
+            "investigating",
+            Lifecycle::Investigating,
+            None,
+        ),
+        (Process::Tinker, "follow-up", Lifecycle::FollowUp, None),
         (
             Process::Investigate,
             "investigating",
-            verkstead_store::Lifecycle::Investigating,
+            Lifecycle::Investigating,
+            None,
         ),
-        (
-            Process::Review,
-            "wrapping",
-            verkstead_store::Lifecycle::Wrapping,
-        ),
+        (Process::Review, "wrapping", Lifecycle::Wrapping, None),
         (
             Process::FixMergeIssues,
             "wrapping",
-            verkstead_store::Lifecycle::Wrapping,
+            Lifecycle::Wrapping,
+            None,
         ),
     ];
 
     let mut ids = Vec::new();
     {
         let pool = open_database(&path).await.unwrap();
-        for (picked, state, _) in &stored {
+        for (picked, state, _, direction) in &stored {
             let id = drafting(&pool).await;
             set_process(&pool, id, picked.clone()).await.unwrap();
+            // The row as a Verkstead from before would have left it: a
+            // Direction is picked on a grilling, and this Conversation is
+            // being stood up in the state it was found in.
+            if let Some(direction) = direction {
+                sqlx::query("INSERT INTO directions (conversation_id, direction) VALUES (?, ?)")
+                    .bind(id)
+                    .bind(match direction {
+                        Direction::Inline => "inline",
+                        Direction::TaskList => "task-list",
+                        Direction::Roadmap => "roadmap",
+                    })
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+            }
             sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
                 .bind(state)
                 .bind(id)
@@ -382,10 +425,11 @@ async fn the_four_stored_before_processes_were_data_read_on() {
     }
 
     let pool = open_database(&path).await.unwrap();
-    for (id, (picked, _, lifecycle)) in ids.into_iter().zip(stored) {
+    for (id, (picked, _, lifecycle, direction)) in ids.into_iter().zip(stored) {
         let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
         assert_eq!(conversation.process, picked);
         assert_eq!(conversation.state, lifecycle, "{picked:?}");
         assert_eq!(conversation.declared_state, None, "{picked:?}");
+        assert_eq!(conversation.direction, direction, "{picked:?}");
     }
 }

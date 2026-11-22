@@ -151,7 +151,7 @@ import {
   loadSettings,
   loadSkillPacks,
 } from "../api/client";
-import type { Process, RepoEntry } from "../api/types";
+import type { Process, ProcessChoice, RepoEntry } from "../api/types";
 import { useReading } from "../freshness";
 import { Reaching, keyOf, type Device } from "../reaching";
 import { setDraftingOn } from "../remembered";
@@ -208,6 +208,7 @@ import {
   uses,
   type Role,
 } from "./processes";
+import { defaultChoice } from "./provided";
 import { namesPullRequest, pullRequestRepository } from "./targets";
 import { useZero } from "./zero";
 
@@ -502,14 +503,24 @@ function Compose(props: {
       : pairing.chosen(prefill[role]);
   };
 
-  /// What kind of work this page is composing: what the picker was moved to, and
-  /// Develop until it is moved at all.
+  /// What kind of work this page is composing: what the picker was moved to,
+  /// and the row an untouched picker stands on until it is moved at all —
+  /// Develop while its tick stands, and the first Process still offered where
+  /// it does not, which is what the server prefills a new Draft with. See
+  /// [`defaultChoice`].
   ///
   /// The one reading the row is drawn off, the way [`on`] is the one reading of
   /// the repo: which pickers stand in it, what the press waits on, and what an
   /// inert press says it is waiting on all come off this and the table it
   /// indexes.
-  const process = (): Process => state().process ?? "Develop";
+  const chosen = (): ProcessChoice =>
+    state().process === null
+      ? defaultChoice()
+      : {
+          process: state().process!,
+          ...(state().provided === null ? {} : { provided: state().provided! }),
+        };
+  const process = (): Process => chosen().process;
 
   /// Whether there is anything to create at all, which is the repo and nothing
   /// else: everything else on this page may stay empty, as it always may while
@@ -1027,15 +1038,12 @@ function Compose(props: {
                   field in this row that is *not* remembered per repo: the
                   pairings are the same answer most of the time, and a Process is
                   the one thing about a Conversation likeliest to differ from the
-                  last. So it stands on Develop for every repo, and a picker left
-                  on it sends nothing when this is created. */}
+                  last. So it stands on the first Process offered for every repo,
+                  and a picker left on it sends nothing when this is created —
+                  the server prefills the same row where Develop is unticked.
+                  */}
               <ProcessPicker
-                chosen={{
-                  process: process(),
-                  ...(state().provided === null
-                    ? {}
-                    : { provided: state().provided! }),
-                }}
+                chosen={chosen()}
                 disabled={make.isPending}
                 pick={(picked) =>
                   change({

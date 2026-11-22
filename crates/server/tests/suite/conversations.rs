@@ -31,6 +31,7 @@ use verkstead_render::{
     StageState, Standing, Started, SteerCancelled, SteerCompanionRefusal, SteerOpened,
     SteerPairingView, SteerSaved, TakenUp, TargetRecorded, TimelineEvent, Uncommitted,
 };
+use verkstead_server::plugins::built_in::DEVELOP;
 use verkstead_server::settings::{Author, Recorded, Settings};
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
@@ -723,6 +724,48 @@ async fn a_new_conversation_is_a_develop_one() {
     let id = started(&app, repo_id).await;
 
     assert_eq!(opened(&app, id).await.process, Process::Develop);
+}
+
+/// And unticking Develop's plugin takes the ladder off the picker, so a new
+/// Draft is prefilled with the first Process still offered instead — the row
+/// under Develop, which is Tinker. A Draft left reading a Process nothing
+/// offers is one whose Start could only refuse.
+///
+/// Nothing is written while Develop is ticked, which is almost always: a Draft
+/// with no row of its own reads Develop, and that reading is the whole of how a
+/// Conversation from before there were Processes is covered. And a Draft
+/// started before the tick came off is left exactly where it was.
+#[tokio::test]
+async fn a_new_draft_defaults_to_the_first_process_still_offered() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let before = started(&app, repo_id).await;
+
+    assert_eq!(opened(&app, before).await.process, Process::Develop);
+
+    let (status, said) = fetch(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/ui/plugins/{DEVELOP}/enabled"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"enabled":false}"#))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    let after = started(&app, repo_id).await;
+
+    assert_eq!(
+        opened(&app, after).await.process,
+        Process::Tinker,
+        "the row under Develop on the picker",
+    );
+    assert_eq!(
+        opened(&app, before).await.process,
+        Process::Develop,
+        "and the Draft that was already there is not rewritten",
+    );
 }
 
 /// And one holding a pull-request adoption is a Review, that being the Process

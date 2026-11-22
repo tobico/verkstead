@@ -69,7 +69,7 @@ pub(crate) fn built_in(
 }
 
 /// Start Activities on this server's Conversations from outside it — the
-/// suite's seam, until a Process says which Activity a state runs.
+/// suite's seam, for an Activity no Process of this build's names.
 ///
 /// Handed out beside the router it was built with: see
 /// [`crate::router_hosting_activities`].
@@ -83,9 +83,14 @@ impl Hosting {
         Hosting { state }
     }
 
-    /// Say that `conversation_id`'s interview is to offer `offers` alone —
-    /// the Process's declaration (Set 1765, Q27) until stage 11 writes it.
-    /// Said before the grilling starts, as a declaration is.
+    /// Say that `conversation_id`'s interview is to offer `offers` alone,
+    /// whatever its Process declares (Set 1765, Q27). Said before the
+    /// grilling starts, as a declaration is.
+    ///
+    /// What a Process declares is its manifest's `directions` — see
+    /// [`crate::processes::directions`] — and one of the five Verkstead runs
+    /// itself has no Process of its own to swap for a narrower one, so this is
+    /// how the suite narrows a Develop's interview.
     pub fn offering(&self, conversation_id: i64, offers: Vec<Direction>) {
         self.state.followers.declare(conversation_id, offers);
     }

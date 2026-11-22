@@ -116,9 +116,9 @@ impl Loaded {
 
 /// The Process `process` runs by, where it is data: a plugin's own, or the
 /// built-in plugin one of the record's bare words stands for — `tinker` is
-/// the *Tinker* plugin's. Held whether or not it is offered, so a Conversation
-/// on a plugin unticked since runs on. `None` for Develop, which is not data
-/// yet, and for a plugin that isn't held here.
+/// the *Tinker* plugin's, and `develop` the *Develop* plugin's. Held whether
+/// or not it is offered, so a Conversation on a plugin unticked since runs on.
+/// `None` for a plugin that isn't held here.
 pub(crate) fn of(state: &AppState, process: &store::Process) -> Option<Loaded> {
     match process {
         store::Process::Provided { plugin, id } => state.plugins.process(plugin, id),
@@ -177,10 +177,14 @@ fn built_ins() -> &'static [Loaded] {
 
 /// Whether a new Conversation may be started on `process`: a plugin's while
 /// it is loaded, switched on and in no trouble; a built-in plugin's while its
-/// tick stands; Develop always.
+/// tick stands — Develop's included, since stage 11 wrote it as data.
 pub(crate) async fn offered(state: &AppState, process: &store::Process) -> bool {
     match process {
         store::Process::Provided { plugin, id } => state.plugins.offers(plugin, id),
+        // Each of the five is a built-in plugin of its own, so every arm here
+        // reads a tick. A word none of them stands for could only be a
+        // record this build does not understand, and nothing is refused over
+        // one.
         built_in => match crate::plugins::built_in::standing_for(built_in) {
             Some((plugin, _)) => ticked(state, plugin).await,
             None => true,
@@ -328,6 +332,35 @@ pub(crate) fn options_of(
     of(state, process)
         .and_then(|loaded| Some(loaded.process.state(standing)?.options.clone()))
         .unwrap_or_default()
+}
+
+/// The Directions the interview of a Conversation on `process` offers, in the
+/// order the chooser draws them: the ones its manifest maps to a state
+/// (Set 1765, Q27) — all three for Develop, which maps each of them to
+/// `implementing`.
+///
+/// All three where the Process is not data or maps none, which is the reading
+/// a chooser has always had: a Process that offers nothing to pick between is
+/// one whose interview could put no proposal at all.
+pub(crate) fn directions(
+    state: &AppState,
+    process: &store::Process,
+) -> Vec<verkstead_schema::Direction> {
+    let mapped: Vec<verkstead_schema::Direction> = of(state, process)
+        .map(|loaded| {
+            loaded
+                .process
+                .directions
+                .iter()
+                .filter_map(|(word, _)| direction_named(word))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    match mapped.is_empty() {
+        true => verkstead_schema::Direction::ALL.to_vec(),
+        false => mapped,
+    }
 }
 
 /// Whether a Draft of `process` takes a Target, as its manifest says.
@@ -756,6 +789,15 @@ fn direction_word(direction: verkstead_schema::Direction) -> &'static str {
     }
 }
 
+/// And the Direction a manifest's word names, where it names one — the
+/// reader refuses any other, so this is only ever `None` for a manifest read
+/// by a Verkstead that knows a Direction this one does not.
+fn direction_named(word: &str) -> Option<verkstead_schema::Direction> {
+    verkstead_schema::Direction::ALL
+        .into_iter()
+        .find(|direction| direction_word(*direction) == word)
+}
+
 /// The options `declared` starts its Activity with: the manifest's, and a
 /// `prompt` over the Conversation's documents where the state names a skill.
 ///
@@ -936,11 +978,12 @@ mod tests {
         assert!(options("review").is_empty());
     }
 
-    /// Each of the four starts in the state word the record already holds for
+    /// Each of the five starts in the state word the record already holds for
     /// it, with every Activity it runs found in the built-in Activities.
     #[test]
-    fn the_four_start_in_the_words_already_stored() {
+    fn the_five_start_in_the_words_already_stored() {
         for (id, first) in [
+            ("develop", "grilling"),
             ("tinker", "follow-up"),
             ("investigate", "investigating"),
             ("review", "wrapping"),
@@ -958,5 +1001,115 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Develop's five states, in the words a Conversation's record already
+    /// held: the interview offering all three Directions, each leading to the
+    /// one `implementing` state, whose Activity is the Direction's own; then
+    /// the wrap-up, the follow-up that hangs off it, and `investigating`, the
+    /// detour a question takes.
+    #[test]
+    fn develop_is_the_ladder_written_as_data() {
+        use crate::plugins::manifest::process::{Brief, Runs, To};
+
+        let loaded = built_in("develop");
+        let develop = &loaded.process;
+
+        assert!(!develop.target, "Develop is pointed at nothing");
+        assert_eq!(develop.building().name, "implementation");
+        assert_eq!(
+            develop
+                .roles
+                .iter()
+                .map(|role| role.name.as_str())
+                .collect::<Vec<&str>>(),
+            ["grilling", "implementation", "review"],
+        );
+
+        assert_eq!(
+            develop.directions,
+            [
+                ("inline".to_owned(), "implementing".to_owned()),
+                ("task-list".to_owned(), "implementing".to_owned()),
+                ("roadmap".to_owned(), "implementing".to_owned()),
+            ],
+            "all three, each leading to the one state that builds",
+        );
+        assert_eq!(
+            develop
+                .states
+                .iter()
+                .map(|state| state.id.as_str())
+                .collect::<Vec<&str>>(),
+            [
+                "grilling",
+                "implementing",
+                "wrapping",
+                "follow-up",
+                "investigating"
+            ],
+        );
+
+        let state = |id: &str| develop.state(id).expect("Develop declares it").clone();
+
+        assert_eq!(
+            state("grilling").activity,
+            Runs::Activity("interview".to_owned())
+        );
+        assert_eq!(state("grilling").steer, Some(Brief::Round));
+        assert_eq!(
+            state("grilling").transitions,
+            [("gone".to_owned(), To::Stopped)],
+            "the Directions are `directions`' to map, and `gone` is the only other way out",
+        );
+
+        assert_eq!(
+            state("implementing").activity,
+            Runs::ByDirection(vec![
+                ("inline".to_owned(), "one-session".to_owned()),
+                ("task-list".to_owned(), "backlog-runner".to_owned()),
+                ("roadmap".to_owned(), "stage-runner".to_owned()),
+            ]),
+        );
+        assert_eq!(state("implementing").steer, Some(Brief::Instruction));
+        assert!(
+            state("implementing")
+                .transitions
+                .contains(&("done".to_owned(), To::State("wrapping".to_owned()))),
+            "an inline session that is done wraps up",
+        );
+        assert!(
+            state("implementing")
+                .transitions
+                .contains(&("refused".to_owned(), To::Stopped)),
+        );
+        for outcome in ["finished", "continued"] {
+            assert!(
+                state("implementing")
+                    .transitions
+                    .contains(&(outcome.to_owned(), To::State("wrapping".to_owned()))),
+                "{outcome} wraps up too, as a backlog's and a roadmap's ending do",
+            );
+        }
+
+        assert_eq!(state("wrapping").steer, Some(Brief::None));
+        assert!(state("wrapping").options.is_empty(), "nothing is narrowed");
+        assert_eq!(state("follow-up").steer, Some(Brief::FollowUp));
+        assert_eq!(
+            state("follow-up").transitions,
+            [
+                ("committed".to_owned(), To::State("wrapping".to_owned())),
+                ("nothing".to_owned(), To::State("wrapping".to_owned())),
+            ],
+            "a follow-up is steered into over a pull request, so either ending leaves \
+             that pull request and a wrap-up to see it out",
+        );
+
+        assert!(state("investigating").detour);
+        assert_eq!(state("investigating").steer, Some(Brief::Question));
+        assert!(
+            state("investigating").transitions.is_empty(),
+            "a detour goes back where it was steered from, whatever it ends in",
+        );
     }
 }

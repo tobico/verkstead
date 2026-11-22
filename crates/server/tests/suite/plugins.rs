@@ -22,7 +22,7 @@ use verkstead_render::{
     PluginRow, PluginSettingsSaved, PluginSettingsView, PluginSource, PluginUpdated, PluginsView,
 };
 use verkstead_server::plugins::built_in::{
-    ACTIVITIES, FIX_MERGE_ISSUES, FIXTURE, INVESTIGATE, REVIEW, TINKER, VERKSTEAD,
+    ACTIVITIES, DEVELOP, FIX_MERGE_ISSUES, FIXTURE, INVESTIGATE, REVIEW, TINKER, VERKSTEAD,
 };
 use verkstead_server::settings::Settings;
 use verkstead_server::{open_database, router_keeping};
@@ -938,8 +938,8 @@ async fn the_language_plugins_are_listed_under_built_in() {
     let names: Vec<&str> = view.built_in.iter().map(|row| row.name.as_str()).collect();
     assert_eq!(
         names.len(),
-        13,
-        "the pack, the Activities, Codex, six languages and four Processes: {names:?}"
+        14,
+        "the pack, the Activities, Codex, six languages and five Processes: {names:?}"
     );
     assert!(!view.built_in.iter().any(|row| row.uuid == FIXTURE));
 
@@ -2934,15 +2934,17 @@ async fn an_installed_process_is_offered_to_the_picker_until_its_plugin_is_disab
     );
 }
 
-/// Tinker, Investigate, Review and Fix merge issues are built-in plugins of
-/// their own, each listed under Built-in with a tick and naming its Process;
-/// unticking one takes it off the picker and leaves the other three on it.
+/// Develop, Tinker, Investigate, Review and Fix merge issues are built-in
+/// plugins of their own, each listed under Built-in with a tick and naming its
+/// Process; unticking one takes it off the picker and leaves the other four on
+/// it.
 #[tokio::test]
 async fn verksteads_own_processes_are_built_ins_each_with_a_tick() {
     let (app, _dir) = kept().await;
 
     let view = page(&app).await;
     for (uuid, name) in [
+        (DEVELOP, "Develop"),
         (TINKER, "Tinker"),
         (INVESTIGATE, "Investigate"),
         (REVIEW, "Review"),
@@ -2967,22 +2969,32 @@ async fn verksteads_own_processes_are_built_ins_each_with_a_tick() {
             .offered
     };
     let listed = processes(&app).await;
+    assert!(offered(&listed, verkstead_render::Process::Develop));
     assert!(offered(&listed, verkstead_render::Process::Tinker));
     assert!(offered(&listed, verkstead_render::Process::FixMergeIssues));
 
-    let (status, said) = pressing(
-        &app,
-        &format!("/api/ui/plugins/{TINKER}/enabled"),
-        serde_json::json!({ "enabled": false }),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{said}");
+    // Develop as well as Tinker: the ladder every Draft defaults to comes off
+    // the picker with its tick like any other row.
+    for unticked in [DEVELOP, TINKER] {
+        let (status, said) = pressing(
+            &app,
+            &format!("/api/ui/plugins/{unticked}/enabled"),
+            serde_json::json!({ "enabled": false }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+    }
 
     let listed = processes(&app).await;
-    assert!(
-        !offered(&listed, verkstead_render::Process::Tinker),
-        "unticked, Tinker is off the picker"
-    );
+    for off in [
+        verkstead_render::Process::Develop,
+        verkstead_render::Process::Tinker,
+    ] {
+        assert!(
+            !offered(&listed, off),
+            "unticked, {off:?} is off the picker"
+        );
+    }
     for process in [
         verkstead_render::Process::Investigate,
         verkstead_render::Process::Review,
@@ -2990,12 +3002,13 @@ async fn verksteads_own_processes_are_built_ins_each_with_a_tick() {
     ] {
         assert!(offered(&listed, process), "{process:?} is still offered");
     }
-    assert!(
-        page(&app)
-            .await
-            .built_in
-            .iter()
-            .any(|row| row.uuid == TINKER && !row.enabled),
-        "and its row's tick is off"
-    );
+    let view = page(&app).await;
+    for unticked in [DEVELOP, TINKER] {
+        assert!(
+            view.built_in
+                .iter()
+                .any(|row| row.uuid == unticked && !row.enabled),
+            "and its row's tick is off"
+        );
+    }
 }

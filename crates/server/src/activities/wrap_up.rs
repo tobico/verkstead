@@ -166,7 +166,7 @@ pub(crate) async fn run(
     // data — each of the four that wrap up says Done for `settled` and
     // `merged`, and `stopped` for the other two — with Verkstead's own
     // landing for each kind of place: the settling rule before Done, and the
-    // pull request's own stop words. Develop, not data yet, reads the same.
+    // pull request's own stop words.
     let leaving = crate::processes::leaving(&state, &process, crate::processes::WRAPPING, &outcome);
     let leaving = match leaving {
         crate::processes::Leaving::AsEver => match outcome.as_str() {

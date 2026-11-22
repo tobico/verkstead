@@ -23,9 +23,10 @@
 //! proposal its session puts is stamped with them as the Set arrives — see
 //! [`crate::sets`] — so the chooser draws those and no others, and a pick of
 //! any other is not heard. Which those are is a start fact of the interview,
-//! which a Process declares from stage 11 on; until then the suite says it
-//! through [`Followers::declare`], and every other Conversation is offered all
-//! three.
+//! and what the Conversation's Process declares — see
+//! [`crate::processes::directions`]. [`Followers::declare`] narrows one
+//! whatever its Process says, which is how the bench narrows one of the five
+//! Verkstead runs itself.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -98,8 +99,10 @@ impl Followers {
             .map(|listening| listening.offers.clone())
     }
 
-    /// Say that this Conversation's interview is to offer `offers` — the
-    /// suite's stand-in for a Process's declaration until stage 11 writes one.
+    /// Say that this Conversation's interview is to offer `offers`, whatever
+    /// its Process declares — the bench's way of narrowing one of the five
+    /// Verkstead runs itself, each of which offers what its manifest maps and
+    /// has no Process of its own to swap for a narrower one.
     pub(crate) fn declare(&self, conversation_id: i64, offers: Vec<Direction>) {
         self.declared
             .lock()
@@ -107,15 +110,15 @@ impl Followers {
             .insert(conversation_id, offers);
     }
 
-    /// What this Conversation's interview is to offer: what was declared for
-    /// it, or all three.
-    pub(crate) fn declared(&self, conversation_id: i64) -> Vec<Direction> {
+    /// What this Conversation's interview was narrowed to, where something
+    /// narrowed it: `None` is the Process's own declaration standing — see
+    /// [`crate::processes::directions`].
+    pub(crate) fn narrowed(&self, conversation_id: i64) -> Option<Vec<Direction>> {
         self.declared
             .lock()
             .expect("the followers registry is not poisoned")
             .get(&conversation_id)
             .cloned()
-            .unwrap_or_else(|| Direction::ALL.to_vec())
     }
 }
 

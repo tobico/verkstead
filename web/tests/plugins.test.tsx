@@ -236,6 +236,7 @@ describe("the Built-in group", () => {
       "Verkstead",
       "Activities",
       "Codex",
+      "Develop",
       ".NET",
       "Fix merge issues",
       "Go",

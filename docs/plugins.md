@@ -490,15 +490,22 @@ Activity again. A server coming back up does the same for every Conversation
 it finds in one of a Process's states, so an Activity works out where it was
 from its facts rather than from anything kept.
 
-**Verkstead's own Processes are written this way.** *Tinker*,
+**Verkstead's own Processes are written this way.** *Develop*, *Tinker*,
 *Investigate*, *Review* and *Fix merge issues* are built-in plugins of their
 own, under `plugins/`, each listed under Built-in on the Plugins page with a
 tick: unticked, it is off the picker, and the conversations on it run to the
-end. Their states are named with the words a conversation's record already
-held — `follow-up`, `investigating`, `wrapping` — so one stored before they
-were data reads on. What Verkstead does on the way into the wrap-up or Done —
-sending for a pull request the work isn't on yet, the settling rule — is its
-own, whichever Process leads there. **A wrap-up is narrowed by its options**:
+end. Unticking *Develop* takes the ladder off the picker too, and a new draft
+is then prefilled with the first Process still offered. Their states are named
+with the words a conversation's record already held — `grilling`,
+`implementing`, `wrapping`, `follow-up`, `investigating` — so one stored
+before they were data reads on. *Develop* is the one that runs an Activity per
+Direction: its interview offers all three, each leading to `implementing`,
+whose Activity is *One session* inline, the *Backlog runner* for a task list
+and the *Stage runner* for a roadmap.
+
+What Verkstead does on the way into the wrap-up or Done — sending for a pull
+request the work isn't on yet, the settling rule — is its own, whichever
+Process leads there. **A wrap-up is narrowed by its options**:
 Fix merge issues' wrapping state starts the *Wrap-up* with
 `{ review: "off", comments: "off" }`, so nothing reads the branch and nothing
 said on the pull request is answered, and that is the whole of what makes it

@@ -300,8 +300,9 @@ pub fn switched(manifest: &Manifest) -> bool {
             .any(|provision| provision.agent().is_some())
 }
 
-/// The uuids of the four built-ins that are Verkstead's own Processes written
+/// The uuids of the five built-ins that are Verkstead's own Processes written
 /// as data (ADR-0030, *Process*), each a plugin of its own with a tick.
+pub const DEVELOP: &str = "2bcf359e-071a-4237-8741-9897cf06ac15";
 pub const TINKER: &str = "591db9f3-2cb1-4adb-bf35-ff046f5be6f0";
 pub const INVESTIGATE: &str = "53f22a43-806b-4019-8798-c014fa9a0239";
 pub const REVIEW: &str = "0b55843a-7c93-47cc-9655-e5f6ec3cf019";
@@ -310,8 +311,8 @@ pub const FIX_MERGE_ISSUES: &str = "0b4f33da-1f61-46dd-aa82-3983d627e192";
 /// The built-in plugin and the id of its Process that one of the record's
 /// bare Process words is read as — `tinker` is the *Tinker* plugin's `tinker`
 /// — so a Conversation stored before Processes were data runs on its manifest
-/// with nothing rewritten. `None` for Develop, which is not data yet, and for
-/// a plugin's own Process, which names itself.
+/// with nothing rewritten. `None` for a plugin's own Process, which names
+/// itself.
 pub(crate) fn standing_for(
     process: &crate::store::Process,
 ) -> Option<(&'static str, &'static str)> {
@@ -322,16 +323,18 @@ pub(crate) fn standing_for(
         Process::Investigate => (INVESTIGATE, "investigate"),
         Process::Review => (REVIEW, "review"),
         Process::FixMergeIssues => (FIX_MERGE_ISSUES, "fix-merge-issues"),
-        Process::Develop | Process::Provided { .. } => return None,
+        Process::Develop => (DEVELOP, "develop"),
+        Process::Provided { .. } => return None,
     })
 }
 
 /// And the record's word a built-in plugin's Process stands for, where it is
-/// one of the four.
+/// one of the five.
 pub(crate) fn stood_for(plugin: &str, id: &str) -> Option<crate::store::Process> {
     use crate::store::Process;
 
     [
+        Process::Develop,
         Process::Tinker,
         Process::Investigate,
         Process::Review,

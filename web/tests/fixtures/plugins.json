@@ -83,6 +83,31 @@
       "elsewhere": null,
       "enabled": true,
       "harness": null,
+      "languages": [],
+      "name": "Develop",
+      "needs": [],
+      "processes": [
+        "Develop"
+      ],
+      "profiles": 0,
+      "provides": [
+        "process"
+      ],
+      "settings": 0,
+      "source": {
+        "kind": "BuiltIn"
+      },
+      "trouble": null,
+      "uuid": "2bcf359e-071a-4237-8741-9897cf06ac15",
+      "version": "0.1.0"
+    },
+    {
+      "activities": [],
+      "author": "Tobias Cohen",
+      "dependents": [],
+      "elsewhere": null,
+      "enabled": true,
+      "harness": null,
       "languages": [
         ".NET"
       ],

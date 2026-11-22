@@ -2874,8 +2874,10 @@ fn named(submission: &SteerSubmission) -> String {
 /// **Where a plugin provides the Process, every target is one of its
 /// states**, a mark on each saying it takes a steer (ADR-0030, *Process*;
 /// Set 1765, Q28): Close alone is Verkstead's, and on every form. The five
-/// built-ins are run by Verkstead's own targets and take every one of them,
-/// as they always have, until Develop is data; none takes a declared one.
+/// built-ins are data too, and are still run by Verkstead's own targets and
+/// take every one of them, as they always have: their states are the words
+/// the record holds rather than declared ones, so none of them takes a
+/// declared target.
 fn unmarked(
     state: &AppState,
     conversation: &Conversation,
@@ -2943,10 +2945,10 @@ fn written(
 /// The rows the Steer form draws for `conversation`: each state its Process
 /// marks as taking a steer, in the order written, then Close.
 ///
-/// The five built-ins take Verkstead's own targets, as they always have —
-/// Develop not being data yet — each worded and briefed by the state a
-/// built-in's manifest marks for it where it marks one; then Close, as on
-/// every form.
+/// The five built-ins take Verkstead's own targets, as they always have,
+/// each worded by the state its manifest marks for that target where it marks
+/// one — Develop's `grilling`, `implementing`, `wrapping`, `follow-up` and
+/// `investigating` among them; then Close, as on every form.
 ///
 /// And a Process in trouble — its plugin missing, switched off or unreadable —
 /// has no marks to draw, so its form is Close alone: a Conversation on one

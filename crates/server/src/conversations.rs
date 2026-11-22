@@ -187,6 +187,10 @@ async fn fix(state: &AppState, id: i64, base: &str) {
 /// picker left empty. What does not survive the judging is simply not applied,
 /// which leaves that picker exactly as a Repo with no memory leaves it.
 ///
+/// **And its Process, where Develop is not offered**: a Draft with no row of
+/// its own reads as Develop, so one started while Develop is unticked is put
+/// on the first Process still offered instead — see [`default_process`].
+///
 /// Nothing here refuses the start. The Conversation exists by the time this
 /// runs, and answering the button with a failure would say that it does not —
 /// so a memory that could not be read is logged and the human gets the empty
@@ -203,6 +207,12 @@ async fn prefill(state: &AppState, id: i64, repo_id: i64) {
 
 /// What [`prefill`] does, with somewhere for a store error to go.
 async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
+    if !crate::processes::offered(state, &store::Process::Develop).await
+        && let Some(process) = default_process(state).await
+    {
+        store::set_process(&state.pool, id, process).await?;
+    }
+
     let prefill = pairing_prefill(state, repo_id).await?;
 
     if let Some(pairing) = &prefill.grilling {
@@ -1394,6 +1404,47 @@ const LANDED: &[Process] = &[
     Process::Provided,
 ];
 
+/// The Process a new Draft is prefilled with where Develop is not offered:
+/// the first one that is, in the order [`LANDED`] is written and the picker
+/// draws its rows — Verkstead's own five, then each plugin's in the order they
+/// were installed.
+///
+/// **Nothing is written while Develop is offered**, which is almost always:
+/// a Draft with no row of its own reads as Develop, and that reading is the
+/// whole of how a Conversation from before there were Processes is covered —
+/// see [`store::process`]. Prefilling it would be writing a row into every new
+/// Draft to say what the record already says.
+///
+/// `None` where nothing at all is offered: every tick off and no plugin
+/// providing one. The Draft is left reading Develop and Start says it is not
+/// offered, which is the truth, rather than this putting the Conversation on
+/// something nobody offered either.
+async fn default_process(state: &AppState) -> Option<store::Process> {
+    for landed in LANDED {
+        let choice = verkstead_render::ProcessChoice {
+            process: *landed,
+            provided: None,
+        };
+
+        let Some(process) = crate::ui::picked_process(choice) else {
+            continue;
+        };
+
+        if crate::processes::offered(state, &process).await {
+            return Some(process);
+        }
+    }
+
+    crate::processes::listed(state)
+        .await
+        .into_iter()
+        .find(|loaded| loaded.offered)
+        .map(|loaded| store::Process::Provided {
+            plugin: loaded.plugin,
+            id: loaded.process.id,
+        })
+}
+
 /// Say what kind of work a drafting Conversation is for.
 ///
 /// Thin over the store with one question of its own in front of it, which is
@@ -1441,6 +1492,8 @@ pub(crate) async fn pick_process(
 /// where it is one of Verkstead's own written as data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FirstRuns {
+    /// The Interview, as a Develop's: [`crate::activities::interview::run`].
+    Interview,
     /// Follow-up rounds, as a Tinker's: [`crate::activities::follow_up_rounds::run`].
     FollowUp,
     /// Follow-up rounds under the investigating skill, as an Investigate's:
@@ -1837,10 +1890,10 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // only while it is offered: a plugin switched off or in trouble since the
     // pick is one nothing new starts on.
     //
-    // And so does each of Verkstead's own that is data — Tinker and
-    // Investigate here, Review and Fix Merge Issues at the take-up — while its
-    // tick stands: its first state is the word it lands in, and that state's
-    // Activity is what is started. Develop is not data yet.
+    // And so does each of Verkstead's own, all five of them data — Develop,
+    // Tinker and Investigate here, Review and Fix Merge Issues at the take-up
+    // — while its tick stands: its first state is the word it lands in, and
+    // that state's Activity is what is started.
     let manifest = crate::processes::of(state, &process);
     let provided = matches!(process, store::Process::Provided { .. });
 
@@ -1860,9 +1913,14 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         .map(|first| first.id.clone());
 
     // Which of the host's drivers the first state's Activity is run by, for
-    // one of Verkstead's own: Follow-up rounds as an investigation where the
-    // state names the investigating skill, as a follow-up otherwise.
+    // one of Verkstead's own: the Interview as a Develop's, Follow-up rounds
+    // as an investigation where the state names the investigating skill, and
+    // as a follow-up otherwise. `None` is a Process whose manifest this build
+    // cannot read, which starts the grilling a Start always started.
     let runs = first.as_ref().and_then(|first| match &first.activity {
+        crate::plugins::manifest::process::Runs::Activity(id) if id == "interview" => {
+            Some(FirstRuns::Interview)
+        }
         crate::plugins::manifest::process::Runs::Activity(id) if id == "follow-up-rounds" => {
             let investigating = first
                 .options
@@ -2231,6 +2289,11 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // grilling from here is the interview, from its launch through to wherever
     // the Direction picked carries the Conversation. See
     // [`crate::activities::interview::run`].
+    //
+    // Where a Develop lands: its manifest's first state runs the Interview, so
+    // `runs` is [`FirstRuns::Interview`] and neither of the two above took it.
+    // A Process whose manifest this build cannot read lands here too, which is
+    // the grilling a Start always started.
     //
     // The grilling Profile is what the session runs under. The implementation
     // one is fixed before starting because the grilling ends by handing over to
@@ -6008,7 +6071,7 @@ pub(crate) fn ready_to_grill(
 /// **Read off the Process's manifest**, its `target` (ADR-0030, *Process*):
 /// Review and Fix Merge Issues say so, each being a wrap-up over a pull request
 /// or a branch somebody built without Verkstead, and the field is where it is
-/// named. Develop, not data yet, takes none.
+/// named. Develop's manifest writes no `target`, so it takes none.
 ///
 /// Which is the question the take-up asks of a press as well — see [`take_up`],
 /// whose door this is: *is this Process pointed at work that is already
