@@ -9547,7 +9547,7 @@ describe("the author on the brief", () => {
     display_name: "Home",
     name: "A. L.",
     email: "al@home.example",
-    github_token: null,
+    tokens: [],
   };
   const TWO_AUTHORS: SettingsView = { ...ONE_AUTHOR, authors: [WORK, HOME] };
 

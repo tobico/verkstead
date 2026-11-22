@@ -802,10 +802,13 @@ flowchart LR
 - **Verkstead itself reaches GitHub through host `gh`** (CI status, PR commit
   lists and comments), authenticating as the same configured token the sessions
   get — `GH_TOKEN` in the environment of each call, read from `secrets.yaml` at
-  the moment of the call so a rotation applies without a restart, and unset
-  where nothing is configured so the host's own login still stands (*refined
-  2026-08-23, building intentional-credentials*). Agents keep using `gh` inside
-  the sandbox for push/PR as today.
+  the moment of the call so a rotation applies without a restart (*refined
+  2026-08-23, building intentional-credentials*). Where the Repo's Author holds
+  no token for its Forge, the Forge is not asked at all and the work is treated
+  as the Forge being out of reach — the host's own login no longer stands in
+  (*refined 2026-11-22, Set 1878, Q3*). One token per Forge per Author, the
+  Author record carrying a digest of each beside the GitHub one older members
+  read. Agents keep using `gh` inside the sandbox for push/PR as today.
 - **Full Captures** are stored per session; the timeline event summarizes (turn
   count, and what the run was launched under), the details pane shows
   everything. The turns are the session's own Transcript, counted as the pane

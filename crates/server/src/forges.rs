@@ -62,18 +62,14 @@ pub(crate) trait Forge: Send + Sync + std::fmt::Debug {
     /// this Forge would be asked with, read now. See [`Credential`].
     fn credential(&self) -> Credential;
 
-    /// Whether there is a token to ask as at all — which, where there is none,
-    /// would leave a call to the host's own login.
-    ///
-    /// What a write asks before it is made: a read under the host's login is a
-    /// read, and a repository made under it is one in an account nobody chose.
+    /// Whether there is a token to ask as at all. An Author with none for this
+    /// Forge leaves it unasked (Set 1878, Q3): nothing falls back to the
+    /// host's own login.
     fn tokened(&self) -> bool;
 
-    /// The token the host itself is logged in to this Forge with, where it has
-    /// one: what the onboarding wizard prefills its token field from.
-    fn host_token(&self) -> Option<String>;
-
-    /// Who `token` authenticates as, and what the Forge will let it do.
+    /// Who `token` authenticates as, and what the Forge will let it do — the
+    /// scopes it found, which [`Account::short_of`] reads against the ones
+    /// the Forge's manifest declares it needs.
     fn verify(&self, token: &str) -> Result<Account, Trouble>;
 
     /// The pull request open on `branch` of `repo`.
@@ -171,9 +167,15 @@ pub(crate) struct Credential(pub(crate) AsWhom);
 /// Who a git or a Forge call of Verkstead's own authenticates as.
 #[derive(Clone)]
 pub(crate) enum AsWhom {
-    /// Whatever the host is logged in as: an Author with no token, or no
-    /// Author at all.
+    /// Whatever the host is logged in as — a Forge with no settings behind it
+    /// to read a token out of, which is a stand-in's.
     Host,
+
+    /// The Repo's Author holds no token for this Forge, or there is no
+    /// Author at all: the Forge is not asked (Set 1878, Q3), and a git of
+    /// Verkstead's own is left to the machine's own configuration — an SSH
+    /// key, most likely — exactly as before there were tokens.
+    Untokened,
 
     /// This token and no other.
     Token(String),
@@ -225,7 +227,7 @@ impl Credential {
         const HELPER: &str = r#"!f() { if test "$1" = get; then printf 'username=x-access-token\npassword=%s\n' "$GH_TOKEN"; fi; }; f"#;
 
         match &self.0 {
-            AsWhom::Host => {}
+            AsWhom::Host | AsWhom::Untokened => {}
             AsWhom::Token(token) => {
                 command
                     .args(["-c", "credential.helper=", "-c"])
@@ -250,6 +252,7 @@ impl std::fmt::Debug for Credential {
         match self.0 {
             AsWhom::Token(_) => f.write_str("Credential(an Author's token)"),
             AsWhom::Host => f.write_str("Credential(the host's)"),
+            AsWhom::Untokened => f.write_str("Credential(the machine's, no token held)"),
             AsWhom::Awaited => f.write_str("Credential(nobody's, a token awaited)"),
         }
     }
@@ -275,8 +278,8 @@ pub(crate) fn awaited() -> String {
 /// [`Trouble::why`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Trouble {
-    /// Nobody is logged in to the Forge: no token for the Author, and nothing
-    /// on the host to fall back on.
+    /// Nobody is logged in to the Forge: the Repo's Author holds no token for
+    /// it, which leaves it unasked, or the Forge turned the token down.
     NotLoggedIn,
 
     /// The repository has no remote for the Forge to work out which of its
@@ -318,6 +321,19 @@ pub(crate) struct Account {
 
     /// And the scopes it says the token carries.
     pub(crate) scopes: Scopes,
+}
+
+impl Account {
+    /// The scopes of `needed` — the Forge manifest's, in its order — this
+    /// token is known not to carry. Empty on one that carries them all, and
+    /// on one the Forge said nothing about — see [`Scopes::known_to_lack`].
+    pub(crate) fn short_of(&self, needed: &[String]) -> Vec<String> {
+        needed
+            .iter()
+            .filter(|scope| self.scopes.known_to_lack(scope))
+            .cloned()
+            .collect()
+    }
 }
 
 /// What GitHub said about a token's scopes, which has three answers rather than
@@ -627,6 +643,50 @@ pub(crate) struct Enabled {
 /// human adds to it: a self-hosted instance is a host added, not a plugin
 /// written (ADR-0030, *Forge*).
 pub(crate) const HOSTS_SETTING: &str = "hosts";
+
+/// The Forges a token is asked for under each Author: the built-in GitHub
+/// where it is enabled, then every Forge an installed plugin that loaded here
+/// declares, in the order they were installed (ADR-0030, *Forge*). Each with
+/// the scopes its manifest says a token needs.
+///
+/// Wider than [`enabled`], which is the Forges a Repo is matched against: a
+/// token can be set for a Forge before its component can be asked anything.
+pub(crate) async fn taking_tokens(state: &crate::AppState) -> Vec<verkstead_render::TokenForge> {
+    let records =
+        match crate::store::replicated::live_records::<crate::replicating::plugins::Plugins>(
+            &state.pool,
+        )
+        .await
+        {
+            Ok(records) => records,
+            Err(error) => {
+                tracing::error!(error = ?error, "reading which forges are enabled failed");
+                Vec::new()
+            }
+        };
+
+    let built_in = crate::plugins::built_in::listed()
+        .iter()
+        .filter(|manifest| {
+            !records
+                .iter()
+                .any(|record| record.uuid == manifest.uuid && !record.fields.enabled)
+        })
+        .filter_map(|manifest| {
+            let forge = manifest
+                .provides
+                .iter()
+                .find_map(|provision| provision.forge())?;
+
+            Some(verkstead_render::TokenForge {
+                uuid: manifest.uuid.clone(),
+                name: manifest.name.clone(),
+                scopes: forge.scopes.clone(),
+            })
+        });
+
+    built_in.chain(state.plugins.forges()).collect()
+}
 
 /// Which Forge a Repo is on, read off its remote at the moment it is asked.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -549,8 +549,8 @@ const TOKENED = told as SettingsView;
 /// looks like — and what every test that is not about the tick reads.
 const UNTOKENED: SettingsView = {
   ...TOKENED,
-  github_token: null,
-  authors: [{ ...TOKENED.authors[0]!, github_token: null }],
+  tokens: [],
+  authors: [{ ...TOKENED.authors[0]!, tokens: [] }],
 };
 
 /// The second of two Authors, with no display name, so its row reads as its
@@ -560,7 +560,7 @@ const SECOND: SettingsView["authors"][number] = {
   display_name: "",
   name: "A. L.",
   email: "al@home.example",
-  github_token: null,
+  tokens: [],
 };
 
 /// The settings with two Authors configured, which is what draws the pick on
@@ -4947,7 +4947,7 @@ describe("the two repo rows on the picked device", () => {
     display_name: "Laptop",
     name: "Ada Lovelace",
     email: "ada@laptop.example",
-    holds_token: true,
+    tokens: ["b357e557-3716-4ea6-a3a8-d904c92c5eac"],
   };
 
   const MADE_HERE_AUTHOR: AuthorEntry = oneList(UNTOKENED)[0]!;
@@ -5930,7 +5930,7 @@ describe("the MCP servers a compose page holds", () => {
               },
             ],
           },
-          verified: null,
+          verified: [],
           refused: [],
           refused_servers: [],
           tried: [],

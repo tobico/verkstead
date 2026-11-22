@@ -140,7 +140,7 @@ function theSettings(standing: SettingsView, ...answers: Array<Answer>) {
 function answering(standing: SettingsView): SettingsSaved {
   return {
     settings: standing,
-    verified: null,
+    verified: [],
     refused: [],
     refused_servers: [],
     tried: [],

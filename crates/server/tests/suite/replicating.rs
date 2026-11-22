@@ -67,6 +67,12 @@ const RECORDS: &str = "/api/peer/v1/records/authors";
 const TOKENS: &str = "/api/peer/v1/authors/";
 
 const WORK: &str = "6f1c2a52-7d0e-4c55-9a43-0d6b8f3e2a11";
+
+/// The built-in GitHub's plugin uuid, which its tokens are kept under.
+const GITHUB: &str = "b357e557-3716-4ea6-a3a8-d904c92c5eac";
+
+/// And another Forge's, a self-hosted one's plugin.
+const GITEA: &str = "7a3d1f20-5b4e-4c8a-9e61-2d0f4b7c9a35";
 const PERSONAL: &str = "0b7e5f3a-2c41-4d8e-b6a9-5e3f1c7d9a20";
 
 /// How long a dial in this suite gives one address, rather than the two seconds
@@ -309,7 +315,7 @@ impl Verkstead {
                         "name": name,
                         "email": email,
                     },
-                    "github_token": "Keep",
+                    "tokens": [],
                     "cleanup": {
                         "trim": { "enabled": true, "days": "" },
                         "delete": { "enabled": false, "days": "" },
@@ -340,7 +346,7 @@ impl Verkstead {
                     "display_name": "",
                     "name": name,
                     "email": email,
-                    "github_token": "Keep",
+                    "tokens": [],
                 })
                 .to_string(),
             ),
@@ -366,7 +372,7 @@ impl Verkstead {
                     "display_name": row.display_name,
                     "name": row.name,
                     "email": row.email,
-                    "github_token": token,
+                    "tokens": [{ "forge": GITHUB, "token": token }],
                 })
                 .to_string(),
             ),
@@ -399,7 +405,7 @@ impl Verkstead {
             Some(
                 &serde_json::json!({
                     "git_author": { "display_name": "", "name": "", "email": "" },
-                    "github_token": "Keep",
+                    "tokens": [],
                     "cleanup": {
                         "trim": { "enabled": true, "days": "" },
                         "delete": { "enabled": false, "days": "" },
@@ -471,7 +477,7 @@ impl Verkstead {
             Some(
                 &serde_json::json!({
                     "git_author": { "display_name": "", "name": "", "email": "" },
-                    "github_token": "Keep",
+                    "tokens": [],
                     "cleanup": {
                         "trim": { "enabled": true, "days": "" },
                         "delete": { "enabled": false, "days": "" },
@@ -615,6 +621,32 @@ impl Verkstead {
             .fetch_optional(&self.pool)
             .await
             .unwrap()
+    }
+
+    /// The token this device's `secrets.yaml` holds for the Author `id` for
+    /// the Forge `forge`.
+    fn token_here_on(&self, id: &str, forge: &str) -> Option<String> {
+        self.settings()
+            .secrets()
+            .author_token_on(id, forge)
+            .map(str::to_owned)
+    }
+
+    /// And wait for it to be `token`.
+    async fn token_saying_on(&self, id: &str, forge: &str, token: Option<&str>) {
+        let waited = tokio::time::timeout(WAITING, async {
+            while self.token_here_on(id, forge).as_deref() != token {
+                tokio::time::sleep(LOOKING).await;
+            }
+        })
+        .await;
+
+        waited.unwrap_or_else(|_| {
+            panic!(
+                "the {forge} token never said {token:?}: it said {:?}",
+                self.token_here_on(id, forge)
+            )
+        });
     }
 
     /// The token this device's `secrets.yaml` holds for the Author `id`.
@@ -1299,6 +1331,86 @@ async fn a_token_set_on_one_device_reaches_another_with_the_authors_maker_off() 
     a.token_saying(WORK, Some("ghp_rotatedonb")).await;
 }
 
+/// One token per Forge per Author: a second Forge's token held on A reaches B
+/// beside the GitHub one, each under its own Forge, and clearing GitHub's
+/// takes that copy away and leaves the other.
+#[tokio::test]
+async fn a_second_forges_token_reaches_another_device_beside_githubs() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let _b_holding = b.holding();
+
+    a.saves_author(WORK, "Ada Lovelace", "ada@work.example")
+        .await;
+
+    // The second Forge's token written beside where the Git section would
+    // have put it, and the GitHub one set through the section — which is the
+    // write that says on the record what the file holds.
+    std::fs::write(
+        a.dir.path().join("secrets.yaml"),
+        format!("author_tokens:\n  {WORK}:\n    {GITEA}: gta_seton_a\n"),
+    )
+    .unwrap();
+    a.sets_token(WORK, "ghp_seton_a").await;
+
+    b.token_saying_on(WORK, GITEA, Some("gta_seton_a")).await;
+    b.token_saying_on(WORK, GITHUB, Some("ghp_seton_a")).await;
+
+    let held = with(&b.authors().await, WORK).cloned().unwrap();
+    assert_eq!(
+        held.tokens,
+        [GITEA.to_owned(), GITHUB.to_owned()],
+        "by uuid"
+    );
+
+    a.clears_token(WORK).await;
+
+    b.token_saying_on(WORK, GITHUB, None).await;
+    assert_eq!(
+        b.token_here_on(WORK, GITEA).as_deref(),
+        Some("gta_seton_a"),
+        "the other Forge's copy stays"
+    );
+}
+
+/// An older member reads GitHub's token off the two fields it has always had:
+/// a device of this release holding a second Forge's token beside it leaves
+/// those two saying the GitHub one, and puts the other in a map of its own.
+#[tokio::test]
+async fn an_older_members_record_is_read_and_written_as_githubs() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let _b_holding = b.holding();
+
+    a.saves_author(WORK, "Ada Lovelace", "ada@work.example")
+        .await;
+    std::fs::write(
+        a.dir.path().join("secrets.yaml"),
+        format!("author_tokens:\n  {WORK}:\n    {GITHUB}: ghp_seton_a\n    {GITEA}: gta_seton_a\n"),
+    )
+    .unwrap();
+    a.sets_token(WORK, "ghp_seton_a").await;
+
+    let said: serde_json::Value = reading(&a.over_the_link, RECORDS).await;
+    let record = &said[0]["fields"];
+    assert_eq!(record["holds_token"], true, "{said}");
+    assert!(record["token_digest"].is_string(), "{said}");
+    assert!(
+        record["forge_tokens"][GITEA].is_string(),
+        "the second Forge's digest beside them: {said}"
+    );
+    assert!(
+        record["forge_tokens"].get(GITHUB).is_none(),
+        "and never GitHub's, which the two fields are: {said}"
+    );
+
+    // And B copies each, GitHub's by the two fields an older member reads.
+    b.token_saying_on(WORK, GITHUB, Some("ghp_seton_a")).await;
+    b.token_saying_on(WORK, GITEA, Some("gta_seton_a")).await;
+}
+
 /// A token's record saying one is held, before any copy has reached a device,
 /// is a token awaited there — and nothing else is.
 #[tokio::test]
@@ -1390,7 +1502,7 @@ async fn the_token_route_answers_from_whoever_holds_one() {
     a.sets_token(WORK, "ghp_seton_a").await;
     b.token_saying(WORK, Some("ghp_seton_a")).await;
 
-    let asked = |id: &'static str| replicating::authors::token_at(Some(&c.cluster), B, id);
+    let asked = |id: &'static str| replicating::authors::token_at(Some(&c.cluster), B, id, GITHUB);
 
     assert_eq!(
         asked(WORK).await.unwrap().as_deref(),

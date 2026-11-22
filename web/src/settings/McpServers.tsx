@@ -193,7 +193,7 @@ export function savingServers(
     git_author: heldAuthor(told),
     // Untouched. This has no business with the credentials, and a blank token
     // field read as *clear this* is exactly what `Keep` is here to stop.
-    github_token: "Keep",
+    tokens: [],
     share_on_done: told?.share_on_done ?? false,
     // And the ignore rules left exactly where they are: a save that spoke for
     // them could be refused over a pattern it never showed anybody.

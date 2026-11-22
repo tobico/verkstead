@@ -80,8 +80,9 @@ there, as a **Clonable Repo**, and the other sends the human to the machine.
 _Avoid_: project, codebase, checkout
 
 **Author**:
-Who a Repo's work is committed and pushed as: a git name, an email and, where
-GitHub is in use, a token — the human's own name on the work, where an **Agent
+Who a Repo's work is committed and pushed as: a git name, an email and a token
+for each enabled **Forge** it is used on — one token per Forge per Author — the
+human's own name on the work, where an **Agent
 Profile** is the account the agent runs under, and the two are picked
 independently. Keyed by a uuid, with an optional display name that falls back to
 the git name: the uuid is what a Repo records and what every device of a cluster
@@ -106,7 +107,9 @@ said rather than refused. And everything Verkstead itself does on a Repo —
 every `gh` call, every fetch and push of its own, the GitHub repository
 **Create repo** makes — authenticates as that Author's token, through the
 credential helper publishing already hands one to; an Author with no token
-leaves git to the host's own credentials. A **Share** is published as its Repo's
+for the Repo's Forge leaves git to the host's own credentials and the Forge
+unasked, which the wrap-up and `verkstead done` read as the Forge out of reach
+— the host's own `gh` login never stands in. A **Share** is published as its Repo's
 Author too, the gist and the comment linking it alike, and an Author with no
 token refuses the publish rather than lending it another's.
 **Refused rather than mixed.** Repointing a Repo is refused while a Conversation

@@ -88,7 +88,9 @@ pub struct RepoEntry {
 #[serde(tag = "kind")]
 pub enum RepoForge {
     /// An enabled Forge answers for its remote's host: the plugin's uuid and
-    /// its name.
+    /// its name. Whether the Repo's Author holds a token for it is the
+    /// Author's — see [`crate::AuthorEntry::tokens`] — which the row reads to
+    /// say where it holds none.
     On { uuid: String, name: String },
 
     /// None does: the host the remote names, which the row and the card say

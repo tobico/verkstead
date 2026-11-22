@@ -3723,6 +3723,12 @@ enum Serving {
     /// A desktop install's, answering for this device too — see
     /// [`grilling_as_a_desktop_install`].
     ADesktopInstall,
+
+    /// Sessions, with the `gh` asked as the Repo's Author the way the real
+    /// server asks it — through the Author's token in `secrets.yaml`, and not
+    /// at all where it holds none. Every other bench's `gh` is a stand-in
+    /// answering as whatever it is.
+    AsTheAuthor,
 }
 
 /// The same, serving what `serving` says.
@@ -3782,6 +3788,15 @@ async fn bench_serving(
         Serving::Sessions => {
             let (app, hosting) =
                 router_hosting_activities(pool, state.path().to_owned(), agents, gh_stub(gh));
+            (app, Some(hosting))
+        }
+        Serving::AsTheAuthor => {
+            let (app, hosting) = router_hosting_activities(
+                pool,
+                state.path().to_owned(),
+                agents,
+                gh_stub(gh).authenticated_by(Settings::in_data_dir(state.path())),
+            );
             (app, Some(hosting))
         }
         Serving::ADesktopInstall => {
@@ -9116,6 +9131,60 @@ async fn a_backlog_on_a_repo_no_forge_answers_for_lands_done_with_nothing_watchi
     );
 }
 
+/// A backlog worked to empty on a Repo whose Author holds no GitHub token gets
+/// no wrap-up (Set 1878, Q3): GitHub is not asked — the `gh` here would answer
+/// a pull request — and nothing falls back to the host's own login, so the
+/// run stops saying the Author needs one, the way a Forge out of reach does.
+#[tokio::test]
+async fn a_backlog_whose_author_holds_no_token_is_not_wrapped_up() {
+    let bench = bench_serving(
+        tempfile::tempdir().unwrap(),
+        A_BACKLOG_OF_ONE,
+        PULL_REQUEST,
+        *BRISKLY,
+        None,
+        Serving::AsTheAuthor,
+    )
+    .await;
+    let fixture = grilling_on(
+        bench,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::UnderEveryPairing,
+        Origin::None,
+        Seeded::Nothing,
+        &[],
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture
+        .until(|view| {
+            notices(view)
+                .iter()
+                .any(|notice| notice.contains("no GitHub token that works"))
+                .then(|| view.clone())
+        })
+        .await;
+
+    assert!(
+        pull_request(&view).is_none(),
+        "nothing was asked for a pull request"
+    );
+    assert!(
+        fixture.view().await.blocked_on.is_some(),
+        "the run stopped, on you"
+    );
+    assert!(
+        !view
+            .timeline
+            .iter()
+            .any(|event| matches!(event, TimelineEvent::Moved(moved) if moved.state == Lifecycle::Wrapping)),
+        "it never wrapped up"
+    );
+}
+
 /// The whole of what a finished backlog leaves behind: a pull request open on
 /// the branch, the Conversation wrapping it up, and the move on the Timeline —
 /// with nothing having asked for approval at any point.
@@ -10677,7 +10746,7 @@ esac
         "the signal was taken: {answered:?}",
     );
     assert!(
-        stopped.html.contains("isn't logged in"),
+        stopped.html.contains("no GitHub token that works"),
         "and the stop after it is the one GitHub's silence has always given: {:?}",
         stopped.html,
     );
@@ -30969,7 +31038,7 @@ async fn resuming_an_inline_run_github_cannot_be_asked_about_halts_unspent() {
     let first = fixture.stopped().await;
 
     assert!(
-        first.html.contains("isn't logged in"),
+        first.html.contains("no GitHub token that works"),
         "the run stopped because nothing could be asked: {:?}",
         first.html,
     );
@@ -30988,7 +31057,7 @@ async fn resuming_an_inline_run_github_cannot_be_asked_about_halts_unspent() {
         .await;
 
     assert!(
-        again.html.contains("isn't logged in"),
+        again.html.contains("no GitHub token that works"),
         "and it stops on the same thing, named again: {:?}",
         again.html,
     );

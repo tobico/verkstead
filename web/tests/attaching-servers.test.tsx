@@ -237,7 +237,7 @@ describe("adding a server from the Attach menu", () => {
   function landed(servers: SettingsView["mcp_servers"]): SettingsSaved {
     return {
       settings: { ...SETTINGS, mcp_servers: servers },
-      verified: null,
+      verified: [],
       refused: [],
       refused_servers: [],
       tried: [],
@@ -327,7 +327,7 @@ describe("adding a server from the Attach menu", () => {
       },
     });
     // And everything else on the settings left as it stands.
-    expect(body.github_token).toBe("Keep");
+    expect(body.tokens).toEqual([]);
     expect(body.ignored_comments).toBe("Keep");
 
     await waitFor(() =>

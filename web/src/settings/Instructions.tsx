@@ -140,7 +140,7 @@ export function InstructionsPane(props: {
         // Untouched. This form has no business with the credentials, and a
         // blank token field read as *clear this* is exactly what `Keep` is
         // here to stop.
-        github_token: "Keep",
+        tokens: [],
         // And what becomes of an archived Conversation — see [`heldCleanup`].
         cleanup: heldCleanup(told()),
         // And how much Verkstead runs at once, likewise — see [`heldAtOnce`].

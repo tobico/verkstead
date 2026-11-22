@@ -3346,7 +3346,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
                 "name": "Ada Lovelace",
                 "email": "ada@example.com",
             },
-            "github_token": { "Set": { "token": "ghp_0123456789abcdef" } },
+            "tokens": [{
+                "forge": verkstead_server::plugins::built_in::GITHUB,
+                "token": { "Set": { "token": "ghp_0123456789abcdef" } },
+            }],
             // And a Cleanup somebody has been through: both durations typed and
             // the delete turned on, for the reason the size above is typed —
             // this is the fixture of a Verkstead that has been told everything,
@@ -4840,16 +4843,20 @@ fn pin_written_at(json: &str, under: &str) -> String {
     };
 
     assert!(
-        settings["github_token"].get("at").is_some(),
+        settings["tokens"]
+            .as_array()
+            .is_some_and(|tokens| !tokens.is_empty()),
         "no saved token here to pin:\n{settings}"
     );
-    settings["github_token"]["at"] = "2026-08-03T09:07:11.000Z".into();
+    for token in settings["tokens"].as_array_mut().into_iter().flatten() {
+        token["saved"]["at"] = "2026-08-03T09:07:11.000Z".into();
+    }
 
     // And every Author's in the list, which is the same stamp read off the
     // same file.
     for author in settings["authors"].as_array_mut().into_iter().flatten() {
-        if author["github_token"].get("at").is_some() {
-            author["github_token"]["at"] = "2026-08-03T09:07:11.000Z".into();
+        for token in author["tokens"].as_array_mut().into_iter().flatten() {
+            token["saved"]["at"] = "2026-08-03T09:07:11.000Z".into();
         }
     }
 

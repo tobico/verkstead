@@ -1332,7 +1332,7 @@ async fn adding_a_second_author_keeps_a_repo_that_recorded_none_as_the_first() {
                 "name": "A. L.",
                 "email": "al@home.example",
             },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": {
                 "trim": { "enabled": true, "days": "" },
                 "delete": { "enabled": false, "days": "" },

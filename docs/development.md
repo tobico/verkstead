@@ -626,14 +626,21 @@ A session's GitHub auth and the author of its commits are two of those settings
 rather than anything found in a home directory. Who you are is an **Author**,
 keyed by a uuid and kept in the database as a **Replicated record**
 ([ADR-0028](adr/0028-records-are-the-clusters.md)) — added, edited and removed
-on the settings page rather than in a file — and its token is in `secrets.yaml`
-beside the database under that uuid:
+on the settings page rather than in a file — and its tokens are in
+`secrets.yaml` beside the database under that uuid, one per Forge, keyed by the
+Forge plugin's uuid (the built-in GitHub's below). A file from before held the
+one token alone under the Author, which reads as GitHub's:
 
 ```yaml
 # secrets.yaml
 author_tokens:
-  3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01: ghp_...
+  3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01:
+    b357e557-3716-4ea6-a3a8-d904c92c5eac: ghp_...
 ```
+
+An Author with no token for a Repo's Forge leaves that Forge unasked: nothing
+falls back to the host's own `gh` login, and the onboarding wizard prefills the
+token from `GH_TOKEN` or `GITHUB_TOKEN` alone.
 
 ```yaml
 # config.yaml

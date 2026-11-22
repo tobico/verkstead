@@ -694,6 +694,69 @@ async fn unticking_a_row_disables_it() {
     assert!(!row(&page(&app).await, PLUGIN).enabled);
 }
 
+/// The Forges a token is asked for under each Author, as the Git section
+/// reads them off the settings.
+async fn token_forges(app: &Router) -> Vec<(String, String, Vec<String>)> {
+    let answered = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/ui/settings")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(answered.status(), StatusCode::OK);
+    let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+    let view: verkstead_render::SettingsView = serde_json::from_slice(&bytes).unwrap();
+
+    view.forges
+        .into_iter()
+        .map(|forge| (forge.uuid, forge.name, forge.scopes))
+        .collect()
+}
+
+/// A second Forge enabled is a second token asked for under each Author:
+/// the built-in GitHub's first, with the scopes its manifest declares, and
+/// the installed plugin's after it — gone again once it is unticked.
+#[tokio::test]
+async fn an_installed_forge_is_a_second_token_under_each_author_until_unticked() {
+    let (app, dir) = kept().await;
+    const GITHUB: &str = "b357e557-3716-4ea6-a3a8-d904c92c5eac";
+
+    assert_eq!(
+        token_forges(&app).await,
+        [(
+            GITHUB.to_owned(),
+            "GitHub".to_owned(),
+            vec!["repo".to_owned(), "gist".to_owned()]
+        )],
+    );
+
+    let path = plugin(dir.path(), "one", &manifest(PLUGIN, "One", &[]));
+    installs(&app, &path).await;
+
+    let forges = token_forges(&app).await;
+    assert_eq!(
+        forges
+            .iter()
+            .map(|(uuid, name, _)| (uuid.as_str(), name.as_str()))
+            .collect::<Vec<_>>(),
+        [(GITHUB, "GitHub"), (PLUGIN, "One")],
+    );
+
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{PLUGIN}/enabled"),
+        serde_json::json!({ "enabled": false }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    assert_eq!(token_forges(&app).await.len(), 1, "GitHub's alone");
+}
+
 /// A uuid already installed, and a built-in's, are refused at the card.
 #[tokio::test]
 async fn a_uuid_installed_or_built_in_is_refused() {

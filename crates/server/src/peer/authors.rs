@@ -24,7 +24,7 @@
 
 use axum::Json;
 use axum::Router;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -47,8 +47,19 @@ pub const TOKEN: &str = "/api/peer/v1/authors/{author}/token";
 ///
 /// **A uuid this device holds no live record of is `404`** — one nobody here
 /// has heard of, or one removed, whose copy went with it.
-pub(crate) async fn held(State(state): State<AppState>, Path(author): Path<String>) -> Response {
+///
+/// **Which Forge's is `?forge=<uuid>`** — one token per Forge per Author
+/// (ADR-0030, *Forge*) — and the built-in GitHub's where the query is absent,
+/// which is what an older member asks.
+pub(crate) async fn held(
+    State(state): State<AppState>,
+    Path(author): Path<String>,
+    Query(asked): Query<Asked>,
+) -> Response {
     let settings = state.settings.clone();
+    let forge = asked
+        .forge
+        .unwrap_or_else(|| crate::plugins::built_in::GITHUB.to_owned());
 
     let read = tokio::task::spawn_blocking(move || {
         // The table's live Authors, which are the ones the settings hold.
@@ -57,7 +68,10 @@ pub(crate) async fn held(State(state): State<AppState>, Path(author): Path<Strin
             .author(&author)
             .is_some()
             .then(|| AuthorToken {
-                token: settings.secrets().author_token(&author).map(str::to_owned),
+                token: settings
+                    .secrets()
+                    .author_token_on(&author, &forge)
+                    .map(str::to_owned),
             })
     })
     .await;
@@ -84,6 +98,13 @@ pub(crate) async fn held(State(state): State<AppState>, Path(author): Path<Strin
                 .into_response()
         }
     }
+}
+
+/// What a member's ask after a token may say beside the Author.
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct Asked {
+    #[serde(default)]
+    forge: Option<String>,
 }
 
 /// The route, over the state the workbench answers out of — mounted by

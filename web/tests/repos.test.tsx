@@ -73,6 +73,7 @@ import {
   whenever,
   type Answer,
 } from "./serving";
+import { GITHUB } from "../src/forges";
 import { CLIENT, oneList } from "./authors";
 import repos from "./fixtures/repos.json" with { type: "json" };
 import listing from "./fixtures/directories.json" with { type: "json" };
@@ -323,6 +324,57 @@ describe("the pane it opens", () => {
     expect(row.querySelector(`.${card.card}`)).toBeNull();
   });
 
+  /// A Repo on a forge its Author holds no token for says so on its row: the
+  /// forge is not asked, so no wrap-up is started there (Set 1878, Q3).
+  it("says on a row that its author has no token for its forge", async () => {
+    const on: RepoEntry = {
+      ...FIRST,
+      author: null,
+      forge: { kind: "On", uuid: GITHUB, name: "GitHub" },
+    };
+    const author = {
+      id: "6f1c2a52-7d0e-4c55-9a43-0d6b8f3e2a11",
+      display_name: "Work",
+      name: "Ada Lovelace",
+      email: "ada@work.example",
+    };
+    serving(
+      whenever("/api/ui/repos", json([on])),
+      whenever("/api/ui/authors", json([{ ...author, tokens: [] }])),
+    );
+    mountPane();
+
+    await waitFor(() => screen.getByText("No GitHub token for Work"));
+  });
+
+  /// And says nothing of it where the Author holds one.
+  it("says nothing of a token its author holds", async () => {
+    const on: RepoEntry = {
+      ...FIRST,
+      author: null,
+      forge: { kind: "On", uuid: GITHUB, name: "GitHub" },
+    };
+    serving(
+      whenever("/api/ui/repos", json([on])),
+      whenever(
+        "/api/ui/authors",
+        json([
+          {
+            id: "6f1c2a52-7d0e-4c55-9a43-0d6b8f3e2a11",
+            display_name: "Work",
+            name: "Ada Lovelace",
+            email: "ada@work.example",
+            tokens: [GITHUB],
+          },
+        ]),
+      ),
+    );
+    mountPane();
+
+    await waitFor(() => screen.getByText(FIRST.name));
+    expect(theRow(FIRST.name).textContent).toBe(`${FIRST.name}${FIRST.path}Remove`);
+  });
+
   /// And the path is on the row because the name is not unique.
   ///
   /// A name is the directory's own and nothing stops two registered
@@ -540,7 +592,7 @@ const HOME: SettingsView["authors"][number] = {
   display_name: "Home",
   name: "A. L.",
   email: "al@home.example",
-  github_token: null,
+  tokens: [],
 };
 
 const TWO_AUTHORS: SettingsView = {

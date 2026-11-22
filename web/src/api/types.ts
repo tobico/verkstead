@@ -846,12 +846,17 @@ display_name: string, name: string, email: string, };
  * files it is made on. The fields are values and the token is an action, as
  * they are in a settings save, for its reason.
  */
-export type AuthorEdit = { display_name: string, name: string, email: string, github_token: TokenEdit, };
+export type AuthorEdit = { display_name: string, name: string, email: string, 
+/**
+ * What is to become of its tokens, one per Forge the edit is about —
+ * empty where it is about none, which leaves every one where it is.
+ */
+tokens: Array<ForgeTokenEdit>, };
 
 /**
  * What became of an [`AuthorEdit`].
  */
-export type AuthorEdited = { "Saved": { verified: Verified | null, } } | "NoSuchAuthor";
+export type AuthorEdited = { "Saved": { verified: Array<ForgeVerified>, } } | "NoSuchAuthor";
 
 /**
  * One Author of the cluster's **one list**: a record every device holds,
@@ -868,9 +873,10 @@ export type AuthorEntry = { id: string,
  */
 display_name: string, name: string, email: string, 
 /**
- * Whether this device's `secrets.yaml` holds a GitHub token for it.
+ * The Forges this device's `secrets.yaml` holds a token for it for, by
+ * plugin uuid — empty where it holds none.
  */
-holds_token: boolean, };
+tokens: Array<string>, };
 
 /**
  * What became of removing an Author, from the Git section's switcher — or of
@@ -899,9 +905,10 @@ export type AuthorSaved = { id: string,
  */
 display_name: string, name: string, email: string, 
 /**
- * What can be said about its token, or `null` where it holds none.
+ * What can be said about each of its tokens, one per Forge it holds one
+ * for — empty where it holds none.
  */
-github_token: TokenSaved | null, };
+tokens: Array<ForgeToken>, };
 
 /**
  * The backlog opened: every task document of it, rendered.
@@ -3494,6 +3501,33 @@ export type FolderListing = { "Listed": {
  * The folder this lists, as it was asked for.
  */
 path: string, entries: Array<FolderEntry>, } } | "Outside" | "UnderGit" | "RootGone" | "Missing" | "NotAFolder" | { "Unreadable": { why: string, } };
+
+/**
+ * One Author's token for one Forge, as everything but the token.
+ */
+export type ForgeToken = { 
+/**
+ * The Forge plugin's uuid.
+ */
+forge: string, saved: TokenSaved, };
+
+/**
+ * What is to become of one Author's token for one Forge.
+ */
+export type ForgeTokenEdit = { 
+/**
+ * The Forge plugin's uuid.
+ */
+forge: string, token: TokenEdit, };
+
+/**
+ * What a Forge made of one token that was just set.
+ */
+export type ForgeVerified = { 
+/**
+ * The Forge plugin's uuid.
+ */
+forge: string, verified: Verified, };
 
 /**
  * Why a Forward could not be held.
@@ -6871,10 +6905,11 @@ lock_line: string | null, };
  */
 export type SettingsEdit = { git_author: Author, 
 /**
- * What is to become of the token of the Author `git_author` is about —
- * the one it names, or the one a `null` uuid makes.
+ * What is to become of the tokens of the Author `git_author` is about —
+ * the one it names, or the one a `null` uuid makes — one per Forge the
+ * save is about, and empty where it is about none.
  */
-github_token: TokenEdit, 
+tokens: Array<ForgeTokenEdit>, 
 /**
  * And what the Cleanup is to do after an archiving, as values for that
  * reason again: two switches and two durations, and a save says where each
@@ -6971,10 +7006,11 @@ export type SettingsSaved = {
  */
 settings: SettingsView, 
 /**
- * What GitHub made of the token that was just saved, or `null` where the
- * save was not about a token.
+ * What each Forge made of the token that was just set for it — empty
+ * where the save was not about a token. A token short of the scopes its
+ * Forge declares is not written: its entry says so.
  */
-verified: Verified | null, 
+verified: Array<ForgeVerified>, 
 /**
  * The rules that would not be written down, or empty where the save
  * landed — which is every save that did not send any.
@@ -7018,10 +7054,16 @@ tried: Array<ServerTried>, };
  */
 export type SettingsView = { git_author: Author, 
 /**
- * What can be said about that Author's token, or `null` where it holds
- * none — which is what a Verkstead nobody has told anything looks like.
+ * What can be said about each of that Author's tokens, one per Forge it
+ * holds one for — empty where it holds none, which is what a Verkstead
+ * nobody has told anything looks like.
  */
-github_token: TokenSaved | null, 
+tokens: Array<ForgeToken>, 
+/**
+ * And the Forges a token is asked for under each Author: every enabled
+ * one, in the order the Plugins section lists them (ADR-0030, *Forge*).
+ */
+forges: Array<TokenForge>, 
 /**
  * And every Author, in the order `config.yaml` lists them — empty on a
  * Verkstead nobody has told anything. The first of them is `git_author`
@@ -7348,7 +7390,7 @@ export type Size = { columns: number, rows: number, };
  * around each of them is the viewer's, the way the install commands are, and
  * which environment variable answered is part of what there is to say.
  */
-export type Source = "GitConfig" | "GhToken" | "GithubToken" | "HostGh";
+export type Source = "GitConfig" | "GhToken" | "GithubToken";
 
 /**
  * One stage's brief as the pane draws it: the entry it belongs to, and the
@@ -8351,6 +8393,24 @@ export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | 
 export type TokenEdit = "Keep" | { "Set": { token: string, } } | "Clear";
 
 /**
+ * A Forge a token is asked for: an enabled plugin providing one.
+ */
+export type TokenForge = { 
+/**
+ * The plugin's uuid, which a token is kept under.
+ */
+uuid: string, 
+/**
+ * Its name, which the field is labelled with.
+ */
+name: string, 
+/**
+ * And the scopes its manifest says a token needs, which a token is
+ * verified against — empty where it declares none.
+ */
+scopes: Array<string>, };
+
+/**
  * Everything about the Author's token that is not the token.
  */
 export type TokenSaved = { 
@@ -8634,26 +8694,7 @@ export type UpdateNotice = "Current" | { "Available": { version: string, } };
  * one: the token is written down, and this says what happened when it was
  * tried.
  */
-export type Verified = { "Account": { login: string, 
-/**
- * The scopes Verkstead needs that GitHub says this token has not been
- * given — empty on one that can do everything asked of it.
- *
- * `gist` is the whole of the list, and it is a list because the answer
- * is *what to go and tick*: publishing a share writes a secret gist,
- * which is Verkstead's own write to GitHub rather than a session's, and
- * a token issued for reading repositories does not carry it. The
- * scopes a *session* needs are not checked here — a session
- * authenticates as this token too, but what it does with it is the
- * repository's review process rather than anything this server asks
- * for.
- *
- * Empty as well where GitHub said nothing about scopes at all, which is
- * what a fine-grained token comes back as: it has permissions rather
- * than scopes, and reporting the absence of a header as a missing scope
- * would be sending the human to re-issue a token that works.
- */
-missing: Array<string>, } } | { "Refused": { why: string, } };
+export type Verified = { "Account": { login: string, } } | { "Short": { login: string, missing: Array<string>, } } | { "Refused": { why: string, } };
 
 /**
  * One way a Set fails the question grammar.

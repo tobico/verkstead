@@ -132,9 +132,14 @@ use ts_rs::TS;
 pub struct SettingsView {
     pub git_author: Author,
 
-    /// What can be said about that Author's token, or `null` where it holds
-    /// none — which is what a Verkstead nobody has told anything looks like.
-    pub github_token: Option<TokenSaved>,
+    /// What can be said about each of that Author's tokens, one per Forge it
+    /// holds one for — empty where it holds none, which is what a Verkstead
+    /// nobody has told anything looks like.
+    pub tokens: Vec<ForgeToken>,
+
+    /// And the Forges a token is asked for under each Author: every enabled
+    /// one, in the order the Plugins section lists them (ADR-0030, *Forge*).
+    pub forges: Vec<TokenForge>,
 
     /// And every Author, in the order `config.yaml` lists them — empty on a
     /// Verkstead nobody has told anything. The first of them is `git_author`
@@ -625,8 +630,33 @@ pub struct AuthorSaved {
     pub name: String,
     pub email: String,
 
-    /// What can be said about its token, or `null` where it holds none.
-    pub github_token: Option<TokenSaved>,
+    /// What can be said about each of its tokens, one per Forge it holds one
+    /// for — empty where it holds none.
+    pub tokens: Vec<ForgeToken>,
+}
+
+/// One Author's token for one Forge, as everything but the token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ForgeToken {
+    /// The Forge plugin's uuid.
+    pub forge: String,
+    pub saved: TokenSaved,
+}
+
+/// A Forge a token is asked for: an enabled plugin providing one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct TokenForge {
+    /// The plugin's uuid, which a token is kept under.
+    pub uuid: String,
+
+    /// Its name, which the field is labelled with.
+    pub name: String,
+
+    /// And the scopes its manifest says a token needs, which a token is
+    /// verified against — empty where it declares none.
+    pub scopes: Vec<String>,
 }
 
 /// One Author of the cluster's **one list**: a record every device holds,
@@ -647,8 +677,9 @@ pub struct AuthorEntry {
     pub name: String,
     pub email: String,
 
-    /// Whether this device's `secrets.yaml` holds a GitHub token for it.
-    pub holds_token: bool,
+    /// The Forges this device's `secrets.yaml` holds a token for it for, by
+    /// plugin uuid — empty where it holds none.
+    pub tokens: Vec<String>,
 }
 
 /// One Author's **token**, as a member holding a copy hands it to another for
@@ -686,17 +717,39 @@ pub struct AuthorEdit {
     pub display_name: String,
     pub name: String,
     pub email: String,
-    pub github_token: TokenEdit,
+
+    /// What is to become of its tokens, one per Forge the edit is about —
+    /// empty where it is about none, which leaves every one where it is.
+    pub tokens: Vec<ForgeTokenEdit>,
+}
+
+/// What is to become of one Author's token for one Forge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ForgeTokenEdit {
+    /// The Forge plugin's uuid.
+    pub forge: String,
+    pub token: TokenEdit,
+}
+
+/// What a Forge made of one token that was just set.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ForgeVerified {
+    /// The Forge plugin's uuid.
+    pub forge: String,
+    pub verified: Verified,
 }
 
 /// What became of an [`AuthorEdit`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum AuthorEdited {
-    /// Written to the Author's record, and the token into this device's
-    /// `secrets.yaml` where the edit set one — with what GitHub made of it,
-    /// asked from here, or `null` where the edit was not about a token.
-    Saved { verified: Option<Verified> },
+    /// Written to the Author's record, and each token into this device's
+    /// `secrets.yaml` where the edit set one — with what its Forge made of
+    /// it, asked from here, one per token set. A token short of the scopes its
+    /// Forge declares is not written: its entry says so.
+    Saved { verified: Vec<ForgeVerified> },
 
     /// No live Author has that uuid: one removed since the page was drawn,
     /// most likely.
@@ -804,9 +857,10 @@ pub struct TokenSaved {
 pub struct SettingsEdit {
     pub git_author: Author,
 
-    /// What is to become of the token of the Author `git_author` is about —
-    /// the one it names, or the one a `null` uuid makes.
-    pub github_token: TokenEdit,
+    /// What is to become of the tokens of the Author `git_author` is about —
+    /// the one it names, or the one a `null` uuid makes — one per Forge the
+    /// save is about, and empty where it is about none.
+    pub tokens: Vec<ForgeTokenEdit>,
 
     /// And what the Cleanup is to do after an archiving, as values for that
     /// reason again: two switches and two durations, and a save says where each
@@ -926,9 +980,10 @@ pub struct SettingsSaved {
     /// made a moment ago is part of what the page should be showing.
     pub settings: SettingsView,
 
-    /// What GitHub made of the token that was just saved, or `null` where the
-    /// save was not about a token.
-    pub verified: Option<Verified>,
+    /// What each Forge made of the token that was just set for it — empty
+    /// where the save was not about a token. A token short of the scopes its
+    /// Forge declares is not written: its entry says so.
+    pub verified: Vec<ForgeVerified>,
 
     /// The rules that would not be written down, or empty where the save
     /// landed — which is every save that did not send any.
@@ -1262,29 +1317,20 @@ pub enum RuleField {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Verified {
-    /// GitHub says the token is this account's.
-    Account {
-        login: String,
+    /// The Forge says the token is this account's, and that it carries every
+    /// scope the Forge's manifest declares it needs — or says nothing about
+    /// scopes at all, which is what a GitHub fine-grained token comes back as:
+    /// it has permissions rather than scopes, and the absence of a header is
+    /// no missing scope. Written down.
+    Account { login: String },
 
-        /// The scopes Verkstead needs that GitHub says this token has not been
-        /// given — empty on one that can do everything asked of it.
-        ///
-        /// `gist` is the whole of the list, and it is a list because the answer
-        /// is *what to go and tick*: publishing a share writes a secret gist,
-        /// which is Verkstead's own write to GitHub rather than a session's, and
-        /// a token issued for reading repositories does not carry it. The
-        /// scopes a *session* needs are not checked here — a session
-        /// authenticates as this token too, but what it does with it is the
-        /// repository's review process rather than anything this server asks
-        /// for.
-        ///
-        /// Empty as well where GitHub said nothing about scopes at all, which is
-        /// what a fine-grained token comes back as: it has permissions rather
-        /// than scopes, and reporting the absence of a header as a missing scope
-        /// would be sending the human to re-issue a token that works.
-        missing: Vec<String>,
-    },
+    /// The token is this account's, and short of scopes the Forge's manifest
+    /// declares it needs: **refused**, and not written down. `missing` is what
+    /// to go and tick, in the order the manifest declares them. Never empty.
+    Short { login: String, missing: Vec<String> },
 
-    /// GitHub would not say, in `gh`'s own words or Verkstead's about `gh`.
+    /// The Forge would not say, in its own words or Verkstead's. Written
+    /// down all the same: a token is pasted once, and a network that was
+    /// briefly down is no reason to make the human go back for another.
     Refused { why: String },
 }

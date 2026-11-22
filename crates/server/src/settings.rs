@@ -13,7 +13,8 @@
 //!
 //! ```yaml
 //! author_tokens:
-//!   3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01: ghp_...
+//!   3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01:
+//!     b357e557-3716-4ea6-a3a8-d904c92c5eac: ghp_...
 //! mcp_headers:
 //!   9c1d7e52-4b3a-5f08-8e6d-2a7c0b9f3e14:
 //!     Authorization: Bearer ...
@@ -586,18 +587,23 @@ impl Settings {
 
         let secrets = authors
             .iter()
-            .any(|recorded| recorded.holds_token)
+            .any(|recorded| !recorded.holds_tokens.is_empty())
             .then(|| self.secrets());
 
         config.awaited = authors
             .iter()
-            .filter(|recorded| recorded.holds_token)
-            .filter(|recorded| {
+            .flat_map(|recorded| {
+                recorded
+                    .holds_tokens
+                    .iter()
+                    .map(move |forge| (recorded.author.id(), forge.as_str()))
+            })
+            .filter(|(id, forge)| {
                 secrets
                     .as_ref()
-                    .is_some_and(|secrets| secrets.author_token(recorded.author.id()).is_none())
+                    .is_some_and(|secrets| secrets.author_token_on(id, forge).is_none())
             })
-            .map(|recorded| recorded.author.id().to_owned())
+            .map(|(id, forge)| (id.to_owned(), forge.to_owned()))
             .collect();
 
         config.authors = authors
@@ -872,19 +878,43 @@ impl Settings {
     /// **A file nothing can parse is an error** rather than a file of nothing
     /// to write the token into: written back from nothing, it would lose
     /// whatever else the human kept in it.
+    #[cfg(test)]
     pub(crate) fn setting_author_token(
         &self,
         id: &str,
         token: Option<String>,
     ) -> std::io::Result<()> {
+        self.setting_author_token_on(id, crate::plugins::built_in::GITHUB, token)
+    }
+
+    /// The same for the token of the Author `id` for the Forge `forge`.
+    pub(crate) fn setting_author_token_on(
+        &self,
+        id: &str,
+        forge: &str,
+        token: Option<String>,
+    ) -> std::io::Result<()> {
         let secrets = Self::parsed(&self.secrets_path(), Secrets::read)
             .ok_or_else(|| std::io::Error::other("secrets.yaml won't parse"))?;
 
-        if token.is_none() && secrets.author_token(id).is_none() {
+        if token.is_none() && secrets.author_token_on(id, forge).is_none() {
             return Ok(());
         }
 
-        self.save_secrets(&secrets.with_author_token(id, token))
+        self.save_secrets(&secrets.with_author_token_on(id, forge, token))
+    }
+
+    /// And every token of the Author `id` taken away, for its removal — an
+    /// error where the file will not parse, for the token's reason.
+    pub(crate) fn clearing_author_tokens(&self, id: &str) -> std::io::Result<()> {
+        let secrets = Self::parsed(&self.secrets_path(), Secrets::read)
+            .ok_or_else(|| std::io::Error::other("secrets.yaml won't parse"))?;
+
+        if secrets.author_tokens_of(id).is_empty() {
+            return Ok(());
+        }
+
+        self.save_secrets(&secrets.without_author_tokens(id))
     }
 
     /// Set the header values of the declaration whose uuid is `server` in
@@ -1141,17 +1171,28 @@ pub struct Secrets {
     #[serde(default, skip_serializing)]
     github_token: Option<String>,
 
-    /// The GitHub token of each Author, by the Author's uuid: what a session on
-    /// a Repo of that Author is given as `GH_TOKEN`, and what a host-side `gh`
-    /// about such a Repo authenticates as. Empty where no Author holds one.
+    /// The tokens of each Author, by the Author's uuid and then by the uuid
+    /// of the Forge plugin each is for — **one token per Forge per Author**
+    /// (ADR-0030, *Forge*; ADR-0025). The built-in GitHub's is what a session
+    /// on a Repo of that Author is given as `GH_TOKEN`, and what a host-side
+    /// `gh` about such a Repo authenticates as. Empty where no Author holds
+    /// one.
+    ///
+    /// **A file from before held one token per Author**, a string under the
+    /// uuid, which was GitHub's: it reads as the built-in GitHub's, and the
+    /// next write is in the shape above — see [`per_forge`].
     ///
     /// Keyed by the uuid the way `mcp_headers` below is keyed by a server's
-    /// name, and for its reason: the Author itself is in `config.yaml`, which
-    /// is what says which Authors there are, and this holds the one part of it
-    /// that may not be read back. An Author with no token simply has nothing
-    /// here. Sorted, so that what a save writes is the same file twice over.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    author_tokens: BTreeMap<String, String>,
+    /// name, and for its reason: the Author itself is a record, which is what
+    /// says which Authors there are, and this holds the one part of it that
+    /// may not be read back. An Author with no token simply has nothing here.
+    /// Sorted, so that what a save writes is the same file twice over.
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        deserialize_with = "per_forge"
+    )]
+    author_tokens: BTreeMap<String, BTreeMap<String, String>>,
 
     /// And the password of the local account a Windows session runs as, or
     /// `None` on a machine where the elevated verb has not been run — which is
@@ -1228,11 +1269,7 @@ impl Secrets {
             github_token: secrets.github_token.and_then(blank_is_nothing),
             // A token emptied by hand is an Author with none, as a header
             // emptied by hand is a header nothing is sent in.
-            author_tokens: secrets
-                .author_tokens
-                .into_iter()
-                .filter_map(|(id, token)| Some((id, blank_is_nothing(token)?)))
-                .collect(),
+            author_tokens: headers_kept(secrets.author_tokens),
             session_account_password: secrets.session_account_password.and_then(blank_is_nothing),
             // And the headers with the blanks taken out of them: a value
             // somebody emptied by hand is a header nothing is sent in, and a
@@ -1246,8 +1283,14 @@ impl Secrets {
         })
     }
 
-    /// These secrets with the GitHub token of the Author `id` replaced: `token`
-    /// as it was typed, or `None` where the human cleared it.
+    /// These secrets with the built-in GitHub's token of the Author `id`
+    /// replaced — see [`Secrets::with_author_token_on`].
+    pub fn with_author_token(&self, id: &str, token: Option<String>) -> Secrets {
+        self.with_author_token_on(id, crate::plugins::built_in::GITHUB, token)
+    }
+
+    /// These secrets with the token of the Author `id` for the Forge `forge`
+    /// replaced: `token` as it was typed, or `None` where the human cleared it.
     ///
     /// On the secrets that are already there rather than on nothing, because
     /// what a save writes is the whole file — see
@@ -1257,13 +1300,32 @@ impl Secrets {
     /// Whitespace is nothing, as it is on the way in — see [`blank_is_nothing`].
     /// A token pasted with the newline that came with it is the ordinary case,
     /// and one that was only spaces is a cleared field spelled another way.
-    pub fn with_author_token(&self, id: &str, token: Option<String>) -> Secrets {
+    pub fn with_author_token_on(&self, id: &str, forge: &str, token: Option<String>) -> Secrets {
         let mut author_tokens = self.author_tokens.clone();
+        let tokens = author_tokens.entry(id.to_owned()).or_default();
 
         match token.and_then(blank_is_nothing) {
-            Some(token) => author_tokens.insert(id.to_owned(), token),
-            None => author_tokens.remove(id),
+            Some(token) => tokens.insert(forge.to_owned(), token),
+            None => tokens.remove(forge),
         };
+
+        // An Author left holding none is not written at all, which is what a
+        // hand-written file with none for it reads as.
+        if tokens.is_empty() {
+            author_tokens.remove(id);
+        }
+
+        Secrets {
+            author_tokens,
+            ..self.clone()
+        }
+    }
+
+    /// And these secrets with every token of the Author `id` taken away, which
+    /// is what removing the Author does.
+    pub fn without_author_tokens(&self, id: &str) -> Secrets {
+        let mut author_tokens = self.author_tokens.clone();
+        author_tokens.remove(id);
 
         Secrets {
             author_tokens,
@@ -1405,9 +1467,23 @@ impl Secrets {
         }
     }
 
-    /// The GitHub token of the Author `id`, or `None` where it holds none.
+    /// The built-in GitHub's token of the Author `id`, or `None` where it holds
+    /// none — what a session's `GH_TOKEN` is, while GitHub is the one Forge a
+    /// session is lent a tool for.
     pub fn author_token(&self, id: &str) -> Option<&str> {
-        self.author_tokens.get(id).map(String::as_str)
+        self.author_token_on(id, crate::plugins::built_in::GITHUB)
+    }
+
+    /// The token of the Author `id` for the Forge `forge`, or `None` where it
+    /// holds none.
+    pub fn author_token_on(&self, id: &str, forge: &str) -> Option<&str> {
+        self.author_tokens.get(id)?.get(forge).map(String::as_str)
+    }
+
+    /// Every token the Author `id` holds, by the uuid of the Forge each is
+    /// for — empty where it holds none.
+    pub fn author_tokens_of(&self, id: &str) -> BTreeMap<String, String> {
+        self.author_tokens.get(id).cloned().unwrap_or_default()
     }
 
     /// And the session account's password, or `None` where the elevated verb
@@ -1505,7 +1581,7 @@ pub struct Config {
     /// this file nor written to it, but laid beside it by
     /// [`Settings::config`]. See [`Config::token_awaited`].
     #[serde(skip)]
-    awaited: BTreeSet<String>,
+    awaited: BTreeSet<(String, String)>,
 
     /// What the built-in Language plugins' records say of their languages,
     /// once they are held — never read from this file nor written to it, but
@@ -1897,8 +1973,19 @@ impl Config {
     /// device's `secrets.yaml` yet — it travels from whichever member holds
     /// one (ADR-0028). Working as that Author without it was turned down, and
     /// so was the host's own login in its place (ADR-0025).
+    ///
+    /// The built-in GitHub's token, which is the one a Repo's Author is asked
+    /// for while GitHub is the Forge every matched Repo is on — see
+    /// [`Config::token_awaited_on`] for any other.
     pub(crate) fn token_awaited(&self, id: &str) -> bool {
-        self.awaited.contains(id)
+        self.token_awaited_on(id, crate::plugins::built_in::GITHUB)
+    }
+
+    /// And the same of the Author's token for the Forge `forge`.
+    pub(crate) fn token_awaited_on(&self, id: &str, forge: &str) -> bool {
+        self.awaited
+            .iter()
+            .any(|(author, awaited)| author == id && awaited == forge)
     }
 
     /// The Author a Repo recorded as `recorded` is committed and pushed as:
@@ -2608,14 +2695,28 @@ pub enum Unauthored {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Recorded {
     author: Author,
-    holds_token: bool,
+
+    /// The Forges its record says a token is held for, by plugin uuid.
+    holds_tokens: BTreeSet<String>,
 }
 
 impl Recorded {
+    /// An Author whose record says a token is held for the built-in GitHub
+    /// where `holds_token`, and for nothing else.
     pub fn of(author: Author, holds_token: bool) -> Recorded {
+        let holds_tokens = match holds_token {
+            true => BTreeSet::from([crate::plugins::built_in::GITHUB.to_owned()]),
+            false => BTreeSet::new(),
+        };
+
+        Recorded::holding(author, holds_tokens)
+    }
+
+    /// And one whose record says a token is held for each of `holds_tokens`.
+    pub fn holding(author: Author, holds_tokens: BTreeSet<String>) -> Recorded {
         Recorded {
             author,
-            holds_token,
+            holds_tokens,
         }
     }
 
@@ -3427,6 +3528,36 @@ fn servers_kept(servers: Vec<McpServer>) -> Vec<McpServer> {
 /// looked up, so one left here by an edit to `config.yaml` is spent rather than
 /// wrong — and dropping it would be throwing away a value the human could not
 /// type again.
+/// `author_tokens` as a file holds it, in either shape: a map of Forge uuid to
+/// token under each Author, or — written before there was more than one Forge
+/// — the one token alone, which was the built-in GitHub's.
+fn per_forge<'de, D: serde::Deserializer<'de>>(
+    written: D,
+) -> Result<BTreeMap<String, BTreeMap<String, String>>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Held {
+        One(String),
+        PerForge(BTreeMap<String, String>),
+    }
+
+    let written: BTreeMap<String, Held> = Deserialize::deserialize(written)?;
+
+    Ok(written
+        .into_iter()
+        .map(|(author, held)| {
+            let tokens = match held {
+                Held::One(token) => {
+                    BTreeMap::from([(crate::plugins::built_in::GITHUB.to_owned(), token)])
+                }
+                Held::PerForge(tokens) => tokens,
+            };
+
+            (author, tokens)
+        })
+        .collect())
+}
+
 fn headers_kept(
     headers: BTreeMap<String, BTreeMap<String, String>>,
 ) -> BTreeMap<String, BTreeMap<String, String>> {
@@ -3568,6 +3699,61 @@ mod tests {
             settings.secrets().session_account_password(),
             Some("Vk1-hunter2"),
             "clearing a token should not have taken the session account's password with it",
+        );
+    }
+
+    /// An installation from before held one token per Author: it reads as
+    /// the built-in GitHub's, for every Author, and the next write is in the
+    /// shape keyed by the Forge too — a second Forge's token set beside it.
+    #[test]
+    fn a_token_per_author_from_before_reads_as_githubs_and_is_written_per_forge() {
+        const GITHUB: &str = crate::plugins::built_in::GITHUB;
+        const GITEA: &str = "7a3d1f20-5b4e-4c8a-9e61-2d0f4b7c9a35";
+
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+        std::fs::write(
+            settings.secrets_path(),
+            "author_tokens:\n  work: ghp_theworkone\n  home: ghp_thehomeone\n",
+        )
+        .unwrap();
+
+        let secrets = settings.secrets();
+        assert_eq!(
+            secrets.author_token_on("work", GITHUB),
+            Some("ghp_theworkone")
+        );
+        assert_eq!(
+            secrets.author_token_on("home", GITHUB),
+            Some("ghp_thehomeone")
+        );
+        assert_eq!(secrets.author_token_on("work", GITEA), None);
+
+        settings
+            .setting_author_token_on("work", GITEA, Some("gta_theworkone".to_owned()))
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(settings.secrets_path()).unwrap(),
+            format!(
+                "author_tokens:\n  home:\n    {GITHUB}: ghp_thehomeone\n  work:\n    \
+                 {GITEA}: gta_theworkone\n    {GITHUB}: ghp_theworkone\n"
+            ),
+        );
+
+        let secrets = settings.secrets();
+        assert_eq!(secrets.author_token("work"), Some("ghp_theworkone"));
+        assert_eq!(
+            secrets.author_token_on("work", GITEA),
+            Some("gta_theworkone")
+        );
+
+        // And an Author's every token goes with it, and nobody else's.
+        settings.clearing_author_tokens("work").unwrap();
+        assert!(settings.secrets().author_tokens_of("work").is_empty());
+        assert_eq!(
+            settings.secrets().author_token("home"),
+            Some("ghp_thehomeone")
         );
     }
 

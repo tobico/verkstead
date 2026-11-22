@@ -174,14 +174,17 @@ impl Gh {
         }
     }
 
-    /// Who to authenticate as, read now — the host where no token is
-    /// configured, which leaves the call to whatever login the host's `gh` has.
+    /// Who to authenticate as, read now: the Author's token for GitHub, or —
+    /// where it holds none, or there is no Author — nobody, and GitHub is not
+    /// asked (Set 1878, Q3). The host's own `gh` login is never read in its
+    /// place. Only a `Gh` with no settings behind it, which is a stand-in's,
+    /// is left to whatever it is.
     ///
     /// The Author's this `Gh` asks as — see [`Gh::as_author`] and
     /// [`crate::settings::Config::author_of`], which resolves any Author of the
     /// cluster's one list, and [`crate::settings::Config::token_of`], which
     /// reads its token off this device's copy. An Author whose copy has not
-    /// arrived is nobody rather than the host.
+    /// arrived is nobody too, and said so.
     fn whom(&self) -> AsWhom {
         let Some(settings) = self.settings.as_ref() else {
             return AsWhom::Host;
@@ -190,7 +193,7 @@ impl Gh {
         let config = settings.config();
 
         let Some(author) = config.author_of(self.author.as_deref()) else {
-            return AsWhom::Host;
+            return AsWhom::Untokened;
         };
 
         if config.token_awaited(author.id()) {
@@ -199,26 +202,25 @@ impl Gh {
 
         match config.token_of(author, &settings.secrets()) {
             Some(token) => AsWhom::Token(token.to_owned()),
-            None => AsWhom::Host,
+            None => AsWhom::Untokened,
         }
     }
 
-    /// The token to authenticate as, or `None` for the host's own login — or
-    /// why there is to be neither, where the Author's token is awaited.
+    /// The token to authenticate as, or `None` for a stand-in's own — or why
+    /// there is to be neither: no token for the Author, or one awaited.
     fn token(&self) -> Result<Option<String>, Trouble> {
         match self.whom() {
             AsWhom::Host => Ok(None),
             AsWhom::Token(token) => Ok(Some(token)),
+            AsWhom::Untokened => Err(Trouble::NotLoggedIn),
             AsWhom::Awaited => Err(Trouble::Ours(awaited())),
         }
     }
 
-    /// Whether there is a token to authenticate as at all — which, where there
-    /// is none, would leave a call to the host's own login.
+    /// Whether there is a token to authenticate as at all.
     ///
-    /// What a write asks before it is made: a read under the host's login is a
-    /// read, and a repository made under it is one in an account nobody chose.
-    /// See [`crate::repos::create`].
+    /// What a write asks before it is made: a repository made under anything
+    /// else is one in an account nobody chose. See [`crate::repos::create`].
     pub(crate) fn tokened(&self) -> bool {
         matches!(self.token(), Ok(Some(_)))
     }
@@ -497,10 +499,6 @@ impl Forge for Gh {
         Gh::tokened(self)
     }
 
-    fn host_token(&self) -> Option<String> {
-        host_token(self)
-    }
-
     fn verify(&self, token: &str) -> Result<Account, Trouble> {
         authenticates_as(self, token)
     }
@@ -644,8 +642,8 @@ impl Trouble {
     pub(crate) fn why(&self) -> String {
         match self {
             Trouble::NotLoggedIn => {
-                "This machine's gh isn't logged in and no GitHub token is set, \
-                 so Verkstead can't ask GitHub anything. Put one in on the settings page."
+                "This repo's author has no GitHub token that works, so Verkstead can't ask \
+                 GitHub anything. Set one in Settings, under Git."
                     .to_owned()
             }
             Trouble::NoRemote => "This repo has no GitHub remote for gh to ask about.".to_owned(),
@@ -660,26 +658,6 @@ impl Trouble {
             Trouble::NoForge(host) => crate::forges::unmatched(host.as_deref()),
         }
     }
-}
-
-/// The token the host's own `gh` is logged in with, where it has one.
-///
-/// What the onboarding wizard prefills its token field from when the server's
-/// environment holds none — see [`crate::onboarding`]. Asked *as nobody*: the
-/// token argument is `None`, so `GH_TOKEN` is left unset and what answers is
-/// the login on this machine rather than whatever Verkstead was already
-/// configured with, which would be a prefill of a value the page already has.
-///
-/// Nothing at all where there is no `gh`, where nobody is logged in, or where
-/// it printed nothing — all three being the same thing to the field this fills:
-/// there is no token to offer.
-///
-/// Blocking, like everything else here — see [`Gh::run`].
-pub(crate) fn host_token(gh: &Gh) -> Option<String> {
-    let said = gh.run(None, None, &["auth", "token"]).ok()?;
-    let said = said.trim();
-
-    (!said.is_empty()).then(|| said.to_owned())
 }
 
 /// Who `token` authenticates as, and what GitHub will let it do.
@@ -1914,7 +1892,7 @@ mod tests {
             Err(Trouble::NotLoggedIn),
         );
         assert!(
-            Trouble::NotLoggedIn.why().contains("settings page"),
+            Trouble::NotLoggedIn.why().contains("Settings, under Git"),
             "and says where the token goes: {}",
             Trouble::NotLoggedIn.why(),
         );
@@ -2616,18 +2594,16 @@ printf '%s' '{"number":41,"title":"Rate limiting","url":"https://github.com/tobi
         );
     }
 
-    /// With nothing configured, nothing is set: the call is made as it always
-    /// was and falls back to whatever login the host's `gh` has.
+    /// A `Gh` with no settings behind it — a stand-in's — sets no `GH_TOKEN`
+    /// of its own, and is asked as whatever it is.
     ///
     /// Against what this test process itself holds, because that is what a
     /// child inherits — the claim is that Verkstead sets no `GH_TOKEN` of its
     /// own here, not that the machine running the tests has none.
     #[test]
-    fn with_no_token_configured_the_host_gh_keeps_its_own_login() {
+    fn a_gh_with_no_settings_behind_it_sets_no_token_of_its_own() {
         let inherited = std::env::var("GH_TOKEN").unwrap_or_else(|_| "unset".to_owned());
 
-        // A `Gh` with no settings behind it at all, which is every router that
-        // has no Data Directory to read them out of.
         let (repo, gh) = stub_saying_its_token();
 
         assert_eq!(
@@ -2636,22 +2612,52 @@ printf '%s' '{"number":41,"title":"Rate limiting","url":"https://github.com/tobi
                 .title,
             inherited,
         );
+    }
 
-        // And the three ways settings say nothing: no file, an empty one, and
-        // one that will not parse.
+    /// But with settings behind it, an Author holding no token — or no Author
+    /// at all — leaves GitHub unasked (Set 1878, Q3): nothing falls back to
+    /// the host's own `gh` login, and the answer is the one a Forge out of
+    /// reach gives, naming where the token goes.
+    #[test]
+    fn with_no_token_for_the_author_github_is_not_asked() {
         for yaml in [None, Some(""), Some("author_tokens: [oh\n")] {
             let (repo, gh) = stub_saying_its_token();
             let (_data_dir, settings) = configured(yaml);
             let gh = gh.authenticated_by(settings);
 
             assert_eq!(
-                pull_request(&gh, repo.path(), "rate-limiting")
-                    .unwrap()
-                    .title,
-                inherited,
+                pull_request(&gh, repo.path(), "rate-limiting"),
+                Err(Trouble::NotLoggedIn),
                 "with secrets.yaml {yaml:?}",
             );
+            assert!(!gh.tokened());
         }
+
+        let (repo, gh) = stub_saying_its_token();
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+        std::fs::write(
+            settings.config_path(),
+            "authors:\n  - id: work\n  - id: home\n",
+        )
+        .unwrap();
+        std::fs::write(
+            settings.secrets_path(),
+            "author_tokens:\n  work: ghp_theworkone\n",
+        )
+        .unwrap();
+        let gh = gh.authenticated_by(settings);
+
+        assert_eq!(
+            pull_request(&gh.as_author(Some("home")), repo.path(), "rate-limiting"),
+            Err(Trouble::NotLoggedIn),
+            "an Author holding none, beside one that does",
+        );
+        assert_eq!(
+            format!("{:?}", gh.as_author(Some("home")).credential()),
+            "Credential(the machine's, no token held)",
+            "and its git is left to the machine's own configuration",
+        );
     }
 
     /// Verifying a token is the one call that authenticates as something other

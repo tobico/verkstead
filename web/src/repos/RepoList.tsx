@@ -126,7 +126,7 @@ import { Reaching, keyOf, useDevice, type Device } from "../reaching";
 import { Picker } from "../picking";
 import { rowPress } from "../rows";
 import { authorLabel, useAuthors } from "../authors";
-import { unforged } from "../forges";
+import { GITHUB, holdsToken, unforged, untokened } from "../forges";
 import { PaneHead } from "../workbench/PaneHead";
 import styles from "./RepoList.module.css";
 import { SettingsCard } from "../settings/SettingsCard";
@@ -544,6 +544,12 @@ export function ReposPane(props: {
                         {/* And where its remote is on no forge, which is a
                             Repo whose work no pull request is opened for. */}
                         <Show when={unforged(repo)}>
+                          {(said) => <span class={styles.forge}>{said()}</span>}
+                        </Show>
+                        {/* And where its Author holds no token for the forge
+                            it is on, which leaves the forge unasked: no
+                            wrap-up is started there. */}
+                        <Show when={untokened(repo, listed.data)}>
                           {(said) => <span class={styles.forge}>{said()}</span>}
                         </Show>
                       </div>
@@ -1536,12 +1542,13 @@ export function CreateRepo(props: {
     }
 
     if (!author.asked()) {
-      return author.authors()[0]?.holds_token ?? false;
+      const only = author.authors()[0];
+      return only === undefined ? false : holdsToken(only, GITHUB);
     }
 
     const picked = author.picked();
 
-    return picked === undefined ? null : picked.holds_token;
+    return picked === undefined ? null : holdsToken(picked, GITHUB);
   };
 
   // And whether it is ticked, which starts on: somebody who has saved a token

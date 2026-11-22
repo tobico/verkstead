@@ -13,12 +13,17 @@
       {
         "display_name": "",
         "email": "ada@example.com",
-        "github_token": {
-          "at": "2026-08-03T09:07:11.000Z",
-          "last_four": "cdef"
-        },
         "id": "3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01",
-        "name": "Ada Lovelace"
+        "name": "Ada Lovelace",
+        "tokens": [
+          {
+            "forge": "b357e557-3716-4ea6-a3a8-d904c92c5eac",
+            "saved": {
+              "at": "2026-08-03T09:07:11.000Z",
+              "last_four": "cdef"
+            }
+          }
+        ]
       }
     ],
     "cleanup": {
@@ -34,15 +39,21 @@
       }
     },
     "conflict_resolution": "Rebase",
+    "forges": [
+      {
+        "name": "GitHub",
+        "scopes": [
+          "repo",
+          "gist"
+        ],
+        "uuid": "b357e557-3716-4ea6-a3a8-d904c92c5eac"
+      }
+    ],
     "git_author": {
       "display_name": "",
       "email": "ada@example.com",
       "id": "3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01",
       "name": "Ada Lovelace"
-    },
-    "github_token": {
-      "at": "2026-08-03T09:07:11.000Z",
-      "last_four": "cdef"
     },
     "ignored_comments": [
       {
@@ -150,7 +161,16 @@
       "sessions": 0,
       "terminals": 0
     },
-    "share_on_done": true
+    "share_on_done": true,
+    "tokens": [
+      {
+        "forge": "b357e557-3716-4ea6-a3a8-d904c92c5eac",
+        "saved": {
+          "at": "2026-08-03T09:07:11.000Z",
+          "last_four": "cdef"
+        }
+      }
+    ]
   },
   "tried": [
     {
@@ -170,10 +190,14 @@
       "server": "tickets"
     }
   ],
-  "verified": {
-    "Account": {
-      "login": "ada",
-      "missing": []
+  "verified": [
+    {
+      "forge": "b357e557-3716-4ea6-a3a8-d904c92c5eac",
+      "verified": {
+        "Account": {
+          "login": "ada"
+        }
+      }
     }
-  }
+  ]
 }

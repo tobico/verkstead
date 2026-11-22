@@ -45,6 +45,7 @@ use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
+use verkstead_render::{AuthorSaved, ForgeToken, TokenSaved};
 use verkstead_render::{
     CompileCaching, ConflictResolution, DiskUse, Eviction, IgnoreRule, LanguageCleared,
     LanguageView, McpHeader, McpServer, PathResolution, PathSource, PluginSettingsView,
@@ -67,6 +68,48 @@ use verkstead_server::{
 /// The whole of what verifying does is hand a token to a child process and read
 /// what came back, so a child that answers *with* the token is the witness that
 /// the right one reached it.
+/// The built-in GitHub's plugin uuid, which its tokens are kept under.
+const GITHUB: &str = "b357e557-3716-4ea6-a3a8-d904c92c5eac";
+
+/// The built-in GitHub's token of a read, as the one token there was before
+/// there was one per Forge.
+trait GithubToken {
+    fn github_token(&self) -> Option<TokenSaved>;
+}
+
+impl GithubToken for SettingsView {
+    fn github_token(&self) -> Option<TokenSaved> {
+        held(&self.tokens)
+    }
+}
+
+impl GithubToken for AuthorSaved {
+    fn github_token(&self) -> Option<TokenSaved> {
+        held(&self.tokens)
+    }
+}
+
+fn held(tokens: &[ForgeToken]) -> Option<TokenSaved> {
+    tokens
+        .iter()
+        .find(|token| token.forge == GITHUB)
+        .map(|token| token.saved.clone())
+}
+
+/// And what GitHub made of the token a save set, where it set one.
+trait GithubVerified {
+    fn verified(&self) -> Option<Verified>;
+}
+
+impl GithubVerified for SettingsSaved {
+    fn verified(&self) -> Option<Verified> {
+        self.verified
+            .iter()
+            .find(|verified| verified.forge == GITHUB)
+            .map(|verified| verified.verified.clone())
+    }
+}
+
 const SAYS_ITS_TOKEN: &str = r#"printf '{"login":"%s"}' "${GH_TOKEN-unset}""#;
 
 /// And one that refuses everything, in the words the real `gh` refuses a bad
@@ -138,7 +181,7 @@ async fn save_author(app: &Router, name: &str, email: &str) -> SettingsSaved {
         app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": name, "email": email },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -159,7 +202,7 @@ async fn save_token(app: &Router, token: &str) -> SettingsSaved {
         app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": { "Set": { "token": token } },
+            "tokens": [{ "forge": GITHUB, "token": { "Set": { "token": token } } }],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -178,7 +221,7 @@ async fn clear_token(app: &Router) -> SettingsSaved {
         app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Clear",
+            "tokens": [{ "forge": GITHUB, "token": "Clear" }],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -222,7 +265,7 @@ async fn save_at_once(app: &Router, roadmap_stages: &str, conversations: &str) -
         app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": cleanup_unset(),
             "at_once": {
                 "roadmap_stages": roadmap_stages,
@@ -246,7 +289,7 @@ async fn save_cleanup(app: &Router, trim: (bool, &str), delete: (bool, &str)) ->
         app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": {
                 "trim": { "enabled": trim.0, "days": trim.1 },
                 "delete": { "enabled": delete.0, "days": delete.1 },
@@ -333,7 +376,7 @@ async fn a_verkstead_nobody_has_told_anything_says_so() {
 
     assert_eq!(settings.git_author.name, "");
     assert_eq!(settings.git_author.email, "");
-    assert_eq!(settings.github_token, None);
+    assert_eq!(settings.github_token(), None);
     assert_eq!(
         settings.instructions, "",
         "and nothing every session is to be told, which is the section drawn \
@@ -350,7 +393,8 @@ async fn the_author_goes_in_and_comes_back() {
     assert_eq!(saved.settings.git_author.name, "Tobias Cohen");
     assert_eq!(saved.settings.git_author.email, "tobi@tobico.net");
     assert_eq!(
-        saved.verified, None,
+        saved.verified(),
+        None,
         "a save that was not about a token verified nothing"
     );
 
@@ -383,7 +427,10 @@ async fn the_first_save_makes_the_one_author_and_every_save_after_is_about_it() 
     let saved = save_author(&app, "Tobias Cohen", "tobi@tobico.net").await;
     assert_eq!(saved.settings.git_author.id.as_deref(), Some(id.as_str()));
     assert_eq!(saved.settings.git_author.name, "Tobias Cohen");
-    assert!(saved.settings.github_token.is_some(), "under the same uuid");
+    assert!(
+        saved.settings.github_token().is_some(),
+        "under the same uuid"
+    );
 
     let authors = Settings::in_data_dir(dir.path())
         .config()
@@ -399,8 +446,8 @@ async fn the_first_save_makes_the_one_author_and_every_save_after_is_about_it() 
 
     let secrets = std::fs::read_to_string(dir.path().join("secrets.yaml")).unwrap();
     assert!(
-        secrets.contains(&format!("{id}: ghp_thetoken")),
-        "{secrets}"
+        secrets.contains(&format!("{id}:\n    {GITHUB}: ghp_thetoken")),
+        "under the Author and then the Forge: {secrets}"
     );
 }
 
@@ -425,7 +472,7 @@ async fn a_save_about_one_author_leaves_the_others_as_they_were() {
         &app,
         &serde_json::json!({
             "git_author": { "id": "work", "display_name": "", "name": "Tobias Cohen", "email": "tobi@tobico.net" },
-            "github_token": { "Set": { "token": "ghp_anewone" } },
+            "tokens": [{ "forge": GITHUB, "token": { "Set": { "token": "ghp_anewone" } } }],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -439,18 +486,18 @@ async fn a_save_about_one_author_leaves_the_others_as_they_were() {
     .await;
 
     assert!(
-        matches!(saved.verified, Some(Verified::Account { .. })),
+        matches!(saved.verified(), Some(Verified::Account { .. })),
         "the token typed was verified: {:?}",
-        saved.verified
+        saved.verified()
     );
 
     let config = Settings::in_data_dir(dir.path()).config();
     assert_eq!(config.author("home").unwrap().name(), Some("Home"));
     assert_eq!(config.author("work").unwrap().name(), Some("Tobias Cohen"));
 
-    let secrets = std::fs::read_to_string(dir.path().join("secrets.yaml")).unwrap();
-    assert!(secrets.contains("work: ghp_anewone"), "{secrets}");
-    assert!(secrets.contains("home: ghp_thehomeone"), "{secrets}");
+    let secrets = Settings::in_data_dir(dir.path()).secrets();
+    assert_eq!(secrets.author_token("work"), Some("ghp_anewone"));
+    assert_eq!(secrets.author_token("home"), Some("ghp_thehomeone"));
 }
 
 /// **Add author**: a save naming a uuid the file does not hold is a new Author,
@@ -481,7 +528,7 @@ async fn a_save_under_a_new_uuid_adds_an_author_and_the_read_carries_every_one()
                 "name": "Toby",
                 "email": "toby@example.com",
             },
-            "github_token": { "Set": { "token": "ghp_thehomeone" } },
+            "tokens": [{ "forge": GITHUB, "token": { "Set": { "token": "ghp_thehomeone" } } }],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -497,10 +544,9 @@ async fn a_save_under_a_new_uuid_adds_an_author_and_the_read_carries_every_one()
     // Verified as the token typed under the new Author, which is the stub's
     // way of naming the login.
     assert_eq!(
-        saved.verified,
+        saved.verified(),
         Some(Verified::Account {
             login: "ghp_thehomeone".to_owned(),
-            missing: Vec::new(),
         }),
     );
 
@@ -514,22 +560,19 @@ async fn a_save_under_a_new_uuid_adds_an_author_and_the_read_carries_every_one()
                 author.id.as_str(),
                 author.display_name.as_str(),
                 author.name.as_str(),
-                author
-                    .github_token
-                    .as_ref()
-                    .map(|token| token.last_four.as_str()),
+                author.github_token().map(|token| token.last_four),
             )
         })
         .collect();
     assert_eq!(
         rows,
         [
-            ("work", "", "Tobias Cohen", Some("kone")),
+            ("work", "", "Tobias Cohen", Some("kone".to_owned())),
             (
                 "a1b2c3d4-0000-4000-8000-000000000002",
                 "Home",
                 "Toby",
-                Some("eone")
+                Some("eone".to_owned())
             ),
         ],
     );
@@ -537,10 +580,10 @@ async fn a_save_under_a_new_uuid_adds_an_author_and_the_read_carries_every_one()
     // And the single fields are still the first Author's, which is what every
     // other section sends back and the wizard asks for.
     assert_eq!(read.git_author.id.as_deref(), Some("work"));
-    assert_eq!(read.github_token.unwrap().last_four, "kone");
+    assert_eq!(read.github_token().unwrap().last_four, "kone");
 
-    let secrets = std::fs::read_to_string(dir.path().join("secrets.yaml")).unwrap();
-    assert!(secrets.contains("work: ghp_theworkone"), "{secrets}");
+    let secrets = Settings::in_data_dir(dir.path()).secrets();
+    assert_eq!(secrets.author_token("work"), Some("ghp_theworkone"));
 }
 
 /// The promise the whole page rests on: a token that has gone in is never in a
@@ -555,7 +598,7 @@ async fn the_token_appears_in_no_answer_this_endpoint_gives() {
         &app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "Tobias Cohen", "email": "tobi@tobico.net" },
-            "github_token": { "Set": { "token": "ghp_averysecrettoken" } },
+            "tokens": [{ "forge": GITHUB, "token": { "Set": { "token": "ghp_averysecrettoken" } } }],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -587,7 +630,10 @@ async fn a_saved_token_comes_back_as_its_last_four_and_when_it_was_saved() {
 
     let saved = save_token(&app, "ghp_averysecrettoken").await;
 
-    let token = saved.settings.github_token.expect("a token is configured");
+    let token = saved
+        .settings
+        .github_token()
+        .expect("a token is configured");
 
     assert_eq!(token.last_four, "oken");
     assert!(
@@ -604,54 +650,64 @@ async fn a_saved_token_is_verified_and_the_account_comes_back_with_the_save() {
     let saved = save_token(&app, "ghp_thetoken").await;
 
     assert_eq!(
-        saved.verified,
+        saved.verified(),
         Some(Verified::Account {
             // The stub answers with the token it was run with, so this is the
             // proof that the token just saved is the one GitHub was asked about.
             login: "ghp_thetoken".to_owned(),
             // And it names no scopes, which says nothing about what the token
             // may do — see [`SAYS_ITS_SCOPES`] for the half that does.
-            missing: Vec::new(),
         }),
     );
 }
 
-/// And what a token that authenticates and cannot publish comes back as: the
-/// account, and the one scope to go and tick.
+/// And a token short of the scopes the GitHub plugin's manifest declares —
+/// `repo` and `gist` — is refused: not written down, and the answer naming
+/// the account and what to go and tick. Whatever token was there before stays.
 ///
 /// A settings-page answer rather than a failure found later by a human pressing
-/// Share. The `gist` scope is Verkstead's own — publishing a share is its own
-/// write to GitHub — and a token issued for reading repositories does not carry
-/// it.
+/// Share, or a session's push refused.
 #[tokio::test]
-async fn a_token_that_cannot_write_a_gist_says_which_scope_is_missing() {
-    let (_dir, app) = app_asking(SAYS_ITS_SCOPES).await;
+async fn a_token_short_of_the_declared_scopes_is_refused_naming_them() {
+    let (dir, app) = app_asking(SAYS_ITS_SCOPES).await;
 
-    let saved = save_token(&app, "read:org, repo, workflow").await;
+    save_token(&app, "repo, gist, workflow").await;
+
+    let saved = save_token(&app, "read:org, workflow").await;
 
     assert_eq!(
-        saved.verified,
-        Some(Verified::Account {
+        saved.verified(),
+        Some(Verified::Short {
             login: "tobico".to_owned(),
-            missing: vec!["gist".to_owned()],
+            missing: vec!["repo".to_owned(), "gist".to_owned()],
         }),
+    );
+
+    let secrets = std::fs::read_to_string(dir.path().join("secrets.yaml")).unwrap();
+    assert!(
+        !secrets.contains("read:org"),
+        "the short one was written: {secrets}"
+    );
+    assert!(
+        secrets.contains("repo, gist, workflow"),
+        "the one before it stands: {secrets}"
     );
 }
 
-/// And one that does carry it comes back with nothing to do.
+/// And one that carries them all comes back with nothing to do.
 #[tokio::test]
-async fn a_token_that_can_write_a_gist_is_missing_nothing() {
+async fn a_token_carrying_the_declared_scopes_is_missing_nothing() {
     let (_dir, app) = app_asking(SAYS_ITS_SCOPES).await;
 
     let saved = save_token(&app, "repo, gist").await;
 
     assert_eq!(
-        saved.verified,
+        saved.verified(),
         Some(Verified::Account {
             login: "tobico".to_owned(),
-            missing: Vec::new(),
         }),
     );
+    assert!(saved.settings.github_token().is_some());
 }
 
 /// The one that costs the human a trip back to GitHub if it goes wrong: a token
@@ -664,7 +720,7 @@ async fn a_token_github_refuses_is_saved_anyway_and_the_refusal_is_in_words() {
     let saved = save_token(&app, "ghp_thetoken").await;
 
     assert_eq!(
-        saved.verified,
+        saved.verified(),
         Some(Verified::Refused {
             why: "The gh command said: gh: Bad credentials (HTTP 401).".to_owned(),
         }),
@@ -673,7 +729,7 @@ async fn a_token_github_refuses_is_saved_anyway_and_the_refusal_is_in_words() {
     assert_eq!(
         saved
             .settings
-            .github_token
+            .github_token()
             .expect("the token was saved regardless")
             .last_four,
         "oken",
@@ -692,13 +748,17 @@ async fn clearing_takes_the_token_away_and_the_read_says_so() {
     let (_dir, app) = app().await;
 
     save_token(&app, "ghp_thetoken").await;
-    assert!(settings(&app).await.github_token.is_some());
+    assert!(settings(&app).await.github_token().is_some());
 
     let cleared = clear_token(&app).await;
 
-    assert_eq!(cleared.settings.github_token, None);
-    assert_eq!(cleared.verified, None, "clearing asks GitHub about nothing");
-    assert_eq!(settings(&app).await.github_token, None);
+    assert_eq!(cleared.settings.github_token(), None);
+    assert_eq!(
+        cleared.verified(),
+        None,
+        "clearing asks GitHub about nothing"
+    );
+    assert_eq!(settings(&app).await.github_token(), None);
 }
 
 /// Saving the author must not take the credentials away, which is why the
@@ -713,12 +773,12 @@ async fn saving_the_author_leaves_the_token_where_it_was() {
     assert_eq!(
         saved
             .settings
-            .github_token
+            .github_token()
             .expect("the token is still configured")
             .last_four,
         "oken",
     );
-    assert_eq!(saved.verified, None);
+    assert_eq!(saved.verified(), None);
 }
 
 #[tokio::test]
@@ -768,7 +828,7 @@ async fn a_hand_edit_to_either_file_is_what_the_next_read_says() {
 
     assert_eq!(
         settings
-            .github_token
+            .github_token()
             .expect("the hand-edited token is configured")
             .last_four,
         "abcd",
@@ -798,7 +858,7 @@ async fn a_save_carrying_the_binds_as_they_stand_leaves_them() {
         &app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "Tobias Cohen", "email": "tobi@tobico.net" },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -831,9 +891,10 @@ async fn a_token_that_is_nothing_but_whitespace_configures_nothing() {
 
     let saved = save_token(&app, "   \n").await;
 
-    assert_eq!(saved.settings.github_token, None);
+    assert_eq!(saved.settings.github_token(), None);
     assert_eq!(
-        saved.verified, None,
+        saved.verified(),
+        None,
         "there is no token to ask GitHub about"
     );
 }
@@ -890,7 +951,7 @@ async fn save_as_it_stands(app: &Router) -> SettingsSaved {
         app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -1457,7 +1518,7 @@ async fn a_save_carrying_the_cleanup_as_it_stands_leaves_it() {
         &app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": {
                 "trim": { "enabled": false, "days": "5" },
                 "delete": { "enabled": true, "days": "90" },
@@ -1585,7 +1646,7 @@ async fn a_save_carrying_the_limit_as_it_stands_leaves_it() {
         &app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": cleanup_unset(),
             "at_once": { "roadmap_stages": "1", "conversations": "2" },
             "conflict_resolution": "Merge",
@@ -1659,7 +1720,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
         &app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Rebase",
@@ -1696,7 +1757,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
         &app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -1739,7 +1800,7 @@ async fn sharing_on_done_goes_in_and_comes_back() {
         &app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -1781,7 +1842,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
         &app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -1800,7 +1861,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
         &app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -1901,7 +1962,7 @@ async fn a_save_from_another_section_leaves_the_instructions() {
         &app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -1972,7 +2033,7 @@ async fn a_save_leaves_an_installers_own_descriptor_exactly_as_the_file_had_it()
         &app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "Ada", "email": "ada@example.com" },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -2025,7 +2086,7 @@ async fn save_instructions(app: &Router, instructions: &str) -> SettingsSaved {
         app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -2092,7 +2153,7 @@ async fn save_paths(app: &Router, binds: &[&str]) -> SettingsSaved {
         app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -2322,7 +2383,7 @@ async fn save_rules(app: &Router, rules: serde_json::Value) -> SettingsSaved {
         app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -2486,7 +2547,7 @@ async fn a_refused_save_writes_nothing_at_all() {
         &app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "Tobias Cohen", "email": "tobi@tobico.net" },
-            "github_token": { "Set": { "token": "ghp_thetoken" } },
+            "tokens": [{ "forge": GITHUB, "token": { "Set": { "token": "ghp_thetoken" } } }],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -2500,9 +2561,9 @@ async fn a_refused_save_writes_nothing_at_all() {
     .await;
 
     assert_eq!(saved.refused.len(), 1);
-    assert!(saved.verified.is_none(), "no token was tried");
+    assert!(saved.verified().is_none(), "no token was tried");
     assert_eq!(saved.settings.git_author.name, "Ada Lovelace");
-    assert!(saved.settings.github_token.is_none());
+    assert!(saved.settings.github_token().is_none());
     assert_eq!(settings(&app).await.git_author.name, "Ada Lovelace");
 }
 
@@ -2638,7 +2699,7 @@ async fn save_servers_removing(
         app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -2903,7 +2964,7 @@ async fn a_save_refused_over_a_name_writes_nothing_at_all() {
         &app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "Tobias Cohen", "email": "tobi@tobico.net" },
-            "github_token": { "Set": { "token": "ghp_thetoken" } },
+            "tokens": [{ "forge": GITHUB, "token": { "Set": { "token": "ghp_thetoken" } } }],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -2918,9 +2979,9 @@ async fn a_save_refused_over_a_name_writes_nothing_at_all() {
 
     assert_eq!(saved.refused_servers.len(), 1);
     assert!(saved.refused.is_empty());
-    assert!(saved.verified.is_none(), "no token was tried");
+    assert!(saved.verified().is_none(), "no token was tried");
     assert_eq!(saved.settings.git_author.name, "Ada Lovelace");
-    assert!(saved.settings.github_token.is_none());
+    assert!(saved.settings.github_token().is_none());
     assert_eq!(settings(&app).await.git_author.name, "Ada Lovelace");
 }
 
@@ -3113,7 +3174,7 @@ async fn a_header_value_appears_in_no_answer_this_endpoint_gives() {
         &app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
+            "tokens": [],
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -3354,7 +3415,7 @@ async fn a_server_and_the_token_are_saved_without_taking_each_other_away() {
     assert_eq!(
         settings(&app)
             .await
-            .github_token
+            .github_token()
             .expect("the token survived the server's save")
             .last_four,
         "oken"
@@ -3867,7 +3928,7 @@ mod trying {
             &app,
             &serde_json::json!({
                 "git_author": { "display_name": "", "name": "", "email": "" },
-                "github_token": "Keep",
+                "tokens": [],
                 "cleanup": super::cleanup_unset(),
                 "at_once": super::at_once_unset(),
                 "conflict_resolution": "Merge",

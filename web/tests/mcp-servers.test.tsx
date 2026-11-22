@@ -61,7 +61,7 @@ const BESIDE = TOLD.mcp_servers[1]!;
 /// said, left exactly where it was.
 const REST = {
   git_author: TOLD.git_author,
-  github_token: "Keep",
+  tokens: [],
   // The rules ride along as an action rather than a value: nothing this pane
   // does says anything about them — see [`IgnoredCommentsEdit`].
   ignored_comments: "Keep",
@@ -121,7 +121,7 @@ function holding(
 ): SettingsSaved {
   return {
     settings: { ...standing, mcp_servers },
-    verified: null,
+    verified: [],
     refused: [],
     refused_servers: [],
     // What came of speaking to each of them, which every save that landed
@@ -145,7 +145,7 @@ function unreached(server: string, why: string): ServerTried {
 function turnedDown(...refused_servers: ServerRefused[]): SettingsSaved {
   return {
     settings: TOLD,
-    verified: null,
+    verified: [],
     refused: [],
     refused_servers,
     tried: [],
