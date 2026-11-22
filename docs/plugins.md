@@ -392,7 +392,9 @@ provides:
 - **`id`** — required, lowercase letters, digits and hyphens, and unique among
   the plugin's Processes: what a Conversation's record names it by, beside the
   plugin's uuid.
-- **`name`** and **`description`** — required. What the Process picker draws.
+- **`name`** and **`description`** — required. What the Process picker draws:
+  the row's own word, and the sentence under it. The name is also what a frozen
+  Brief's Configuration reads back.
 - **`target`** — optional, `true` or `false`, and `false` where it is not
   written: whether a Draft of it takes a Target, a pull request or a branch
   already there.
@@ -417,7 +419,11 @@ provides:
     digits, hyphens and underscores, like `follow_up`, unique among the
     Process's states. `draft`, `done`, `closed` and `stopped` are Verkstead's
     own, and refused.
-  - **`word`** — what the Conversation's card draws while it is in the state.
+  - **`word`** — what the human reads wherever the state is named: the
+    Conversation's card, the moves on its Timeline, the Steer row that goes
+    there, and the sidebar row read aloud. The viewer keeps no words of its own
+    for a state (Set 1765, Q29) — only Verkstead's three, *Draft*, *Done* and
+    *Closed*, which no Process declares.
   - **`activity`** — the `id` of the Activity it runs. The plugin's own
     Activities are looked in first, then each dependency's in the order they
     are written.

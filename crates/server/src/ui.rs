@@ -985,26 +985,27 @@ pub(crate) async fn set_reading(
     );
 
     // Whether the closing section carries the Nothing-else option, and which
-    // ending it would bring about — a fact about the Conversation rather than
-    // about the Set: a follow-up's rounds and an investigation's are both
-    // ordinary Sets, and what makes one either is where the work stands while it
-    // is being answered. A Conversation that cannot be read draws no option,
-    // which is what every state but those two gets anyway.
-    let lifecycle = match store::state(&state.pool, conversation).await {
-        Ok(state) => state,
+    // ending it would bring about — a fact about what is *running* rather than
+    // about the Set or about what the state is called: a follow-up's rounds and
+    // an investigation's are both ordinary Sets asked from the one Follow-up
+    // rounds Activity, and its options are what say which (Set 1765, Q29). A
+    // Conversation that cannot be read draws no option, which is what every
+    // state running something else gets anyway.
+    let ending = crate::processes::ending(state, conversation).await;
+
+    // And whether the Conversation has been closed, which is what strikes an
+    // addition nothing is ever going to apply — a word of Verkstead's own
+    // whatever the Process, so it is read as one.
+    let closed = match store::state(&state.pool, conversation).await {
+        Ok(state) => state == Some(store::Lifecycle::Closed),
         Err(error) => {
             tracing::error!(
                 error = ?error,
                 conversation,
-                "reading where a Set's Conversation stands failed"
+                "reading whether a Set's Conversation is closed failed"
             );
-            None
+            false
         }
-    };
-    let ending = match lifecycle {
-        Some(store::Lifecycle::FollowUp) => Some(verkstead_render::Ending::FollowUp),
-        Some(store::Lifecycle::Investigating) => Some(verkstead_render::Ending::Investigation),
-        _ => None,
     };
 
     // And the files the human put on its Answers, which the sheet draws under
@@ -1033,9 +1034,9 @@ pub(crate) async fn set_reading(
     };
     // What a lock, or the Conversation closing, left unapplied is struck on the
     // record: nothing is ever going to put it on.
-    let additions = match (&standing, lifecycle) {
+    let additions = match (&standing, closed) {
         (verkstead_render::Standing::LockedUnanswered(_), _)
-        | (verkstead_render::Standing::Waiting(_), Some(store::Lifecycle::Closed)) => {
+        | (verkstead_render::Standing::Waiting(_), true) => {
             crate::answer_additions::unapplied(additions)
         }
         _ => additions,
@@ -1826,13 +1827,13 @@ async fn conversations(
                 naming: conversation.naming,
                 repo: conversation.repo,
                 state: row_state(conversation.id, conversation.state),
-                declared: conversation.declared.map(|declared| DeclaredState {
-                    process: ProvidedProcess {
-                        plugin: declared.plugin,
-                        id: declared.process,
-                    },
-                    state: declared.state,
-                }),
+                // Which Process declares the state, as the plugin providing
+                // it: a plugin's names itself, and one of Verkstead's own is
+                // the built-in plugin that holds it. The row's word is read
+                // off that Process's manifest either way (Set 1765, Q29).
+                declared: conversation
+                    .declared
+                    .and_then(|declared| declaring(&declared.process, declared.state)),
                 working,
                 // Idle is a thing a running session is, and the two sets are
                 // read a moment apart — so the pair is made consistent here
@@ -2923,9 +2924,12 @@ pub(crate) async fn conversation_view(
                         markdown,
                         Some(event.id) != open_brief,
                     ),
-                    store::Event::Moved(state) => {
-                        verkstead_render::moved_event(event.id, event.at, lifecycle(state))
-                    }
+                    store::Event::Moved(state) => verkstead_render::moved_event(
+                        event.id,
+                        event.at,
+                        lifecycle(state),
+                        state.stored().to_owned(),
+                    ),
                     store::Event::Entered(state) => {
                         verkstead_render::entered_event(event.id, event.at, state)
                     }
@@ -3074,7 +3078,14 @@ pub(crate) async fn conversation_view(
                         verkstead_render::steer_event(
                             event.id,
                             event.at,
-                            lifecycle(target),
+                            lifecycle(target.target()),
+                            // And the state's id beside it, which is what the
+                            // card's word is read off: a plugin's Process
+                            // names its own states, and Verkstead's five name
+                            // theirs with the words the record holds, so the
+                            // target's own word is the id either way.
+                            (target.target() != store::Lifecycle::Done)
+                                .then(|| target.stored().to_owned()),
                             instruction.as_deref(),
                             // And the rest of the form that press filled, where
                             // the record has it: the pane this Event opens
@@ -6709,6 +6720,29 @@ fn parked(sitting: &crate::sessions::Parked) -> Parked {
         idle_seconds: sitting.idle_for.as_secs(),
         spoken_to: sitting.spoken_to,
     }
+}
+
+/// The state `state` of `process`, named by the plugin that declares it and
+/// its id there — which is what a sidebar row's word is read off (Set 1765,
+/// Q29).
+///
+/// A plugin's Process names itself; one of Verkstead's own is named by the
+/// built-in plugin holding it, all five being plugins of their own. `None`
+/// for a Process this build does not know, which can only be a record written
+/// by a newer one: the row then draws the word it has.
+fn declaring(process: &store::Process, state: String) -> Option<DeclaredState> {
+    let (plugin, id) = match process {
+        store::Process::Provided { plugin, id } => (plugin.clone(), id.clone()),
+        built_in => {
+            let (plugin, id) = crate::plugins::built_in::standing_for(built_in)?;
+            (plugin.to_owned(), id.to_owned())
+        }
+    };
+
+    Some(DeclaredState {
+        process: ProvidedProcess { plugin, id },
+        state,
+    })
 }
 
 /// The store's lifecycle state as the viewer receives it. One word either side,

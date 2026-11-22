@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentOutputEvent, ConversationView } from "../src/api/types";
 import { status } from "../src/workbench/StatusButton";
 import { knowProvidedProcesses } from "../src/workbench/provided";
+import { declaredOn } from "./processes";
 
 import building from "./fixtures/conversation-building.json" with {
   type: "json",
@@ -29,6 +30,7 @@ import building from "./fixtures/conversation-building.json" with {
 const QUIET: ConversationView = {
   ...(building as ConversationView),
   state: "Implementing",
+  declared_state: "implementing",
   waiting: false,
   blocked_on: null,
   stopped_by_hand: false,
@@ -41,8 +43,12 @@ const QUIET: ConversationView = {
 };
 
 /// That Conversation with something else true about it.
+///
+/// The state's own id travels with the state, as the server sends the two
+/// together — the word is read off the id, so a case that moved one and not
+/// the other would be asking about a state nothing named.
 function like(over: Partial<ConversationView>): ConversationView {
-  return { ...QUIET, ...over };
+  return { ...QUIET, ...declaredOn(over.state ?? QUIET.state), ...over };
 }
 
 /// A session on its record, running or finished.
@@ -341,6 +347,11 @@ describe("a declared state", () => {
           { id: "drafting", word: "Drafting" },
           { id: "checking", word: "Checking" },
         ],
+        roles: [
+          { role: "sketching", label: "Sketching", building: true, away: false },
+        ],
+        target: false,
+        narrowed: false,
         built_in: null,
       },
     ]);

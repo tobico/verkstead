@@ -50,7 +50,7 @@ import { useDevice } from "../reaching";
 import { Actions } from "./Actions";
 import { WAITING_ON_CHECKS, WAITING_TO_JOIN, parked } from "./conditions";
 import { pressed } from "./eager";
-import { ENDED, stateWord } from "./states";
+import { ENDED, stateWord } from "./provided";
 import styles from "./StatusButton.module.css";
 
 /// What the first line says.
@@ -82,8 +82,9 @@ export type Status = {
 /// on its own rather than the same word said twice with a colour between.
 export function status(conversation: ConversationView): Status {
   const state = stateWord(
-    conversation.state,
+    conversation.process,
     conversation.provided,
+    conversation.state,
     conversation.declared_state,
   );
 

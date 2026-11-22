@@ -189,7 +189,9 @@ pub(crate) struct Landing {
 /// the record's to say whatever was written to send it there with.
 fn homeward(timeline: &[store::TimelineEvent]) -> Landing {
     let steer = timeline.iter().rev().find_map(|event| match &event.event {
-        store::Event::Steer(Lifecycle::Investigating, _, record) => Some((event.id, record)),
+        store::Event::Steer(store::Steered::Built(Lifecycle::Investigating), _, record) => {
+            Some((event.id, record))
+        }
         _ => None,
     });
 
@@ -406,9 +408,11 @@ fn steered(timeline: &[store::TimelineEvent]) -> Option<(usize, &str)> {
         .enumerate()
         .rev()
         .find_map(|(at, event)| match &event.event {
-            store::Event::Steer(store::Lifecycle::Investigating, Some(brief), _) => {
-                Some((at, brief.as_str()))
-            }
+            store::Event::Steer(
+                store::Steered::Built(store::Lifecycle::Investigating),
+                Some(brief),
+                _,
+            ) => Some((at, brief.as_str())),
             _ => None,
         })
 }
@@ -452,7 +456,7 @@ mod tests {
             id: 1,
             at: "2026-09-26T12:00:00Z".to_owned(),
             event: store::Event::Steer(
-                target,
+                store::Steered::Built(target),
                 Some("Where does the 429 count come from?\n".to_owned()),
                 Some(Box::new(store::SteerRecord {
                     digest: false,

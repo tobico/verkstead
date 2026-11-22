@@ -90,9 +90,11 @@ fn steered(timeline: &[store::TimelineEvent]) -> Option<(usize, &str)> {
         .enumerate()
         .rev()
         .find_map(|(at, event)| match &event.event {
-            store::Event::Steer(store::Lifecycle::FollowUp, Some(brief), _) => {
-                Some((at, brief.as_str()))
-            }
+            store::Event::Steer(
+                store::Steered::Built(store::Lifecycle::FollowUp),
+                Some(brief),
+                _,
+            ) => Some((at, brief.as_str())),
             _ => None,
         })
 }
@@ -178,7 +180,11 @@ mod tests {
         store::TimelineEvent {
             id: 2,
             at: "2026-09-26T12:00:00Z".to_owned(),
-            event: store::Event::Steer(target, Some("Say what came of it\n".to_owned()), None),
+            event: store::Event::Steer(
+                store::Steered::Built(target),
+                Some("Say what came of it\n".to_owned()),
+                None,
+            ),
         }
     }
 

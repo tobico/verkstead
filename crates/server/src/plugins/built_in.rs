@@ -308,6 +308,16 @@ pub const INVESTIGATE: &str = "53f22a43-806b-4019-8798-c014fa9a0239";
 pub const REVIEW: &str = "0b55843a-7c93-47cc-9655-e5f6ec3cf019";
 pub const FIX_MERGE_ISSUES: &str = "0b4f33da-1f61-46dd-aa82-3983d627e192";
 
+/// And the order the picker draws their rows in, which is the order the
+/// Processes are listed and a new Draft is prefilled from: the ladder first,
+/// then the two that start without an interview, then the review — with *Fix
+/// merge issues* under the Review it is the narrowed form of.
+///
+/// Written here because it is a fact about the five together rather than
+/// about any one of them, and because `plugins/` is embedded in directory
+/// order, which spells no order anybody chose.
+pub(crate) const PROCESSES: &[&str] = &[DEVELOP, TINKER, INVESTIGATE, REVIEW, FIX_MERGE_ISSUES];
+
 /// The built-in plugin and the id of its Process that one of the record's
 /// bare Process words is read as — `tinker` is the *Tinker* plugin's `tinker`
 /// — so a Conversation stored before Processes were data runs on its manifest

@@ -12,6 +12,9 @@ use crate::AppState;
 use crate::activities::built_in;
 use crate::drivers::Driving;
 use crate::lending::Lent;
+/// The id the **Interview** Activity has in the Activities plugin's manifest,
+/// which is also what a Process's state names to run it.
+use crate::processes::INTERVIEW;
 use crate::runner::{base, broken_down, staged};
 use crate::skills;
 
@@ -165,10 +168,6 @@ async fn offered(state: &AppState, conversation_id: i64) -> Vec<Direction> {
         }
     }
 }
-
-/// The id the **Interview** Activity has in the built-in Activities plugin's
-/// manifest.
-const INTERVIEW: &str = "interview";
 
 /// Start the session that builds from the handoff the grilling session wrote.
 ///

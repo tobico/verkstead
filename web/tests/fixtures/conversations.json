@@ -3,7 +3,13 @@
     "born": "aa00bb11cc22dd33ee44ff5566778899/5",
     "branch": "task-runner",
     "branch_named": true,
-    "declared": null,
+    "declared": {
+      "process": {
+        "id": "develop",
+        "plugin": "2bcf359e-071a-4237-8741-9897cf06ac15"
+      },
+      "state": "implementing"
+    },
     "device": null,
     "id": 5,
     "idle": false,
@@ -24,7 +30,13 @@
     "born": "aa00bb11cc22dd33ee44ff5566778899/4",
     "branch": "usage-limits",
     "branch_named": true,
-    "declared": null,
+    "declared": {
+      "process": {
+        "id": "develop",
+        "plugin": "2bcf359e-071a-4237-8741-9897cf06ac15"
+      },
+      "state": "implementing"
+    },
     "device": null,
     "id": 4,
     "idle": false,
@@ -45,7 +57,13 @@
     "born": "aa00bb11cc22dd33ee44ff5566778899/3",
     "branch": "outbound-retries",
     "branch_named": true,
-    "declared": null,
+    "declared": {
+      "process": {
+        "id": "develop",
+        "plugin": "2bcf359e-071a-4237-8741-9897cf06ac15"
+      },
+      "state": "grilling"
+    },
     "device": null,
     "id": 3,
     "idle": false,

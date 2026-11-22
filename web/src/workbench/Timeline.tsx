@@ -129,6 +129,7 @@ import type {
   PendingSteerView,
   SteerForm,
   SteerRow,
+  Process,
   ProvidedProcess,
   PinnedEvent,
   ProfileEntry,
@@ -176,8 +177,8 @@ import { StatusButton } from "./StatusButton";
 import styles from "./Timeline.module.css";
 import { titled } from "./naming";
 import { inFlight, settled, stageState } from "./stages";
-import { away } from "./processes";
-import { STATE, stateWord } from "./states";
+import { away } from "./roles";
+import { stateWord } from "./provided";
 import { opensRoadmap, type Opening } from "./openings";
 import { windowed } from "./windowing";
 
@@ -861,6 +862,7 @@ export function Timeline(props: {
                     <Moved
                       from={movedFrom(props.conversation.timeline, index())}
                       moved={moved()}
+                      process={props.conversation.process}
                       provided={props.conversation.provided}
                     />
                   )}
@@ -869,6 +871,8 @@ export function Timeline(props: {
                   {(steer) => (
                     <Steered
                       steer={steer()}
+                      process={props.conversation.process}
+                      provided={props.conversation.provided}
                       selected={props.selected === steer().id}
                       open={() => {
                         props.select(steer().id);
@@ -2095,17 +2099,22 @@ function ManualTask(props: { manual: ManualTaskEvent }): JSX.Element {
 /// line saying only where it arrived leaves the reader to remember where it
 /// was. The state it came from is [`movedFrom`]'s to say.
 ///
-/// A state a plugin's Process declares is said in the word its manifest gives
-/// it, read off the Conversation's Process — see `provided.ts`.
+/// Every state is said in the word its Process's manifest gives it, read off
+/// the Conversation's Process — see `provided.ts`. The three that are
+/// Verkstead's own, Draft among them, are worded there.
 function Moved(props: {
   from: MovedEvent | null;
   moved: MovedEvent;
+  process: Process;
   provided: ProvidedProcess | null;
 }): JSX.Element {
   const word = (moved: MovedEvent | null) =>
-    moved === null
-      ? STATE.Draft
-      : stateWord(moved.state, props.provided, moved.declared);
+    stateWord(
+      props.process,
+      props.provided,
+      moved?.state ?? "Draft",
+      moved?.declared,
+    );
   const tone = () => styles[props.moved.state.toLowerCase()];
 
   return (
@@ -2143,6 +2152,8 @@ function Moved(props: {
 /// lines here, whole in the details pane.
 function Steered(props: {
   steer: SteerEvent;
+  process: Process;
+  provided: ProvidedProcess | null;
   selected: boolean;
   open: () => void;
 }): JSX.Element {
@@ -2160,7 +2171,14 @@ function Steered(props: {
         class={styles.steered}
         classList={tone() === undefined ? {} : { [tone()!]: true }}
       >
-        You steered this into {STATE[props.steer.target]}.
+        You steered this into{" "}
+        {stateWord(
+          props.process,
+          props.provided,
+          props.steer.target,
+          props.steer.declared,
+        )}
+        .
       </p>
       <Show when={props.steer.html}>
         {(html) => <Clamped class={styles.steerBody!} html={html()} />}

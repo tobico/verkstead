@@ -429,7 +429,18 @@ async fn the_five_stored_before_processes_were_data_read_on() {
         let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
         assert_eq!(conversation.process, picked);
         assert_eq!(conversation.state, lifecycle, "{picked:?}");
-        assert_eq!(conversation.declared_state, None, "{picked:?}");
+        // The state's own id beside it, which is the word the column holds:
+        // the five name their states with exactly these words, so a row
+        // stored before any of this is worded off its Process's manifest with
+        // nothing rewritten.
+        assert_eq!(
+            conversation.declared_state.as_deref(),
+            match lifecycle {
+                Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => None,
+                state => Some(state.stored()),
+            },
+            "{picked:?}"
+        );
         assert_eq!(conversation.direction, direction, "{picked:?}");
     }
 }

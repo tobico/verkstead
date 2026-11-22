@@ -1,13 +1,13 @@
-//! What the viewer draws around a Process and the roles it declares: the words
-//! each Process is said in, which of them the picker offers, which are pointed
-//! at a target, the row a role's picker offers above the pairings, which shape
-//! the one **Agent** control takes, and the words an inert start counts off the
-//! roles.
+//! What the viewer draws around the roles a Process declares: the row a role's
+//! picker offers above the pairings, which shape the one **Agent** control
+//! takes, what a Conversation settled for a role, and the words an inert start
+//! counts off the roles.
 //!
 //! **Which roles a Process has is not here**: its manifest declares them and
-//! the server sends them with it (ADR-0030, *Process*) — see `provided.ts`.
-//! What is asked of this module is what Verkstead draws over whatever they
-//! turn out to be.
+//! the server sends them with it (ADR-0030, *Process*) — see `provided.ts`,
+//! and `provided.test.ts`, which is where every word about a Process itself is
+//! asked for. What is asked of this module is what Verkstead draws over
+//! whatever they turn out to be.
 //!
 //! Asked of the module rather than of a rendered row, for the reason it is a
 //! module at all: it is the one place these words are written down, and a page
@@ -16,29 +16,15 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { Process, RoleEntry } from "../src/api/types";
+import type { RoleEntry } from "../src/api/types";
 import {
   away,
   control,
-  DESCRIPTION,
   label,
-  narrowed,
-  NARROWED,
   needed,
-  OFFERED,
-  PROCESS,
   roles,
   settledFor,
-  TARGETED,
-  targeted,
-} from "../src/workbench/processes";
-
-/// Every Process the wire carries, which is every word the viewer has for one.
-/// The five Verkstead runs itself. A plugin's is worded by its manifest —
-/// see `provided.ts`.
-const EVERY = (Object.keys(PROCESS) as Process[]).filter(
-  (process) => process !== "Provided",
-);
+} from "../src/workbench/roles";
 
 /// One role as a manifest declares it, for the readings below.
 function role(
@@ -124,13 +110,14 @@ describe("what an inert start says it is waiting on", () => {
     }
   });
 
-  /// And the whole sentence, which is the clauses the caller asked for with
-  /// the target added where the Process takes one.
-  it("names a target where the process is pointed at one", () => {
-    expect(needed("Review", 2, { brief: true, target: true })).toBe(
+  /// And the whole sentence, which is the clauses the caller asked for: a
+  /// Review's two roles and the target it is pointed at, a Develop's three
+  /// roles and no target.
+  it("names a target where the caller says it is wanted", () => {
+    expect(needed(2, { brief: true, target: true })).toBe(
       "a brief, a target, and both roles picked and working",
     );
-    expect(needed("Develop", 3, { brief: true, target: true })).toBe(
+    expect(needed(3, { brief: true, target: false })).toBe(
       "a brief, and every role picked and working",
     );
   });
@@ -139,7 +126,7 @@ describe("what an inert start says it is waiting on", () => {
   /// names one role rather than two, nothing about it ever reading the branch:
   /// the clause is counted off its roles, so this is the sentence saying so.
   it("names one role for a fix merge issues, and its target with it", () => {
-    expect(needed("FixMergeIssues", 1, { brief: true, target: true })).toBe(
+    expect(needed(1, { brief: true, target: true })).toBe(
       "a brief, a target, and one role picked and working",
     );
   });
@@ -147,49 +134,14 @@ describe("what an inert start says it is waiting on", () => {
   /// And leaves out what the caller says is answered already: a page holding a
   /// roadmap has its brief, and one holding a pull request has its target.
   it("leaves out the clauses the caller does not ask for", () => {
-    expect(needed("Develop", 3, { brief: false, target: true })).toBe(
+    expect(needed(3, { brief: false, target: false })).toBe(
       "every role picked and working",
     );
-    expect(needed("Review", 2, { brief: true, target: false })).toBe(
+    expect(needed(2, { brief: true, target: false })).toBe(
       "a brief, and both roles picked and working",
     );
   });
 });
-
-describe("the processes that are pointed at a target", () => {
-  /// **Review** and **Fix Merge Issues**, which are the two wrap-ups over work
-  /// already somewhere else: the field in the Repo panel comes out of this
-  /// list, so a Process that gains a target gains the field without a line
-  /// changing in either composer — and so does the press that takes it up.
-  it("is the two wrap-ups over work already somewhere else", () => {
-    expect(TARGETED).toEqual(["Review", "FixMergeIssues"]);
-
-    for (const process of EVERY) {
-      expect(targeted(process)).toBe(
-        process === "Review" || process === "FixMergeIssues",
-      );
-    }
-  });
-
-  /// Every one of them is offered, which is the pair of lists agreeing: a
-  /// Process with a Target field and no row to pick it on would be a field
-  /// nobody could reach.
-  it("names only processes the picker offers", () => {
-    for (const process of TARGETED) {
-      expect(OFFERED).toContain(process);
-    }
-  });
-
-  /// And every one of them is a Process the wire carries, for the reason the
-  /// role table has a row for each: a word this viewer has never heard of is
-  /// nothing a panel could draw a field for.
-  it("names only processes there is a word for", () => {
-    for (const process of TARGETED) {
-      expect(EVERY).toContain(process);
-    }
-  });
-});
-
 describe("what a role's picker is labelled", () => {
   /// Inside a panel it is the role's own label, as its manifest writes it:
   /// several pickers stacked, and a label apiece is the whole of what tells
@@ -219,55 +171,3 @@ describe("what a role's picker is labelled", () => {
   });
 });
 
-describe("the processes whose wrap-up is narrowed", () => {
-  /// **Fix Merge Issues** and nothing else: the one Process pointed at a pull
-  /// request that has been reviewed and talked about already, so what is left of
-  /// wrapping it up is the two things GitHub itself refuses a merge for.
-  ///
-  /// The viewer keeps this list so that what the human is *told* is about to
-  /// happen comes off the same kind of fact as what happens — the Steer form's
-  /// wrapping-up note is drawn off it, and a note promising a review on a Process
-  /// that never runs one would promise an hour of work that never happens.
-  it("is Fix Merge Issues and nothing else", () => {
-    expect(NARROWED).toEqual(["FixMergeIssues"]);
-
-    for (const process of EVERY) {
-      expect(narrowed(process)).toBe(process === "FixMergeIssues");
-    }
-  });
-
-  /// And it is one of the two pointed at a target, which is what makes it a
-  /// wrap-up over work already somewhere else rather than a pipeline of its own.
-  it("narrows only a process that takes a target", () => {
-    for (const process of NARROWED) {
-      expect(TARGETED).toContain(process);
-      expect(OFFERED).toContain(process);
-    }
-  });
-});
-
-describe("what each process is said to be", () => {
-  /// A sentence for every Process the wire carries, for the reason `PROCESS`
-  /// has a word for each: the picker draws one under every row, and a row with
-  /// none would be the one the human had to guess at.
-  it("has a sentence for each of the five", () => {
-    expect(Object.keys(DESCRIPTION).sort()).toEqual([...EVERY].sort());
-
-    for (const process of EVERY) {
-      expect(DESCRIPTION[process]).not.toBe("");
-    }
-  });
-
-  /// In the human's own words, *PR* and all.
-  it("says them the way the human wrote them", () => {
-    expect(DESCRIPTION).toEqual({
-      Develop:
-        "Work on something complex, starting with a grilling session and proceeding through a step-by-step development process",
-      Tinker: "Make a series of simple one-off changes with minimal fuss",
-      Investigate:
-        "Ask questions about a code base without committing any code",
-      Review: "Review an existing PR or branch, and fix any issues found",
-      FixMergeIssues: "Fix up a PR which is unable to merge",
-    });
-  });
-});

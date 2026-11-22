@@ -151,7 +151,7 @@ import {
   loadSettings,
   loadSkillPacks,
 } from "../api/client";
-import type { Process, ProcessChoice, RepoEntry } from "../api/types";
+import type { ProcessChoice, RepoEntry } from "../api/types";
 import { useReading } from "../freshness";
 import { Reaching, keyOf, type Device } from "../reaching";
 import { setDraftingOn } from "../remembered";
@@ -199,14 +199,8 @@ import {
   type Composed,
 } from "./composing";
 import { pathOf } from "./openings";
-import {
-  away,
-  label,
-  needed,
-  targeted,
-  type Role,
-} from "./processes";
-import { defaultChoice, rolesFor } from "./provided";
+import { away, label, needed, type Role } from "./roles";
+import { defaultChoice, rolesFor, targetedFor } from "./provided";
 import { namesPullRequest, pullRequestRepository } from "./targets";
 import { useZero } from "./zero";
 
@@ -520,7 +514,6 @@ function Compose(props: {
           process: state().process!,
           ...(state().provided === null ? {} : { provided: state().provided! }),
         };
-  const process = (): Process => chosen().process;
 
   /// Whether there is anything to create at all, which is the repo and nothing
   /// else: everything else on this page may stay empty, as it always may while
@@ -550,7 +543,7 @@ function Compose(props: {
   /// own base along, and a branch's base is what its pull request will be
   /// opened against.
   const onAPullRequest = () =>
-    targeted(process()) && namesPullRequest(state().target);
+    targetedFor(chosen()) && namesPullRequest(state().target);
 
   /// The roles the Process picked declares, in the order their pickers are
   /// drawn — its manifest's, read off the list the server sends.
@@ -559,7 +552,7 @@ function Compose(props: {
   const startable = () =>
     ready() &&
     (adopting() !== null || state().brief.trim() !== "") &&
-    (!targeted(process()) || state().target.trim() !== "") &&
+    (!targetedFor(chosen()) || state().target.trim() !== "") &&
     roles().every((role) => showing(role.role) !== "");
 
   /// What starting is waiting on, in the words the composer's own start says
@@ -571,9 +564,9 @@ function Compose(props: {
   /// or not anybody wanted it is the page explaining itself unasked — see the
   /// composer's own start, where the same words moved for the same reason.
   const waiting = () =>
-    `Starting needs ${needed(process(), roles().length, {
+    `Starting needs ${needed(roles().length, {
       brief: adopting() === null,
-      target: true,
+      target: targetedFor(chosen()),
     })}.`;
 
   const [gone, setGone] = createSignal(false);
@@ -965,13 +958,13 @@ function Compose(props: {
                               />
 
                               {/* And what the work is pointed at, for the
-                                  Processes that are pointed at work already
-                                  somewhere else — `processes.ts`'s list, so a
+                                  Processes whose manifest says they are
+                                  pointed at work already somewhere else, so a
                                   Process that gains a target gains the field
                                   here without a line changing. Held on the
                                   device like everything else in this panel, and
                                   filled from the box while it is empty. */}
-                              <Show when={targeted(process())}>
+                              <Show when={targetedFor(chosen())}>
                                 <BranchField
                                   id="target"
                                   label="Target"

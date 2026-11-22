@@ -46,9 +46,12 @@ pub enum Lifecycle {
     /// steer out of anywhere, and leading back to wherever it was entered from.
     Investigating,
 
-    /// One of the states a plugin's Process declares: which one is the view's
-    /// `declared_state`, and its word is the Process's — see
-    /// [`ProcessEntry::states`].
+    /// One of the states a plugin's Process declares, which none of the words
+    /// above names: which one is the view's `declared_state`.
+    ///
+    /// Every state's word is its Process's — see [`ProcessEntry::states`] —
+    /// so this says only that the record's word is none of Verkstead's own,
+    /// never how the state is drawn.
     Declared,
 
     Done,
@@ -139,9 +142,25 @@ pub struct ProcessEntry {
     /// (ADR-0020, *A Conversation has a Process*; Set 1765, Q26).
     pub roles: Vec<RoleEntry>,
 
+    /// Whether it is pointed at work that is already somewhere else, and so
+    /// draws the **Target** field in the Repo panel: its manifest's `target`
+    /// (Set 1765, Q29). What a Start waits on reads the same fact — see
+    /// `processes::takes_a_target` on the server.
+    pub target: bool,
+
+    /// And whether its wrap-up is narrowed to what GitHub refuses a merge
+    /// for: its `wrapping` state turns the Wrap-up's `review` and `comments`
+    /// off, so nothing reads the branch and nothing said on the pull request
+    /// is answered.
+    ///
+    /// What the Steer form says wrapping up will do, under Verkstead's own
+    /// **Wrapping** row — which is the row this is for, so it is read by that
+    /// state's id and `false` for a Process that declares no such state.
+    pub narrowed: bool,
+
     /// The record's own word for it, where it is one of Verkstead's
     /// Processes written as data: a Conversation on it carries that word, and
-    /// the viewer words it from its own tables until those are read from here.
+    /// it is what the picker's row makes its choice from.
     pub built_in: Option<Process>,
 }
 
@@ -287,8 +306,12 @@ pub struct ConversationEntry {
 
     pub state: Lifecycle,
 
-    /// Where `state` is [`Lifecycle::Declared`], its Process and the state's
-    /// id, for the word to be read off the Process list.
+    /// Its Process and the id of the state it declares, for the row's word to
+    /// be read off the Process list — see [`ProcessEntry::states`].
+    ///
+    /// Filled for every state but the three Verkstead words itself. A row
+    /// whose Process this server holds nothing for carries the id, which the
+    /// sidebar reads aloud as the word it has.
     pub declared: Option<DeclaredState>,
 
     /// Whether a session is running on this Conversation right now.
@@ -739,8 +762,13 @@ pub struct ConversationView {
 
     pub state: Lifecycle,
 
-    /// Where `state` is [`Lifecycle::Declared`], the id of the state its
-    /// Process declares — the word is the Process's, in [`ProcessEntry`].
+    /// The id of the state its Process declares, which is what the card's
+    /// word is read off — see [`ProcessEntry::states`].
+    ///
+    /// Filled for every state but the three Verkstead words itself: Draft,
+    /// Done and Closed. All five of Verkstead's own Processes are plugins
+    /// whose states are named with the words the record holds, so a Grilling
+    /// carries `grilling` here and reads *Grilling* off Develop's manifest.
     pub declared_state: Option<String>,
 
     /// What each role its Process declares will run its sessions under, in the
@@ -880,9 +908,9 @@ pub struct ConversationView {
     /// is decided at Start and not before, so there is nothing here saying
     /// which the page is looking at.
     ///
-    /// Drawn in the Repo panel under the Branch field, for the Processes that
-    /// take a target and no others — see `processes.ts`, where that list is
-    /// kept beside the role table.
+    /// Drawn in the Repo panel under the Branch field, for the Processes whose
+    /// manifest says they take a target and no others — see
+    /// [`ProcessEntry::target`], which is where the page asks.
     pub target: Option<String>,
 
     /// The worktree the grilling was given to work in, once there is one.
@@ -2747,6 +2775,17 @@ pub struct SteerEvent {
     /// The state the human moved it into.
     pub target: Lifecycle,
 
+    /// The id of the state its Process declares, which is what the card's
+    /// word is read off — see [`ProcessEntry::states`].
+    ///
+    /// Every target but Done, whose word is Verkstead's: the five written as
+    /// data name their states with the words the record holds, so a steer
+    /// into Verkstead's own Wrapping carries `wrapping` here exactly as a
+    /// plugin's Process carries whatever it called its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "typescript", ts(optional))]
+    pub declared: Option<String>,
+
     /// The instruction they steered it with, rendered and sanitized on the way
     /// out as every piece of markdown on this wire is — and `None` for every
     /// steer that carried nothing written.
@@ -2884,8 +2923,13 @@ pub struct MovedEvent {
 
     pub state: Lifecycle,
 
-    /// Where `state` is [`Lifecycle::Declared`], the id of the state its
-    /// Process declares. Left off every other move.
+    /// The id of the state its Process declares, which is what the line's
+    /// word is read off — see [`ProcessEntry::states`].
+    ///
+    /// Every move but the three Verkstead words itself: Draft, Done and
+    /// Closed. The five written as data name their states with the words the
+    /// record holds, so a move into Verkstead's own Wrapping carries
+    /// `wrapping` here exactly as a plugin's Process carries its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "typescript", ts(optional))]
     pub declared: Option<String>,
@@ -3459,16 +3503,24 @@ pub enum TerminalClosed {
 
 /// A move as an Event. Nothing to render — see [`MovedEvent`] — but built here
 /// beside the Brief so that one place knows how a Timeline is made.
-pub fn moved_event(id: i64, at: String, state: Lifecycle) -> TimelineEvent {
+///
+/// `declared` is the state's id in the Process, which is what the line's word
+/// is read off: the five Processes Verkstead ships name their states with the
+/// words the record holds, so a move into Grilling carries `grilling`. The
+/// three Verkstead words itself carry none.
+pub fn moved_event(id: i64, at: String, state: Lifecycle, declared: String) -> TimelineEvent {
     TimelineEvent::Moved(MovedEvent {
         id,
         at,
         state,
-        declared: None,
+        declared: match state {
+            Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => None,
+            _ => Some(declared),
+        },
     })
 }
 
-/// And a move into a declared state, `state` its id in the Process.
+/// And a move into a state a plugin's Process declares, `state` its id there.
 pub fn entered_event(id: i64, at: String, state: String) -> TimelineEvent {
     TimelineEvent::Moved(MovedEvent {
         id,
@@ -4095,7 +4147,8 @@ pub fn manual_task_event(id: i64, at: String, instruction: &str) -> TimelineEven
     })
 }
 
-/// A Steer as an Event: the state the human sent the Conversation into, and the
+/// A Steer as an Event: the state the human sent the Conversation into — by its
+/// id in the Process, which is what the card's word is read off — and the
 /// instruction they sent it with where they wrote one.
 ///
 /// Rendered the way the Brief is, and for the same reason: it is what the human
@@ -4107,6 +4160,7 @@ pub fn steer_event(
     id: i64,
     at: String,
     target: Lifecycle,
+    declared: Option<String>,
     instruction: Option<&str>,
     record: Option<SteerRecordView>,
 ) -> TimelineEvent {
@@ -4114,6 +4168,7 @@ pub fn steer_event(
         id,
         at,
         target,
+        declared,
         html: instruction.map(crate::markdown::to_html),
         record,
     })

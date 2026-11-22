@@ -44,7 +44,7 @@ import {
   retrying,
 } from "../src/api/client";
 import { osIcon } from "../src/devices";
-import { PROCESS } from "../src/workbench/processes";
+import { named, declaredOn } from "./processes";
 import { Reaching, rowKey } from "../src/reaching";
 import sheet from "../src/set/Sheet.module.css";
 import { Asked } from "../src/workbench/Asked";
@@ -540,7 +540,7 @@ describe("the process and the target of a draft on another device", () => {
     mount(on(`/conversations/${OPEN.id}`));
 
     await waitFor(() => picker("Process"));
-    pick("Process", PROCESS.Tinker);
+    pick("Process", named("Tinker"));
 
     await waitFor(() =>
       expect(written(fetching, at(`/conversations/${OPEN.id}/process`))).toEqual(
@@ -668,6 +668,7 @@ describe("the merged sidebar", () => {
     id: SIDEBAR[0]!.id,
     branch: "over-on-the-member",
     state: "Closed",
+    ...declaredOn("Closed"),
     archived: false,
   };
 

@@ -119,9 +119,34 @@ impl Loaded {
                     away: role.away,
                 })
                 .collect(),
+            target: self.process.target,
+            narrowed: self.narrows_the_wrap_up(),
             built_in: crate::plugins::built_in::stood_for(&self.plugin, &self.process.id)
                 .map(|process| crate::ui::process(&process)),
         }
+    }
+
+    /// Whether its wrap-up is narrowed to what GitHub refuses a merge for:
+    /// the options of its `wrapping` state turn the Wrap-up's `review` and
+    /// `comments` off. Read off the options alone, as the Wrap-up itself reads
+    /// them — never off which Process it is.
+    ///
+    /// By the state's id, which is the word the record holds for Verkstead's
+    /// own wrap-up: what reads this is the Steer form's note under
+    /// Verkstead's own **Wrapping** row, and a Process that declares no state
+    /// by that name has no such row to say anything under.
+    fn narrows_the_wrap_up(&self) -> bool {
+        let Some(wrapping) = self.process.state(WRAPPING) else {
+            return false;
+        };
+        let off = |key: &str| {
+            wrapping
+                .options
+                .iter()
+                .any(|(named, value)| named == key && value == "off")
+        };
+
+        off("review") && off("comments")
     }
 }
 
@@ -147,6 +172,11 @@ pub(crate) fn of(state: &AppState, process: &store::Process) -> Option<Loaded> {
 /// states run found — read out of this binary once, so a press arriving before
 /// the installed plugins have loaded still finds them. `offered` here is only
 /// a placeholder: whether one is offered is its tick, see [`offered`].
+///
+/// In the order the picker draws their rows, which is
+/// [`crate::plugins::built_in::PROCESSES`]' and not the directory order the
+/// built-ins are embedded in: this list *is* the picker's list now that the
+/// viewer keeps none of its own (Set 1765, Q29).
 fn built_ins() -> &'static [Loaded] {
     use crate::plugins::built_in::{BUILT_INS, BuiltIn};
     use crate::plugins::manifest::Manifest;
@@ -168,7 +198,8 @@ fn built_ins() -> &'static [Loaded] {
                 .map(|(built_in, manifest)| (Source::BuiltIn(*built_in), manifest))
         };
 
-        read.iter()
+        let mut held: Vec<Loaded> = read
+            .iter()
             .filter(|(_, manifest)| !crate::plugins::built_in::unlisted(&manifest.uuid))
             .flat_map(|(_, manifest)| {
                 crate::plugins::installed::reaching(manifest, &source)
@@ -180,7 +211,16 @@ fn built_ins() -> &'static [Loaded] {
                         activities,
                     })
             })
-            .collect()
+            .collect();
+
+        let order = |loaded: &Loaded| {
+            crate::plugins::built_in::PROCESSES
+                .iter()
+                .position(|uuid| *uuid == loaded.plugin)
+                .unwrap_or(usize::MAX)
+        };
+        held.sort_by_key(order);
+        held
     });
 
     &HELD
@@ -380,22 +420,78 @@ pub(crate) fn takes_a_target(state: &AppState, process: &store::Process) -> bool
 }
 
 /// Whether `process`'s wrap-up is narrowed to what GitHub refuses a merge
-/// for: the options of the state it wraps up in turn the Wrap-up's `review`
-/// and `comments` off. Read off the options alone, as the Wrap-up itself
-/// reads them — never off which Process it is.
+/// for, as its manifest says — see [`Loaded::narrows_the_wrap_up`], which is
+/// the same reading sent to the picker.
 pub(crate) fn narrows_the_wrap_up(state: &AppState, process: &store::Process) -> bool {
-    let options = options_of(state, process, WRAPPING);
-    let off = |key: &str| {
-        options
-            .iter()
-            .any(|(named, value)| named == key && value == "off")
-    };
-
-    off("review") && off("comments")
+    of(state, process).is_some_and(|loaded| loaded.narrows_the_wrap_up())
 }
 
 /// The state a built-in Process wraps up in, by the word the record holds.
 pub(crate) const WRAPPING: &str = "wrapping";
+
+/// The ids the two Activities Verkstead reads a Conversation's own drawing off
+/// have in the built-in Activities plugin's manifest.
+///
+/// **What is running decides, not what the state is called** (Set 1765, Q29):
+/// a Set asked from Follow-up rounds carries the Nothing-else box and a Set
+/// asked from the Interview honours a `proposal`, whatever the state a Process
+/// declared for it is named.
+pub(crate) const INTERVIEW: &str = "interview";
+pub(crate) const FOLLOW_UP_ROUNDS: &str = "follow-up-rounds";
+
+/// Whether what is running on `conversation_id` is the **Interview**, so a
+/// `proposal` on its Set is one there is still something to inform about —
+/// see [`crate::conversations::settle_a_proposal`].
+pub(crate) async fn interviewing(state: &AppState, conversation_id: i64) -> bool {
+    match standing_under(state, conversation_id).await {
+        Some((word, process)) => runs(state, &process, &word, INTERVIEW),
+        None => false,
+    }
+}
+
+/// And which ending the Nothing-else box on a Set of `conversation_id` would
+/// bring about, or `None` where what is running takes no such mark.
+///
+/// **Follow-up rounds is the Activity that takes it**, and what it is told to
+/// keep as evidence is what says which ending it is: `investigated` is an
+/// investigation, which ends where it was asked from with nothing committed,
+/// and anything else is a follow-up, which ends in the wrap-up. The same two
+/// facts the component itself reads off its options — see the Activity's own
+/// `plugins/activities/follow-up-rounds`.
+pub(crate) async fn ending(
+    state: &AppState,
+    conversation_id: i64,
+) -> Option<verkstead_render::Ending> {
+    let (word, process) = standing_under(state, conversation_id).await?;
+
+    if !runs(state, &process, &word, FOLLOW_UP_ROUNDS) {
+        return None;
+    }
+
+    let investigating = options_of(state, &process, &word)
+        .iter()
+        .any(|(key, value)| key == "evidence" && value == "investigated");
+
+    Some(match investigating {
+        true => verkstead_render::Ending::Investigation,
+        false => verkstead_render::Ending::FollowUp,
+    })
+}
+
+/// The word `conversation_id` stands in with the Process it reads against, or
+/// nothing at all where the record will not say.
+async fn standing_under(
+    state: &AppState,
+    conversation_id: i64,
+) -> Option<(String, store::Process)> {
+    match store::state_under(&state.pool, conversation_id).await {
+        Ok(standing) => standing,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading where a Conversation stands failed");
+            None
+        }
+    }
+}
 
 /// The word of the state a Conversation stands in, as its Process's manifest
 /// names it.
@@ -960,8 +1056,8 @@ async fn stop(
 }
 
 /// Carry on every Conversation a Process in trouble stopped, now that the
-/// Processes loaded here have moved: each one standing in a declared state,
-/// stopped by nobody's decision, whose Process now loads.
+/// Processes loaded here have moved: each one standing in a state a plugin's
+/// Process declares, stopped by nobody's decision, whose Process now loads.
 ///
 /// What the loader calls once a load has changed what is held — see
 /// [`crate::plugins::installed`].
@@ -979,11 +1075,11 @@ pub(crate) async fn taken_back(state: &AppState) {
             continue;
         };
 
-        if state
-            .plugins
-            .process(&declared.plugin, &declared.process)
-            .is_none()
-        {
+        let store::Process::Provided { plugin, id } = &declared.process else {
+            continue;
+        };
+
+        if state.plugins.process(plugin, id).is_none() {
             continue;
         }
 
@@ -998,7 +1094,7 @@ pub(crate) async fn taken_back(state: &AppState) {
 
         tracing::info!(
             conversation_id = row.id,
-            process = declared.process,
+            process = id,
             "a Process's plugin is back, so the Conversation it stopped carries on"
         );
 

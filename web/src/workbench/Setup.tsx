@@ -133,20 +133,13 @@ import type { Device } from "../reaching";
 import { CloneRepo, CreateRepo, OpenRepo, useCloning } from "../repos/RepoList";
 import { reading, type Picked } from "./agent";
 import { AUTOMATIC, chosen } from "./naming";
+import { away, control, label } from "./roles";
 import {
-  away,
-  control,
-  DESCRIPTION,
-  label,
-  OFFERED,
-  targeted,
-} from "./processes";
-import {
-  builtInOffered,
   choiceValue,
   offeredProcesses,
+  processDescription,
   processName,
-  providedProcess,
+  targeted,
 } from "./provided";
 import { namesPullRequest } from "./targets";
 import styles from "./Setup.module.css";
@@ -422,10 +415,15 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
             </Show>
 
             {/* And what the work is pointed at, under the branch it will be
-                done on — drawn for the Processes that are pointed at work
-                already somewhere else and for no other, which is
-                `processes.ts`'s list to keep. */}
-            <Show when={targeted(props.conversation.process)}>
+                done on — drawn for the Processes whose manifest says they are
+                pointed at work already somewhere else and for no other, which
+                is `provided.ts`'s question to put. */}
+            <Show
+              when={targeted(
+                props.conversation.process,
+                props.conversation.provided,
+              )}
+            >
               <TargetName conversation={props.conversation} />
             </Show>
 
@@ -459,7 +457,7 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
 /// own to pick.
 export function onAPullRequest(conversation: ConversationView): boolean {
   return (
-    targeted(conversation.process) &&
+    targeted(conversation.process, conversation.provided) &&
     conversation.target !== null &&
     namesPullRequest(conversation.target)
   );
@@ -1363,11 +1361,11 @@ function ProcessOption(props: { conversation: ConversationView }): JSX.Element {
 /// about. What a pick *does* is the caller's, and so is everything said under
 /// it.
 ///
-/// Which Processes it offers is [`OFFERED`]'s, and the server keeps the other
-/// list — a Process is offered only once its stage has landed, as an agent type
-/// is offered only once it can launch the real thing. Under them, every
-/// Process a plugin loaded on the server offers, worded as its manifest words
-/// it — see `provided.ts`.
+/// Which Processes it offers is the server's, in the order it lists them: the
+/// five Verkstead ships, each while its plugin's tick stands, then every
+/// Process a plugin loaded there offers. Each is worded as its own manifest
+/// words it, name and sentence alike — see `provided.ts`, which is where this
+/// asks (Set 1765, Q29).
 export function ProcessPicker(props: {
   chosen: ProcessChoice;
   pick: (picked: ProcessChoice) => void;
@@ -1382,15 +1380,7 @@ export function ProcessPicker(props: {
   /// stage lands, and a control showing nothing there would be the row missing
   /// the one thing that tells a Review apart.
   const options = (): ProcessChoice[] => {
-    const offered: ProcessChoice[] = [
-      ...OFFERED.filter(builtInOffered).map((process) => ({ process })),
-      ...offeredProcesses().map(
-        (entry): ProcessChoice => ({
-          process: "Provided",
-          provided: { plugin: entry.plugin, id: entry.id },
-        }),
-      ),
-    ];
+    const offered = offeredProcesses();
     const chosen = choiceValue(props.chosen);
 
     return offered.some((choice) => choiceValue(choice) === chosen)
@@ -1413,11 +1403,7 @@ export function ProcessPicker(props: {
         options={options()}
         value={choiceValue}
         label={(choice) => processName(choice.process, choice.provided ?? null)}
-        says={(choice) =>
-          choice.process === "Provided"
-            ? (providedProcess(choice.provided ?? null)?.description ?? "")
-            : DESCRIPTION[choice.process]
-        }
+        says={processDescription}
         chosen={choiceValue(props.chosen)}
         disabled={props.disabled}
         pick={(picked) => {

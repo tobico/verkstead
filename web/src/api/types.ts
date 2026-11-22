@@ -1666,8 +1666,12 @@ naming: boolean,
  */
 repo: string, state: Lifecycle, 
 /**
- * Where `state` is [`Lifecycle::Declared`], its Process and the state's
- * id, for the word to be read off the Process list.
+ * Its Process and the id of the state it declares, for the row's word to
+ * be read off the Process list — see [`ProcessEntry::states`].
+ *
+ * Filled for every state but the three Verkstead words itself. A row
+ * whose Process this server holds nothing for carries the id, which the
+ * sidebar reads aloud as the word it has.
  */
 declared: DeclaredState | null, 
 /**
@@ -2001,8 +2005,13 @@ base_commit: string | null,
  */
 companions: Array<CompanionView>, state: Lifecycle, 
 /**
- * Where `state` is [`Lifecycle::Declared`], the id of the state its
- * Process declares — the word is the Process's, in [`ProcessEntry`].
+ * The id of the state its Process declares, which is what the card's
+ * word is read off — see [`ProcessEntry::states`].
+ *
+ * Filled for every state but the three Verkstead words itself: Draft,
+ * Done and Closed. All five of Verkstead's own Processes are plugins
+ * whose states are named with the words the record holds, so a Grilling
+ * carries `grilling` here and reads *Grilling* off Develop's manifest.
  */
 declared_state: string | null, 
 /**
@@ -2151,9 +2160,9 @@ adopting: AdoptionView | null,
  * is decided at Start and not before, so there is nothing here saying
  * which the page is looking at.
  *
- * Drawn in the Repo panel under the Branch field, for the Processes that
- * take a target and no others — see `processes.ts`, where that list is
- * kept beside the role table.
+ * Drawn in the Repo panel under the Branch field, for the Processes whose
+ * manifest says they take a target and no others — see
+ * [`ProcessEntry::target`], which is where the page asks.
  */
 target: string | null, 
 /**
@@ -4352,8 +4361,13 @@ export type MovedEvent = { id: number,
  */
 at: string, state: Lifecycle, 
 /**
- * Where `state` is [`Lifecycle::Declared`], the id of the state its
- * Process declares. Left off every other move.
+ * The id of the state its Process declares, which is what the line's
+ * word is read off — see [`ProcessEntry::states`].
+ *
+ * Every move but the three Verkstead words itself: Draft, Done and
+ * Closed. The five written as data name their states with the words the
+ * record holds, so a move into Verkstead's own Wrapping carries
+ * `wrapping` here exactly as a plugin's Process carries its own.
  */
 declared?: string, };
 
@@ -5412,9 +5426,23 @@ states: Array<DeclaredStateEntry>,
  */
 roles: Array<RoleEntry>, 
 /**
+ * Whether it is pointed at work that is already somewhere else, and so
+ * draws the **Target** field in the Repo panel: its manifest's `target`
+ * (Set 1765, Q29). What a Start waits on reads the same fact — see
+ * `processes::takes_a_target` on the server.
+ */
+target: boolean, 
+/**
+ * And whether its wrap-up is narrowed to what GitHub refuses a merge
+ * for: the state it wraps up in turns the Wrap-up's `review` and
+ * `comments` off, so nothing reads the branch and nothing said on the
+ * pull request is answered. What the Steer form says wrapping up will do.
+ */
+narrowed: boolean, 
+/**
  * The record's own word for it, where it is one of Verkstead's
  * Processes written as data: a Conversation on it carries that word, and
- * the viewer words it from its own tables until those are read from here.
+ * it is what the picker's row makes its choice from.
  */
 built_in: Process | null, };
 
@@ -7766,6 +7794,16 @@ at: string,
  * The state the human moved it into.
  */
 target: Lifecycle, 
+/**
+ * The id of the state its Process declares, which is what the card's
+ * word is read off — see [`ProcessEntry::states`].
+ *
+ * Every target but Done, whose word is Verkstead's: the five written as
+ * data name their states with the words the record holds, so a steer
+ * into Verkstead's own Wrapping carries `wrapping` here exactly as a
+ * plugin's Process carries whatever it called its own.
+ */
+declared?: string, 
 /**
  * The instruction they steered it with, rendered and sanitized on the way
  * out as every piece of markdown on this wire is — and `None` for every

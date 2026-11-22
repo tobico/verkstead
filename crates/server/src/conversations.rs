@@ -519,6 +519,20 @@ pub(crate) async fn settle_a_proposal(
         }
     };
 
+    // And whether what is running there is the **Interview** at all, which is
+    // the manifest's to say: the record's word got the pick as far as a state
+    // something could be interviewing in — see [`store::pick_direction`] — and
+    // which of a Process's states runs the Interview is written nowhere but
+    // its `process` block (Set 1765, Q29).
+    if !crate::processes::interviewing(state, conversation_id).await {
+        tracing::debug!(
+            set_id,
+            conversation_id,
+            "a proposal was accepted for a Conversation whose state runs no interview"
+        );
+        return;
+    }
+
     if !write_the_artifact(state, conversation_id, picked) {
         // A Conversation grilling with nothing grilling it, which is a thing to
         // see in the log: the pick is recorded, so the human's answer stands, and
@@ -1402,11 +1416,12 @@ async fn other_author_onto(
 /// The Processes a Conversation can actually be started on: the ones whose
 /// stage has landed.
 ///
-/// **The server's list, and the viewer keeps the other** — the rows the picker
-/// draws, in `web/src/workbench/processes.ts`. Two places rather than one
-/// because they are two different statements: this is what the record will
-/// accept, and that is what the human is offered. A stage that brings a Process
-/// to life adds to both, and each of them is written knowing the other is there.
+/// **What the record will accept, which is not what the picker offers**: the
+/// rows the picker draws are the Processes listed to it, in the order
+/// `crate::processes::listed` answers — the viewer keeps no list of its own
+/// (Set 1765, Q29). This is the older question, and the one a pick is refused
+/// by name on: a Process spelled in [`store::Process`] before there is a stage
+/// that can run it waits here.
 ///
 /// All five, the last of them landing with Fix Merge Issues: the record reads
 /// and writes exactly this set — see [`store::Process`] — so nothing is held
@@ -1423,9 +1438,13 @@ const LANDED: &[Process] = &[
 ];
 
 /// The Process a new Draft is prefilled with where Develop is not offered:
-/// the first one that is, in the order [`LANDED`] is written and the picker
-/// draws its rows — Verkstead's own five, then each plugin's in the order they
-/// were installed.
+/// the first one that is, in the order the picker draws its rows — which is
+/// the order the Processes are listed to it, Verkstead's own five first (see
+/// [`crate::plugins::built_in::PROCESSES`]) and then each plugin's in the
+/// order they were installed.
+///
+/// The one list rather than a second reading of it: the control and the
+/// record stand on the same row because they walk the same answer.
 ///
 /// **Nothing is written while Develop is offered**, which is almost always:
 /// a Draft with no row of its own reads as Develop, and that reading is the
@@ -1438,28 +1457,17 @@ const LANDED: &[Process] = &[
 /// offered, which is the truth, rather than this putting the Conversation on
 /// something nobody offered either.
 async fn default_process(state: &AppState) -> Option<store::Process> {
-    for landed in LANDED {
-        let choice = verkstead_render::ProcessChoice {
-            process: *landed,
-            provided: None,
-        };
-
-        let Some(process) = crate::ui::picked_process(choice) else {
-            continue;
-        };
-
-        if crate::processes::offered(state, &process).await {
-            return Some(process);
-        }
-    }
-
     crate::processes::listed(state)
         .await
         .into_iter()
         .find(|loaded| loaded.offered)
-        .map(|loaded| store::Process::Provided {
-            plugin: loaded.plugin,
-            id: loaded.process.id,
+        .map(|loaded| {
+            crate::plugins::built_in::stood_for(&loaded.plugin, &loaded.process.id).unwrap_or(
+                store::Process::Provided {
+                    plugin: loaded.plugin,
+                    id: loaded.process.id,
+                },
+            )
         })
 }
 
@@ -1918,10 +1926,14 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // as a follow-up otherwise. `None` is a Process whose manifest this build
     // cannot read, which starts the grilling a Start always started.
     let runs = first.as_ref().and_then(|first| match &first.activity {
-        crate::plugins::manifest::process::Runs::Activity(id) if id == "interview" => {
+        crate::plugins::manifest::process::Runs::Activity(id)
+            if id == crate::processes::INTERVIEW =>
+        {
             Some(FirstRuns::Interview)
         }
-        crate::plugins::manifest::process::Runs::Activity(id) if id == "follow-up-rounds" => {
+        crate::plugins::manifest::process::Runs::Activity(id)
+            if id == crate::processes::FOLLOW_UP_ROUNDS =>
+        {
             let investigating = first
                 .options
                 .iter()
@@ -6021,10 +6033,9 @@ pub(crate) fn ready_to_grill(
 /// Which Processes are pointed at work that is already somewhere else, and so
 /// take a **Target**.
 ///
-/// The server's half of a fact the viewer keeps too — `TARGETED` in
-/// `processes.ts`, beside the role table — for the reason the landed list is
-/// kept in both: one says what the record waits on, the other says what the
-/// panel draws, and a stage that gives a Process a target adds to both.
+/// What the record's readiness waits on, and the same fact the panel draws the
+/// field off: the viewer reads it off the Process it was sent — see
+/// `ProcessEntry::target` — rather than keeping a list of its own.
 ///
 /// **Read off the Process's manifest**, its `target` (ADR-0030, *Process*):
 /// Review and Fix Merge Issues say so, each being a wrap-up over a pull request

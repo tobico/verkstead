@@ -1,10 +1,11 @@
 import { cleanup, configure } from "@solidjs/testing-library";
 import { afterEach, beforeEach } from "vitest";
 
-import type { HarnessEntry } from "../src/api/types";
+import type { HarnessEntry, ProcessEntry } from "../src/api/types";
 import { knowHarnesses } from "../src/harnesses";
 import { knowProvidedProcesses } from "../src/workbench/provided";
 import harnesses from "./fixtures/harnesses.json" with { type: "json" };
+import processes from "./fixtures/processes.json" with { type: "json" };
 
 // The library cleans up after itself only when vitest's globals are on, and
 // they are not: an uncleaned render leaves the last test's DOM in the document
@@ -19,9 +20,15 @@ afterEach(cleanup);
 // the storage puts what it means in it and reads it back inside itself.
 beforeEach(() => localStorage.clear());
 
-// And no plugin's Process known, which is what a server with nothing installed
-// says — a test about one says its own with `knowProvidedProcesses`.
-beforeEach(() => knowProvidedProcesses([]));
+// And the five Processes Verkstead ships, which is what a server with nothing
+// installed says — every word the viewer draws about a Process or one of its
+// states is read off this list (ADR-0030, *Process*), so a test that started
+// without it would be a page on a server that had answered nothing. Written by
+// the server's own suite, like every other fixture here.
+//
+// A test about a plugin's Process says its own with `knowProvidedProcesses`,
+// these five beside it where it still wants them.
+beforeEach(() => knowProvidedProcesses(processes as ProcessEntry[]));
 
 // How long a wait is given, which is a budget on the machine rather than on the
 // code — the same thing `testTimeout` in `vite.config.ts` is, and said here

@@ -26,7 +26,7 @@ import type {
 } from "../src/api/types";
 import { Shell, conversationRoutes } from "../src/App";
 import { under } from "../src/pairing";
-import { settledFor } from "../src/workbench/processes";
+import { settledFor } from "../src/workbench/roles";
 import { ComposePage } from "../src/workbench/Compose";
 import { Conversations } from "../src/workbench/Conversations";
 import setup from "../src/workbench/Setup.module.css";

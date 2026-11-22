@@ -57,7 +57,7 @@ import * as pairing from "../pairing";
 import { authorLabel, useAuthors } from "../authors";
 import styles from "./Brief.module.css";
 import { chosen } from "./naming";
-import { away } from "./processes";
+import { away } from "./roles";
 import { processName } from "./provided";
 import { PaneHead } from "./PaneHead";
 import { ABBREVIATED } from "./Timeline";

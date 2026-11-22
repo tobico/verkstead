@@ -2260,6 +2260,41 @@ async fn a_plugin_in_trouble_still_draws_its_fields() {
     assert!(saved.refused.is_empty());
 }
 
+/// And leave the viewer's tests the Processes the picker is sent, as a server
+/// with nothing installed lists them: the five Verkstead ships, in the order
+/// their rows are drawn.
+///
+/// Every word the viewer says about a Process or one of its states is read off
+/// this list now (Set 1765, Q29) — the picker's rows and their sentences, the
+/// state on a card, the Target field — so its own tests start from what the
+/// endpoint actually said rather than from a table of their own.
+#[tokio::test]
+async fn the_processes_are_written_for_the_viewer() {
+    let (app, _dir) = kept().await;
+    let listed = processes(&app).await;
+
+    assert_eq!(
+        listed
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "Develop",
+            "Tinker",
+            "Investigate",
+            "Review",
+            "Fix merge issues"
+        ],
+        "in the order the picker draws them",
+    );
+
+    let mut pretty = serde_json::to_string_pretty(&listed).unwrap();
+    pretty.push('\n');
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join(FIXTURES);
+    std::fs::create_dir_all(&fixtures).unwrap();
+    std::fs::write(fixtures.join("processes.json"), pretty).unwrap();
+}
+
 /// Leave the viewer's tests the page and the consent card as the server writes
 /// them: a plugin that loaded, one in trouble, one from git, one whose
 /// dependency isn't installed, an installer's own language, the card for one asking for a host, and the
@@ -2365,6 +2400,241 @@ async fn the_page_and_the_card_are_written_for_the_viewer() {
     written("plugin-settings.json", settings);
 }
 
+/// A router over a Data Directory of its own, with the plugin `install` writes
+/// there installed and a Conversation drafting in a Repo of its own.
+///
+/// The Repo is a git repository with one empty commit, which is the least a
+/// Start will accept — and what it is for is a Conversation whose record can be
+/// moved about by hand.
+async fn drafting_on(
+    install: impl FnOnce(&Path) -> String,
+) -> (Router, tempfile::TempDir, sqlx::SqlitePool, i64) {
+    use std::process::{Command, Stdio};
+    use verkstead_render::{Registered, RepoEntry, Started};
+
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    let app = router_keeping(pool.clone(), dir.path().to_owned());
+
+    let path = install(dir.path());
+    assert_eq!(row(&installs(&app, &path).await, PLUGIN).trouble, None);
+
+    let repo = dir.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    for args in [
+        &["init", "--initial-branch", "main"][..],
+        &["config", "user.email", "test@verkstead.invalid"],
+        &["config", "user.name", "Verkstead Test"],
+        &["commit", "--allow-empty", "-m", "first"],
+    ] {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(&repo)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+
+    let registered: Registered =
+        answered(&app, "/api/ui/repos", serde_json::json!({ "path": repo })).await;
+    assert!(matches!(registered, Registered::Added(_)), "{registered:?}");
+    let repos: Vec<RepoEntry> = got(&app, "/api/ui/repos").await;
+    let started: Started = answered(
+        &app,
+        "/api/ui/conversations",
+        serde_json::json!({ "repo_id": repos[0].id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("the Conversation starts: {started:?}");
+    };
+
+    (app, dir, pool, id)
+}
+
+/// A press that is expected to land, read back as whatever it answers with.
+async fn answered<T: serde::de::DeserializeOwned>(
+    app: &Router,
+    path: &str,
+    body: serde_json::Value,
+) -> T {
+    let (status, said) = pressing(app, path, body).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    serde_json::from_str(&said).unwrap_or_else(|error| panic!("{error}: {said}"))
+}
+
+/// **What is drawn on a Set is decided by the Activity running**, never by what
+/// the state it is asked from happens to be called (Set 1765, Q29).
+///
+/// A Process names its own states, so a Follow-up rounds state called anything
+/// at all is still the rounds the Nothing-else box belongs to — and whether
+/// that box promises a wrap-up or promises nothing committed is its options'
+/// to say, exactly as the Activity's own component reads them.
+mod drawing {
+    use super::*;
+    use verkstead_render::{Ending, SetReading};
+    use verkstead_server::store;
+
+    /// A whole plugin, PLUGIN, providing the Process *Rounds*: an interview
+    /// under a word of its own, rounds of follow-up under another, and an
+    /// investigation under a third.
+    fn rounds() -> String {
+        format!(
+            "uuid: {PLUGIN}\n\
+             name: Rounds\n\
+             author:\n  name: Ada Lovelace\n  email: ada@example.com\n\
+             version: 1.0.0\n\
+             interface: 1\n\
+             dependencies:\n\
+             \x20 - uuid: {ACTIVITIES}\n\
+             \x20   name: Activities\n\
+             \x20   author:\n      name: Tobias Cohen\n      email: tobi@tobico.net\n\
+             \x20   version: ^0.1\n\
+             \x20 - uuid: {VERKSTEAD}\n\
+             \x20   name: Verkstead\n\
+             \x20   author:\n      name: Tobias Cohen\n      email: tobi@tobico.net\n\
+             \x20   version: ^0.1\n\
+             provides:\n\
+             \x20 - category: process\n\
+             \x20   id: rounds\n\
+             \x20   name: Rounds\n\
+             \x20   description: Ask, then chat, then probe.\n\
+             \x20   roles:\n\
+             \x20     - {{ name: sketching, label: Sketching, building: true }}\n\
+             \x20   directions: {{ inline: chatting }}\n\
+             \x20   states:\n\
+             \x20     - {{ id: asking, word: Asking, activity: interview, options: {{ skill: verkstead/grilling }} }}\n\
+             \x20     - {{ id: chatting, word: Chatting, activity: follow-up-rounds, options: {{ skill: verkstead/following-up }} }}\n\
+             \x20     - {{ id: probing, word: Probing, activity: follow-up-rounds, options: {{ skill: verkstead/investigating, evidence: investigated }} }}\n\
+             \x20   transitions:\n\
+             \x20     asking: {{ gone: stopped }}\n\
+             \x20     chatting: {{ committed: probing, nothing: done }}\n\
+             \x20     probing: {{ committed: done, nothing: done }}\n\
+             capabilities: []\n"
+        )
+    }
+
+    /// Which ending the Nothing-else box on a Set of `id` would bring about,
+    /// with the Conversation standing in the state `state`.
+    async fn box_in(app: &Router, pool: &sqlx::SqlitePool, id: i64, state: &str) -> Option<Ending> {
+        store::set_state(pool, id, state).await.unwrap();
+
+        let set = verkstead_schema::QuestionSet::from_yaml(
+            "title: the rate limiter\n\
+             questions:\n\
+             \x20 - label: Q1\n\
+             \x20   text: where does the counter live?\n",
+        )
+        .unwrap();
+        let asked = store::ask(pool, id, &set, store::Ask::Blocking)
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+
+        let reading: SetReading = got(app, &format!("/api/ui/sets/{asked}")).await;
+        let SetReading::Set(view) = reading else {
+            panic!("the Set reads back: {reading:?}");
+        };
+
+        view.ending
+    }
+
+    /// A state called `chatting` carries the box, and a state called `probing`
+    /// carries it worded for what an investigation ends in — the Activity and
+    /// its `evidence` deciding both, so neither word has to be one Verkstead
+    /// knows. And the interview's state carries none, nothing there taking the
+    /// mark.
+    #[tokio::test]
+    async fn a_follow_up_rounds_state_carries_the_box_whatever_it_is_called() {
+        let (app, _dir, pool, id) = drafting_on(|dir| plugin(dir, "rounds", &rounds())).await;
+        on_rounds(&app, id).await;
+
+        assert_eq!(
+            box_in(&app, &pool, id, "chatting").await,
+            Some(Ending::FollowUp),
+            "a state running Follow-up rounds carries the box"
+        );
+        assert_eq!(
+            box_in(&app, &pool, id, "probing").await,
+            Some(Ending::Investigation),
+            "and `evidence: investigated` is what words it as an investigation"
+        );
+        assert_eq!(
+            box_in(&app, &pool, id, "asking").await,
+            None,
+            "the interview's state takes no such mark"
+        );
+    }
+
+    /// And a `proposal` on a Set asked from the state running the **Interview**
+    /// is honoured there, whatever that state is called: the pick is recorded,
+    /// which is what decides the artefact the session is held to.
+    #[tokio::test]
+    async fn a_proposal_is_honoured_from_an_interview_state_whatever_it_is_called() {
+        let (app, _dir, pool, id) = drafting_on(|dir| plugin(dir, "rounds", &rounds())).await;
+        on_rounds(&app, id).await;
+        store::set_state(&pool, id, "asking").await.unwrap();
+
+        let proposing = verkstead_schema::QuestionSet::from_yaml(
+            "title: the rate limiter\n\
+             proposal:\n\
+             \x20 direction: task-list\n\
+             \x20 rationale: There is more here than one session should carry.\n\
+             questions:\n\
+             \x20 - label: Q1\n\
+             \x20   text: where does the counter live?\n",
+        )
+        .unwrap();
+        let set = store::ask(&pool, id, &proposing, store::Ask::Blocking)
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+
+        let submitted: verkstead_render::Submitted = answered(
+            &app,
+            &format!("/api/ui/sets/{set}/response"),
+            serde_json::json!({
+                "answers": [{ "label": "Q1", "free_text": "in Redis" }],
+                "direction": "task-list",
+            }),
+        )
+        .await;
+        assert_eq!(submitted, verkstead_render::Submitted::Accepted);
+
+        assert_eq!(
+            store::picked_direction(&pool, id).await.unwrap(),
+            Some(verkstead_schema::Direction::TaskList),
+            "the pick stands, so the artefact the session is held to is settled"
+        );
+    }
+
+    /// Put the Conversation on the fixture Process, which is what makes its
+    /// states the ones the record's words are read against.
+    async fn on_rounds(app: &Router, id: i64) {
+        let picked: verkstead_render::ProcessPicked = answered(
+            app,
+            &format!("/api/ui/conversations/{id}/process"),
+            serde_json::json!({
+                "process": "Provided",
+                "provided": { "plugin": PLUGIN, "id": "rounds" },
+            }),
+        )
+        .await;
+        assert_eq!(
+            picked,
+            verkstead_render::ProcessPicked::Picked,
+            "{picked:?}"
+        );
+    }
+}
+
 /// **A Skill Pack attached to a Conversation** while its round drafts, the way
 /// an MCP server is (ADR-0030, *Skill packs*): offered on the Attach menu once
 /// an installed plugin's pack has loaded, kept as a chip read back from the
@@ -2374,56 +2644,14 @@ mod packs {
     use sqlx::SqlitePool;
     use verkstead_render::{
         Added, AdditionMade, AdditionState, ConversationView, OfferedPack, PackAttached,
-        PackRemoved, Registered, RepoEntry, SetReading, Started, Submitted,
+        PackRemoved, SetReading, Submitted,
     };
     use verkstead_server::store;
 
     /// A router over a Data Directory of its own, with the plugin providing
     /// `rust-review` installed and a Conversation drafting in a Repo.
     async fn drafting() -> (Router, tempfile::TempDir, SqlitePool, i64) {
-        let dir = tempfile::tempdir().unwrap();
-        let pool = open_database(&dir.path().join("verkstead.db"))
-            .await
-            .unwrap();
-        let app = router_keeping(pool.clone(), dir.path().to_owned());
-
-        let path = packing(dir.path(), PLUGIN, "Rust review", "rust-review");
-        assert_eq!(row(&installs(&app, &path).await, PLUGIN).trouble, None);
-
-        let repo = dir.path().join("repo");
-        std::fs::create_dir_all(&repo).unwrap();
-        for args in [
-            &["init", "--initial-branch", "main"][..],
-            &["config", "user.email", "test@verkstead.invalid"],
-            &["config", "user.name", "Verkstead Test"],
-            &["commit", "--allow-empty", "-m", "first"],
-        ] {
-            let status = Command::new("git")
-                .args(args)
-                .current_dir(&repo)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .unwrap();
-            assert!(status.success(), "git {args:?}");
-        }
-
-        let registered: Registered =
-            answer(&app, "/api/ui/repos", serde_json::json!({ "path": repo })).await;
-        assert!(matches!(registered, Registered::Added(_)), "{registered:?}");
-        let repos: Vec<RepoEntry> = reading(&app, "/api/ui/repos").await;
-        let started: Started = answer(
-            &app,
-            "/api/ui/conversations",
-            serde_json::json!({ "repo_id": repos[0].id }),
-        )
-        .await;
-        let Started::Started { id } = started else {
-            panic!("the Conversation starts: {started:?}");
-        };
-
-        (app, dir, pool, id)
+        super::drafting_on(|dir| packing(dir, PLUGIN, "Rust review", "rust-review")).await
     }
 
     async fn answer<T: serde::de::DeserializeOwned>(

@@ -148,7 +148,7 @@ import { SPOKEN } from "./Mark";
 import marks from "./Mark.module.css";
 import { WAITING_ON_CHECKS, WAITING_TO_JOIN, parked } from "./conditions";
 import { titled } from "./naming";
-import { stateWord } from "./states";
+import { rowWord } from "./provided";
 import { Wordmark } from "./Wordmark";
 
 export function Conversations(props: {
@@ -865,11 +865,7 @@ function spoken(entry: ConversationEntry, reasons: Active): string {
     ? WAITING_ON_CHECKS
     : entry.waiting_to_join
       ? WAITING_TO_JOIN
-      : stateWord(
-          entry.state,
-          entry.declared?.process ?? null,
-          entry.declared?.state,
-        );
+      : rowWord(entry.declared, entry.state);
   const name = titled(entry);
   const marked =
     which === "waiting"

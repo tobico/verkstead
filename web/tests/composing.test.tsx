@@ -63,9 +63,10 @@ import {
   TARGET_REFUSAL,
   TICK_REFUSAL,
 } from "../src/workbench/Setup";
-// The Processes the picker offers and the words they are said in, read rather
-// than spelled out again: what the row offers is that list and nothing else.
-import { OFFERED, PROCESS } from "../src/workbench/processes";
+// The Processes the picker offers and the words they are said in, read off the
+// list the server actually sent rather than spelled out again: what the row
+// offers is that list and nothing else.
+import { declaredRow, named, OFFERED } from "./processes";
 import {
   CREATE_REFUSAL,
   REFUSAL as REPO_REFUSAL,
@@ -1628,17 +1629,17 @@ describe("the process a compose page is composing under", () => {
     expect(showing("Process")).toBe("Develop");
   });
 
-  /// All five now, Fix Merge Issues having landed last. A Process is offered
-  /// only once its stage has landed, as an agent type is offered only once it
-  /// can launch the real thing.
-  it("offers the processes that have landed and no others", async () => {
+  /// All five, in the order the server lists them — the rows and their words
+  /// are read off `GET /api/ui/processes` rather than out of a table here
+  /// (ADR-0030, *Process*).
+  it("offers the processes the server lists and no others", async () => {
     theWorkbench();
     const { container } = mount("/compose");
 
     await composing(container);
     await waitFor(() => expect(screen.getByLabelText("Process")).toBeTruthy());
 
-    expect(rows("Process")).toEqual(OFFERED.map((process) => PROCESS[process]));
+    expect(rows("Process")).toEqual(OFFERED.map(named));
     expect(OFFERED).toEqual([
       "Develop",
       "Tinker",
@@ -1696,7 +1697,7 @@ describe("the process a compose page is composing under", () => {
     await rolesAnswered();
 
     await waitFor(() => expect(screen.getByLabelText("Process")).toBeTruthy());
-    pick("Process", PROCESS.Develop);
+    pick("Process", named("Develop"));
 
     // Held on the device the moment it is picked, so a reload loses nothing.
     expect(stored().process).toBe("Develop");
@@ -1746,7 +1747,7 @@ describe("the target a compose page is pointed at", () => {
     await waitFor(() => expect(screen.getByLabelText("Branch")).toBeTruthy());
     expect(screen.queryByLabelText("Target")).toBeNull();
 
-    pick("Process", PROCESS.Review);
+    pick("Process", named("Review"));
 
     const field = (await waitFor(() =>
       screen.getByLabelText("Target"),
@@ -1767,13 +1768,13 @@ describe("the target a compose page is pointed at", () => {
 
     await waitFor(() => expect(screen.getByLabelText("Branch")).toBeTruthy());
 
-    pick("Process", PROCESS.FixMergeIssues);
+    pick("Process", named("FixMergeIssues"));
     const field = (await waitFor(() =>
       screen.getByLabelText("Target"),
     )) as HTMLInputElement;
     expect(field.placeholder).toBe(TARGET);
 
-    pick("Process", PROCESS.Develop);
+    pick("Process", named("Develop"));
     await waitFor(() => expect(screen.queryByLabelText("Target")).toBeNull());
   });
 
@@ -2944,7 +2945,7 @@ describe("starting the work on the picked device", () => {
       target: { value: "Make the widget" },
     });
     await pickRepoThere(container, THEIRS[1]!.id);
-    pick("Process", PROCESS.Tinker);
+    pick("Process", named("Tinker"));
     await rolesAnswered();
 
     fireEvent.click(screen.getByRole("button", { name: "Start work" }));
@@ -2980,7 +2981,7 @@ describe("starting the work on the picked device", () => {
       target: { value: "Wrap the limiter up." },
     });
     await pickRepoThere(container, THEIRS[1]!.id);
-    pick("Process", PROCESS.Review);
+    pick("Process", named("Review"));
     await openRepo(container);
     fireEvent.input(
       await waitFor(() => screen.getByLabelText("Target")),
@@ -3057,6 +3058,7 @@ describe("starting the work on the picked device", () => {
         rank: `Zz-${MEMBER.device}`,
         repo: THEIRS[0]!.name,
         state: "Draft",
+        ...declaredRow("Draft"),
         device: {
           id: MEMBER.device,
           name: MEMBER.name,

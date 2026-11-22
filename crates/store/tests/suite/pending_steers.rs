@@ -215,7 +215,11 @@ async fn submitting_discards_it_with_the_record() {
     assert!(
         kinds.iter().any(|event| matches!(
             event.event,
-            verkstead_store::Event::Steer(Lifecycle::Implementing, None, _)
+            verkstead_store::Event::Steer(
+                verkstead_store::Steered::Built(Lifecycle::Implementing),
+                None,
+                _
+            )
         )),
         "the record it became is on the Timeline",
     );

@@ -122,7 +122,7 @@ pub use conversations::{
     ConversationRow, Declared, Destination, Directing, Driven, Edited, Ending, Entering, Event,
     Grilling, Implementing, Investigated, Joined, Landed, Landing, Lifecycle, Pairings, Planned,
     Process, Queued, Rebuilding, Resolving, RoadmapStage, Role, RowState, SetOnTimeline, Settling,
-    StageOf, StageStanding, StageStandings, Staged, Steer, Steering, Switched, Taking,
+    StageOf, StageStanding, StageStandings, Staged, Steer, Steered, Steering, Switched, Taking,
     TimelineEvent, Transitioned, Work, adopted_pull_request, adopting, ask, ask_on_our_own,
     asked_from, closable, close_conversation, conversation_at_worktree, conversation_branch,
     conversation_rank, conversation_ranks, conversation_standing, conversations, driven_roadmaps,
@@ -136,9 +136,9 @@ pub use conversations::{
     set_state, set_target, settle_naming, skip_review, skip_role, stacks_on, stage_chain,
     stage_roadmap, stage_standings, start_adoption, start_conversation, start_declared,
     start_grilling, start_implementing, start_in, start_investigating, start_stage,
-    start_tinkering, start_unnamed_conversation, state, steer_conversation, switch_repo, take_up,
-    target, timeline, timeline_as_held, transition, unfinished_conversations, waiting,
-    work_on_repo,
+    start_tinkering, start_unnamed_conversation, state, state_under, steer_conversation,
+    switch_repo, take_up, target, timeline, timeline_as_held, transition, unfinished_conversations,
+    waiting, work_on_repo,
 };
 pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, unfolded};
 pub use deliveries::{delivered, record_delivery};

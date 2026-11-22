@@ -1,0 +1,186 @@
+[
+  {
+    "plugin": "2bcf359e-071a-4237-8741-9897cf06ac15",
+    "id": "develop",
+    "name": "Develop",
+    "description": "Work on something complex, starting with a grilling session and proceeding through a step-by-step development process",
+    "offered": true,
+    "states": [
+      {
+        "id": "grilling",
+        "word": "Grilling"
+      },
+      {
+        "id": "implementing",
+        "word": "Implementing"
+      },
+      {
+        "id": "wrapping",
+        "word": "Wrapping"
+      },
+      {
+        "id": "follow-up",
+        "word": "Follow-up"
+      },
+      {
+        "id": "investigating",
+        "word": "Investigating"
+      }
+    ],
+    "roles": [
+      {
+        "role": "grilling",
+        "label": "Grilling",
+        "building": false,
+        "away": false
+      },
+      {
+        "role": "implementation",
+        "label": "Implementation",
+        "building": true,
+        "away": false
+      },
+      {
+        "role": "review",
+        "label": "Review",
+        "building": false,
+        "away": true
+      }
+    ],
+    "target": false,
+    "narrowed": false,
+    "built_in": "Develop"
+  },
+  {
+    "plugin": "591db9f3-2cb1-4adb-bf35-ff046f5be6f0",
+    "id": "tinker",
+    "name": "Tinker",
+    "description": "Make a series of simple one-off changes with minimal fuss",
+    "offered": true,
+    "states": [
+      {
+        "id": "follow-up",
+        "word": "Follow-up"
+      },
+      {
+        "id": "wrapping",
+        "word": "Wrapping"
+      },
+      {
+        "id": "investigating",
+        "word": "Investigating"
+      }
+    ],
+    "roles": [
+      {
+        "role": "implementation",
+        "label": "Implementation",
+        "building": true,
+        "away": false
+      },
+      {
+        "role": "review",
+        "label": "Review",
+        "building": false,
+        "away": true
+      }
+    ],
+    "target": false,
+    "narrowed": false,
+    "built_in": "Tinker"
+  },
+  {
+    "plugin": "53f22a43-806b-4019-8798-c014fa9a0239",
+    "id": "investigate",
+    "name": "Investigate",
+    "description": "Ask questions about a code base without committing any code",
+    "offered": true,
+    "states": [
+      {
+        "id": "investigating",
+        "word": "Investigating"
+      }
+    ],
+    "roles": [
+      {
+        "role": "implementation",
+        "label": "Implementation",
+        "building": true,
+        "away": false
+      }
+    ],
+    "target": false,
+    "narrowed": false,
+    "built_in": "Investigate"
+  },
+  {
+    "plugin": "0b55843a-7c93-47cc-9655-e5f6ec3cf019",
+    "id": "review",
+    "name": "Review",
+    "description": "Review an existing PR or branch, and fix any issues found",
+    "offered": true,
+    "states": [
+      {
+        "id": "wrapping",
+        "word": "Wrapping"
+      },
+      {
+        "id": "follow-up",
+        "word": "Follow-up"
+      },
+      {
+        "id": "investigating",
+        "word": "Investigating"
+      }
+    ],
+    "roles": [
+      {
+        "role": "implementation",
+        "label": "Implementation",
+        "building": true,
+        "away": false
+      },
+      {
+        "role": "review",
+        "label": "Review",
+        "building": false,
+        "away": false
+      }
+    ],
+    "target": true,
+    "narrowed": false,
+    "built_in": "Review"
+  },
+  {
+    "plugin": "0b4f33da-1f61-46dd-aa82-3983d627e192",
+    "id": "fix-merge-issues",
+    "name": "Fix merge issues",
+    "description": "Fix up a PR which is unable to merge",
+    "offered": true,
+    "states": [
+      {
+        "id": "wrapping",
+        "word": "Wrapping"
+      },
+      {
+        "id": "follow-up",
+        "word": "Follow-up"
+      },
+      {
+        "id": "investigating",
+        "word": "Investigating"
+      }
+    ],
+    "roles": [
+      {
+        "role": "implementation",
+        "label": "Implementation",
+        "building": true,
+        "away": false
+      }
+    ],
+    "target": true,
+    "narrowed": true,
+    "built_in": "FixMergeIssues"
+  }
+]

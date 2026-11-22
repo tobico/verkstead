@@ -16226,7 +16226,7 @@ async fn steering_a_finished_conversation_into_investigating_records_where_it_ca
         .into_iter()
         .filter_map(|event| match event.event {
             store::Event::Steer(target, _, recorded) => {
-                Some((target, recorded.and_then(|record| record.source)))
+                Some((target.target(), recorded.and_then(|record| record.source)))
             }
             _ => None,
         })

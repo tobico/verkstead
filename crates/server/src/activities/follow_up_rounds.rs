@@ -9,6 +9,9 @@ use crate::AppState;
 use crate::activities::built_in;
 use crate::drivers::Driving;
 use crate::investigations::Investigation;
+/// The id the **Follow-up rounds** Activity has in the Activities plugin's
+/// manifest, which is also what a Process's state names to run it.
+use crate::processes::FOLLOW_UP_ROUNDS;
 use crate::runner::{documents, stop};
 use crate::skills;
 use crate::store;
@@ -151,10 +154,6 @@ async fn owed_ending(state: &AppState, conversation_id: i64) -> bool {
         }
     }
 }
-
-/// The id the **Follow-up rounds** Activity has in the built-in Activities
-/// plugin's manifest.
-const FOLLOW_UP_ROUNDS: &str = "follow-up-rounds";
 
 /// Pick a follow-up up again, on a press of Resume or a restart: the
 /// **Follow-up rounds** Activity started over, on the Timeline as it now

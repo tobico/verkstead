@@ -35,7 +35,7 @@ import type { AgentType } from "../agents";
 import type { ProfileEntry, RoleEntry } from "../api/types";
 import * as pairing from "../pairing";
 import { NOTHING } from "../picking";
-import type { Role } from "./processes";
+import type { Role } from "./roles";
 
 /// What each role's picker is showing, as that picker's own `chosen` writes it:
 /// a Pairing, [`pairing.NONE`] for a role picked away, and the empty string for

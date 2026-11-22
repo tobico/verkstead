@@ -208,19 +208,11 @@ import outputCss from "../src/workbench/Output.module.css?raw";
 // source to read the rules that jsdom lays nothing out for.
 import paneHead from "../src/workbench/PaneHead.module.css";
 import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
-// The words a Process is said in, read here rather than spelled out again: the
-// pane and this assertion about it would otherwise be two opinions about what
-// Develop is called.
-import {
-  away,
-  type BuiltIn,
-  DESCRIPTION,
-  OFFERED,
-  PROCESS,
-  TARGETED,
-  targeted,
-} from "../src/workbench/processes";
-import { knowProvidedProcesses } from "../src/workbench/provided";
+// The words a Process is said in, read off the list the server sends rather
+// than spelled out again: the pane and this assertion about it would otherwise
+// be two opinions about what Develop is called.
+import { away } from "../src/workbench/roles";
+import { knowProvidedProcesses, targeted } from "../src/workbench/provided";
 // The pause card, which is one of the record's and draws itself.
 import { RESOLVE_REFUSAL } from "../src/workbench/PullRequest";
 import prPane from "../src/workbench/PullRequest.module.css";
@@ -304,9 +296,19 @@ import codeCss from "../src/workbench/Code.module.css?raw";
 // What a Conversation is called where nobody has named its branch, which the
 // sidebar and the pane header are both drawn with.
 import { AUTOMATIC, DRAFT, titled } from "../src/workbench/naming";
-// The words a lifecycle state is said in, which the status button draws beside
-// the status and the sidebar's row reads aloud.
-import { STATE } from "../src/workbench/states";
+// The words a state is said in, which the status button draws beside the
+// status and the sidebar's row reads aloud — read off the Process that
+// declares the state, as the page reads them.
+import {
+  declaredOn,
+  declaredRow,
+  described,
+  named,
+  OFFERED,
+  offeringOnly,
+  PROCESSES,
+  stateOf,
+} from "./processes";
 // And the words a roadmap stage's state is said in, which the card's row, the
 // pane's heading and the pane's nav line are all drawn with.
 import { stageState } from "../src/workbench/stages";
@@ -1118,6 +1120,9 @@ describe("the workbench", () => {
 /// The rows are the fixture's, altered: what is being asked here is what a card
 /// does with `state`, `working` and `waiting`, and everything else about a row
 /// should stay whatever the server really said.
+///
+/// The state's own id travels with the state, as the server sends the two
+/// together — see `declaredRow`, which is what the row's word is read off.
 function theSidebar(...rows: Array<Partial<ConversationEntry>>) {
   return theWorkbench(
     whenever(
@@ -1127,6 +1132,7 @@ function theSidebar(...rows: Array<Partial<ConversationEntry>>) {
           ...SIDEBAR[0]!,
           id: n + 1,
           branch: `b${n}`,
+          ...declaredRow(row.state ?? SIDEBAR[0]!.state),
           ...row,
         })),
       ),
@@ -2756,7 +2762,11 @@ describe("a press that takes the open conversation off the list", () => {
     theOpenGrilling(
       whenever(
         `/api/ui/conversations/${GRILLING.id}`,
-        json({ ...GRILLING, state: "Closed" } satisfies ConversationView),
+        json({
+          ...GRILLING,
+          state: "Closed",
+          ...declaredOn("Closed"),
+        } satisfies ConversationView),
       ),
     );
     const { container, history } = mount(`/conversations/${GRILLING.id}`);
@@ -3501,7 +3511,9 @@ describe("the escape hatch on a conversation that will not load", () => {
       "/api/ui/conversations",
       json(
         SIDEBAR.map((entry) =>
-          entry.id === OPEN.id ? { ...entry, state } : entry,
+          entry.id === OPEN.id
+            ? { ...entry, state, ...declaredRow(state) }
+            : entry,
         ),
       ),
     );
@@ -4928,8 +4940,8 @@ describe("a conversation's setup", () => {
 /// well-formed ref, and a pull request URL is not one.
 describe("the target a review is pointed at", () => {
   /// Drawn for the two Processes pointed at work already somewhere else and for
-  /// nothing else, which is `processes.ts`'s list to keep — so the row that adds
-  /// a Process adds the field with it.
+  /// nothing else, which is each manifest's `target` to say — so a Process that
+  /// declares one draws the field with no line changing here.
   it("is drawn under the targeted processes and under no other", async () => {
     for (const process of ["Develop", "Tinker", "Investigate"] satisfies Process[]) {
       theWorkbenchWith({ process });
@@ -4938,7 +4950,7 @@ describe("the target a review is pointed at", () => {
 
       await waitFor(() => screen.getByLabelText("Branch"));
       expect(screen.queryByLabelText("Target")).toBeNull();
-      expect(targeted(process)).toBe(false);
+      expect(targeted(process, null)).toBe(false);
 
       unmount();
     }
@@ -4956,7 +4968,9 @@ describe("the target a review is pointed at", () => {
       unmount();
     }
 
-    expect(TARGETED).toEqual(["Review", "FixMergeIssues"]);
+    expect(
+      PROCESSES.filter((entry) => entry.target).map((entry) => entry.built_in),
+    ).toEqual(["Review", "FixMergeIssues"]);
   });
 
   /// And it takes the one value the Branch field beside it will not: a pull
@@ -5373,27 +5387,25 @@ describe("a conversation's process", () => {
     expect(at(`.${setup.processChoice}`)).toBe(1);
     expect(at(`.${setup.agentOption}`)).toBe(2);
 
-    expect(showing("Process")).toBe(PROCESS[OPEN.process]);
+    expect(showing("Process")).toBe(named(OPEN.process));
     expect(OPEN.process).toBe("Develop");
   });
 
-  /// All five now, and that list is the one place a Process's row is written: a
-  /// Process is offered only once its stage has landed, and *Fix merge issues*
-  /// is the row this stage added.
-  it("offers the processes that have landed and no others", async () => {
+  /// All five, in the order the server listed them and in the words their
+  /// manifests give them: the rows are `GET /api/ui/processes`'s, and this
+  /// viewer keeps no list of its own (ADR-0030, *Process*).
+  it("offers the processes the server lists and no others", async () => {
     theWorkbench();
     mount(`/conversations/${OPEN.id}`);
     await theProcess();
 
-    expect(offers("Process")).toEqual(OFFERED.map((process) => PROCESS[process]));
-    expect(OFFERED).toEqual([
+    expect(offers("Process")).toEqual([
       "Develop",
       "Tinker",
       "Investigate",
       "Review",
-      "FixMergeIssues",
+      "Fix merge issues",
     ]);
-    expect(offers("Process")).toContain("Fix merge issues");
   });
 
   /// Each row says what kind of work it is under its name, as a row of the
@@ -5406,20 +5418,18 @@ describe("a conversation's process", () => {
     mount(`/conversations/${OPEN.id}`);
     const control = await theProcess();
 
-    expect(control.textContent).not.toContain(
-      DESCRIPTION[OPEN.process as BuiltIn],
-    );
+    expect(control.textContent).not.toContain(described(OPEN.process));
 
     opened("Process");
 
-    for (const process of OFFERED) {
-      const row = screen.getByRole("option", { name: PROCESS[process] });
+    for (const entry of PROCESSES) {
+      const row = screen.getByRole("option", { name: entry.name });
       const said = document.getElementById(
         row.getAttribute("aria-describedby")!,
       );
 
       expect(row.contains(said)).toBe(true);
-      expect(said!.textContent).toBe(DESCRIPTION[process]);
+      expect(said!.textContent).toBe(entry.description);
     }
   });
 
@@ -5430,7 +5440,7 @@ describe("a conversation's process", () => {
     mount(`/conversations/${OPEN.id}`);
     await theProcess();
 
-    pick("Process", PROCESS.Develop);
+    pick("Process", named("Develop"));
 
     await waitFor(() =>
       expect(
@@ -5446,6 +5456,7 @@ describe("a conversation's process", () => {
     // What the shell's read of the server's list says, said as a share's
     // bundle says it — see `provided.ts`.
     knowProvidedProcesses([
+      ...PROCESSES,
       {
         plugin: "5e0c9a7e-2f4b-4c1d-8a3e-6b9f0d2c7a41",
         id: "two-steps",
@@ -5456,6 +5467,11 @@ describe("a conversation's process", () => {
           { id: "drafting", word: "Drafting" },
           { id: "checking", word: "Checking" },
         ],
+        roles: [
+          { role: "sketching", label: "Sketching", building: true, away: false },
+        ],
+        target: false,
+        narrowed: false,
         built_in: null,
       },
     ] satisfies ProcessEntry[]);
@@ -5491,20 +5507,9 @@ describe("a conversation's process", () => {
   /// One of Verkstead's own, written as data, whose plugin is unticked is off
   /// the picker, and the rest of the five stay on it.
   it("leaves off a built-in Process whose plugin is unticked", async () => {
-    knowProvidedProcesses([
-      {
-        plugin: "591db9f3-2cb1-4adb-bf35-ff046f5be6f0",
-        id: "tinker",
-        name: "Tinker",
-        description: "Make a series of simple one-off changes with minimal fuss",
-        offered: false,
-        states: [
-          { id: "follow-up", word: "Follow-up" },
-          { id: "wrapping", word: "Wrapping" },
-        ],
-        built_in: "Tinker",
-      },
-    ] satisfies ProcessEntry[]);
+    knowProvidedProcesses(
+      offeringOnly(["Develop", "Investigate", "Review", "FixMergeIssues"]),
+    );
     theWorkbench();
     mount(`/conversations/${OPEN.id}`);
     await theProcess();
@@ -5512,11 +5517,15 @@ describe("a conversation's process", () => {
     opened("Process");
 
     await waitFor(() =>
-      expect(screen.getByRole("option", { name: PROCESS.Develop })).toBeTruthy(),
+      expect(
+        screen.getByRole("option", { name: named("Develop") }),
+      ).toBeTruthy(),
     );
-    expect(screen.queryByRole("option", { name: PROCESS.Tinker })).toBeNull();
     expect(
-      screen.getByRole("option", { name: PROCESS.Investigate }),
+      screen.queryByRole("option", { name: named("Tinker") }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("option", { name: named("Investigate") }),
     ).toBeTruthy();
   });
 
@@ -5529,7 +5538,7 @@ describe("a conversation's process", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
     await theProcess();
 
-    pick("Process", PROCESS.Develop);
+    pick("Process", named("Develop"));
 
     const said = await waitFor(() =>
       screen.getByText(PROCESS_REFUSAL.NotDrafting),
@@ -5549,7 +5558,7 @@ describe("a conversation's process", () => {
     mount(`/conversations/${OPEN.id}`);
 
     expect((await theProcess()).disabled).toBe(true);
-    expect(showing("Process")).toBe(PROCESS.Develop);
+    expect(showing("Process")).toBe(named("Develop"));
   });
 
   /// And a draft from before there were Processes reads Review off the pull
@@ -5563,7 +5572,7 @@ describe("a conversation's process", () => {
     mount(`/conversations/${HOLDING.id}`);
 
     await theProcess();
-    expect(showing("Process")).toBe(PROCESS.Review);
+    expect(showing("Process")).toBe(named("Review"));
     expect(HOLDING.worktree).toBeNull();
     expect(OFFERED).toContain("Review");
   });
@@ -7406,7 +7415,13 @@ function theTrimmed(...answers: Parameters<typeof serving>) {
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(
       `/api/ui/conversations/${GRILLING.id}`,
-      json({ ...GRILLING, state: "Closed", archived: true, trimmed: true }),
+      json({
+        ...GRILLING,
+        state: "Closed",
+        ...declaredOn("Closed"),
+        archived: true,
+        trimmed: true,
+      }),
     ),
     whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
     whenever(CAPTURE_OF_IT, json({ ...CAPTURE, text: "" })),
@@ -7426,6 +7441,9 @@ function lay(element: Element, box: { at: number; wide: number }): void {
 
 /// The workbench with the opened conversation altered, for the states no fixture
 /// holds — a refusal from the server, a worktree that has gone.
+///
+/// The state's own id travels with the state, as the server sends the two
+/// together — see `declaredOn`, which is what the card's word is read off.
 function theWorkbenchWith(
   over: Partial<ConversationView>,
   ...answers: Parameters<typeof serving>
@@ -7435,7 +7453,10 @@ function theWorkbenchWith(
     whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
-    whenever(`/api/ui/conversations/${OPEN.id}`, json({ ...OPEN, ...over })),
+    whenever(
+      `/api/ui/conversations/${OPEN.id}`,
+      json({ ...OPEN, ...declaredOn(over.state ?? OPEN.state), ...over }),
+    ),
     ...answers,
   );
 }
@@ -10402,9 +10423,9 @@ describe("closing a conversation", () => {
 
     // And the conversation is where it was, on the page and in the list both.
     await waitFor(async () =>
-      expect((await standing(container)).state).toBe(STATE.Grilling),
+      expect((await standing(container)).state).toBe(stateOf("Grilling")),
     );
-    expect(spokenRow(container, GRILLING.id)).toContain(STATE.Grilling);
+    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("Grilling"));
   });
 
   /// A request that never came back is said the same way. Nothing about it is a
@@ -10431,7 +10452,7 @@ describe("closing a conversation", () => {
     expect(said.textContent).toContain("the server is not answering");
 
     await waitFor(async () =>
-      expect((await standing(container)).state).toBe(STATE.Grilling),
+      expect((await standing(container)).state).toBe(stateOf("Grilling")),
     );
   });
 });
@@ -10527,7 +10548,7 @@ describe("closing and archiving a conversation", () => {
     expect(refusal()).toBeNull();
 
     await waitFor(() =>
-      expect(spokenRow(container, GRILLING.id)).toContain(STATE.Grilling),
+      expect(spokenRow(container, GRILLING.id)).toContain(stateOf("Grilling")),
     );
   });
 });
@@ -10622,8 +10643,8 @@ describe("a close pressed over a run in flight", () => {
     expect(askedFor(fetching, CLOSING_IT), "nothing has been sent").toBe(0);
 
     // And the conversation is where it was, on the page and in the list both.
-    expect((await standing(container)).state).toBe(STATE.Grilling);
-    expect(spokenRow(container, GRILLING.id)).toContain(STATE.Grilling);
+    expect((await standing(container)).state).toBe(stateOf("Grilling"));
+    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("Grilling"));
   });
 
   /// And the gap between one step and the next, where no session process exists
@@ -10692,7 +10713,7 @@ describe("a close pressed over a run in flight", () => {
 
     await waitFor(() => expect(asking()).toBeNull());
     expect(askedFor(fetching, CLOSING_IT), "and still nothing was sent").toBe(0);
-    expect((await standing(container)).state).toBe(STATE.Grilling);
+    expect((await standing(container)).state).toBe(stateOf("Grilling"));
 
     // And the menu drops what it dropped before: both closes, and no archive
     // standing where one of them was.
@@ -10719,7 +10740,7 @@ describe("a close pressed over a run in flight", () => {
 
     await waitFor(() => expect(asking()).toBeNull());
     expect(askedFor(fetching, CLOSING_IT)).toBe(0);
-    expect((await standing(container)).state).toBe(STATE.Grilling);
+    expect((await standing(container)).state).toBe(stateOf("Grilling"));
   });
 
   /// And the second press is the first one made: the close goes out and the page
@@ -10747,10 +10768,10 @@ describe("a close pressed over a run in flight", () => {
     // the work has ended in — with the request still out and never coming back.
     await waitFor(async () => {
       const line = await standing(container);
-      expect(line.word).toBe(STATE.Closed);
+      expect(line.word).toBe(stateOf("Closed"));
       expect(line.state).toBeNull();
     });
-    expect(spokenRow(container, GRILLING.id)).toContain(STATE.Closed);
+    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("Closed"));
   });
 
   /// And the row under it is the same press with the archive already made: the
@@ -11087,11 +11108,11 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     // conversation the work has ended in.
     await waitFor(async () => {
       const line = await standing(container);
-      expect(line.word).toBe(STATE.Closed);
+      expect(line.word).toBe(stateOf("Closed"));
       expect(line.state).toBeNull();
     });
 
-    expect(spokenRow(container, GRILLING.id)).toContain(STATE.Closed);
+    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("Closed"));
   });
 
   /// And the menu it drops is a closed conversation's: archive where close was,
@@ -11208,7 +11229,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     );
 
     await waitFor(async () =>
-      expect((await standing(container)).word).toBe(STATE.Closed),
+      expect((await standing(container)).word).toBe(stateOf("Closed")),
     );
 
     // Everything the page is showing, read again — which is the whole of what a
@@ -11216,8 +11237,8 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     // grilled, the close it would be told about not having landed.
     await nudged(client);
 
-    expect((await standing(container)).word).toBe(STATE.Closed);
-    expect(spokenRow(container, GRILLING.id)).toContain(STATE.Closed);
+    expect((await standing(container)).word).toBe(stateOf("Closed"));
+    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("Closed"));
   });
 
   /// And it is let go of once the read behind the press has landed, so what the
@@ -11234,7 +11255,12 @@ describe("a press whose outcome is drawn before the server has answered", () => 
         () => {
           listed = SIDEBAR.map((row) =>
             row.id === GRILLING.id
-              ? { ...row, state: "Closed" as const, waiting: false }
+              ? {
+                  ...row,
+                  state: "Closed" as const,
+                  ...declaredRow("Closed"),
+                  waiting: false,
+                }
               : row,
           );
           return json("Closed" satisfies ConversationClosed)();
@@ -11250,7 +11276,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     );
 
     await waitFor(() =>
-      expect(spokenRow(container, GRILLING.id)).toContain(STATE.Closed),
+      expect(spokenRow(container, GRILLING.id)).toContain(stateOf("Closed")),
     );
 
     // And then the server says something else about it — a steer on another
@@ -11260,7 +11286,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     await client.invalidateQueries({ queryKey: ["conversations"] });
 
     await waitFor(() =>
-      expect(spokenRow(container, GRILLING.id)).toContain(STATE.Grilling),
+      expect(spokenRow(container, GRILLING.id)).toContain(stateOf("Grilling")),
     );
   });
 
@@ -11308,7 +11334,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     // ever lets go of a press is the list's, and the list did not answer.
     for (let turn = 0; turn < 3; turn += 1) {
       await new Promise((settle) => setTimeout(settle, 0));
-      expect((await standing(container)).word).toBe(STATE.Closed);
+      expect((await standing(container)).word).toBe(stateOf("Closed"));
     }
 
     // And then one that does land, which lets go of it — and says what the
@@ -11318,7 +11344,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     await client.invalidateQueries({ queryKey: ["conversations"] });
 
     await waitFor(async () =>
-      expect((await standing(container)).state).toBe(STATE.Grilling),
+      expect((await standing(container)).state).toBe(stateOf("Grilling")),
     );
   });
 
@@ -11385,7 +11411,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     // the archive that was waiting on it never went out. One thing was said,
     // because one press was made that did nothing.
     await waitFor(() =>
-      expect(spokenRow(container, GRILLING.id)).toContain(STATE.Grilling),
+      expect(spokenRow(container, GRILLING.id)).toContain(stateOf("Grilling")),
     );
     expect(askedFor(fetching, ARCHIVING_IT)).toBe(0);
     expect(document.body.querySelectorAll(`.${toasts.toast}`)).toHaveLength(1);
@@ -11406,7 +11432,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     );
 
     await waitFor(async () =>
-      expect((await standing(container)).word).toBe(STATE.Closed),
+      expect((await standing(container)).word).toBe(stateOf("Closed")),
     );
 
     expect(document.body.querySelector(`.${toasts.toast}`)).toBeNull();
@@ -11488,7 +11514,7 @@ describe("a second round", () => {
       state: "Draft",
       timeline: [
         ...BUILDING.timeline,
-        { Moved: { id: 9007, at: "2026-08-24T11:00:00Z", state: "Draft" } },
+        { Moved: { id: 9007, at: "2026-08-24T11:00:00Z", state: "Draft", ...declaredAt("Draft") } },
       ],
     });
     const { container } = mount(`/conversations/${BUILDING.id}`);
@@ -14037,11 +14063,12 @@ describe("steering a conversation", () => {
             id: 9001,
             at: "2026-08-24T11:00:00Z",
             target: "Done",
+            ...declaredAt("Done"),
             html: null,
             record: null,
           },
         },
-        { Moved: { id: 9002, at: "2026-08-24T11:00:00Z", state: "Done" } },
+        { Moved: { id: 9002, at: "2026-08-24T11:00:00Z", state: "Done", ...declaredAt("Done") } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -14074,7 +14101,7 @@ describe("steering a conversation", () => {
       timeline: [
         ...GRILLING.timeline,
         { ResolveConflicts: { id: 9101, at: "2026-08-24T11:00:00Z" } },
-        { Moved: { id: 9102, at: "2026-08-24T11:00:00Z", state: "Wrapping" } },
+        { Moved: { id: 9102, at: "2026-08-24T11:00:00Z", state: "Wrapping", ...declaredAt("Wrapping") } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -14116,11 +14143,12 @@ describe("steering a conversation", () => {
             id: 9003,
             at: "2026-08-24T11:00:00Z",
             target: "Implementing",
+            ...declaredAt("Implementing"),
             html: "<p>Note the window the count is against.</p>",
             record: null,
           },
         },
-        { Moved: { id: 9004, at: "2026-08-24T11:00:00Z", state: "Implementing" } },
+        { Moved: { id: 9004, at: "2026-08-24T11:00:00Z", state: "Implementing", ...declaredAt("Implementing") } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -14157,6 +14185,7 @@ describe("steering a conversation", () => {
             id: 9201,
             at: "2026-08-24T11:00:00Z",
             target: "Done",
+            ...declaredAt("Done"),
             html: null,
             record: {
               digest: false,
@@ -14167,7 +14196,7 @@ describe("steering a conversation", () => {
             },
           },
         },
-        { Moved: { id: 9202, at: "2026-08-24T11:00:00Z", state: "Done" } },
+        { Moved: { id: 9202, at: "2026-08-24T11:00:00Z", state: "Done", ...declaredAt("Done") } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -14208,6 +14237,7 @@ describe("steering a conversation", () => {
             id: 9301,
             at: "2026-08-24T11:00:00Z",
             target: "Implementing",
+            ...declaredAt("Implementing"),
             html: "<p>Count against the window.</p>",
             record: {
               digest: false,
@@ -14227,7 +14257,7 @@ describe("steering a conversation", () => {
             },
           },
         },
-        { Moved: { id: 9302, at: "2026-08-24T11:00:00Z", state: "Implementing" } },
+        { Moved: { id: 9302, at: "2026-08-24T11:00:00Z", state: "Implementing", ...declaredAt("Implementing") } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -14275,6 +14305,7 @@ describe("steering a conversation", () => {
             id: 9401,
             at: "2026-08-24T11:00:00Z",
             target: "Implementing",
+            ...declaredAt("Implementing"),
             html: null,
             record: {
               digest: false,
@@ -14285,7 +14316,7 @@ describe("steering a conversation", () => {
             },
           },
         },
-        { Moved: { id: 9402, at: "2026-08-24T11:00:00Z", state: "Implementing" } },
+        { Moved: { id: 9402, at: "2026-08-24T11:00:00Z", state: "Implementing", ...declaredAt("Implementing") } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -14878,7 +14909,7 @@ describe("a grilling that has handed over", () => {
       state: "Closed",
       timeline: [
         ...BUILDING.timeline,
-        { Moved: { id: 9001, at: "2026-08-24T11:00:00Z", state: "Closed" } },
+        { Moved: { id: 9001, at: "2026-08-24T11:00:00Z", state: "Closed", ...declaredAt("Closed") } },
       ],
     });
     const { container } = mount(`/conversations/${BUILDING.id}`);
@@ -20057,7 +20088,7 @@ describe("a conversation that has ended", () => {
       const line = await standing(container);
 
       expect(line.word).toBe("Stopped");
-      expect(line.state).toBe(STATE[state]);
+      expect(line.state).toBe(stateOf(state));
 
       unmount();
     }
@@ -20510,11 +20541,12 @@ describe("the documents on a timeline", () => {
             id: 9005,
             at: "2026-08-24T11:00:00Z",
             target: "Implementing",
+            ...declaredAt("Implementing"),
             html: SHORT_INSTRUCTION,
             record: null,
           },
         },
-        { Moved: { id: 9006, at: "2026-08-24T11:00:00Z", state: "Implementing" } },
+        { Moved: { id: 9006, at: "2026-08-24T11:00:00Z", state: "Implementing", ...declaredAt("Implementing") } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -20934,7 +20966,7 @@ describe("the configuration on the brief's pane", () => {
         card.querySelector(`.${sidebar.open}`)!.getAttribute("aria-label") ?? "";
       expect(spoken).not.toBe("");
 
-      for (const word of Object.values(PROCESS)) {
+      for (const word of PROCESSES.map((entry) => entry.name)) {
         expect(says(card.textContent ?? "", word)).toBe(false);
         expect(says(spoken, word)).toBe(false);
       }

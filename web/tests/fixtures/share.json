@@ -80,7 +80,7 @@
       }
     ],
     "compiles_uncached": false,
-    "declared_state": null,
+    "declared_state": "implementing",
     "direction": "inline",
     "drafted_on": null,
     "driven": false,
@@ -130,6 +130,7 @@
       {
         "Moved": {
           "at": "2026-08-03T09:07:11.000Z",
+          "declared": "grilling",
           "id": 11,
           "state": "Grilling"
         }
@@ -171,6 +172,7 @@
       {
         "Moved": {
           "at": "2026-08-03T09:07:11.000Z",
+          "declared": "implementing",
           "id": 14,
           "state": "Implementing"
         }

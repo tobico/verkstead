@@ -418,9 +418,13 @@ pub struct Conversation {
 
     pub state: Lifecycle,
 
-    /// The word of the declared state it is in, where [`Self::state`] is
-    /// [`Lifecycle::Declared`]: the id its Process's manifest gives the state,
-    /// as the column holds it. `None` for every other state.
+    /// The id its Process's manifest gives the state it stands in, as the
+    /// column holds it — which is what the state's word is read off.
+    ///
+    /// Filled for every state but the three Verkstead words itself: Draft,
+    /// Done and Closed. All five of Verkstead's own are plugins whose states
+    /// are named with the words this column already held, so a Grilling
+    /// carries `grilling` here and is worded off Develop's manifest.
     pub declared_state: Option<String>,
 
     /// The Profile and model each of its roles' sessions run under, once they
@@ -661,17 +665,24 @@ pub struct ConversationRow {
     /// which is where the device holding that record is read.
     pub transferred: bool,
 
-    /// The declared state it stands in, where its Process is a plugin's and
-    /// [`Self::state`] is [`Lifecycle::Declared`].
+    /// The state it stands in as its Process declares it, which is what the
+    /// row's word is read off — every state but the three Verkstead words
+    /// itself, Draft, Done and Closed.
     pub declared: Option<Declared>,
 }
 
 /// A declared state, named by everything it takes to find its word: the
-/// plugin, the Process's id in its manifest, and the state's id there.
+/// Process that declares it, and the state's id in that Process's manifest.
+///
+/// **Its Process is read off the `processes` row alone**, Develop where the
+/// Conversation has none — unlike [`super::process`], which reads an adopted
+/// pull request as a Review. What this is for is the state's word, and the
+/// five Processes Verkstead ships name every state they share alike, so the
+/// nearer reading would word nothing differently and would cost the list a
+/// join.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Declared {
-    pub plugin: String,
-    pub process: String,
+    pub process: Process,
     pub state: String,
 }
 
@@ -864,7 +875,7 @@ pub enum Event {
     ///
     /// `None` is a steer recorded before this was written down, which draws
     /// with the fields it has and is no error anywhere.
-    Steer(Lifecycle, Option<String>, Option<Box<super::SteerRecord>>),
+    Steer(Steered, Option<String>, Option<Box<super::SteerRecord>>),
 
     /// The human pressed **Resolve conflicts** on a finished Conversation's pull
     /// request, and this is where they did it.
@@ -1072,11 +1083,11 @@ impl Event {
 
                 match body.split_once('\n') {
                     Some((target, instruction)) => Self::Steer(
-                        Lifecycle::read(target)?,
+                        Steered::read(target),
                         Some(instruction.to_owned()),
                         recorded,
                     ),
-                    None => Self::Steer(Lifecycle::read(&body)?, None, recorded),
+                    None => Self::Steer(Steered::read(&body), None, recorded),
                 }
             }
             "resolve-conflicts" => Self::ResolveConflicts,
@@ -1242,13 +1253,14 @@ pub struct Entering<'a> {
 /// proposal Set answered after the first has nothing left to move.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Directing {
-    /// Recorded, and the Conversation is still grilling: whichever direction was
-    /// picked, the session that proposed writes its artifact itself, so what
-    /// moves the Conversation is that artifact landing rather than the answer.
+    /// Recorded, and the Conversation is still in the state that asked:
+    /// whichever direction was picked, the session that proposed writes its
+    /// artifact itself, so what moves the Conversation is that artifact
+    /// landing rather than the answer.
     Writing,
 
-    /// It was not grilling, so there was no grilling for this to end. Nothing
-    /// recorded and nothing wrong.
+    /// It was not in a state anything could be interviewing in, so there was
+    /// no interview for this to end. Nothing recorded and nothing wrong.
     NotGrilling,
 
     /// There is no Conversation with that id.
@@ -2464,25 +2476,30 @@ pub async fn conversations(
                 plugin,
                 process,
             )| {
-                // A plugin's Process says which words are its declared
-                // states — see [`Lifecycle::read_under`].
-                let provided = match (plugin, process) {
-                    (Some(plugin), Some(id)) => Some(Process::Provided { plugin, id }),
-                    _ => None,
+                // Which Process the state word is read against, off the row
+                // the query joined: a plugin's by its uuid and the Process's
+                // id there, one of Verkstead's own by its word, and Develop
+                // where the Conversation has no row at all — which is what
+                // covers every Conversation from before there were Processes.
+                // What a word means is the Process's, so a plugin naming a
+                // state `wrapping` is never read as Verkstead's wrap-up — see
+                // [`Lifecycle::read_under`].
+                let running = match (plugin, process) {
+                    (Some(plugin), Some(id)) => Process::Provided { plugin, id },
+                    (None, Some(word)) => Process::read(&word).unwrap_or(Process::Develop),
+                    _ => Process::Develop,
                 };
-                let read = match &provided {
-                    Some(process) => Lifecycle::read_under(&state, process),
-                    None => Lifecycle::read_strict(&state),
-                };
-                let declared = match (&provided, &read) {
-                    (Some(Process::Provided { plugin, id }), Ok(Lifecycle::Declared)) => {
-                        Some(Declared {
-                            plugin: plugin.clone(),
-                            process: id.clone(),
-                            state: state.clone(),
-                        })
-                    }
-                    _ => None,
+                let read = Lifecycle::read_under(&state, &running);
+                // Every state but the three Verkstead words itself carries
+                // the state's own id, for the row's word to be read off the
+                // Process — the five written as data included, their states
+                // being named with the words this column holds.
+                let declared = match &read {
+                    Ok(Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed) | Err(_) => None,
+                    Ok(_) => Some(Declared {
+                        process: running,
+                        state: state.clone(),
+                    }),
                 };
                 ConversationRow {
                     id,
@@ -2738,7 +2755,11 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         base_commit: base_commit.filter(|commit| !commit.is_empty()),
         base_ref: base_ref.filter(|named| !named.is_empty()),
         state: lifecycle,
-        declared_state: (lifecycle == Lifecycle::Declared).then_some(state),
+        declared_state: (!matches!(
+            lifecycle,
+            Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed
+        ))
+        .then_some(state),
         pairings: pairings(pool, id).await?,
         worktree: worktree(pool, id).await?,
         direction: direction(pool, id).await?,
@@ -4602,10 +4623,44 @@ pub async fn opened_at(pool: &SqlitePool, set_id: i64) -> Result<Option<(i64, i6
     Ok(found)
 }
 
+/// The word the `state` column holds for a Conversation, with the Process it
+/// is to be read against.
+///
+/// For the readers whose question is *which state of its Process* — whether
+/// what is running there is the Interview, or the rounds the Nothing-else box
+/// belongs to — which is a question about the manifest and so wants the word
+/// rather than one of Verkstead's variants. The whole [`Conversation`] is a
+/// join across the Repo and every Pairing, which is more of the store read
+/// than two columns are worth.
+///
+/// The Process is the `processes` row's, Develop where there is none, for
+/// [`Declared`]'s reason.
+pub async fn state_under(pool: &SqlitePool, id: i64) -> Result<Option<(String, Process)>> {
+    let row: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT conversations.state, processes.process, processes.plugin
+           FROM conversations
+           LEFT JOIN processes ON processes.conversation_id = conversations.id
+          WHERE conversations.id = ?",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("reading where Conversation {id} stands"))?;
+
+    row.map(|(state, word, plugin)| {
+        let running = match word {
+            Some(word) => Process::read_row(&word, plugin)?,
+            None => Process::Develop,
+        };
+
+        Ok((state, running))
+    })
+    .transpose()
+}
+
 /// Where a Conversation stands, and nothing else about it.
 ///
-/// For the readers whose whole question is the state: whether the Set on the
-/// page in front of the human is a follow-up's, above all. The whole
+/// For the readers whose whole question is the state. The whole
 /// [`Conversation`] is a join across the Repo and every Pairing, which is more
 /// of the store read than one word is worth.
 pub async fn state(pool: &SqlitePool, id: i64) -> Result<Option<Lifecycle>> {
@@ -5218,6 +5273,82 @@ pub enum Destination<'a> {
     Declared(&'a str),
 }
 
+/// Where a steer sent the work, as its Event holds it: one of Verkstead's own
+/// states, or the id of one the Conversation's Process declares.
+///
+/// [`Destination`]'s owned pair, and the reason the Event keeps the word
+/// rather than only the [`Lifecycle`] it reads as: a steer into a state a
+/// plugin named is drawn under that state's word, and the word is read off
+/// the manifest by the id — which [`Lifecycle::Declared`] on its own has
+/// thrown away.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Steered {
+    /// One of Verkstead's own, by the word the body holds.
+    Built(Lifecycle),
+
+    /// One a Process declares, by its own id there — every word this build
+    /// does not know.
+    Declared(String),
+}
+
+impl Steered {
+    /// The word the body's first line holds for it.
+    pub fn stored(&self) -> &str {
+        match self {
+            Self::Built(state) => state.stored(),
+            Self::Declared(state) => state,
+        }
+    }
+
+    /// Which of Verkstead's states it reads as — [`Lifecycle::Declared`] for
+    /// one a Process named itself.
+    pub fn target(&self) -> Lifecycle {
+        match self {
+            Self::Built(state) => *state,
+            Self::Declared(_) => Lifecycle::Declared,
+        }
+    }
+
+    /// And the state's own id, where the Process is the one that named it.
+    pub fn declared(&self) -> Option<&str> {
+        match self {
+            Self::Built(_) => None,
+            Self::Declared(state) => Some(state),
+        }
+    }
+
+    /// The target a stored word names, the way [`Lifecycle::read`] does and
+    /// keeping the word: one this build does not know is a state some
+    /// Process declares.
+    fn read(word: &str) -> Self {
+        match Lifecycle::read_strict(word) {
+            Ok(state) => Self::Built(state),
+            Err(_) => Self::Declared(word.to_owned()),
+        }
+    }
+}
+
+impl From<Lifecycle> for Destination<'_> {
+    fn from(state: Lifecycle) -> Self {
+        Self::Built(state)
+    }
+}
+
+impl<'a> From<&'a str> for Destination<'a> {
+    fn from(state: &'a str) -> Self {
+        Self::Declared(state)
+    }
+}
+
+impl From<Destination<'_>> for Steered {
+    fn from(landing: Destination<'_>) -> Self {
+        match landing {
+            Destination::Built(state) => Self::Built(state),
+            Destination::Declared(state) => Self::Declared(state.to_owned()),
+        }
+    }
+}
+
 impl Destination<'_> {
     /// The word the column holds for it.
     fn stored(&self) -> &str {
@@ -5469,8 +5600,16 @@ pub async fn close_conversation(pool: &SqlitePool, id: i64) -> Result<Closing> {
 ///
 /// Called off the back of a Response landing rather than off anything the human
 /// pressed — see [`super::submit_response`] — which is why a Conversation that is
-/// not grilling is [`Directing::NotGrilling`] rather than an error. A pick that
-/// arrives after the grilling has ended has nothing left to inform.
+/// not interviewing is [`Directing::NotGrilling`] rather than an error. A pick
+/// that arrives after the interview has ended has nothing left to inform.
+///
+/// **What counts as interviewing is read as far as a word can read it**: one of
+/// Verkstead's own five is grilling, and a Conversation on a plugin's Process is
+/// in one of the states that Process declares. Which of *those* runs the
+/// Interview is its manifest's to say and no column holds it, so the state is
+/// taken as far as the record goes here and the server asks the manifest before
+/// it acts on the pick — see `conversations::settle_a_proposal`, which is what
+/// tells the session waiting.
 ///
 /// The pick is recorded as the row alone. What says on the Timeline that the
 /// human chose is the answered proposal Set sitting on it, with the direction
@@ -5482,17 +5621,33 @@ pub async fn close_conversation(pool: &SqlitePool, id: i64) -> Result<Closing> {
 pub async fn pick_direction(pool: &SqlitePool, id: i64, direction: Direction) -> Result<Directing> {
     let mut tx = super::writing(pool, "acting on a picked direction").await?;
 
-    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await
-        .with_context(|| format!("reading the state of Conversation {id}"))?;
+    // The Process beside the state, because what a word means is the Process's
+    // — see [`Lifecycle::read_under`], which is what keeps a plugin's own
+    // `wrapping` from being read as Verkstead's wrap-up.
+    let row: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT conversations.state, processes.process, processes.plugin
+           FROM conversations
+           LEFT JOIN processes ON processes.conversation_id = conversations.id
+          WHERE conversations.id = ?",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await
+    .with_context(|| format!("reading the state of Conversation {id}"))?;
 
-    let Some((state,)) = row else {
+    let Some((state, word, plugin)) = row else {
         return Ok(Directing::NoSuchConversation);
     };
 
-    if Lifecycle::read(&state)? != Lifecycle::Grilling {
+    let running = match word {
+        Some(word) => Process::read_row(&word, plugin)?,
+        None => Process::Develop,
+    };
+
+    if !matches!(
+        Lifecycle::read_under(&state, &running)?,
+        Lifecycle::Grilling | Lifecycle::Declared
+    ) {
         return Ok(Directing::NotGrilling);
     }
 
@@ -6035,17 +6190,21 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
 
     let mut tx = super::writing(pool, "steering a Conversation").await?;
 
-    // No record beside it on the way in: what a row in `steers` holds is
-    // written a few lines down, out of the same press. The Event is built here
-    // for its kind and its body, which is the target and whatever was written
-    // under it.
-    let steer = Event::Steer(target, instruction.map(str::to_owned), None);
-
     // Where it goes, as the column holds it: a declared state by its own id.
     let destination = match declared {
         Some(declared) if target == Lifecycle::Declared => Destination::Declared(declared),
         _ => Destination::Built(target),
     };
+
+    // No record beside it on the way in: what a row in `steers` holds is
+    // written a few lines down, out of the same press. The Event is built here
+    // for its kind and its body, which is the target and whatever was written
+    // under it.
+    let steer = Event::Steer(
+        Steered::from(destination),
+        instruction.map(str::to_owned),
+        None,
+    );
     let body = match instruction {
         None => destination.stored().to_owned(),
         Some(instruction) => format!("{}\n{instruction}", destination.stored()),
@@ -7810,12 +7969,18 @@ pub(crate) async fn entered(tx: &mut sqlx::SqliteConnection, id: i64, state: &st
     Ok(())
 }
 
-/// Move a Conversation on to another state.
+/// Move a Conversation on to another state: one of Verkstead's own, or a state
+/// a Process declares by its own id.
 ///
 /// The blunt instrument, for the states no stage has arrived at yet. Starting to
 /// grill and closing have their own calls, because each of them is a move plus
 /// everything else that has to be true at the same moment.
-pub async fn set_state(pool: &SqlitePool, id: i64, state: Lifecycle) -> Result<()> {
+pub async fn set_state<'a>(
+    pool: &SqlitePool,
+    id: i64,
+    state: impl Into<Destination<'a>>,
+) -> Result<()> {
+    let state = state.into();
     let changed = sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
         .bind(state.stored())
         .bind(id)

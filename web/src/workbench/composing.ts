@@ -112,7 +112,7 @@ import { rowKey, type Device } from "../reaching";
 import { draftingOn, forget, read, write } from "../remembered";
 import { adoptRefusal } from "./Adoption";
 import { ATTACH_REFUSAL, PACK_REFUSAL, SERVER_REFUSAL } from "./Composer";
-import { PROCESS, targeted } from "./processes";
+import { targeted } from "./provided";
 import {
   BASE_REFUSAL,
   BRANCH_REFUSAL,
@@ -759,15 +759,19 @@ export async function create(
         outcome === "Adopted",
         `The stage couldn't be started. ${adoptRefusal(outcome)}`,
       );
-    } else if (state.process !== null && targeted(state.process)) {
+    } else if (
+      state.process !== null &&
+      targeted(state.process, state.provided)
+    ) {
       // The third kickoff, and the one that starts no session: the take-up reads
       // the Target, puts the Conversation on what it names and moves it into
       // Wrapping, and what runs from there is the wrap-up's own watchers.
       //
-      // Asked of the Process's own list rather than of its name — a **Review**
-      // and a **Fix Merge Issues** are both pointed at work that is already
-      // somewhere else, and both reach it by this one endpoint. Nothing picked
-      // is the Develop every draft defaults to, which is pointed at nothing.
+      // Asked of the Process's own manifest rather than of its name — a
+      // **Review** and a **Fix Merge Issues** are both pointed at work that is
+      // already somewhere else, and both reach it by this one endpoint.
+      // Nothing picked is the Develop every draft defaults to, which is
+      // pointed at nothing.
       const outcome = await takeUpPullRequest(to, id);
 
       // And the two outcomes that are not refusals: the press stopped to ask what
@@ -1392,6 +1396,21 @@ function loaded(value: unknown): value is Adopting | null | undefined {
   );
 }
 
+/// The `process` words the wire knows, which is the union's own members
+/// written out: a type is no runtime value.
+///
+/// Not a table of anything the human reads — what each Process is called, and
+/// which of them the picker offers, is the manifests' and the server's (see
+/// `provided.ts`). This is the shape of the field alone.
+const WORDS: Process[] = [
+  "Develop",
+  "Tinker",
+  "Investigate",
+  "Review",
+  "FixMergeIssues",
+  "Provided",
+];
+
 /// Whether this is a Process the wire knows, or the absence of one.
 ///
 /// Checked against the words rather than merely for a string, because a Process
@@ -1404,7 +1423,7 @@ function kind(value: unknown): value is Process | null | undefined {
   return (
     value === null ||
     value === undefined ||
-    (typeof value === "string" && Object.hasOwn(PROCESS, value))
+    (typeof value === "string" && WORDS.includes(value as Process))
   );
 }
 

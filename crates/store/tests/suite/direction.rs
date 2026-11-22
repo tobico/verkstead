@@ -21,10 +21,10 @@ use verkstead_schema::{
     Direction, Proposal, Question, QuestionOption, QuestionSet, Response, Want, WantedPlatform,
 };
 use verkstead_store::{
-    Ask, Directing, Event, Implementing, Lifecycle, OwnAsking, PlacedWork, Proposed, Settlements,
-    Submission, ask, ask_on_our_own, building_since, load_conversation, open_database, own_sets,
-    pick_direction, picked_wants, record_handoff, register_repo, save_brief, start_conversation,
-    start_grilling, start_implementing, submit_response, timeline,
+    Ask, Directing, Event, Implementing, Lifecycle, OwnAsking, PlacedWork, Process, Proposed,
+    Settlements, Submission, ask, ask_on_our_own, building_since, load_conversation, open_database,
+    own_sets, pick_direction, picked_wants, record_handoff, register_repo, save_brief, set_process,
+    set_state, start_conversation, start_grilling, start_implementing, submit_response, timeline,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -685,6 +685,70 @@ async fn a_conversation_that_is_not_grilling_has_no_grilling_to_end() {
     );
     assert_eq!(state(&pool, id).await, Lifecycle::Draft);
     assert_eq!(direction(&pool, id).await, None);
+}
+
+/// A Conversation on a plugin's Process stands in whatever states that Process
+/// declares, and which of them runs the Interview is its manifest's to say —
+/// nothing a column holds. So a pick there is recorded, and the server asks the
+/// manifest before it tells the session waiting (Set 1765, Q29).
+#[tokio::test]
+async fn a_pick_on_a_declared_state_is_recorded_for_the_manifest_to_judge() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap();
+    let id = start_conversation(&pool, repo.id, "two-steps", THIS_DEVICE, None)
+        .await
+        .unwrap()
+        .unwrap();
+    set_process(
+        &pool,
+        id,
+        Process::Provided {
+            plugin: "5e0c9a7e-2f4b-4c1d-8a3e-6b9f0d2c7a41".to_owned(),
+            id: "two-steps".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    set_state(&pool, id, "interviewing").await.unwrap();
+
+    assert_eq!(
+        pick_direction(&pool, id, Direction::TaskList)
+            .await
+            .unwrap(),
+        Directing::Writing,
+        "the word is none of Verkstead's, so the record takes the pick as far as it goes",
+    );
+    assert_eq!(direction(&pool, id).await, Some(Direction::TaskList));
+
+    // Even where the state is spelled as one of Verkstead's own: a Process
+    // naming a state `wrapping` is never read as Verkstead's wrap-up.
+    set_state(&pool, id, "wrapping").await.unwrap();
+    assert_eq!(
+        pick_direction(&pool, id, Direction::Roadmap).await.unwrap(),
+        Directing::Writing,
+    );
+    assert_eq!(direction(&pool, id).await, Some(Direction::Roadmap));
+
+    // And the same word on one of Verkstead's own five is the wrap-up, which
+    // nothing interviews in: refused, as a Develop past its grilling is.
+    let develop = start_conversation(&pool, repo.id, "rate-limiting", THIS_DEVICE, None)
+        .await
+        .unwrap()
+        .unwrap();
+    set_state(&pool, develop, Lifecycle::Wrapping)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        pick_direction(&pool, develop, Direction::Inline)
+            .await
+            .unwrap(),
+        Directing::NotGrilling,
+    );
+    assert_eq!(direction(&pool, develop).await, None);
 }
 
 #[tokio::test]

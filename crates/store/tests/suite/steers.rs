@@ -206,7 +206,7 @@ async fn ladder(pool: &SqlitePool, id: i64) -> Vec<(&'static str, Lifecycle)> {
         .unwrap()
         .into_iter()
         .filter_map(|event| match event.event {
-            Event::Steer(target, ..) => Some(("steer", target)),
+            Event::Steer(target, ..) => Some(("steer", target.target())),
             Event::Moved(state) => Some(("moved", state)),
             _ => None,
         })
@@ -1436,7 +1436,7 @@ async fn sources(pool: &SqlitePool, id: i64) -> Vec<(Lifecycle, Option<Lifecycle
         .into_iter()
         .filter_map(|event| match event.event {
             Event::Steer(target, _, recorded) => {
-                Some((target, recorded.and_then(|record| record.source)))
+                Some((target.target(), recorded.and_then(|record| record.source)))
             }
             _ => None,
         })

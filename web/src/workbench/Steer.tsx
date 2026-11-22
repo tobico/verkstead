@@ -120,6 +120,7 @@ import type {
   Lifecycle,
   PairingView,
   Process,
+  ProvidedProcess,
   RepoEntry,
   SteerCompanionRefusal,
   SteerEvent,
@@ -145,9 +146,9 @@ import { Switch as Toggle } from "../Switch";
 import { chosen } from "./naming";
 import { pathOf } from "./openings";
 import { PaneHead } from "./PaneHead";
-import { narrowed, settledFor } from "./processes";
+import { narrowed, stateWord } from "./provided";
+import { settledFor } from "./roles";
 import { keeping, type Keeping } from "./settling";
-import { STATE } from "./states";
 import { BasePicker, RULE } from "./Setup";
 import styles from "./Steer.module.css";
 
@@ -248,9 +249,13 @@ const STEER_COMPANION_REFUSAL: Record<
 /// makes about the same absence: a wrap-up nothing reviews looks from the outside
 /// like one whose review has not started yet, so it is worth a sentence.
 ///
-/// Asked of [`narrowed`](./processes.ts) rather than of the Process by name, that
-/// being where a fact about a Process is kept.
-function note(offered: SteerRow, process: Process): string {
+/// Asked of [`narrowed`](./provided.ts) rather than of the Process by name,
+/// that being the Process's own manifest read off the list the server sends.
+function note(
+  offered: SteerRow,
+  process: Process,
+  provided: ProvidedProcess | null,
+): string {
   if (offered.target === "Declared") {
     const said = BRIEF_NOTE[offered.brief];
 
@@ -259,7 +264,7 @@ function note(offered: SteerRow, process: Process): string {
 
   const known = NOTE[offered.target];
 
-  return known.narrowed !== undefined && narrowed(process)
+  return known.narrowed !== undefined && narrowed(process, provided)
     ? known.narrowed
     : known.note;
 }
@@ -1533,7 +1538,11 @@ export function Steer(props: {
                   {offered.word}
                 </label>
                 <Note class={styles.optionNote}>
-                  {note(offered, props.conversation.process)}
+                  {note(
+                    offered,
+                    props.conversation.process,
+                    props.conversation.provided,
+                  )}
                 </Note>
               </div>
             )}
@@ -1940,7 +1949,14 @@ export function Frozen(props: {
 
       <div class={styles.steered}>
         <p class={styles.steeredInto}>
-          You steered this into {STATE[props.steer.target]}.
+          You steered this into{" "}
+          {stateWord(
+            props.conversation.process,
+            props.conversation.provided,
+            props.steer.target,
+            props.steer.declared,
+          )}
+          .
         </p>
 
         {/* What was written to steer it with, under the name the field had when
