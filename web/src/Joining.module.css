@@ -10,8 +10,8 @@
 }
 
 /* Who is asking, with the mark for its operating system in front of the name —
-   a WSL wears the Linux mark and reads *Linux (WSL)* below, which is the one
-   thing that tells it from the Windows it shares a hostname with. */
+   a WSL wears a mark of its own and reads *Linux (WSL)* below, which is what
+   tells it from the Windows it shares a hostname with. */
 .asking .title {
   margin-top: 0;
   font-weight: 600;

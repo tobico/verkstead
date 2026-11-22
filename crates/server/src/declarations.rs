@@ -81,7 +81,7 @@ pub(crate) struct Reading<'a> {
     /// There are three words it can be, `linux`, `macos` and `windows`, and this
     /// is not where they are checked: see the module docs. What places the stage
     /// as it starts — see [`crate::placing::stage`] — matched against a
-    /// device's OS word through [`crate::platform::os_mark`] rather than as a
+    /// device's OS word through [`crate::platform::os_platform`] rather than as a
     /// string, so a *Linux (WSL)* member is a Linux device.
     pub(crate) platform: Option<&'a str>,
 }

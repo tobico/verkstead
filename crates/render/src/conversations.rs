@@ -329,10 +329,11 @@ pub struct RowDevice {
     /// beside the name — or `null` where there is no mark worth drawing.
     ///
     /// **`null` on a sidebar row whose device wears the same mark as the
-    /// machine the browser opened**, the mark being picked off what the word
-    /// starts with: *Linux (WSL)* seen from *Linux*, or one macOS seen from
-    /// another, is a name and no mark. A mark that matches the one the reader
-    /// is already on says nothing. The hub decides it, by the server's
+    /// machine the browser opened**: one macOS seen from another is a name and
+    /// no mark, a mark that matches the one the reader is already on saying
+    /// nothing. A WSL seen from a Linux is not one of those — it has a mark of
+    /// its own, which is what an **Annex** on its Keeper's hostname is told
+    /// from its Keeper by. The hub decides it, by the server's
     /// `platform::same_mark` — the viewer's `osIcon` rule said a second time.
     ///
     /// **Never `null` on a Profile card's line per device**, which draws the
@@ -4630,9 +4631,10 @@ pub struct AddableView {
 pub struct ClusterDevice {
     pub device: crate::DeviceIdentity,
 
-    /// The platform its OS word is the mark of — *Linux (WSL)* being a Linux —
-    /// or `null` for a word this build has no mark for, which no proposal can
-    /// want.
+    /// The platform its OS word says it is — *Linux (WSL)* being a Linux — or
+    /// `null` for a word this build has never heard of, which no proposal can
+    /// want. What it is *drawn* as is another question: see
+    /// `platform::os_platform` beside `platform::mark`.
     pub platform: Option<WantedPlatform>,
 
     pub standing: DeviceStanding,

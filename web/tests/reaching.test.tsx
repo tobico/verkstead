@@ -1000,27 +1000,27 @@ describe("the merged sidebar", () => {
     expect(head.querySelector(`.${timeline.paneDevice}`)).toBeNull();
   });
 
-  /// A member wearing this device's own mark — a WSL seen from a Linux — is
-  /// named and left unmarked: the row by the server leaving its OS off, and the
-  /// header by the same rule said in `sameMark`.
+  /// A member wearing this device's own mark — one Linux seen from another —
+  /// is named and left unmarked: the row by the server leaving its OS off, and
+  /// the header by the same rule said in `sameMark`.
   describe("a member on this device's own mark", () => {
     const SAME: ConversationEntry[] = MERGED.map((row) => ({
       ...row,
-      device: row.device && { ...row.device, name: "the-wsl", os: null },
+      device: row.device && { ...row.device, name: "the-twin", os: null },
     }));
 
-    const WSL: DevicesView = {
+    const TWIN: DevicesView = {
       ...LINKED,
       members: LINKED.members.map((member) => ({
         ...member,
-        identity: { ...member.identity, name: "the-wsl", os: "Linux (WSL)" },
+        identity: { ...member.identity, name: "the-twin", os: LINKED.this.os },
       })),
     };
 
     function onTheSameMark() {
       return serving(
         whenever("/api/ui/conversations", json(SAME)),
-        whenever("/api/ui/devices", json(WSL)),
+        whenever("/api/ui/devices", json(TWIN)),
         whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
         whenever("/api/ui/onboarding", json(SET_UP)),
         whenever("/api/ui/repos", json(REPOS)),
@@ -1037,7 +1037,7 @@ describe("the merged sidebar", () => {
       const drawnRows = await rows(container);
       const device = drawnRows[0]!.querySelector(`.${sidebar.device}`)!;
 
-      expect(device.textContent).toBe("the-wsl");
+      expect(device.textContent).toBe("the-twin");
       expect(device.querySelector("svg")).toBeNull();
     });
 
@@ -1050,9 +1050,57 @@ describe("the merged sidebar", () => {
         `.${shell.middlePane} .${paneHead.head} h1 .${timeline.paneDevice}`,
       );
 
-      expect(named.textContent?.trim()).toBe("the-wsl");
+      expect(named.textContent?.trim()).toBe("the-twin");
       expect(named.querySelector("svg")).toBeNull();
     });
+  });
+
+  /// And a WSL seen from a Linux is **not** one of those: it wears a mark of
+  /// its own, which is what tells an **Annex** from the Keeper whose hostname
+  /// it carries. The server says as much by leaving the OS word on the row,
+  /// and `sameMark` says it again for the header.
+  it("marks a WSL on the header of a Linux browser", async () => {
+    const WSL: DevicesView = {
+      ...LINKED,
+      members: LINKED.members.map((member) => ({
+        ...member,
+        identity: { ...member.identity, name: "the-wsl", os: "Linux (WSL)" },
+      })),
+    };
+
+    serving(
+      whenever("/api/ui/conversations", json(MERGED)),
+      whenever("/api/ui/devices", json(WSL)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/onboarding", json(SET_UP)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(at(`/conversations/${SHARED.id}`), json(SHARED)),
+      json({ error: "nothing serves that" }, 404),
+    );
+
+    const { container } = mount(on(`/conversations/${SHARED.id}`));
+
+    const named = await drawn(
+      container,
+      `.${shell.middlePane} .${paneHead.head} h1 .${timeline.paneDevice}`,
+    );
+
+    expect(named.textContent?.trim()).toBe("the-wsl");
+
+    const drawnMark = named.querySelector("svg")!;
+    expect(drawnMark.getAttribute("aria-label")).toBe("Linux (WSL)");
+    expect(
+      Array.from(drawnMark.querySelectorAll("path")).map((path) =>
+        path.getAttribute("d"),
+      ),
+    ).toEqual([osIcon("Linux (WSL)").icon[4]].flat());
+
+    // And that is not what a plain Linux wears, which is the whole of the
+    // change: the two words used to be the one mark.
+    expect([osIcon("Linux (WSL)").icon[4]].flat()).not.toEqual(
+      [osIcon("Linux").icon[4]].flat(),
+    );
   });
 });
 

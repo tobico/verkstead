@@ -1036,7 +1036,7 @@ pub(crate) async fn addable(state: &AppState, conversation: i64) -> Result<Addab
             // This device first, which is where the work is, and then every
             // member in the order the membership lists them.
             let here = ClusterDevice {
-                platform: crate::platform::os_mark(&devices.os()).map(wanted),
+                platform: crate::platform::os_platform(&devices.os()).map(wanted),
                 device: devices.this(),
                 standing: DeviceStanding::WorkIsHere,
             };
@@ -1044,7 +1044,7 @@ pub(crate) async fn addable(state: &AppState, conversation: i64) -> Result<Addab
                 .chain(members.iter().map(|member| {
                     ClusterDevice {
                         device: crate::device::presenting(member),
-                        platform: crate::platform::os_mark(&member.os).map(wanted),
+                        platform: crate::platform::os_platform(&member.os).map(wanted),
                         standing: if born
                             .as_ref()
                             .is_some_and(|born| born.device == member.device)

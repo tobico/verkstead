@@ -22,9 +22,11 @@
 //! cleanly.** Permitted by the rule the agent's own call is held to — the
 //! drafting device and then the ticks, in that order, never this device; see
 //! [`crate::transfers::cluster`] — and of that platform by its member's OS word
-//! read through [`platform::os_mark`], never matched as a string: *Linux (WSL)*
-//! is a Linux device, so `on linux` may pick a Windows machine's WSL and `on
-//! windows` never does. Clean is the **Preflight** holding nothing: a device
+//! read through [`platform::os_platform`], never matched as a string: *Linux
+//! (WSL)* is a Linux device, so `on linux` may pick a Windows machine's WSL and
+//! `on windows` never does — whatever mark that device wears on a screen, which
+//! is another question and another function (see [`platform::mark`]). Clean is
+//! the **Preflight** holding nothing: a device
 //! that is asleep, or that answers and lacks the Repo, the harness or the
 //! Author, is passed over for the next.
 //!
@@ -950,7 +952,7 @@ pub(crate) async fn called(
 
     // The platform is the device's own, which nothing on the Set says: it is
     // what an answer ticking a device asleep asks again with.
-    let wants = platform::os_mark(&device.os).unwrap_or(Platform::HERE);
+    let wants = platform::os_platform(&device.os).unwrap_or(Platform::HERE);
 
     ask(
         state,
@@ -1102,7 +1104,7 @@ async fn waited_on(
         tracing::error!(error = ?error, conversation_id, set_id, "saying the device picked was permitted failed");
     }
 
-    let Some(platform) = platform::os_mark(wants) else {
+    let Some(platform) = platform::os_platform(wants) else {
         tracing::error!(
             conversation_id,
             wants,
@@ -1395,7 +1397,7 @@ async fn placing(
 /// Whether a task wanting `wants` has to move off a device whose OS word is
 /// `here`: only where the word's mark is another platform's, or none.
 fn wants_a_move(here: &str, wants: Platform) -> bool {
-    platform::os_mark(here) != Some(wants)
+    platform::os_platform(here) != Some(wants)
 }
 
 /// The members a task wanting `wants` may be moved to, in the order they are
@@ -1417,7 +1419,7 @@ fn candidates(
     let (permitted, unpermitted): (Vec<_>, Vec<_>) =
         crate::transfers::placed_among(here, born, ticked, members)
             .into_iter()
-            .filter(|placed| platform::os_mark(&placed.member.os) == Some(wants))
+            .filter(|placed| platform::os_platform(&placed.member.os) == Some(wants))
             .partition(|placed| placed.permitted);
 
     let unpermitted: Vec<Device> = unpermitted
