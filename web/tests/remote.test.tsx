@@ -757,9 +757,21 @@ describe("the devices section", () => {
 
   /// And which icon that mark turned out to be, compared against the shape
   /// rather than against a class name: the icons are drawn as the paths Font
-  /// Awesome ships, so the path *is* the identity of the drawing.
-  function drawnAs(icon: IconDefinition): string {
-    return [icon.icon[4]].flat().filter((path) => typeof path === "string")[0]!;
+  /// Awesome ships, so the paths *are* the identity of the drawing.
+  ///
+  /// **Every one of them**, because one of the marks is two: the WSL's is Tux
+  /// and a Windows badge after him, and a comparison that read the first path
+  /// alone would call it the plain Linux mark — see `osIcon` in
+  /// `src/devices.ts`.
+  function drawnAs(icon: IconDefinition): (string | null)[] {
+    return [icon.icon[4]].flat().filter((path) => typeof path === "string");
+  }
+
+  /// The same, read off a mark the page actually drew.
+  function pathsOf(mark: Element): (string | null)[] {
+    return [...mark.querySelectorAll("path")].map((path) =>
+      path.getAttribute("d"),
+    );
   }
 
   /// The one row the list holds, whole: the mark, the name, *this device* and
@@ -1672,16 +1684,23 @@ one on the LAN",
   });
 
   /// The case the whole of cluster mode was written for: a Windows machine and
-  /// the WSL on it share a hostname, so the word and the mark together are what
-  /// tell the two rows apart — the Linux mark, and *Linux (WSL)* beside it.
-  it("draws a WSL with the Linux mark and Linux (WSL) beside it", async () => {
+  /// the WSL on it share a hostname, so the word and the mark are what tell the
+  /// two rows apart — and the mark is the WSL's own, *mainly the penguin* with
+  /// a Windows badge in the corner, rather than the plain Linux one.
+  it("draws a WSL with its own mark and Linux (WSL) beside it", async () => {
     mountPane(SERVING, WSL);
 
     const mark = await waitFor(() => theMark("Linux (WSL)"));
 
-    expect(mark.querySelector("path")?.getAttribute("d")).toBe(
-      drawnAs(faLinux),
-    );
+    // Tux first, which is what says the box is a Linux, and a second path
+    // after him, which is what says which Linux.
+    expect(pathsOf(mark)[0]).toBe(drawnAs(faLinux)[0]);
+    expect(pathsOf(mark).length).toBe(2);
+
+    // And so not what a plain Linux wears. The two words were one mark until
+    // an Annex needed telling from the Keeper it shares a hostname with, and
+    // this is the assertion that says they are two.
+    expect(pathsOf(mark)).not.toEqual(drawnAs(faLinux));
   });
 
   /// And the other two platforms wear their own marks, off the same word.
@@ -1697,9 +1716,7 @@ one on the LAN",
 
       const mark = await waitFor(() => theMark(os));
 
-      expect(mark.querySelector("path")?.getAttribute("d"), os).toBe(
-        drawnAs(icon),
-      );
+      expect(pathsOf(mark), os).toEqual(drawnAs(icon));
 
       unmount();
     }
