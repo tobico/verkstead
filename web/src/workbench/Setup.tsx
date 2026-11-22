@@ -69,7 +69,7 @@ import {
   type JSX,
 } from "solid-js";
 
-import { AnnexMark, keeperOf } from "../AnnexMark";
+import { keeperOf } from "../AnnexMark";
 import { HarnessMark } from "../HarnessMark";
 import { Check } from "../Check";
 import { Icon } from "../Icon";
@@ -633,21 +633,21 @@ export function DeviceSelect(props: {
     return props.chosen ?? view.this.device;
   };
 
-  /// What an **Annex**'s row says after its name: the Annex mark, and its OS
-  /// word as a quiet second word. An Annex carries its Keeper's hostname, so
-  /// without these the two rows would read as one machine twice. Nothing on
-  /// any other row, whose name and mark have always been the whole of it.
+  /// What an **Annex**'s row says after its name: its OS word, spoken and not
+  /// seen. Nothing on any other row, whose name and mark have always been the
+  /// whole of it.
+  ///
+  /// **The name and the mark are the whole of the row here too**, which is the
+  /// point of it: an Annex carries its Keeper's hostname, so what tells the two
+  /// rows apart is the mark — the WSL's own against its Keeper's Windows (see
+  /// `osIcon` in [`../devices.ts`](../devices.ts)). A mark says nothing aloud,
+  /// though, so a screen reader walking the rows would hear one hostname twice;
+  /// the OS word is what it hears instead, out of the layout and in the row.
   const annexed = (device: DeviceIdentity): JSX.Element | undefined => {
     const view = devices.data;
-    const keeper = view === undefined ? null : keeperOf(view, device);
-    if (keeper === null) return undefined;
+    if (view === undefined || keeperOf(view, device) === null) return undefined;
 
-    return (
-      <>
-        <AnnexMark keeper={keeper} />
-        <span class={styles.deviceOs}>{device.os}</span>
-      </>
-    );
+    return <span class={styles.deviceOs}>{device.os}</span>;
   };
 
   // And the correction, which runs whether or not the control is drawn: a pick

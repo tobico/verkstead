@@ -1093,14 +1093,17 @@ describe("the device the compose page is drafting onto", () => {
     leaveRefusals(null, 0, [], null);
   });
 
-  /// Every device the select offers, and the mark each row wears.
-  const marks = (): (string | null | undefined)[] =>
+  /// Every device the select offers, and the mark each row wears — every path
+  /// of it, the WSL's being two where the other marks are one.
+  const marks = (): string[] =>
     offered("Device").map((row) =>
-      row.querySelector("svg path")?.getAttribute("d"),
+      Array.from(row.querySelectorAll("svg path"))
+        .map((path) => path.getAttribute("d"))
+        .join(" "),
     );
 
   /// What one operating system's mark is drawn as, for comparing against those.
-  const mark = (os: string) => [osIcon(os).icon[4]].flat()[0];
+  const mark = (os: string) => [osIcon(os).icon[4]].flat().join(" ");
 
   /// With nothing linked the row is the row it has always been. Which is nearly
   /// every Verkstead, and the reason this is the first thing asked: a select
@@ -1132,21 +1135,26 @@ describe("the device the compose page is drafting onto", () => {
       AWAY.name,
     ]);
 
-    // The mark a device wears wherever it is drawn: the WSL reads as Linux,
-    // which is the whole point of the word — and it is listed like any other,
-    // the list being the membership rather than a reachability probe.
+    // The mark a device wears wherever it is drawn — and the WSL is listed like
+    // any other, the list being the membership rather than a reachability
+    // probe.
     expect(marks()).toEqual([
       mark(LINKED.this.os),
       mark(MEMBER.os),
       mark(AWAY.os),
     ]);
+
+    // And the WSL's is its own rather than the plain Linux one, which is what
+    // tells it from the machine it shares a hostname with.
+    expect(AWAY.os).toBe("Linux (WSL)");
+    expect(mark(AWAY.os)).not.toBe(mark("Linux"));
   });
 
-  /// An **Annex** carries its Keeper's hostname, so the WSL here is the
-  /// fixture's *workbench* twice over until something says which is which:
-  /// the Annex mark the Devices list draws, and its OS word after it. The name
-  /// is still the whole of what the row is called.
-  it("draws an Annex with its mark and its OS word after the name", async () => {
+  /// An **Annex**'s row is its mark and its name and nothing else to look at.
+  /// The hostname is its Keeper's — so the mark is what says which of the two
+  /// rows this is, and the Annex mark the Devices list wears is not drawn here
+  /// (`src/AnnexMark.tsx`).
+  it("draws an Annex with its mark and its name alone", async () => {
     theCluster(whenever("/api/ui/devices", json(ANNEXED)));
     const { container } = mount("/compose");
 
@@ -1162,16 +1170,39 @@ describe("the device the compose page is drafting onto", () => {
 
     const [here, laptop, annex] = offered("Device");
 
-    expect(annex!.querySelector(`.${annexMark.annex}`)?.textContent).toBe(
-      "annex of this device",
-    );
-    expect(annex!.querySelector(`.${setup.deviceOs}`)?.textContent).toBe(
-      "Linux (WSL)",
-    );
+    // Nothing of *annex of …* on any row of this select, the Annex's included.
+    for (const row of [here!, laptop!, annex!]) {
+      expect(row.querySelector(`.${annexMark.annex}`)).toBeNull();
+    }
+
+    // The WSL's own mark, which is what tells this row from its Keeper's.
+    expect(marks()[2]).toBe(mark(AWAY.os));
+    expect(marks()[2]).not.toBe(marks()[0]);
+  });
+
+  /// And a screen reader is not left with the one hostname twice: a mark says
+  /// nothing aloud, so the Annex's row carries its OS word out of the layout
+  /// and in what the row is called.
+  it("says an Annex's OS word to a screen reader and to nobody else", async () => {
+    theCluster(whenever("/api/ui/devices", json(ANNEXED)));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await drawn(container, `.${setup.deviceSelect}`);
+    await waitFor(() => expect(showing("Device")).toBe(LINKED.this.name));
+
+    const [here, laptop, annex] = offered("Device");
+
+    const word = annex!.querySelector(`.${setup.deviceOs}`);
+    expect(word?.textContent).toBe("Linux (WSL)");
+
+    // In the row's own words rather than beside them: the row is named by what
+    // it holds, nothing here handing it an `aria-labelledby` of its own.
+    expect(annex!.getAttribute("aria-labelledby")).toBeNull();
+    expect(annex!.textContent).toBe(`${AWAY.name}Linux (WSL)`);
 
     // And nothing after the name on a row that is nobody's Annex.
     for (const row of [here!, laptop!]) {
-      expect(row.querySelector(`.${annexMark.annex}`)).toBeNull();
       expect(row.querySelector(`.${setup.deviceOs}`)).toBeNull();
     }
   });

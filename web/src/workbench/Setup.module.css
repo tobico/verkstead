@@ -196,14 +196,26 @@
   max-width: min(20rem, calc(100vw - 2.5rem));
 }
 
-/* An Annex's OS word after its mark — *Linux (WSL)* — quiet and a size down,
-   the mark beside it being the louder of the two. Never the thing to cut: the
-   name before them is. */
+/* An Annex's OS word after its name — *Linux (WSL)* — out of the layout and
+   still in the row, so a screen reader reads it and nobody sees it.
+
+   The row is a mark and a hostname and nothing else, which is what the human
+   asked for: an Annex wears its Keeper's hostname, and what says which of the
+   two rows is which is the mark. A mark is silent, though, so the word stays
+   for whoever is listening rather than looking. Out of the layout the same way
+   a question set's answered direction is — see `.chose` in
+   `set/Sheet.module.css` — rather than `display: none`, which would take it out
+   of the row's accessible name along with the layout. */
 .deviceOs {
-  font-size: 0.8rem;
-  font-weight: normal;
-  color: var(--ink-soft);
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
   white-space: nowrap;
+  border: 0;
 }
 
 /* The panel behind the Repo trigger: the branch, the base, what the work runs
