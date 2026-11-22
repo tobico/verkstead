@@ -4217,14 +4217,23 @@ Nothing else of a root goes back, the rest being Verkstead's own or the human's
 and no session's to change. A **Terminal**'s ending goes the same way, a human who
 logged in at that shell having logged in to somebody else's account.
 **Only what changed travels**: a login the session replaced, or made where the
-account had none, goes back whole; one still exactly what came down is not sent at
-all. Which is the three cases a local ending already tells apart.
-**Last write wins.** Two machines refreshing one login at once may sign one of
-them out; that is accepted rather than locked against — nothing is merged and
-nothing is held, and the write that arrives later is the one the account keeps. A
-sign-out that results reads as the Profile being broken there, and the fix is a
-login on a device it is bound on. Lending a Profile out exclusively was rejected as a lock
-nobody asked for.
+account had none, goes back whole; one still exactly what the account holds is not
+sent at all. Which is the three cases a local ending already tells apart. *What
+the account holds* is what this device last knew of it — fetched, or written back
+by an ending since — rather than what this one session's fetch brought: two
+sessions share the one mirror, and the first to end writes what they both
+refreshed.
+**And only over the login it replaces.** The login travels naming that one, and
+the device the account is on writes it only where its own login is still it,
+keeping a login made or refreshed there since and answering that it did. A
+refresh token is spent as it is used, so of two machines refreshing one login only
+the first holds a live one: a session that signed out on a token rotated away
+under it has nothing worth sending, and writing it anyway put a dead login where
+every launch after it would fetch one. Two machines refreshing one login at once
+may still sign one of them out; that is accepted rather than locked against —
+nothing is merged and nothing is held — and reads as the Profile being broken
+there, the fix a login on a device it is bound on. Lending a Profile out
+exclusively was rejected as a lock nobody asked for.
 **And a device that has gone away by then is said rather than swallowed**: the
 mirror is left exactly where it is, nothing retries, and the Conversation's
 Timeline carries a **Notice** saying the account was not written and naming the

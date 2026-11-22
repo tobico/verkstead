@@ -1272,11 +1272,22 @@ async fn a_login_refreshed_at_home_is_the_one_the_next_launch_gets() {
 }
 
 /// What stands where claude goes for a login landing at home: signed out until
-/// the login it was given is the one refreshed there, and then saying so.
+/// the login it was given is the one refreshed there, and then saying so — in
+/// its log as the turn's answer, which is where a sign-out is read, and on its
+/// terminal.
 const SIGNED_OUT_UNTIL_REFRESHED: &str = r#"
 if grep -qs 'refreshed-at-home' "$HOME/.claude/.credentials.json"; then
     printf 'login: %s\n' "$(cat "$HOME/.claude/.credentials.json")"
 else
+    name=
+    take=
+    for argument in "$@"; do
+        if [ -n "$take" ]; then name=$argument; take=; fi
+        case "$argument" in --session-id|--resume) take=1 ;; esac
+    done
+    log=$HOME/.claude/projects/$(pwd | tr -c 'a-zA-Z0-9\n' -)/$name.jsonl
+    mkdir -p "$(dirname "$log")"
+    printf '%s\n' '{"type":"assistant","isApiErrorMessage":true,"message":{"role":"assistant","content":[{"type":"text","text":"Login expired · Please run /login"}]}}' >> "$log"
     for pass in 1 2 3 4; do
         printf '  ⎿  Login expired · Please run /login\r\n'
         sleep 0.25
@@ -1684,11 +1695,94 @@ async fn only_a_login_the_session_changed_goes_back_home() {
     );
 }
 
-/// Two devices refreshing the one login end on the **later write**: nothing is
-/// locked and nothing is merged, and what the account keeps is whatever arrived
-/// last.
+/// A login refreshed **at home** since the fetch is kept over the one a session
+/// away left: a refresh token is spent as it is used, so the session's was rotated
+/// away under it, and writing it over the live one is what signed out every session
+/// fetched from home after it.
 #[tokio::test]
-async fn two_devices_refreshing_one_login_end_on_the_later_write() {
+async fn a_login_refreshed_at_home_since_is_kept() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.account("work").await;
+
+    let mirror = b.mirror_of("work").await;
+    let conversation = b.conversation().await;
+    let under = b.mirror_directory(&mirror.id);
+
+    let lent = b.fetches(&mirror).await.expect("A answered").lent;
+
+    // The session away refreshed — or signed out and left what it holds changed —
+    // and home refreshed on its own meanwhile.
+    std::fs::write(
+        under.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-rotated-away"}}"#,
+    )
+    .unwrap();
+    a.logged_in("work", REFRESHED);
+
+    b.ends(lent, conversation).await;
+
+    let held = a.login_at_home("work").expect("the account holds a login");
+
+    assert!(
+        held.contains(REFRESHED) && !held.contains("rotated-away"),
+        "the login made at home since stands: {held:?}",
+    );
+    let notices = b.notices(conversation).await;
+
+    assert!(
+        !notices.iter().any(|notice| notice.contains("login")),
+        "and nothing is said on the Timeline, there being nothing for the human to put \
+         right: {notices:#?}",
+    );
+}
+
+/// Two sessions sharing **one mirror** both go home: the first to end writes what
+/// they refreshed into the account, and the second is measured against what this
+/// device last knew the account to hold rather than against its own fetch, which
+/// the first has written over.
+#[tokio::test]
+async fn two_sessions_on_one_mirror_both_go_home() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.account("work").await;
+
+    let mirror = b.mirror_of("work").await;
+    let conversation = b.conversation().await;
+    let under = b.mirror_directory(&mirror.id);
+
+    let first = b.fetches(&mirror).await.expect("A answered the first").lent;
+    let second = b
+        .fetches(&mirror)
+        .await
+        .expect("A answered the second")
+        .lent;
+
+    let refreshed = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-refreshed-once"}}"#;
+
+    std::fs::write(under.join(".claude/.credentials.json"), refreshed).unwrap();
+    b.ends(first, conversation).await;
+
+    assert_eq!(a.login_at_home("work").as_deref(), Some(refreshed));
+
+    let again = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-refreshed-twice"}}"#;
+
+    std::fs::write(under.join(".claude/.credentials.json"), again).unwrap();
+    b.ends(second, conversation).await;
+
+    assert_eq!(
+        a.login_at_home("work").as_deref(),
+        Some(again),
+        "the second session's refresh lands over the first's",
+    );
+}
+
+/// Two devices refreshing the one login end on the **first write**: the second
+/// device's fetch is a login the account no longer holds, and nothing it refreshed
+/// from that is newer than what the first put there. Nothing is locked and nothing
+/// is merged.
+#[tokio::test]
+async fn two_devices_refreshing_one_login_end_on_the_first_write() {
     /// The third device, which is the second one away from home.
     const C: &str = "ffeeddccbbaa00998877665544332211";
 
@@ -1742,9 +1836,9 @@ async fn two_devices_refreshing_one_login_end_on_the_later_write() {
 
     assert_eq!(
         a.login_at_home("work").as_deref(),
-        Some(c_refreshed),
-        "and the write that arrived later is the one the account keeps — nothing \
-         merged, and nothing held against the second device",
+        Some(b_refreshed),
+        "and the second device's write is kept out, the account no longer holding \
+         the login it was lent — nothing merged, and nothing held against it",
     );
 }
 

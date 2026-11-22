@@ -46,16 +46,21 @@
 //! itself out a session at a time. What the session left is read off the mirror
 //! once the ending has written everything back into it, and put to the device it
 //! was fetched from where it is not still what came down: replaced or made where
-//! there was none goes back whole, untouched goes nowhere. **Last write wins** —
-//! two machines refreshing one login may sign one of them out, and nothing here
-//! merges or locks anything. See [`Lending::written_home`], and
+//! there was none goes back whole, untouched goes nowhere. **And only over the
+//! login it replaces** — the device it lands on writes it where its own login is
+//! still the one this device last knew it to hold, and keeps a login made or
+//! refreshed there since: a session that signed out on a token rotated away under
+//! it would otherwise put the dead token over the live one. Nothing here merges or
+//! locks anything. See [`Lending::written_home`], [`known`], and
 //! [`crate::peer::account::LOGIN`], which is where it lands.
 
+use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
-use verkstead_render::{AccountFile, AccountLogin, AccountSignedOut};
+use verkstead_render::{AccountFile, AccountLogin, AccountLoginTaken, AccountSignedOut, LoginOver};
 
 use crate::device::Devices;
 use crate::peer::account::{ACCOUNT, LOGIN, SIGNED_OUT};
@@ -143,6 +148,45 @@ impl Lent {
 /// miss a change the way a length or a modification time can — the same reading
 /// the Code pane's version is, see [`crate::files`].
 type Fingerprint = [u8; 32];
+
+/// The login each mirror on this device last knew its account to hold, by the
+/// path of the mirror's login: what came down at the last fetch, or what the last
+/// ending wrote into the account since. `None` beside a path is an account that
+/// had no login.
+///
+/// **What a login sent back goes over** — see [`AccountLogin::over`]. Per mirror
+/// rather than per session, because two sessions under the one member's Profile
+/// share the one mirror and the one login in it: the first to end writes what they
+/// both refreshed into the account, and the second's own fetch is then a login the
+/// account no longer holds. Measured against that, the second's write would be
+/// kept out of an account that holds nothing newer than what this device just put
+/// there — so the second asks after what this device last knew instead.
+///
+/// **Keyed by the path**, which is this device's own: a Data Directory has one
+/// mirror per Profile, and two Verksteads in one process — every suite that links
+/// two — have a Data Directory each. **Held in the process**, so a restart forgets
+/// it and an ending after one goes over what its own session fetched, which is the
+/// reading this improves on rather than a worse one.
+static KNOWN: LazyLock<Mutex<HashMap<PathBuf, Option<Fingerprint>>>> =
+    LazyLock::new(Mutex::default);
+
+/// What the mirror whose login is at `login` last knew its account to hold, or
+/// `None` where this process has neither fetched it nor written it back.
+fn known(login: &Path) -> Option<Option<Fingerprint>> {
+    KNOWN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(login)
+        .copied()
+}
+
+/// And that it now holds `held`: fetched, or written into it.
+fn knows(login: &Path, held: Option<Fingerprint>) {
+    KNOWN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(login.to_owned(), held);
+}
 
 /// The Profile a session on this device is launched under, where the Profile is
 /// **not bound here**: its account fetched from a device it is bound on into
@@ -234,6 +278,10 @@ pub async fn fetched(
         }
     }
 
+    let login = under.join(inside);
+
+    knows(&login, came_down);
+
     Ok(Some(Mirrored {
         profile: store::Profile {
             account: kept_in(agent_type, &under),
@@ -242,7 +290,7 @@ pub async fn fetched(
         lent: Lent {
             at,
             profile: profile.id.clone(),
-            login: under.join(inside),
+            login,
             came_down,
         },
     }))
@@ -470,10 +518,20 @@ impl Lending {
     ///
     /// **Only what changed travels**, which is the three cases a local ending already
     /// tells apart, asked the one way a mirror can be asked: a login that is no longer
-    /// what came down goes back whole, one made where the account had none is handed
-    /// over, and one still exactly what came down is not sent at all. Nothing is
-    /// merged and nothing is locked — **last write wins**, and a login refreshed on two
-    /// machines at once may sign one of them out (ADR-0020, *Shared Profiles*).
+    /// what the account holds goes back whole, one made where the account had none is
+    /// handed over, and one still exactly what the account holds is not sent at all.
+    /// *What the account holds* is what this device last knew of it — see [`known`] —
+    /// rather than what this session's own fetch brought, which another session on
+    /// the same mirror may have written over since.
+    ///
+    /// **And only over the login it replaces.** What is sent names that login, and
+    /// the device it lands on keeps a login of its own made or refreshed since — see
+    /// [`crate::peer::account::written`]. A refresh token is spent as it is used, so
+    /// whichever machine refreshed first holds the one live login: a session here
+    /// whose token was rotated away by a refresh at home has nothing worth sending,
+    /// and putting it over the account anyway is how one session signing out became
+    /// every session after it signing out too (ADR-0020, *Shared Profiles*). Nothing
+    /// is merged and nothing is locked.
     ///
     /// **A device that has gone away by then is said rather than swallowed.** The
     /// mirror is left exactly where it is and nothing retries: what is put on the
@@ -497,14 +555,22 @@ impl Lending {
 
         let devices = devices.as_ref();
 
-        let left = tokio::task::spawn_blocking(move || left_behind(&login, came_down)).await;
+        let over = known(&login).unwrap_or(came_down);
+
+        let left = tokio::task::spawn_blocking({
+            let login = login.clone();
+
+            move || left_behind(&login, over)
+        })
+        .await;
 
         let text = match left {
             Ok(Some(text)) => text,
 
-            // The login is still what came down, or there is none there at all: a
-            // session that wrote nothing to it, and one that took away the file it was
-            // given, which is not a session asking for the account's to go.
+            // The login is still what the account holds, or there is none there at
+            // all: a session that wrote nothing to it, and one that took away the
+            // file it was given, which is not a session asking for the account's to
+            // go.
             Ok(None) => return,
 
             Err(why) => {
@@ -519,7 +585,15 @@ impl Lending {
             }
         };
 
-        let body = match serde_json::to_vec(&AccountLogin { text }) {
+        let sent = fingerprint(text.as_bytes());
+
+        let body = match serde_json::to_vec(&AccountLogin {
+            text,
+            over: Some(match over {
+                Some(over) => LoginOver::Login(hex(&over)),
+                None => LoginOver::Nothing,
+            }),
+        }) {
             Ok(body) => body,
 
             Err(why) => {
@@ -542,12 +616,27 @@ impl Lending {
         };
 
         match relaying::put_to(devices, &at, call).await {
-            Ok(_) => tracing::debug!(
-                conversation_id,
-                device = %at,
-                "the login this session left was written into the account on the device it was \
-                 fetched from",
-            ),
+            // An empty answer is a Verkstead from before the answer said, which wrote
+            // every login it was sent — see [`AccountLoginTaken`].
+            Ok(answer) => match answer.json::<AccountLoginTaken>().await {
+                Ok(AccountLoginTaken { written: false }) => tracing::info!(
+                    conversation_id,
+                    device = %at,
+                    "the login this session left was not written back, the account on the \
+                     device it was fetched from holding a login made or refreshed there since",
+                ),
+
+                _ => {
+                    knows(&login, Some(sent));
+
+                    tracing::debug!(
+                        conversation_id,
+                        device = %at,
+                        "the login this session left was written into the account on the \
+                         device it was fetched from",
+                    );
+                }
+            },
 
             Err(why) => {
                 tracing::warn!(
@@ -654,12 +743,12 @@ pub(crate) fn login_named(login: &Path) -> Option<String> {
 /// account it was fetched from has not got — and `None` where nothing is to
 /// travel.
 ///
-/// Three readings in one comparison. A login whose bytes are no longer what came
-/// down is one the session wrote or replaced, and it goes back whole. A login
-/// where `came_down` is nothing is one made where the account had none, and it is
-/// handed over. And one that still hashes to what arrived is a session that did
-/// not touch it, which is not a write for the account it was fetched from to
-/// take.
+/// Three readings in one comparison against `held`, which is what the account
+/// holds as far as this device knows — see [`known`]. A login whose bytes are no
+/// longer that is one the session wrote or replaced, and it goes back whole. A
+/// login where `held` is nothing is one made where the account had none, and it is
+/// handed over. And one that still hashes to it is a session that did not touch
+/// it, which is not a write for the account it was fetched from to take.
 ///
 /// **A name with nothing at it is nothing to send**, which is the rule a local
 /// ending holds to: a session that took away the file it was given is not a
@@ -671,15 +760,48 @@ pub(crate) fn login_named(login: &Path) -> Option<String> {
 /// Conversations may be running under the one member's Profile and there is one
 /// mirror between them, written beside and renamed over at each fetch — so a
 /// session may read a login the other one's launch brought down, or send back
-/// what the other one left. Which last write wins settles between two sessions
-/// exactly as it settles between two machines, and neither is held up for the
-/// other.
+/// what the other one left. Which is why `held` is the mirror's rather than the
+/// session's: neither is held up for the other.
 ///
 /// Blocking: one read.
-fn left_behind(login: &Path, came_down: Option<Fingerprint>) -> Option<String> {
+fn left_behind(login: &Path, held: Option<Fingerprint>) -> Option<String> {
     let now = std::fs::read_to_string(login).ok()?;
 
-    (came_down != Some(fingerprint(now.as_bytes()))).then_some(now)
+    (held != Some(fingerprint(now.as_bytes()))).then_some(now)
+}
+
+/// Whether `sent` goes into the account whose login is at `login` — the half on
+/// the device it is bound on, called by [`crate::peer::account::written`].
+///
+/// **Where the account still holds the login it names**, which is the login the
+/// sending device last knew it to hold — see [`AccountLogin::over`]. One made or
+/// refreshed here since is newer than anything the session had: a refresh token
+/// is spent as it is used, so of two machines refreshing one login only the first
+/// holds a live one, and a session that signed out on a token rotated away under
+/// it would otherwise put that token over the live one here.
+///
+/// **And where it would change nothing**, the account already holding exactly what
+/// was sent. And always for a Verkstead from before the login was named, which is
+/// written as it always was.
+///
+/// Read and written as two steps rather than one: a refresh here landing between
+/// them is the harness's own write and the last one, the race a local ending has
+/// with a harness at the same file.
+///
+/// Blocking: one read.
+pub(crate) fn goes_over(login: &Path, sent: &AccountLogin) -> bool {
+    let Some(over) = &sent.over else {
+        return true;
+    };
+
+    let here = login_named(login);
+
+    let named = match over {
+        LoginOver::Login(over) => here.as_deref() == Some(over.as_str()),
+        LoginOver::Nothing => here.is_none(),
+    };
+
+    named || here == Some(hex(&fingerprint(sent.text.as_bytes())))
 }
 
 /// And the login that arrived, written into the account at `login` — which is the
@@ -1017,7 +1139,7 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(&login).unwrap(),
             "the later one\n",
-            "last write wins: nothing is merged and nothing is held",
+            "what arrived is what is there: nothing is merged and nothing is held",
         );
         assert_eq!(
             std::fs::metadata(&login).unwrap().ino(),
@@ -1026,5 +1148,80 @@ mod tests {
              what arrived",
         );
         assert_eq!(std::fs::read_to_string(&linked).unwrap(), "the later one\n",);
+    }
+
+    /// The account at `here` — `None` for none — and whether a login sent back
+    /// over `over` goes into it.
+    fn goes(here: Option<&str>, sent: &str, over: Option<LoginOver>) -> bool {
+        let dir = tempfile::tempdir().unwrap();
+        let login = dir.path().join(".credentials.json");
+
+        if let Some(here) = here {
+            std::fs::write(&login, here).unwrap();
+        }
+
+        goes_over(
+            &login,
+            &AccountLogin {
+                text: sent.to_owned(),
+                over,
+            },
+        )
+    }
+
+    /// Named by what it hashes to, as the sending device names it.
+    fn over(text: &str) -> Option<LoginOver> {
+        Some(LoginOver::Login(hex(&fingerprint(text.as_bytes()))))
+    }
+
+    /// A login sent back goes over the one it names, which is an account nobody
+    /// here has touched since the sending device last knew it.
+    #[test]
+    fn a_login_goes_over_the_one_it_names() {
+        assert!(goes(Some("lent\n"), "refreshed away\n", over("lent\n")));
+        assert!(goes(None, "logged in away\n", Some(LoginOver::Nothing)));
+    }
+
+    /// And not over one made or refreshed here since: of two machines refreshing
+    /// one login only the first holds a live one, and the session's was rotated
+    /// away under it.
+    #[test]
+    fn a_login_made_here_since_is_kept() {
+        assert!(!goes(
+            Some("refreshed here\n"),
+            "rotated away\n",
+            over("lent\n")
+        ));
+        assert!(!goes(
+            Some("logged in here\n"),
+            "logged in away\n",
+            Some(LoginOver::Nothing)
+        ));
+        assert!(!goes(None, "rotated away\n", over("lent\n")));
+    }
+
+    /// A login the account already holds goes in, there being nothing to lose; and
+    /// one from a Verkstead that named nothing is written as it always was.
+    #[test]
+    fn the_same_login_and_an_unnamed_one_go_in() {
+        assert!(goes(Some("same\n"), "same\n", over("lent\n")));
+        assert!(goes(Some("refreshed here\n"), "from before\n", None));
+    }
+
+    /// What the mirror last knew is per mirror, and the latest word wins.
+    #[test]
+    fn a_mirror_knows_what_it_was_last_told() {
+        let dir = tempfile::tempdir().unwrap();
+        let login = dir.path().join(".credentials.json");
+
+        assert_eq!(known(&login), None, "nothing fetched, nothing known");
+
+        knows(&login, None);
+        assert_eq!(known(&login), Some(None));
+
+        let written = fingerprint(b"written home\n");
+
+        knows(&login, Some(written));
+        assert_eq!(known(&login), Some(Some(written)));
     }
 }

@@ -44,7 +44,7 @@ use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use verkstead_render::{AccountFile, AccountLogin, AccountSignedOut};
+use verkstead_render::{AccountFile, AccountLogin, AccountLoginTaken, AccountSignedOut};
 
 use crate::{AppState, store};
 
@@ -183,10 +183,16 @@ pub(crate) async fn held(State(state): State<AppState>, Path(profile): Path<Stri
 /// what arrived, rather than for a file left behind by a rename. Owner-only,
 /// because it is a login.
 ///
-/// **Last write wins, and nothing is merged.** Two devices refreshing one login may
-/// sign one of them out; that is accepted rather than locked against, and the write
-/// that arrives later is the one the account keeps (ADR-0020, *Shared Profiles*).
-/// So nothing here reads what is already at the path, and nothing is held.
+/// **Written only over the login it names**, and nothing is merged. The login
+/// arrives naming the one the sending device last knew this account to hold — see
+/// [`AccountLogin::over`] — and a login here that is no longer that one was made or
+/// refreshed here since, which is newer than anything that session had: of two
+/// machines refreshing one login only the first holds a live one, and a session
+/// that signed out on a token rotated away under it would otherwise put that dead
+/// token over the live one here — and every session fetching from here after it
+/// would come up signed out (ADR-0020, *Shared Profiles*). Such a login is kept,
+/// and the answer says so: see [`AccountLoginTaken`]. Nothing is held between the
+/// read and the write — see [`crate::mirroring::account::goes_over`].
 ///
 /// **A Profile that is not bound here is `404`**, as the read beside it answers
 /// one: a Profile this device runs from a copy of is an account bound on a third
@@ -229,11 +235,27 @@ pub(crate) async fn written(
     match tokio::task::spawn_blocking({
         let login = login.clone();
 
-        move || crate::mirroring::account::into_the_account(&login, &sent.text)
+        move || {
+            if !crate::mirroring::account::goes_over(&login, &sent) {
+                return Ok(false);
+            }
+
+            crate::mirroring::account::into_the_account(&login, &sent.text).map(|()| true)
+        }
     })
     .await
     {
-        Ok(Ok(())) => {
+        Ok(Ok(false)) => {
+            tracing::info!(
+                profile = %profile,
+                "a member's session sent back a login of this device's account that has been \
+                 made or refreshed here since, so the account keeps its own",
+            );
+
+            Json(AccountLoginTaken { written: false }).into_response()
+        }
+
+        Ok(Ok(true)) => {
             tracing::debug!(
                 profile = %profile,
                 "the login a member's session left was written into this device's account",
@@ -244,7 +266,7 @@ pub(crate) async fn written(
             // [`crate::profiles::looked`].
             crate::profiles::looked(&state, std::slice::from_ref(&held)).await;
 
-            StatusCode::NO_CONTENT.into_response()
+            Json(AccountLoginTaken { written: true }).into_response()
         }
 
         Ok(Err(why)) => {

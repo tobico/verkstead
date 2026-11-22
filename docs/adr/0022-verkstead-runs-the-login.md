@@ -98,7 +98,14 @@ device can open.
   says it as `<reason> · Please run /login`. Anchoring the phrase at the end
   keeps a session that merely *mentions* the phrase — an agent reading this
   ADR aloud, a grep of the source — from being stopped. The match is checked
-  against a named claude version, the way `limits.rs` records its own. It
+  against a named claude version, the way `limits.rs` records its own.
+  **Claude's is read in its Transcript alone**, not on its terminal or its
+  Screen: claude writes the line into its log as the answer to the turn that
+  failed, and draws it again with the rest of a conversation it resumes —
+  Verkstead's `--resume`, or `/resume` typed at it. On the terminal the old
+  line and a new one are the same line, and reading it there stopped every
+  resume of a conversation that had once signed out as soon as its past was
+  drawn. The log is followed from where the session began in it. It
   writes a **Signed out** stop through the shared stop machinery, like every
   other stop: one Notice, *blocked on you*, the devices told. The Notice has a
   Log in press that opens the same modal.

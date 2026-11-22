@@ -344,9 +344,15 @@ the memory store are synced over before launch and back after, their paths
 rewritten to the machine they land on, which is what makes the harness's own
 resume possible after a transfer. A login is an OAuth pair the harness
 refreshes, so two machines refreshing one login at once may sign one of them
-out; that is accepted, last write winning, a sign-out reading as the Profile
-being broken there, the fix a login on its home device. Lending a Profile out
-exclusively was rejected as a lock nobody asked for. A Profile whose home holds
+out; that is accepted, a sign-out reading as the Profile being broken there,
+the fix a login on its home device. **The login written back goes only over
+the login it replaces**: B names the one it last knew A's account to hold, and
+A keeps a login made or refreshed there since. This was last write wins at
+first, and that turned one sign-out into every sign-out after it: a refresh
+token is spent as it is used, so of two machines refreshing one login only the
+first holds a live one, and B's session, signed out on a token A had rotated
+away, wrote that dead token over A's live one for every launch to fetch.
+Lending a Profile out exclusively was rejected as a lock nobody asked for. A Profile whose home holds
 no login file — a Claude login in the macOS Keychain — cannot be used away and
 the picker's row says so; a harness absent on the device reads as broken there
 in the onboarding probe's own words, and Start is refused by name.
