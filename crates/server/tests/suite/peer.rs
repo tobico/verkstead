@@ -801,11 +801,18 @@ async fn a_caller_whose_certificate_is_current_still_gets_through() {
 /// `verkstead-no-such-tailscale` is a program that is not there, which is what
 /// a machine with no Tailscale on it *is* — see the Remote access suite, which
 /// tells a missing binary from one that will not answer the same way.
+///
+/// **This machine's kernel with it**, for [`WSL_KERNEL`]'s own reason: a WSL is
+/// told from an ordinary Linux by its kernel release and by nothing else, so a
+/// reading stated without one answers *Linux* on a machine that is a WSL — and
+/// [`the_identity_names_the_machine_this_device_is_on`], which holds the
+/// identity against the one real reading of this box, is the test that catches
+/// it.
 fn nowhere() -> Reading {
     Reading::stated(
         Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], 8422),
         Platform::HERE,
-        None,
+        platform::kernel_release(),
         Vec::new(),
     )
 }
@@ -815,7 +822,7 @@ fn on_the_lan() -> Reading {
     Reading::stated(
         Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], 8422),
         Platform::HERE,
-        None,
+        platform::kernel_release(),
         vec!["192.168.1.24".parse().unwrap(), "10.0.0.7".parse().unwrap()],
     )
 }

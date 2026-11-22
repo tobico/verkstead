@@ -15,8 +15,9 @@
 //! file here runs on threads of the one process under `cargo test`, beside
 //! every other.
 //!
-//! One module is not a suite: `fixture_repositories` is the git repository a
-//! test copies rather than makes, for the suites that can reach it.
+//! Two modules are not suites: `fixture_repositories` is the git repository a
+//! test copies rather than makes, for the suites that can reach it, and `pace`
+//! is the one ruler the suites judged on wall clock stretch their waits by.
 
 mod account_windows;
 mod accounts;
@@ -50,6 +51,7 @@ mod news;
 mod notices;
 mod nudges;
 mod onboarding;
+mod pace;
 mod package_stores;
 mod peer;
 mod pictures;

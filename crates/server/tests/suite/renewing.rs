@@ -73,7 +73,10 @@ const PORT: u16 = 8422;
 /// running server gives one.
 ///
 /// Spent only where a dial is meant to reach nobody, which here is the member
-/// whose machine is not there.
+/// whose machine is not there — so it reaches a dial through
+/// [`Verkstead::workbench_in_a_hurry`] and through nothing else. A call that has
+/// to complete is given the ordinary patience, because a dial cut short on a
+/// slow machine is a test failing about the machine.
 const PATIENCE: Duration = Duration::from_millis(300);
 
 /// A day, for standing a start inside the renewal window.
@@ -271,8 +274,16 @@ impl Verkstead {
 
     /// How it dials, for the questions that are about a call rather than about a
     /// press.
+    ///
+    /// **At the ordinary patience**, which every dial made through this is owed:
+    /// each one is a call that has to complete — the identity reads that must
+    /// reach a member, and the announcements that must be answered with a
+    /// refusal rather than with silence. None of them is a dial meant to reach
+    /// nobody, which is the only thing [`PATIENCE`] is for. A dial cut short on
+    /// a slow machine is this suite failing about the machine, the way the
+    /// changeover's own call says at [`back_again`].
     fn peers(&self) -> Peers {
-        Peers::of(self.device.clone(), self.members.clone()).waiting(PATIENCE)
+        Peers::of(self.device.clone(), self.members.clone())
     }
 
     /// What it says about itself, which is what an announcement carries.

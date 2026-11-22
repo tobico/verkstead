@@ -58,6 +58,8 @@ use verkstead_server::{
     Agents, Gh, Refusal, Routers, mirroring, open_database, routers_answering_devices_telling,
     routers_running_sessions_answering_devices, store,
 };
+
+use crate::pace::{paced, pause};
 use verkstead_store::{Linking, record_member};
 
 /// The device the account is at home on.
@@ -144,14 +146,26 @@ const NO_GITHUB: &str = "exit 1";
 
 /// How long one address has to answer here, rather than the two seconds a running
 /// server gives one.
+///
+/// Stretched like the waits below, and for the reason the one ruler exists: a
+/// dial given three hundred milliseconds on a runner at half speed is a test
+/// failing about the machine. Scaling it alongside [`WAITING`] keeps the two in
+/// the order they were chosen in, the dial giving up well inside the wait.
 const PATIENCE: Duration = Duration::from_millis(300);
 
 /// How long a test waits for something two hops away to have happened: a Nudge
 /// crossing a link, a list read back over one, a session starting in a real
 /// sandbox and printing.
+///
+/// **Stretched by [`crate::pace`] wherever it is read**, which is why every use
+/// is `paced(WAITING)` rather than the constant itself. Two hops and a real
+/// sandbox are judged on wall clock the same way `sessions` is, so a loaded
+/// runner needs the same longer ruler.
 const WAITING: Duration = Duration::from_secs(30);
 
-/// And how often it looks while it waits.
+/// And how often it looks while it waits — through [`pause`], so that it
+/// stretches with the wait above rather than reading ever more often against a
+/// machine that is already busy.
 const LOOKING: Duration = Duration::from_millis(50);
 
 /// One Verkstead: its store, its identity, its Peer Listener up behind the Member
@@ -238,7 +252,7 @@ impl Verkstead {
             members.clone(),
             Joins::none(),
         )
-        .waiting(PATIENCE);
+        .waiting(paced(PATIENCE));
 
         let Routers {
             workbench,
@@ -470,7 +484,7 @@ impl Verkstead {
     /// after the process has been reaped and the profile seen to.
     async fn remembered(&self, name: &str, path: &Path, file: &str) -> String {
         let entry = self.entry(name, path);
-        let deadline = Instant::now() + WAITING;
+        let deadline = Instant::now() + paced(WAITING);
 
         loop {
             if let Ok(text) = std::fs::read_to_string(entry.join(file)) {
@@ -484,7 +498,7 @@ impl Verkstead {
                 walked(&entry),
             );
 
-            tokio::time::sleep(LOOKING).await;
+            pause(LOOKING).await;
         }
     }
 
@@ -550,7 +564,7 @@ impl Verkstead {
     /// the process has been reaped and the profile seen to: what is being waited for
     /// is a real session finishing and a real call crossing a real link.
     async fn logged_in_with(&self, name: &str, saying: &str) -> String {
-        let deadline = Instant::now() + WAITING;
+        let deadline = Instant::now() + paced(WAITING);
 
         loop {
             let held = self.login_at_home(name).unwrap_or_default();
@@ -564,7 +578,7 @@ impl Verkstead {
                 "the account {name} never came to hold {saying:?}. It holds: {held:?}",
             );
 
-            tokio::time::sleep(LOOKING).await;
+            pause(LOOKING).await;
         }
     }
 
@@ -595,7 +609,7 @@ impl Verkstead {
     ) -> ProfileEntry {
         let mut last = Vec::new();
 
-        let waited = tokio::time::timeout(WAITING, async {
+        let waited = tokio::time::timeout(paced(WAITING), async {
             loop {
                 last = self.profiles().await;
 
@@ -603,7 +617,7 @@ impl Verkstead {
                     return row.clone();
                 }
 
-                tokio::time::sleep(LOOKING).await;
+                pause(LOOKING).await;
             }
         })
         .await;
@@ -617,7 +631,7 @@ impl Verkstead {
     async fn without(&self, name: &str) {
         let mut last = Vec::new();
 
-        let waited = tokio::time::timeout(WAITING, async {
+        let waited = tokio::time::timeout(paced(WAITING), async {
             loop {
                 last = self.profiles().await;
 
@@ -625,7 +639,7 @@ impl Verkstead {
                     return;
                 }
 
-                tokio::time::sleep(LOOKING).await;
+                pause(LOOKING).await;
             }
         })
         .await;
@@ -810,7 +824,7 @@ impl Verkstead {
     /// Polled rather than waited on a signal: what is being waited for is a real
     /// process starting in a real sandbox, which is the slow part of a launch.
     async fn printed(&self, conversation: i64, saying: &str) -> String {
-        let deadline = Instant::now() + WAITING;
+        let deadline = Instant::now() + paced(WAITING);
         let mut said = String::new();
 
         loop {
@@ -828,7 +842,7 @@ impl Verkstead {
                 "the session never printed {saying:?}. It printed: {said:?}",
             );
 
-            tokio::time::sleep(LOOKING).await;
+            pause(LOOKING).await;
         }
     }
 
@@ -1283,7 +1297,7 @@ async fn a_login_at_home_resumes_the_run_signed_out_away_from_home() {
     let mirror = b.mirror_of("work").await;
     let conversation = b.grilling_under(&mirror.id).await;
 
-    let deadline = Instant::now() + WAITING;
+    let deadline = Instant::now() + paced(WAITING);
     while verkstead_store::stopped(&b.pool, conversation)
         .await
         .unwrap()
@@ -1294,7 +1308,7 @@ async fn a_login_at_home_resumes_the_run_signed_out_away_from_home() {
             Instant::now() < deadline,
             "the run never stopped as signed out on the work Profile",
         );
-        tokio::time::sleep(LOOKING).await;
+        pause(LOOKING).await;
     }
 
     a.logged_in("work", REFRESHED);
@@ -1302,7 +1316,7 @@ async fn a_login_at_home_resumes_the_run_signed_out_away_from_home() {
         profile: mirror.id.clone(),
     });
 
-    let deadline = Instant::now() + WAITING;
+    let deadline = Instant::now() + paced(WAITING);
     loop {
         let drawn: ConversationView = reading(
             &b.workbench,
@@ -1330,7 +1344,7 @@ async fn a_login_at_home_resumes_the_run_signed_out_away_from_home() {
             Instant::now() < deadline,
             "the run was never resumed with the login refreshed at home. It said: {said:?}",
         );
-        tokio::time::sleep(LOOKING).await;
+        pause(LOOKING).await;
     }
 }
 
@@ -1360,9 +1374,9 @@ async fn a_profile_removed_at_home_takes_the_mirror_of_its_account_with_it() {
     // Waited for rather than read at once: the row goes inside the transaction
     // that forgets it and the directory goes after, so the list may be right a
     // moment before the disk is.
-    let swept = tokio::time::timeout(WAITING, async {
+    let swept = tokio::time::timeout(paced(WAITING), async {
         while under.exists() {
-            tokio::time::sleep(LOOKING).await;
+            pause(LOOKING).await;
         }
     })
     .await;

@@ -38,6 +38,12 @@
 //! file. And the members are told, because a run under a Profile not bound on
 //! its device is stopped and recorded there — see [`hearing`].
 //!
+//! **And each of them waits for its session to go.** A sign-out writes the
+//! stop and ends the session on the word that it was written, in that order,
+//! so a resume that lands in between is refused as already driven and starts
+//! nothing. Both of the resumes made here are Verkstead's own press with no
+//! second one behind it, so both wait — see [`let_go`].
+//!
 //! **A sign-out after a fresh login resumes by itself.** A session can sign
 //! out after the human has already logged in again: its root was built before
 //! the login, and on Linux it still holds the old file. So the account's login
@@ -514,8 +520,8 @@ async fn late(
     }
 }
 
-/// How long a run stopped on a replaced login waits for its session, and for
-/// whatever was driving it, to let go before it is started again anyway.
+/// How long a run being started again waits for its session, and for whatever
+/// was driving it, to let go before it is started again anyway.
 const LETTING_GO: Duration = Duration::from_secs(30);
 
 /// How often it looks.
@@ -540,21 +546,9 @@ pub(crate) fn carrying_on(state: &AppState) {
 }
 
 /// Start `conversation_id` again through Resume, once the session that signed
-/// out has gone and the driver that launched it has let go.
-///
-/// Waited for because a driver still holding on is one that may yet launch its
-/// own next step over the stop Resume has just taken away. A wrap-up's
-/// watchers may hold on long after, which is what the limit is for: Resume
-/// over a driver that is still registered is what the press does too.
+/// out has gone and the driver that launched it has let go — see [`let_go`].
 async fn carry_on(state: AppState, conversation_id: i64) {
-    let deadline = Instant::now() + LETTING_GO;
-
-    while (state.sessions.working().contains(&conversation_id)
-        || state.drivers.registered(conversation_id))
-        && Instant::now() < deadline
-    {
-        tokio::time::sleep(LOOKING_EVERY).await;
-    }
+    let_go(&state, conversation_id).await;
 
     match crate::resume::resume(&state, conversation_id, crate::resume::Resuming::LoggedIn).await {
         Ok(verkstead_render::Resumed::Resumed) => tracing::info!(
@@ -574,6 +568,34 @@ async fn carry_on(state: AppState, conversation_id: i64) {
     }
 }
 
+/// Wait for the session that stopped `conversation_id`, and for whatever was
+/// driving it, to let go — or for [`LETTING_GO`] to run out.
+///
+/// **What a resume nobody is going to press again has to wait for.** A
+/// sign-out's stop is written while its session is still running: the stop
+/// goes down first and the relay ends the session on the word that it was
+/// written — see [`Watch::look`]. A Resume landing in between is refused as
+/// already driven, which takes the stop away and launches nothing, and that is
+/// right for a press somebody makes again a moment later and no use at all
+/// here, where the press is Verkstead's own and there is no second one. So the
+/// run would sit with its badge gone and nothing driving it until the human
+/// found it and pressed Resume themselves.
+///
+/// And a driver still holding on is one that may yet launch its own next step
+/// over the stop Resume has just taken away. A wrap-up's watchers may hold on
+/// long after, which is what the limit is for: Resume over a driver that is
+/// still registered is what the press does too.
+async fn let_go(state: &AppState, conversation_id: i64) {
+    let deadline = Instant::now() + LETTING_GO;
+
+    while (state.sessions.working().contains(&conversation_id)
+        || state.drivers.registered(conversation_id))
+        && Instant::now() < deadline
+    {
+        tokio::time::sleep(LOOKING_EVERY).await;
+    }
+}
+
 /// A login on `profile` has landed: resume every run stopped as Signed out
 /// waiting on it.
 ///
@@ -581,6 +603,8 @@ async fn carry_on(state: AppState, conversation_id: i64) {
 /// ought to be running now. A run stopped for any other reason, or waiting on
 /// another Profile, is left as it is. A refusal leaves its run stopped where
 /// the human will find it, and pressing Resume there says why.
+///
+/// Each one waits for its session to go first — see [`let_go`], which is why.
 pub(crate) async fn logged_in(state: AppState, profile: String) {
     let waiting = match store::signed_out_on(&state.pool, &profile).await {
         Ok(waiting) => waiting,
@@ -591,6 +615,8 @@ pub(crate) async fn logged_in(state: AppState, profile: String) {
     };
 
     for conversation_id in waiting {
+        let_go(&state, conversation_id).await;
+
         match crate::resume::resume(&state, conversation_id, crate::resume::Resuming::LoggedIn)
             .await
         {

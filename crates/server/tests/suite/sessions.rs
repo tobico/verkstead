@@ -111,74 +111,34 @@ const BRIEF: &str = "# Rate limiting\n\nThe API has none.\n";
 /// thing worth reading back.
 const LISTENING: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8422);
 
-/// How much longer than its own clock this suite is allowed to take, read once
-/// from `VERKSTEAD_TEST_PACE`.
-///
-/// Every one of these fixtures stands a real server up and launches real
-/// sessions into real sandboxes, and the runner decides on wall clock. So a
-/// machine running the suite at half speed is one where a session gets
-/// descheduled past a budget and is ended by the wrong rule — a failure about
-/// the machine wearing the clothes of a failure about the code, and a different
-/// test every run. There is nothing to observe instead, because on the tests
-/// that matter here the budgets *are* the thing under test.
-///
-/// So the fix is a ruler that stretches: one factor, read from the environment,
-/// applied to everything time-shaped in this file at once. Unset is `1.0`,
-/// which is what a developer's own machine runs at; CI sets `2`, because a
-/// shared four-core runner, four tests at a time and once with the workspace
-/// building alongside, is the loaded shape these flakes came from.
-///
-/// **Uniformly, and that is not a detail.** [`BRISKLY`] keeps `grace` under
-/// `proposing` deliberately, so that a session that has said it is done is
-/// ended well before the rescue would have spoken to it, and one still there
-/// when the rescue arrives is one nothing ended — scaling the two by different factors
-/// would quietly delete the thing several tests here exist to prove. One
-/// multiplier over the whole file keeps every such ordering as it was written.
-///
-/// Only this suite reads it. A server's own [`Pace::default`] is untouched:
-/// this is a test harness deciding how long to wait, not Verkstead deciding
-/// how fast to work.
-static PACE: LazyLock<f64> = LazyLock::new(|| {
-    let Ok(factor) = std::env::var("VERKSTEAD_TEST_PACE") else {
-        return 1.0;
-    };
-
-    factor
-        .parse::<f64>()
-        .ok()
-        .filter(|factor| factor.is_finite() && *factor > 0.0)
-        .unwrap_or_else(|| panic!("VERKSTEAD_TEST_PACE is a positive number, not {factor:?}"))
-});
-
-/// A span of this suite's own, stretched by [`PACE`].
-///
-/// Everything written as a literal duration in this file goes through here.
-/// Anything derived from a [`Pace`] — `BRISKLY.grace * 4`, and the others like
-/// it — does not, and must not: the Pace it came from was paced already, and
-/// pacing it twice would stretch the window past the ordering it was chosen
-/// against.
-fn paced(span: Duration) -> Duration {
-    span.mul_f64(*PACE)
-}
-
-/// Wait out a span of this suite's own — see [`paced`].
-///
-/// Two shapes use one: the gap between two reads in a loop that is waiting for
-/// something to happen, and the do-nothing window a negative assertion holds
-/// open. Both stretch for the same reason. A window has to stay long against
-/// whatever else is running, or it stops being evidence that nothing happened;
-/// and a loop that reads less often on a loaded machine is a loop taking less
-/// of the machine the thing it is waiting for needs.
-async fn pause(span: Duration) {
-    tokio::time::sleep(paced(span)).await;
-}
+// How much longer than its own clock this suite is allowed to take — see
+// `crate::pace`, which is where the factor and the reasoning live.
+//
+// Every one of these fixtures stands a real server up and launches real
+// sessions into real sandboxes, and the runner decides on wall clock. So a
+// machine running the suite at half speed is one where a session gets
+// descheduled past a budget and is ended by the wrong rule — a failure about
+// the machine wearing the clothes of a failure about the code, and a different
+// test every run. There is nothing to observe instead, because on the tests
+// that matter here the budgets *are* the thing under test.
+//
+// And uniformly over this file, which is not a detail. `BRISKLY` keeps `grace`
+// under `proposing` deliberately, so that a session that has said it is done is
+// ended well before the rescue would have spoken to it, and one still there
+// when the rescue arrives is one nothing ended — scaling the two by different
+// factors would quietly delete the thing several tests here exist to prove.
+//
+// Anything derived from a `Pace` — `BRISKLY.grace * 4`, and the others like it
+// — does not go through `paced`, and must not: the Pace it came from was paced
+// already.
+use crate::pace::{paced, pause};
 
 /// How long to wait for something a session does. Generously long, because what
 /// is being waited on is a process starting: the flush that carries its output
 /// is half a second, and a loaded machine can take a while to get bwrap and a
 /// shell going.
 ///
-/// And longer again where the machine says so — see [`PACE`].
+/// And longer again where the machine says so — see [`crate::pace`].
 static PATIENCE: LazyLock<Duration> = LazyLock::new(|| paced(Duration::from_secs(30)));
 
 /// What every sandbox here is equipped with as `verkstead`.
@@ -3561,8 +3521,8 @@ impl Bench {
 ///
 /// Taken in [`bench_at_pace`], which every fixture in this file is built
 /// through, and held for the fixture's whole life. It bounds how far load can
-/// stretch the clock in the first place; [`PACE`] is what copes with the
-/// stretch that is left.
+/// stretch the clock in the first place; [`crate::pace`] is what copes with
+/// the stretch that is left.
 ///
 /// Under nextest, which is how CI runs this suite, every test is a process of
 /// its own and never reaches this cap: nextest's own thread count, the
@@ -37009,22 +36969,19 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
 
     // And the world agrees with the record: the fix session the steer set going
     // was launched on the model the Pairing names.
-    fixture.until(|view| (fixes(view) > 2).then_some(())).await;
-
-    let dispatched = std::fs::read_to_string(&written).unwrap();
-
-    assert!(
-        dispatched.lines().rfind(|line| line.starts_with("model="))
-            == Some("model=claude-grilling-5"),
-        "the last fix session ran under what the steer settled: {dispatched:?}",
-    );
+    //
+    // **Waited for by the prompt it wrote rather than by a fix count.** The
+    // checks here are failing for good, so a fix session is always on its way:
+    // a count that has gone up says one of them landed, not that the one after
+    // the steer did, and the one that landed may be the session the steer
+    // interrupted. The model is written by the session that ran under it and by
+    // nothing else, so the prompt is the evidence and the count never was.
+    until_written_saying(&written, "model=claude-grilling-5").await;
 
     // And a second steer under the *same* Profile on another of its models,
     // which is a different pick rather than the same one made twice: the picker
     // offers one row per Profile-and-model, so a steer judged by the Profile
     // alone would answer Steered to this and change nothing.
-    let ran = fixes(&fixture.view().await);
-
     assert!(matches!(fixture.steer().await, SteerOpened::Opened));
     assert_eq!(
         fixture
@@ -37043,18 +37000,9 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
         "the model moved under a Profile that did not",
     );
 
-    fixture
-        .until(|view| (fixes(view) > ran).then_some(()))
-        .await;
-
-    let dispatched = std::fs::read_to_string(&written).unwrap();
-
-    assert!(
-        dispatched.lines().rfind(|line| line.starts_with("model="))
-            == Some("model=claude-grilling-4.8"),
-        "and the fix session after it ran on the model the steer settled rather \
-         than on the one the Profile was already paired with: {dispatched:?}",
-    );
+    // The same evidence again: a session ran on the model this steer settled,
+    // which no session before it could have written.
+    until_written_saying(&written, "model=claude-grilling-4.8").await;
 }
 
 /// And a steer whose Worktree has gone makes it again from the branch before any
