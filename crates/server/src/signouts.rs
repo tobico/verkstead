@@ -15,6 +15,15 @@
 //! log — and with the same latch: a display redraws its line for as long as it
 //! waits, and one wait is one stop.
 //!
+//! **Except Claude's, which is read in its log alone.** claude writes the line
+//! into its log as the answer to the turn that failed, and draws it again with
+//! the rest of a conversation it resumes — Verkstead's `--resume`, or `/resume`
+//! typed at it — where on the terminal it is the same line said again. Read
+//! there, every resume of a conversation that had once signed out stopped as
+//! soon as its past was drawn, whatever the login was by then. The log is
+//! followed from where this session began in it, so what is read there is only
+//! what this session said. See [`ReadIn`].
+//!
 //! **The phrase rule.** A session has signed out when one of its lines *ends*
 //! with its harness's phrase — [`CLAUDE_SIGNED_OUT`], [`AGY_SIGNED_OUT`] — once
 //! the terminal's decoration is off both ends of it. Claude says it as
@@ -98,19 +107,45 @@ struct Phrase {
     /// The line that has to be the next one drawn after it, blank lines
     /// aside, where the sentence alone is also said by a session signed in.
     then: Option<&'static str>,
+
+    /// Which of the session's records it is read in.
+    read_in: ReadIn,
+}
+
+/// Which of the three records a session leaves a sign-out is read in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReadIn {
+    /// What it printed, the frame it drew, and its backend's own log.
+    Every,
+
+    /// Its backend's own log, and nothing it puts on the terminal — for a
+    /// harness that draws its conversation so far again on the screen, where a
+    /// sign-out it stopped on before is a line drawn rather than said.
+    Log,
 }
 
 /// What a session of `agent_type` says when its account has signed out — or
 /// nothing, where Verkstead cannot run that harness's login.
 fn signed_out_phrase(agent_type: store::AgentType) -> Option<Phrase> {
     match agent_type {
+        // Read in its log alone. claude 2.1.329 writes the line into its log as
+        // the turn's answer — an assistant message marked as an API error — and
+        // draws every message of a conversation it resumes, that one among them:
+        // `--resume` as a Conversation carries on, and `/resume` typed at it by
+        // the human. On the terminal the two are the same line, so a resumed
+        // conversation that had signed out once was stopped on that old line as
+        // soon as it was drawn, every time, whatever the login now was. The log
+        // is followed from where this session began in it, so it holds only what
+        // this session said.
         store::AgentType::Claude => Some(Phrase {
             ends: CLAUDE_SIGNED_OUT,
             then: None,
+            read_in: ReadIn::Log,
         }),
         store::AgentType::Agy => Some(Phrase {
             ends: AGY_SIGNED_OUT,
             then: Some(AGY_PICKER),
+            read_in: ReadIn::Every,
         }),
         store::AgentType::Codex | store::AgentType::Grok | store::AgentType::OpenCode => None,
     }
@@ -340,11 +375,18 @@ impl Watch {
         self.printed.push(text);
     }
 
-    /// The line in any of the three records that says the account signed out.
+    /// The line in the records its harness is read in that says the account
+    /// signed out — see [`ReadIn`].
     fn found(&self, drawn: &str, said: Option<&str>) -> Option<String> {
-        saying(self.printed.text(), self.phrase)
-            .or_else(|| saying(drawn, self.phrase))
-            .or_else(|| saying(said.unwrap_or_default(), self.phrase))
+        let in_the_log = || saying(said.unwrap_or_default(), self.phrase);
+
+        match self.phrase.map(|phrase| phrase.read_in) {
+            Some(ReadIn::Log) => in_the_log(),
+
+            _ => saying(self.printed.text(), self.phrase)
+                .or_else(|| saying(drawn, self.phrase))
+                .or_else(in_the_log),
+        }
     }
 
     /// Look at what has arrived, and stop the run if it says the account signed
@@ -708,13 +750,17 @@ mod tests {
     }
 
     fn watching() -> Watch {
+        watching_on(Claude)
+    }
+
+    fn watching_on(agent_type: store::AgentType) -> Watch {
         Watch::on(
             1,
             2,
             "3".to_owned(),
             "fable".to_owned(),
             Home::Here,
-            Claude,
+            agent_type,
             None,
             Late::default(),
         )
@@ -840,23 +886,50 @@ mod tests {
     /// A line split across two chunks is still one line.
     #[test]
     fn a_line_split_across_two_chunks_is_still_one_line() {
-        let mut watch = watching();
+        let mut watch = watching_on(Agy);
 
-        watch.printed("Login expired · Please r");
+        watch.printed("Welcome to the Antigravity CLI. You are currently not sig");
         watch.printed.looked();
         assert_eq!(watch.found("", None), None, "half a line is not one");
 
-        watch.printed("un /login\n");
+        watch.printed("ned in.\nSelect login method:\n");
         assert!(watch.found("", None).is_some());
     }
 
-    /// And the frame and the log are read as well as the terminal.
+    /// And the frame is read as well as the terminal, for a harness read in
+    /// every record.
     #[test]
-    fn the_frame_and_the_log_are_read_too() {
-        let watch = watching();
-        let line = "Not logged in · Please run /login";
+    fn the_frame_is_read_too() {
+        let watch = watching_on(Agy);
 
-        assert!(watch.found(line, None).is_some(), "the frame");
-        assert!(watch.found("", Some(line)).is_some(), "the log");
+        assert!(
+            watch
+                .found(
+                    "Welcome to the Antigravity CLI. You are currently not signed in.\n\n\
+                     Select login method:\n",
+                    None
+                )
+                .is_some(),
+            "the frame",
+        );
+    }
+
+    /// Claude's is read in its log and nowhere else: on the terminal and in the
+    /// frame the line is also drawn again, with the rest of a conversation it
+    /// resumes, long after it was said.
+    #[test]
+    fn claude_is_read_in_its_log_alone() {
+        let mut watch = watching();
+        let line = "● Login expired · Please run /login";
+
+        watch.printed(&format!("{line}\n"));
+        assert_eq!(watch.found(line, None), None, "the terminal and the frame");
+
+        assert!(
+            watch
+                .found("", Some("Login expired · Please run /login"))
+                .is_some(),
+            "the log",
+        );
     }
 }

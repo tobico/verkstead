@@ -17674,18 +17674,83 @@ async fn an_account_out_of_window_stops_the_run_and_tells_the_devices() {
     );
 }
 
+/// Shell that sets `$log` to the log claude keeps of the session it was
+/// started as, by the name after `--session-id` or `--resume`. Run where the
+/// stub's own arguments are `"$@"`, rather than inside a shell function.
+const CLAUDES_LOG: &str = r#"
+name=
+take=
+for argument in "$@"; do
+    if [ -n "$take" ]; then name=$argument; take=; fi
+    case "$argument" in --session-id|--resume) take=1 ;; esac
+done
+log=$HOME/.claude/projects/$(pwd | tr -c 'a-zA-Z0-9\n' -)/$name.jsonl
+mkdir -p "$(dirname "$log")"
+"#;
+
+/// Shell that writes `line` into `$log` the way claude 2.1.329 writes a turn
+/// that failed on its login: the turn's answer, an assistant message marked as
+/// an API error. Which is the record a sign-out is read in — see
+/// `crate::signouts::ReadIn` — the terminal drawing the same line again with
+/// every conversation it resumes.
+fn said_in_the_log(line: &str) -> String {
+    let record = serde_json::json!({
+        "type": "assistant",
+        "isApiErrorMessage": true,
+        "message": {
+            "role": "assistant",
+            "content": [{ "type": "text", "text": line }],
+        },
+    });
+
+    format!("printf '%s\\n' '{record}' >> \"$log\"\n")
+}
+
 /// A stub that works the backlog, and where the first task lands prints `line`
 /// a few times over and holds — the way claude 2.1.283 sits at its prompt once
-/// its login has gone (ADR-0022).
+/// its login has gone (ADR-0022) — having written it into its log as the turn's
+/// answer.
 fn signing_out(line: &str) -> String {
+    let logged = said_in_the_log(line);
+
     out_of_window_saying(&format!(
         r#"
+                    {CLAUDES_LOG}
+                    {logged}
                     for pass in 1 2 3 4; do
                         printf '  ⎿  {line}\r\n'
                         sleep 0.25
                     done
         "#
     ))
+}
+
+/// A resumed conversation that signed out before draws that line again with
+/// the rest of what it said, and goes on: only what this session writes into its
+/// log is a sign-out. The run is not stopped.
+#[tokio::test]
+async fn a_sign_out_drawn_again_by_a_resume_does_not_stop_the_run() {
+    let fixture = grilling(&out_of_window_saying(
+        r#"
+                    for pass in 1 2 3 4; do
+                        printf '● Login expired · Please run /login\r\n'
+                        sleep 0.25
+                    done
+        "#,
+    ))
+    .await;
+
+    running_out(&fixture).await;
+
+    fixture
+        .until(|view| (outputs(view).len() >= 3).then_some(()))
+        .await;
+
+    assert!(
+        said(&fixture.view().await).is_empty(),
+        "nothing stopped the run: {:?}",
+        notices(&fixture.view().await),
+    );
 }
 
 /// An account that signs out mid-run: the run stops as Signed out with a Notice
@@ -17826,8 +17891,10 @@ case "$0 $1" in
     exit $?
     ;;
 esac
+{log}
 signed_out() {{
     if ! grep -qs '{GOOD_CODE}' "$HOME/.claude/.credentials.json"; then
+        {logged}
         for pass in 1 2 3 4; do
             printf '  ⎿  Not logged in · Please run /login\r\n'
             sleep 0.25
@@ -17852,6 +17919,8 @@ claude-grilling-5) ;;
 esac
 {rest}
 "#,
+        log = CLAUDES_LOG,
+        logged = said_in_the_log("Not logged in · Please run /login"),
         rest = out_of_window_saying(":"),
     )
 }
@@ -17990,6 +18059,8 @@ claude-grilling-5) ;;
     : > {spill}/started
     while [ ! -e {spill}/go ]; do sleep 0.1; done
     if ! grep -qs '{GOOD_CODE}' "$HOME/.claude/.credentials.json"; then
+        {log}
+        {logged}
         for pass in 1 2 3 4; do
             printf '  ⎿  Login expired · Please run /login\r\n'
             sleep 0.25
@@ -18001,6 +18072,8 @@ claude-grilling-5) ;;
 esac
 {rest}
 "#,
+        log = CLAUDES_LOG,
+        logged = said_in_the_log("Login expired · Please run /login"),
         rest = out_of_window_saying(":"),
     )
 }
