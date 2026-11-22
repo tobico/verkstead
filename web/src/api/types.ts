@@ -5408,7 +5408,13 @@ offered: boolean,
 /**
  * Each state it declares, in order, with the word the card draws.
  */
-states: Array<DeclaredStateEntry>, };
+states: Array<DeclaredStateEntry>, 
+/**
+ * The record's own word for it, where it is one of Verkstead's
+ * Processes written as data: a Conversation on it carries that word, and
+ * the viewer words it from its own tables until those are read from here.
+ */
+built_in: Process | null, };
 
 /**
  * What became of picking one.
@@ -8120,7 +8126,7 @@ export type Subscription = { endpoint: string, p256dh: string, auth: string, };
  * named a pull request — and what that field holds is read at the press. So this
  * list begins with what the field said and what GitHub made of it.
  */
-export type TakenUp = "TakenUp" | "NoSuchConversation" | "NotDrafting" | "NotHoldingOne" | "NoTarget" | { "AnotherRepository": { 
+export type TakenUp = "TakenUp" | "NoSuchConversation" | "NotDrafting" | "NotHoldingOne" | "ProcessNotOffered" | "NoTarget" | { "AnotherRepository": { 
 /**
  * The `owner/repo` the URL said, as it was written.
  */

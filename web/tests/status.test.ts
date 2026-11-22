@@ -341,6 +341,7 @@ describe("a declared state", () => {
           { id: "drafting", word: "Drafting" },
           { id: "checking", word: "Checking" },
         ],
+        built_in: null,
       },
     ]);
 

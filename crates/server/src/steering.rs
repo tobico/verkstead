@@ -590,7 +590,11 @@ pub(crate) async fn submit(
 
     let said = announced(&added, &opened, &branch, made_way.as_deref());
 
-    let settling = settling(&conversation, submission);
+    let settling = settling(
+        &conversation,
+        submission,
+        crate::conversations::narrows_the_wrap_up(state, &conversation.process),
+    );
 
     // And what every checkout the session may write in already holds, for the one
     // target whose ending has to put them back to it. Read here — after `make`,
@@ -1022,7 +1026,10 @@ async fn refusal(
         return Ok(Some(ConversationSteered::EmptyBrief));
     }
 
-    let roles = roles(submission.target, &conversation.process);
+    let roles = roles(
+        submission.target,
+        crate::conversations::narrows_the_wrap_up(state, &conversation.process),
+    );
 
     if roles.is_empty() {
         return Ok(None);
@@ -1276,12 +1283,16 @@ fn directing(conversation: &Conversation, instruction: Option<&str>) -> Option<D
 /// apart. So it takes the pick only where nothing was picked for it, which is
 /// still what lets a Conversation that never fixed one — a steered Draft — be
 /// steered into a wrap-up at all.
-fn settling<'a>(conversation: &Conversation, submission: &'a SteerSubmission) -> Vec<Settling<'a>> {
+fn settling<'a>(
+    conversation: &Conversation,
+    submission: &'a SteerSubmission,
+    narrowed: bool,
+) -> Vec<Settling<'a>> {
     let Some(choice) = submission.pairing.as_ref() else {
         return Vec::new();
     };
 
-    roles(submission.target, &conversation.process)
+    roles(submission.target, narrowed)
         .iter()
         .copied()
         .filter(|role| {
@@ -1496,15 +1507,13 @@ pub(crate) async fn standing(
 /// Review Pairing is ever waited on. Waiting on one here would refuse the steer on
 /// account of a role whose sessions this Conversation has none of. See
 /// [`crate::conversations::narrows_the_wrap_up`].
-fn roles(target: SteerTarget, process: &store::Process) -> &'static [Role] {
+fn roles(target: SteerTarget, narrowed: bool) -> &'static [Role] {
     match target {
         SteerTarget::Grilling => &[Role::Grilling],
         SteerTarget::Implementing | SteerTarget::FollowUp | SteerTarget::Investigating => {
             &[Role::Implementation]
         }
-        SteerTarget::Wrapping if crate::conversations::narrows_the_wrap_up(process) => {
-            &[Role::Implementation]
-        }
+        SteerTarget::Wrapping if narrowed => &[Role::Implementation],
         SteerTarget::Wrapping => &[Role::Implementation, Role::Review],
         SteerTarget::Done => &[],
     }

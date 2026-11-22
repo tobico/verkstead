@@ -143,6 +143,7 @@ import {
   uses,
 } from "./processes";
 import {
+  builtInOffered,
   choiceValue,
   offeredProcesses,
   processName,
@@ -1383,7 +1384,7 @@ export function ProcessPicker(props: {
   /// the one thing that tells a Review apart.
   const options = (): ProcessChoice[] => {
     const offered: ProcessChoice[] = [
-      ...OFFERED.map((process) => ({ process })),
+      ...OFFERED.filter(builtInOffered).map((process) => ({ process })),
       ...offeredProcesses().map(
         (entry): ProcessChoice => ({
           process: "Provided",

@@ -96,10 +96,15 @@ pub(crate) async fn run(
         ),
     ];
 
-    if crate::conversations::narrows_the_wrap_up(&process) {
-        options.push(("review".to_owned(), "off".to_owned()));
-        options.push(("comments".to_owned(), "off".to_owned()));
-    } else if reviewing == crate::wrapping::Reviewing::Afresh {
+    // What the Process's manifest starts its wrapping state's Wrap-up with —
+    // Fix Merge Issues' `review` and `comments` off, which is the whole of
+    // its narrowing — and a review read afresh where nothing there says
+    // otherwise. The Wrap-up reads the options, never the Process.
+    let given = crate::processes::options_of(&state, &process, crate::processes::WRAPPING);
+    let reviewed = given.iter().any(|(key, _)| key == "review");
+    options.extend(given);
+
+    if !reviewed && reviewing == crate::wrapping::Reviewing::Afresh {
         options.push(("review".to_owned(), "afresh".to_owned()));
     }
 
@@ -151,13 +156,35 @@ pub(crate) async fn run(
         }
     };
 
-    match outcome.as_deref() {
-        Some("settled") => crate::settling::settled(&state, conversation_id, true).await,
-        Some("merged") => {
+    // Steered elsewhere by the human, whose steer says where it goes.
+    let Some(outcome) = outcome.filter(|outcome| outcome != crate::plugins::manifest::STEERED)
+    else {
+        return;
+    };
+
+    // Where the Process's manifest says this Outcome goes, for one that is
+    // data — each of the four that wrap up says Done for `settled` and
+    // `merged`, and `stopped` for the other two — with Verkstead's own
+    // landing for each kind of place: the settling rule before Done, and the
+    // pull request's own stop words. Develop, not data yet, reads the same.
+    let leaving = crate::processes::leaving(&state, &process, crate::processes::WRAPPING, &outcome);
+    let leaving = match leaving {
+        crate::processes::Leaving::AsEver => match outcome.as_str() {
+            "settled" | "merged" => crate::processes::Leaving::Done,
+            _ => crate::processes::Leaving::Stopped,
+        },
+        leaving => leaving,
+    };
+
+    match (outcome.as_str(), leaving) {
+        ("settled", crate::processes::Leaving::Done) => {
+            crate::settling::settled(&state, conversation_id, true).await
+        }
+        (_, crate::processes::Leaving::Done) => {
             landed(&state, conversation_id).await;
             crate::settling::settled(&state, conversation_id, false).await
         }
-        Some("closed") => {
+        ("closed", crate::processes::Leaving::Stopped) => {
             landed(&state, conversation_id).await;
             stop(
                 &state,
@@ -170,8 +197,27 @@ pub(crate) async fn run(
             )
             .await
         }
-        Some("given-up") => crate::wrapping::given_up(&state, conversation_id).await,
-        _ => {}
+        ("given-up", crate::processes::Leaving::Stopped) => {
+            crate::wrapping::given_up(&state, conversation_id).await
+        }
+        (_, crate::processes::Leaving::Closed) => {
+            landed(&state, conversation_id).await;
+            if let Err(error) = crate::conversations::close(&state, conversation_id).await {
+                tracing::error!(error = ?error, conversation_id, "closing a wrap-up its process ends Closed failed");
+            }
+        }
+        (outcome, leaving) => {
+            landed(&state, conversation_id).await;
+            crate::processes::stopped_by(
+                &state,
+                conversation_id,
+                "wrapping up",
+                "Wrap-up",
+                outcome,
+                &leaving,
+            )
+            .await
+        }
     }
 }
 

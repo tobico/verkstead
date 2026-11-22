@@ -30,7 +30,6 @@ const KEYS: &[&str] = &[
     "name",
     "description",
     "target",
-    "narrows-the-wrap-up",
     "roles",
     "directions",
     "states",
@@ -72,8 +71,6 @@ pub struct Process {
     pub description: String,
     /// Whether a Draft of it takes a Target.
     pub target: bool,
-    /// Whether its wrap-up watches only the checks.
-    pub narrows_the_wrap_up: bool,
     /// Its roles, in the order written, exactly one of them building.
     pub roles: Vec<Role>,
     /// The Directions its interview offers, each with the state it leads to,
@@ -344,7 +341,6 @@ impl Walk<'_> {
             &format!("{field}.description"),
         )?;
         let target = flag(body, field, "target")?;
-        let narrows_the_wrap_up = flag(body, field, "narrows-the-wrap-up")?;
         let roles = roles(body, field)?;
 
         let mut states = states(body, field, packs, dependencies, platform)?;
@@ -386,7 +382,6 @@ impl Walk<'_> {
             name,
             description,
             target,
-            narrows_the_wrap_up,
             roles,
             directions,
             states,

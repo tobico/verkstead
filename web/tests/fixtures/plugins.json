@@ -108,6 +108,31 @@
       "elsewhere": null,
       "enabled": true,
       "harness": null,
+      "languages": [],
+      "name": "Fix merge issues",
+      "needs": [],
+      "processes": [
+        "Fix merge issues"
+      ],
+      "profiles": 0,
+      "provides": [
+        "process"
+      ],
+      "settings": 0,
+      "source": {
+        "kind": "BuiltIn"
+      },
+      "trouble": null,
+      "uuid": "0b4f33da-1f61-46dd-aa82-3983d627e192",
+      "version": "0.1.0"
+    },
+    {
+      "activities": [],
+      "author": "Tobias Cohen",
+      "dependents": [],
+      "elsewhere": null,
+      "enabled": true,
+      "harness": null,
       "languages": [
         "Go"
       ],
@@ -124,6 +149,31 @@
       },
       "trouble": null,
       "uuid": "01b5328a-3524-457d-ab88-1af1c65079ea",
+      "version": "0.1.0"
+    },
+    {
+      "activities": [],
+      "author": "Tobias Cohen",
+      "dependents": [],
+      "elsewhere": null,
+      "enabled": true,
+      "harness": null,
+      "languages": [],
+      "name": "Investigate",
+      "needs": [],
+      "processes": [
+        "Investigate"
+      ],
+      "profiles": 0,
+      "provides": [
+        "process"
+      ],
+      "settings": 0,
+      "source": {
+        "kind": "BuiltIn"
+      },
+      "trouble": null,
+      "uuid": "53f22a43-806b-4019-8798-c014fa9a0239",
       "version": "0.1.0"
     },
     {
@@ -208,6 +258,31 @@
       "elsewhere": null,
       "enabled": true,
       "harness": null,
+      "languages": [],
+      "name": "Review",
+      "needs": [],
+      "processes": [
+        "Review"
+      ],
+      "profiles": 0,
+      "provides": [
+        "process"
+      ],
+      "settings": 0,
+      "source": {
+        "kind": "BuiltIn"
+      },
+      "trouble": null,
+      "uuid": "0b55843a-7c93-47cc-9655-e5f6ec3cf019",
+      "version": "0.1.0"
+    },
+    {
+      "activities": [],
+      "author": "Tobias Cohen",
+      "dependents": [],
+      "elsewhere": null,
+      "enabled": true,
+      "harness": null,
       "languages": [
         "Rust",
         "C/C++"
@@ -225,6 +300,31 @@
       },
       "trouble": null,
       "uuid": "795515ae-96cd-4d7c-8071-e6753b3f4624",
+      "version": "0.1.0"
+    },
+    {
+      "activities": [],
+      "author": "Tobias Cohen",
+      "dependents": [],
+      "elsewhere": null,
+      "enabled": true,
+      "harness": null,
+      "languages": [],
+      "name": "Tinker",
+      "needs": [],
+      "processes": [
+        "Tinker"
+      ],
+      "profiles": 0,
+      "provides": [
+        "process"
+      ],
+      "settings": 0,
+      "source": {
+        "kind": "BuiltIn"
+      },
+      "trouble": null,
+      "uuid": "591db9f3-2cb1-4adb-bf35-ff046f5be6f0",
       "version": "0.1.0"
     }
   ],

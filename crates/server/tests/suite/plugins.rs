@@ -21,7 +21,9 @@ use verkstead_render::{
     PluginCapability, PluginConsent, PluginFieldRefused, PluginFieldValue, PluginFix, PluginNeed,
     PluginRow, PluginSettingsSaved, PluginSettingsView, PluginSource, PluginUpdated, PluginsView,
 };
-use verkstead_server::plugins::built_in::{ACTIVITIES, FIXTURE, VERKSTEAD};
+use verkstead_server::plugins::built_in::{
+    ACTIVITIES, FIX_MERGE_ISSUES, FIXTURE, INVESTIGATE, REVIEW, TINKER, VERKSTEAD,
+};
 use verkstead_server::settings::Settings;
 use verkstead_server::{open_database, router_keeping};
 
@@ -936,8 +938,8 @@ async fn the_language_plugins_are_listed_under_built_in() {
     let names: Vec<&str> = view.built_in.iter().map(|row| row.name.as_str()).collect();
     assert_eq!(
         names.len(),
-        9,
-        "the pack, the Activities, Codex and six languages: {names:?}"
+        13,
+        "the pack, the Activities, Codex, six languages and four Processes: {names:?}"
     );
     assert!(!view.built_in.iter().any(|row| row.uuid == FIXTURE));
 
@@ -2874,12 +2876,21 @@ async fn an_installed_process_is_offered_to_the_picker_until_its_plugin_is_disab
     let (app, dir) = kept().await;
     let path = plugin(dir.path(), "two-steps", &two_steps());
 
-    assert!(processes(&app).await.is_empty(), "nothing installed yet");
+    let theirs = |listed: Vec<verkstead_render::ProcessEntry>| {
+        listed
+            .into_iter()
+            .filter(|entry| entry.built_in.is_none())
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        theirs(processes(&app).await).is_empty(),
+        "nothing installed yet"
+    );
 
     let view = installs(&app, &path).await;
     assert_eq!(row(&view, PLUGIN).trouble, None);
 
-    let listed = processes(&app).await;
+    let listed = theirs(processes(&app).await);
     assert_eq!(listed.len(), 1, "{listed:?}");
     assert_eq!(listed[0].plugin, PLUGIN);
     assert_eq!(listed[0].id, "two-steps");
@@ -2903,7 +2914,9 @@ async fn an_installed_process_is_offered_to_the_picker_until_its_plugin_is_disab
     .await;
     assert_eq!(status, StatusCode::OK, "{said}");
     assert!(
-        processes(&app).await.iter().all(|entry| !entry.offered),
+        theirs(processes(&app).await)
+            .iter()
+            .all(|entry| !entry.offered),
         "a disabled plugin's Process is off the picker: {:?}",
         processes(&app).await,
     );
@@ -2915,5 +2928,74 @@ async fn an_installed_process_is_offered_to_the_picker_until_its_plugin_is_disab
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{said}");
-    assert!(processes(&app).await[0].offered, "ticked, it is back");
+    assert!(
+        theirs(processes(&app).await)[0].offered,
+        "ticked, it is back"
+    );
+}
+
+/// Tinker, Investigate, Review and Fix merge issues are built-in plugins of
+/// their own, each listed under Built-in with a tick and naming its Process;
+/// unticking one takes it off the picker and leaves the other three on it.
+#[tokio::test]
+async fn verksteads_own_processes_are_built_ins_each_with_a_tick() {
+    let (app, _dir) = kept().await;
+
+    let view = page(&app).await;
+    for (uuid, name) in [
+        (TINKER, "Tinker"),
+        (INVESTIGATE, "Investigate"),
+        (REVIEW, "Review"),
+        (FIX_MERGE_ISSUES, "Fix merge issues"),
+    ] {
+        let row = view
+            .built_in
+            .iter()
+            .find(|row| row.uuid == uuid)
+            .unwrap_or_else(|| panic!("{name} is listed under Built-in: {view:?}"));
+        assert_eq!(row.source, PluginSource::BuiltIn);
+        assert!(row.enabled, "{name} is ticked to begin with");
+        assert_eq!(row.trouble, None, "{name}");
+        assert_eq!(row.processes, [name]);
+    }
+
+    let offered = |listed: &[verkstead_render::ProcessEntry], process| {
+        listed
+            .iter()
+            .find(|entry| entry.built_in == Some(process))
+            .unwrap_or_else(|| panic!("{process:?} is listed: {listed:?}"))
+            .offered
+    };
+    let listed = processes(&app).await;
+    assert!(offered(&listed, verkstead_render::Process::Tinker));
+    assert!(offered(&listed, verkstead_render::Process::FixMergeIssues));
+
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{TINKER}/enabled"),
+        serde_json::json!({ "enabled": false }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    let listed = processes(&app).await;
+    assert!(
+        !offered(&listed, verkstead_render::Process::Tinker),
+        "unticked, Tinker is off the picker"
+    );
+    for process in [
+        verkstead_render::Process::Investigate,
+        verkstead_render::Process::Review,
+        verkstead_render::Process::FixMergeIssues,
+    ] {
+        assert!(offered(&listed, process), "{process:?} is still offered");
+    }
+    assert!(
+        page(&app)
+            .await
+            .built_in
+            .iter()
+            .any(|row| row.uuid == TINKER && !row.enabled),
+        "and its row's tick is off"
+    );
 }

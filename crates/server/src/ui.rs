@@ -2398,6 +2398,7 @@ pub(crate) async fn conversation_view(
         &review_pairing,
         brief,
         conversation.target.as_deref(),
+        crate::conversations::takes_a_target(state, &conversation.process),
     );
 
     // And whether this Repo is one the missing sccache costs anything — see
@@ -6298,16 +6299,15 @@ async fn choose_review_pairing(
     }
 }
 
-/// `GET /api/ui/processes` — every Process the plugins loaded here provide,
-/// in the order they were installed: what the picker offers beside the five
-/// Verkstead runs itself, and what a Conversation on one is worded from. A
-/// switched-off plugin's are listed, not offered, while Conversations on them
-/// run to the end.
+/// `GET /api/ui/processes` — every Process the built-in plugins provide, then
+/// those the plugins loaded here provide in the order they were installed:
+/// what the picker offers, and what a Conversation on one is worded from. An
+/// unticked plugin's are listed, not offered, while Conversations on them run
+/// to the end.
 async fn processes(State(state): State<AppState>) -> Json<Vec<ProcessEntry>> {
     Json(
-        state
-            .plugins
-            .processes()
+        crate::processes::listed(&state)
+            .await
             .iter()
             .map(crate::processes::Loaded::entry)
             .collect(),

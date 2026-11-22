@@ -325,3 +325,67 @@ async fn a_process_survives_a_restart() {
 
     assert_eq!(loaded(&pool, id).await, Process::FixMergeIssues);
 }
+
+/// A Conversation of each of the four Processes that are data now, stored by
+/// a Verkstead from before there were plugin Processes — the `processes`
+/// table with no `plugin` column, and each state the word it always held —
+/// reads its Process and its state on a database opened again, with nothing
+/// rewritten.
+#[tokio::test]
+async fn the_four_stored_before_processes_were_data_read_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("verkstead.db");
+    let stored = [
+        (
+            Process::Tinker,
+            "follow-up",
+            verkstead_store::Lifecycle::FollowUp,
+        ),
+        (
+            Process::Investigate,
+            "investigating",
+            verkstead_store::Lifecycle::Investigating,
+        ),
+        (
+            Process::Review,
+            "wrapping",
+            verkstead_store::Lifecycle::Wrapping,
+        ),
+        (
+            Process::FixMergeIssues,
+            "wrapping",
+            verkstead_store::Lifecycle::Wrapping,
+        ),
+    ];
+
+    let mut ids = Vec::new();
+    {
+        let pool = open_database(&path).await.unwrap();
+        for (picked, state, _) in &stored {
+            let id = drafting(&pool).await;
+            set_process(&pool, id, picked.clone()).await.unwrap();
+            sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+                .bind(state)
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap();
+            ids.push(id);
+        }
+
+        // And the table as it was before it had anywhere to name a plugin.
+        sqlx::query("ALTER TABLE processes DROP COLUMN plugin")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+    }
+
+    let pool = open_database(&path).await.unwrap();
+    for (id, (picked, _, lifecycle)) in ids.into_iter().zip(stored) {
+        let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+        assert_eq!(conversation.process, picked);
+        assert_eq!(conversation.state, lifecycle, "{picked:?}");
+        assert_eq!(conversation.declared_state, None, "{picked:?}");
+    }
+}

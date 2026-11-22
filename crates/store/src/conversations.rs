@@ -165,6 +165,11 @@ impl Lifecycle {
         }
     }
 
+    /// The state of Verkstead's a stored word names, where it names one.
+    pub fn named(word: &str) -> Option<Self> {
+        Self::read_strict(word).ok()
+    }
+
     /// The state a stored word names on a Conversation whose Process is
     /// `process`: where it is a plugin's, every word but Draft, Done and
     /// Closed is one of its declared states, whatever it is spelled — so a
@@ -5124,6 +5129,21 @@ pub async fn start_declared<'a>(
         companions,
     )
     .await
+}
+
+/// The same start, landing wherever `landing` says: the first state a
+/// Process's manifest declares, read as one of Verkstead's own where it is
+/// one of the five Processes Verkstead runs, as a declared one where it is a
+/// plugin's.
+pub async fn start_in<'a>(
+    pool: &SqlitePool,
+    id: i64,
+    landing: Destination<'_>,
+    base: impl Into<Base<'a>>,
+    worktree: &Path,
+    companions: &[super::CompanionWorktree],
+) -> Result<Grilling> {
+    start(pool, id, landing, base.into(), worktree, companions).await
 }
 
 /// Where a move leaves a Conversation: one of Verkstead's states, or one its

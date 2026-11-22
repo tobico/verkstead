@@ -30,10 +30,19 @@ import { PROCESS } from "./processes";
 
 const [listed, setListed] = createSignal<ProcessEntry[]>([]);
 
-/// Every plugin's Process the picker offers, in the order they were
-/// installed.
+/// Every plugin's Process the picker offers as a row of its own, in the order
+/// they were installed — not Verkstead's own written as data, which the picker
+/// draws as the five rows it always has.
 export function offeredProcesses(): ProcessEntry[] {
-  return listed().filter((entry) => entry.offered);
+  return listed().filter((entry) => entry.offered && entry.built_in === null);
+}
+
+/// Whether one of Verkstead's own Processes is offered: its plugin's tick
+/// stands, or the server lists no plugin for it — Develop, not data yet.
+export function builtInOffered(process: Process): boolean {
+  return (
+    listed().find((entry) => entry.built_in === process)?.offered ?? true
+  );
 }
 
 /// The plugin's Process `provided` names, where this server holds it —

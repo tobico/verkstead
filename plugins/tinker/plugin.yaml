@@ -1,0 +1,45 @@
+# Tinker as data: rounds of follow-up on a fresh branch, primed with the
+# Brief, then the wrap-up where they left commits and Done where they left
+# none. Built in with a tick: unticked, it is off the Process picker, and the
+# conversations already on it run to the end. The state ids are the words the
+# conversations table already holds, so a Tinker stored before this reads on.
+uuid: 591db9f3-2cb1-4adb-bf35-ff046f5be6f0
+name: Tinker
+author:
+  name: Tobias Cohen
+  email: tobi@tobico.net
+version: 0.1.0
+interface: 1
+description: Simple one-off changes with minimal fuss.
+dependencies:
+  - uuid: d7a5e719-8491-46a7-b7d7-8f9f85e57bd6
+    name: Activities
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+  - uuid: 15447a8d-f28d-4573-8b8b-a7226d477755
+    name: Verkstead
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+provides:
+  - category: process
+    id: tinker
+    name: Tinker
+    description: Make a series of simple one-off changes with minimal fuss
+    roles:
+      - { name: implementation, label: Implementation, building: true }
+      - { name: review, label: Review }
+    states:
+      - id: follow-up
+        word: Follow-up
+        activity: follow-up-rounds
+        options: { skill: verkstead/following-up }
+      - id: wrapping
+        word: Wrapping
+        activity: wrap-up
+    transitions:
+      follow-up: { committed: wrapping, nothing: done }
+      wrapping: { settled: done, merged: done, closed: stopped, given-up: stopped }

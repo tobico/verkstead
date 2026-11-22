@@ -289,13 +289,56 @@ pub fn providing(name: &str) -> Option<&'static Manifest> {
 
 /// Whether `manifest`'s built-in has a tick: a Language plugin's is whether
 /// sessions get its languages, an Agent plugin's whether its harness is
-/// offered, and every other built-in is always on.
+/// offered, a Process plugin's whether the picker offers its Processes, and
+/// every other built-in is always on.
 pub fn switched(manifest: &Manifest) -> bool {
     languages(manifest).next().is_some()
+        || !manifest.processes.is_empty()
         || manifest
             .provides
             .iter()
             .any(|provision| provision.agent().is_some())
+}
+
+/// The uuids of the four built-ins that are Verkstead's own Processes written
+/// as data (ADR-0030, *Process*), each a plugin of its own with a tick.
+pub const TINKER: &str = "591db9f3-2cb1-4adb-bf35-ff046f5be6f0";
+pub const INVESTIGATE: &str = "53f22a43-806b-4019-8798-c014fa9a0239";
+pub const REVIEW: &str = "0b55843a-7c93-47cc-9655-e5f6ec3cf019";
+pub const FIX_MERGE_ISSUES: &str = "0b4f33da-1f61-46dd-aa82-3983d627e192";
+
+/// The built-in plugin and the id of its Process that one of the record's
+/// bare Process words is read as — `tinker` is the *Tinker* plugin's `tinker`
+/// — so a Conversation stored before Processes were data runs on its manifest
+/// with nothing rewritten. `None` for Develop, which is not data yet, and for
+/// a plugin's own Process, which names itself.
+pub(crate) fn standing_for(
+    process: &crate::store::Process,
+) -> Option<(&'static str, &'static str)> {
+    use crate::store::Process;
+
+    Some(match process {
+        Process::Tinker => (TINKER, "tinker"),
+        Process::Investigate => (INVESTIGATE, "investigate"),
+        Process::Review => (REVIEW, "review"),
+        Process::FixMergeIssues => (FIX_MERGE_ISSUES, "fix-merge-issues"),
+        Process::Develop | Process::Provided { .. } => return None,
+    })
+}
+
+/// And the record's word a built-in plugin's Process stands for, where it is
+/// one of the four.
+pub(crate) fn stood_for(plugin: &str, id: &str) -> Option<crate::store::Process> {
+    use crate::store::Process;
+
+    [
+        Process::Tinker,
+        Process::Investigate,
+        Process::Review,
+        Process::FixMergeIssues,
+    ]
+    .into_iter()
+    .find(|process| standing_for(process) == Some((plugin, id)))
 }
 
 /// The languages `manifest` provides, by the name `config.yaml` keys each by,

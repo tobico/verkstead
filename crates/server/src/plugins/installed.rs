@@ -446,8 +446,8 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
     crate::replicating::plugins::taken_up(&state.pool, &state.settings, &state.device).await
 }
 
-/// The Processes the plugins in `manifests` provide — every one of them in no
-/// trouble — in the order `records` installed them, each with the Activities
+/// The Processes the installed plugins in `manifests` provide — every one of
+/// them in no trouble — in the order `records` installed them, each with the Activities
 /// its states run found in the plugin itself or a dependency, in the order
 /// written. A plugin switched off keeps what `before` held of it, not offered.
 fn provided(
@@ -456,7 +456,7 @@ fn provided(
     dirs: &BTreeMap<String, PathBuf>,
     before: &[crate::processes::Loaded],
 ) -> Vec<crate::processes::Loaded> {
-    use crate::processes::{Loaded, Provided, Source};
+    use crate::processes::{Loaded, Source};
 
     let built_ins: Vec<(super::built_in::BuiltIn, Manifest)> = BUILT_INS
         .iter()
@@ -475,6 +475,7 @@ fn provided(
     };
 
     let mut held = Vec::new();
+
     for record in records {
         let Some(manifest) = manifests.get(&record.uuid) else {
             if !record.fields.enabled {
@@ -491,58 +492,75 @@ fn provided(
             continue;
         };
 
-        // The plugin itself, then each dependency in the order written.
-        let reached: Vec<(Source, &Manifest)> = std::iter::once(manifest.uuid.as_str())
-            .chain(
-                manifest
-                    .dependencies
-                    .iter()
-                    .map(|dependency| dependency.uuid.as_str()),
-            )
-            .filter_map(source)
-            .collect();
-
-        for process in &manifest.processes {
-            let mut activities: Vec<Provided> = Vec::new();
-            let mut found = true;
-            for state in &process.states {
-                for (_, id) in state.activity.activities() {
-                    if activities.iter().any(|provided| provided.activity.id == id) {
-                        continue;
-                    }
-                    match reached.iter().find_map(|(source, theirs)| {
-                        theirs
-                            .activities
-                            .iter()
-                            .find(|activity| activity.id == id)
-                            .map(|activity| (source, theirs, activity))
-                    }) {
-                        Some((source, theirs, activity)) => activities.push(Provided {
-                            activity: activity.clone(),
-                            files: source.clone(),
-                            capabilities: theirs.capabilities.clone(),
-                        }),
-                        None => found = false,
-                    }
-                }
-            }
-
-            // The can't-reach check above refuses a Process naming an
-            // Activity nothing provides, so this is only ever a plugin it
-            // took out already.
-            if !found {
-                continue;
-            }
-
-            held.push(Loaded {
-                plugin: record.uuid.clone(),
-                process: process.clone(),
-                offered: true,
-                activities,
-            });
-        }
+        held.extend(
+            reaching(manifest, &source)
+                .into_iter()
+                .map(|(process, activities)| Loaded {
+                    plugin: record.uuid.clone(),
+                    process,
+                    offered: true,
+                    activities,
+                }),
+        );
     }
     held
+}
+
+/// Each of `manifest`'s Processes with every Activity its states run, found
+/// in the plugin itself and then each dependency in the order written, where
+/// `source` says where a plugin's files are. A Process naming an Activity
+/// nothing reached provides is left out: the can't-reach check refuses one,
+/// so that is only ever a plugin it took out already.
+pub(crate) fn reaching<'a>(
+    manifest: &'a Manifest,
+    source: &impl Fn(&str) -> Option<(crate::processes::Source, &'a Manifest)>,
+) -> Vec<(
+    super::manifest::process::Process,
+    Vec<crate::processes::Provided>,
+)> {
+    use crate::processes::{Provided, Source};
+
+    let reached: Vec<(Source, &Manifest)> = std::iter::once(manifest.uuid.as_str())
+        .chain(
+            manifest
+                .dependencies
+                .iter()
+                .map(|dependency| dependency.uuid.as_str()),
+        )
+        .filter_map(source)
+        .collect();
+
+    let mut each = Vec::new();
+    for process in &manifest.processes {
+        let mut activities: Vec<Provided> = Vec::new();
+        let mut found = true;
+        for state in &process.states {
+            for (_, id) in state.activity.activities() {
+                if activities.iter().any(|provided| provided.activity.id == id) {
+                    continue;
+                }
+                match reached.iter().find_map(|(source, theirs)| {
+                    theirs
+                        .activities
+                        .iter()
+                        .find(|activity| activity.id == id)
+                        .map(|activity| (source, theirs, activity))
+                }) {
+                    Some((source, theirs, activity)) => activities.push(Provided {
+                        activity: activity.clone(),
+                        files: source.clone(),
+                        capabilities: theirs.capabilities.clone(),
+                    }),
+                    None => found = false,
+                }
+            }
+        }
+
+        if found {
+            each.push((process.clone(), activities));
+        }
+    }
+    each
 }
 
 /// Whether two holdings of the Processes say anything different: which are

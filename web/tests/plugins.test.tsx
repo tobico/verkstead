@@ -237,11 +237,15 @@ describe("the Built-in group", () => {
       "Activities",
       "Codex",
       ".NET",
+      "Fix merge issues",
       "Go",
+      "Investigate",
       "JVM",
       "Node",
       "Python",
+      "Review",
       "Rust & C/C++",
+      "Tinker",
     ]);
   });
 });

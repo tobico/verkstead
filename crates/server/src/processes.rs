@@ -108,9 +108,250 @@ impl Loaded {
                     word: state.word.clone(),
                 })
                 .collect(),
+            built_in: crate::plugins::built_in::stood_for(&self.plugin, &self.process.id)
+                .map(|process| crate::ui::process(&process)),
         }
     }
 }
+
+/// The Process `process` runs by, where it is data: a plugin's own, or the
+/// built-in plugin one of the record's bare words stands for — `tinker` is
+/// the *Tinker* plugin's. Held whether or not it is offered, so a Conversation
+/// on a plugin unticked since runs on. `None` for Develop, which is not data
+/// yet, and for a plugin that isn't held here.
+pub(crate) fn of(state: &AppState, process: &store::Process) -> Option<Loaded> {
+    match process {
+        store::Process::Provided { plugin, id } => state.plugins.process(plugin, id),
+        built_in => {
+            let (plugin, id) = crate::plugins::built_in::standing_for(built_in)?;
+            built_ins()
+                .iter()
+                .find(|loaded| loaded.plugin == plugin && loaded.process.id == id)
+                .cloned()
+        }
+    }
+}
+
+/// Every Process the built-in plugins provide, each with the Activities its
+/// states run found — read out of this binary once, so a press arriving before
+/// the installed plugins have loaded still finds them. `offered` here is only
+/// a placeholder: whether one is offered is its tick, see [`offered`].
+fn built_ins() -> &'static [Loaded] {
+    use crate::plugins::built_in::{BUILT_INS, BuiltIn};
+    use crate::plugins::manifest::Manifest;
+    use std::sync::LazyLock;
+
+    static HELD: LazyLock<Vec<Loaded>> = LazyLock::new(|| {
+        let read: Vec<(BuiltIn, Manifest)> = BUILT_INS
+            .iter()
+            .filter_map(|built_in| {
+                Some((
+                    *built_in,
+                    built_in.manifest(crate::platform::Platform::HERE).ok()?,
+                ))
+            })
+            .collect();
+        let source = |uuid: &str| {
+            read.iter()
+                .find(|(_, manifest)| manifest.uuid == uuid)
+                .map(|(built_in, manifest)| (Source::BuiltIn(*built_in), manifest))
+        };
+
+        read.iter()
+            .filter(|(_, manifest)| !crate::plugins::built_in::unlisted(&manifest.uuid))
+            .flat_map(|(_, manifest)| {
+                crate::plugins::installed::reaching(manifest, &source)
+                    .into_iter()
+                    .map(|(process, activities)| Loaded {
+                        plugin: manifest.uuid.clone(),
+                        process,
+                        offered: true,
+                        activities,
+                    })
+            })
+            .collect()
+    });
+
+    &HELD
+}
+
+/// Whether a new Conversation may be started on `process`: a plugin's while
+/// it is loaded, switched on and in no trouble; a built-in plugin's while its
+/// tick stands; Develop always.
+pub(crate) async fn offered(state: &AppState, process: &store::Process) -> bool {
+    match process {
+        store::Process::Provided { plugin, id } => state.plugins.offers(plugin, id),
+        built_in => match crate::plugins::built_in::standing_for(built_in) {
+            Some((plugin, _)) => ticked(state, plugin).await,
+            None => true,
+        },
+    }
+}
+
+/// Whether the built-in `plugin`'s tick stands: it does until somebody
+/// unticks it. A store that won't say reads as ticked, so nothing is refused
+/// over a database nobody could read.
+async fn ticked(state: &AppState, plugin: &str) -> bool {
+    match store::replicated::live_records::<crate::replicating::plugins::Plugins>(&state.pool).await
+    {
+        Ok(records) => records
+            .iter()
+            .find(|record| record.uuid == plugin)
+            .is_none_or(|record| record.fields.enabled),
+        Err(error) => {
+            tracing::error!(error = ?error, plugin, "reading whether a built-in Process is ticked failed");
+            true
+        }
+    }
+}
+
+/// Every Process the picker may offer and every Conversation is worded from:
+/// the built-ins', each offered while ticked, then the installed plugins'.
+pub(crate) async fn listed(state: &AppState) -> Vec<Loaded> {
+    let mut listed = Vec::new();
+    for loaded in built_ins() {
+        listed.push(Loaded {
+            offered: ticked(state, &loaded.plugin).await,
+            ..loaded.clone()
+        });
+    }
+    listed.extend(state.plugins.processes());
+    listed
+}
+
+/// Where `outcome` leads from the state `standing`, as `process`'s manifest
+/// says — `None` where it is not data, or says nothing about that state,
+/// which is the caller's own reading to fall back on.
+pub(crate) fn leads(
+    state: &AppState,
+    process: &store::Process,
+    standing: &str,
+    outcome: &str,
+) -> Option<To> {
+    of(state, process)?
+        .process
+        .state(standing)?
+        .transitions
+        .iter()
+        .find(|(mapped, _)| mapped == outcome)
+        .map(|(_, to)| to.clone())
+}
+
+/// Whether the state `standing` of `process`'s manifest runs the Activity
+/// `activity`.
+pub(crate) fn runs(
+    state: &AppState,
+    process: &store::Process,
+    standing: &str,
+    activity: &str,
+) -> bool {
+    of(state, process)
+        .and_then(|loaded| {
+            let declared = loaded.process.state(standing)?.activity.clone();
+            Some(declared.activities().iter().any(|(_, id)| *id == activity))
+        })
+        .unwrap_or(false)
+}
+
+/// What a host driver does with an Outcome of one of Verkstead's own
+/// Activities, as the Conversation's Process's manifest says where it leads:
+/// the landing that host already knows for each kind of place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Leaving {
+    /// The Process is not data, or says nothing of that state: the host's
+    /// own reading, which is what Develop's manifest will say.
+    AsEver,
+    /// Into a state that wraps up.
+    ToTheWrapUp,
+    Done,
+    Closed,
+    Stopped,
+    /// Into a state no host driver enters yet, by its id.
+    Elsewhere(String),
+}
+
+/// Where `outcome` of the state `standing` takes a Conversation on `process`,
+/// as a host driver acts on it — see [`Leaving`].
+pub(crate) fn leaving(
+    state: &AppState,
+    process: &store::Process,
+    standing: &str,
+    outcome: &str,
+) -> Leaving {
+    match leads(state, process, standing, outcome) {
+        None => Leaving::AsEver,
+        Some(To::Done) => Leaving::Done,
+        Some(To::Closed) => Leaving::Closed,
+        Some(To::Stopped) => Leaving::Stopped,
+        Some(To::State(next)) if runs(state, process, &next, "wrap-up") => Leaving::ToTheWrapUp,
+        Some(To::State(next)) => Leaving::Elsewhere(next),
+    }
+}
+
+/// The stop a host driver writes where a Process sends an Outcome somewhere
+/// it can't take a Conversation: `stopped`, or a state it has no way into.
+pub(crate) async fn stopped_by(
+    state: &AppState,
+    conversation_id: i64,
+    doing: &str,
+    activity: &str,
+    outcome: &str,
+    leaving: &Leaving,
+) {
+    let how = match leaving {
+        Leaving::Elsewhere(next) => format!(
+            "{activity} ended in `{outcome}`, which leads to `{next}`, and Verkstead can't \
+             enter that state from here yet."
+        ),
+        _ => format!(
+            "{activity} ended in `{outcome}`, and this process stops here until you press Resume."
+        ),
+    };
+
+    stop(
+        state,
+        conversation_id,
+        crate::stopping::Decided::Verkstead,
+        doing,
+        &how,
+        None,
+    )
+    .await;
+}
+
+/// The options `process`'s manifest gives the state `standing`, or none.
+pub(crate) fn options_of(
+    state: &AppState,
+    process: &store::Process,
+    standing: &str,
+) -> Vec<(String, String)> {
+    of(state, process)
+        .and_then(|loaded| Some(loaded.process.state(standing)?.options.clone()))
+        .unwrap_or_default()
+}
+
+/// Whether a Draft of `process` takes a Target, as its manifest says.
+pub(crate) fn takes_a_target(state: &AppState, process: &store::Process) -> bool {
+    of(state, process).is_some_and(|loaded| loaded.process.target)
+}
+
+/// Whether `process`'s wrap-up is narrowed to what GitHub refuses a merge
+/// for: the options of the state it wraps up in turn the Wrap-up's `review`
+/// and `comments` off. Read off the options alone, as the Wrap-up itself
+/// reads them — never off which Process it is.
+pub(crate) fn narrows_the_wrap_up(state: &AppState, process: &store::Process) -> bool {
+    let options = options_of(state, process, WRAPPING);
+    let off = |key: &str| {
+        options
+            .iter()
+            .any(|(named, value)| named == key && value == "off")
+    };
+
+    off("review") && off("comments")
+}
+
+/// The state a built-in Process wraps up in, by the word the record holds.
+pub(crate) const WRAPPING: &str = "wrapping";
 
 /// Drive `conversation_id` from the declared state it stands in until its
 /// Process stops driving it: Done, Closed, stopped, or moved elsewhere by the
@@ -483,6 +724,68 @@ pub(crate) async fn taken_back(state: &AppState) {
             crate::resume::resume(state, row.id, crate::resume::Resuming::Restarted).await
         {
             tracing::error!(error = ?error, conversation_id = row.id, "carrying on a Conversation whose Process is back failed");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The built-in Process `id`, as this binary carries it.
+    fn built_in(id: &str) -> Loaded {
+        built_ins()
+            .iter()
+            .find(|loaded| loaded.process.id == id)
+            .unwrap_or_else(|| panic!("the built-in Process {id} is carried"))
+            .clone()
+    }
+
+    /// Fix Merge Issues narrows its wrap-up by its wrapping state's options
+    /// alone — the Wrap-up's review and comments off — and Review, the same
+    /// wrap-up otherwise, turns neither off.
+    #[test]
+    fn fix_merge_issues_narrows_its_wrap_up_by_its_options_alone() {
+        let options = |id: &str| {
+            built_in(id)
+                .process
+                .state(WRAPPING)
+                .unwrap()
+                .options
+                .clone()
+        };
+
+        assert_eq!(
+            options("fix-merge-issues"),
+            [
+                ("comments".to_owned(), "off".to_owned()),
+                ("review".to_owned(), "off".to_owned()),
+            ]
+        );
+        assert!(options("review").is_empty());
+    }
+
+    /// Each of the four starts in the state word the record already holds for
+    /// it, with every Activity it runs found in the built-in Activities.
+    #[test]
+    fn the_four_start_in_the_words_already_stored() {
+        for (id, first) in [
+            ("tinker", "follow-up"),
+            ("investigate", "investigating"),
+            ("review", "wrapping"),
+            ("fix-merge-issues", "wrapping"),
+        ] {
+            let loaded = built_in(id);
+            assert_eq!(loaded.process.states[0].id, first, "{id}");
+            assert!(
+                store::Lifecycle::named(first).is_some(),
+                "{first} is one of the words the record holds"
+            );
+            for state in &loaded.process.states {
+                for (_, activity) in state.activity.activities() {
+                    assert!(loaded.activity(activity).is_some(), "{id} runs {activity}");
+                }
+            }
         }
     }
 }

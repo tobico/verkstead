@@ -132,6 +132,11 @@ pub struct ProcessEntry {
 
     /// Each state it declares, in order, with the word the card draws.
     pub states: Vec<DeclaredStateEntry>,
+
+    /// The record's own word for it, where it is one of Verkstead's
+    /// Processes written as data: a Conversation on it carries that word, and
+    /// the viewer words it from its own tables until those are read from here.
+    pub built_in: Option<Process>,
 }
 
 /// A declared state and its word.
@@ -6027,6 +6032,10 @@ pub enum TakenUp {
     /// It is neither a Review nor one of the Drafts that were started holding a
     /// pull request, so there is nothing here to wrap up.
     NotHoldingOne,
+
+    /// Its Process's plugin is unticked or in trouble, so nothing new starts
+    /// on it.
+    ProcessNotOffered,
 
     /// The **Target** field is empty, so there is nothing for this Review to take
     /// up. Anything in it at all is a pull request or a branch — see

@@ -59,6 +59,8 @@ export const TAKE_UP_REFUSAL: Record<Extract<TakenUp, string>, string> = {
   NotDrafting: "This conversation has already been started.",
   NotHoldingOne:
     "This conversation isn't a review, so there's nothing for it to wrap up.",
+  ProcessNotOffered:
+    "This process's plugin is switched off or in trouble. Pick another process, or fix the plugin in Settings.",
   NoTarget:
     "The Target field is empty. Name a pull request in it, by link or as #number, or the branch to wrap up.",
   Fork:

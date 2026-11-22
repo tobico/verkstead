@@ -5456,6 +5456,7 @@ describe("a conversation's process", () => {
           { id: "drafting", word: "Drafting" },
           { id: "checking", word: "Checking" },
         ],
+        built_in: null,
       },
     ] satisfies ProcessEntry[]);
     const fetching = theWorkbench(json("Picked"));
@@ -5485,6 +5486,38 @@ describe("a conversation's process", () => {
         },
       }),
     );
+  });
+
+  /// One of Verkstead's own, written as data, whose plugin is unticked is off
+  /// the picker, and the rest of the five stay on it.
+  it("leaves off a built-in Process whose plugin is unticked", async () => {
+    knowProvidedProcesses([
+      {
+        plugin: "591db9f3-2cb1-4adb-bf35-ff046f5be6f0",
+        id: "tinker",
+        name: "Tinker",
+        description: "Make a series of simple one-off changes with minimal fuss",
+        offered: false,
+        states: [
+          { id: "follow-up", word: "Follow-up" },
+          { id: "wrapping", word: "Wrapping" },
+        ],
+        built_in: "Tinker",
+      },
+    ] satisfies ProcessEntry[]);
+    theWorkbench();
+    mount(`/conversations/${OPEN.id}`);
+    await theProcess();
+
+    opened("Process");
+
+    await waitFor(() =>
+      expect(screen.getByRole("option", { name: PROCESS.Develop })).toBeTruthy(),
+    );
+    expect(screen.queryByRole("option", { name: PROCESS.Tinker })).toBeNull();
+    expect(
+      screen.getByRole("option", { name: PROCESS.Investigate }),
+    ).toBeTruthy();
   });
 
   /// Every refusal is the server's — a picker offering only the landed

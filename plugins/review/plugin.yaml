@@ -1,0 +1,39 @@
+# Review as data: the wrap-up run over a pull request or a branch the Target
+# names, the branch read and what is said on the pull request answered. Built
+# in with a tick, as Tinker is; the state id is the word already stored.
+uuid: 0b55843a-7c93-47cc-9655-e5f6ec3cf019
+name: Review
+author:
+  name: Tobias Cohen
+  email: tobi@tobico.net
+version: 0.1.0
+interface: 1
+description: An existing pull request or branch reviewed, and the issues found fixed.
+dependencies:
+  - uuid: d7a5e719-8491-46a7-b7d7-8f9f85e57bd6
+    name: Activities
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+  - uuid: 15447a8d-f28d-4573-8b8b-a7226d477755
+    name: Verkstead
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+provides:
+  - category: process
+    id: review
+    name: Review
+    description: Review an existing PR or branch, and fix any issues found
+    target: true
+    roles:
+      - { name: implementation, label: Implementation, building: true }
+      - { name: review, label: Review }
+    states:
+      - id: wrapping
+        word: Wrapping
+        activity: wrap-up
+    transitions:
+      wrapping: { settled: done, merged: done, closed: stopped, given-up: stopped }

@@ -245,6 +245,41 @@ async fn over(
         return back_to_the_wrap_up(state, conversation_id, already, driving).await;
     }
 
+    // Where the Process's manifest says this Outcome goes, for one that is
+    // data: a Tinker's `committed` is its wrapping state, so the pull request
+    // is sent for, and its `nothing` is Done.
+    let outcome = if committed { "committed" } else { "nothing" };
+    let leaving = crate::processes::leaving(
+        state,
+        &conversation.process,
+        store::Lifecycle::FollowUp.stored(),
+        outcome,
+    );
+    let committed = match leaving {
+        crate::processes::Leaving::AsEver => committed,
+        crate::processes::Leaving::ToTheWrapUp => true,
+        crate::processes::Leaving::Done => false,
+        crate::processes::Leaving::Closed => {
+            drop(driving);
+            if let Err(error) = crate::conversations::close(state, conversation_id).await {
+                tracing::error!(error = ?error, conversation_id, "closing a follow-up its process ends Closed failed");
+            }
+            return;
+        }
+        leaving => {
+            drop(driving);
+            return crate::processes::stopped_by(
+                state,
+                conversation_id,
+                "following the work up",
+                "Follow-up rounds",
+                outcome,
+                &leaving,
+            )
+            .await;
+        }
+    };
+
     if committed {
         tracing::info!(
             conversation_id,
@@ -494,8 +529,50 @@ pub(crate) async fn investigating(
     // `driving` is held until whatever this writes is written, and handed to
     // the ending, because what the Conversation lands in may be a state
     // something has to go on driving.
-    if let Some("committed" | "nothing") = outcome.as_deref() {
-        found_out(&state, conversation_id, driving).await;
+    let Some(outcome) = outcome.filter(|outcome| outcome == "committed" || outcome == "nothing")
+    else {
+        return;
+    };
+
+    // Where the Process's manifest says it goes, for one that is data: an
+    // Investigate's every Outcome is Done, which is where its landing is too.
+    let process = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation.process,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation an investigation was on failed");
+            return;
+        }
+    };
+
+    match crate::processes::leaving(
+        &state,
+        &process,
+        store::Lifecycle::Investigating.stored(),
+        &outcome,
+    ) {
+        crate::processes::Leaving::AsEver | crate::processes::Leaving::Done => {
+            found_out(&state, conversation_id, driving).await
+        }
+        crate::processes::Leaving::Closed => {
+            drop(driving);
+            state.sessions.end(conversation_id).await;
+            if let Err(error) = crate::conversations::close(&state, conversation_id).await {
+                tracing::error!(error = ?error, conversation_id, "closing an investigation its process ends Closed failed");
+            }
+        }
+        leaving => {
+            drop(driving);
+            crate::processes::stopped_by(
+                &state,
+                conversation_id,
+                INVESTIGATING,
+                "Follow-up rounds",
+                &outcome,
+                &leaving,
+            )
+            .await
+        }
     }
 }
 

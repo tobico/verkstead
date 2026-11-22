@@ -395,8 +395,6 @@ provides:
 - **`target`** — optional, `true` or `false`, and `false` where it is not
   written: whether a Draft of it takes a Target, a pull request or a branch
   already there.
-- **`narrows-the-wrap-up`** — optional, `true` or `false`: whether its wrap-up
-  watches the checks alone, leaving the review and the comments be.
 - **`roles`** — required, a list of each role a session of it runs under, by
   `name` — lowercase letters, digits and hyphens — and the `label` drawn for
   it. Exactly one is marked `building: true`: the role the Done signal, memos
@@ -487,6 +485,20 @@ Close; or to `stopped`, where it waits on **Resume**, which starts the state's
 Activity again. A server coming back up does the same for every Conversation
 it finds in one of a Process's states, so an Activity works out where it was
 from its facts rather than from anything kept.
+
+**Verkstead's own Processes are written this way.** *Tinker*,
+*Investigate*, *Review* and *Fix merge issues* are built-in plugins of their
+own, under `plugins/`, each listed under Built-in on the Plugins page with a
+tick: unticked, it is off the picker, and the conversations on it run to the
+end. Their states are named with the words a conversation's record already
+held — `follow-up`, `investigating`, `wrapping` — so one stored before they
+were data reads on. What Verkstead does on the way into the wrap-up or Done —
+sending for a pull request the work isn't on yet, the settling rule — is its
+own, whichever Process leads there. **A wrap-up is narrowed by its options**:
+Fix merge issues' wrapping state starts the *Wrap-up* with
+`{ review: "off", comments: "off" }`, so nothing reads the branch and nothing
+said on the pull request is answered, and that is the whole of what makes it
+narrower than a Review.
 
 A Conversation whose Process is in trouble — its plugin, or the plugin of an
 Activity it runs, missing or in trouble — stops where it stands, its notice

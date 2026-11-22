@@ -1426,9 +1426,7 @@ pub(crate) async fn pick_process(
         return Ok(ProcessPicked::NotOffered);
     };
 
-    if let store::Process::Provided { plugin, id } = &process
-        && !state.plugins.offers(plugin, id)
-    {
+    if !crate::processes::offered(state, &process).await {
         return Ok(ProcessPicked::NotOffered);
     }
 
@@ -1437,6 +1435,17 @@ pub(crate) async fn pick_process(
         store::Edited::NoSuchConversation => ProcessPicked::NoSuchConversation,
         store::Edited::NotDrafting => ProcessPicked::NotDrafting,
     })
+}
+
+/// Which of the host's drivers a Start hands a Process's first state to,
+/// where it is one of Verkstead's own written as data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FirstRuns {
+    /// Follow-up rounds, as a Tinker's: [`crate::activities::follow_up_rounds::run`].
+    FollowUp,
+    /// Follow-up rounds under the investigating skill, as an Investigate's:
+    /// [`crate::activities::follow_up_rounds::investigating`].
+    Investigation,
 }
 
 /// Add a registered Repo for the work to run alongside.
@@ -1827,15 +1836,46 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // A plugin's Process starts in the first state its manifest declares, and
     // only while it is offered: a plugin switched off or in trouble since the
     // pick is one nothing new starts on.
-    let declared = match &process {
-        store::Process::Provided { plugin, id } => match state.plugins.process(plugin, id) {
-            Some(loaded) if loaded.offered => {
-                loaded.process.states.first().map(|first| first.id.clone())
-            }
-            _ => return Ok(GrillingStarted::ProcessNotOffered),
-        },
+    //
+    // And so does each of Verkstead's own that is data — Tinker and
+    // Investigate here, Review and Fix Merge Issues at the take-up — while its
+    // tick stands: its first state is the word it lands in, and that state's
+    // Activity is what is started. Develop is not data yet.
+    let manifest = crate::processes::of(state, &process);
+    let provided = matches!(process, store::Process::Provided { .. });
+
+    if (provided || manifest.is_some()) && !crate::processes::offered(state, &process).await {
+        return Ok(GrillingStarted::ProcessNotOffered);
+    }
+
+    let first = manifest.and_then(|loaded| loaded.process.states.first().cloned());
+
+    if provided && first.is_none() {
+        return Ok(GrillingStarted::ProcessNotOffered);
+    }
+
+    let declared = first
+        .as_ref()
+        .filter(|_| provided)
+        .map(|first| first.id.clone());
+
+    // Which of the host's drivers the first state's Activity is run by, for
+    // one of Verkstead's own: Follow-up rounds as an investigation where the
+    // state names the investigating skill, as a follow-up otherwise.
+    let runs = first.as_ref().and_then(|first| match &first.activity {
+        crate::plugins::manifest::process::Runs::Activity(id) if id == "follow-up-rounds" => {
+            let investigating = first
+                .options
+                .iter()
+                .any(|(key, value)| key == "skill" && value == "verkstead/investigating");
+
+            Some(match investigating {
+                true => FirstRuns::Investigation,
+                false => FirstRuns::FollowUp,
+            })
+        }
         _ => None,
-    };
+    });
 
     // And whoever the commit Verkstead makes on a fresh branch is by: the
     // clearing of whatever task list the base was carrying — see
@@ -2083,15 +2123,20 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // And where the press lands it, which is the one thing about the record
     // that the Process decides: the same transaction either way, with the state
     // it comes out in as the word that differs.
-    let moved = match (&process, &declared) {
-        (_, Some(first)) => store::start_declared(pool, id, first, base, &path, &checkouts).await?,
-        (store::Process::Tinker, _) => {
-            store::start_tinkering(pool, id, base, &path, &checkouts).await?
-        }
-        (store::Process::Investigate, _) => {
-            store::start_investigating(pool, id, base, &path, &checkouts).await?
-        }
-        _ => store::start_grilling(pool, id, base, &path, &checkouts).await?,
+    //
+    // The first state's word, for a Process that is data: a declared one for a
+    // plugin's, and the one of Verkstead's it names for Verkstead's own — so a
+    // Tinker lands in Follow-up because its manifest's first state is
+    // `follow-up`.
+    let landing = match (&declared, &first) {
+        (Some(declared), _) => Some(store::Destination::Declared(declared)),
+        (None, Some(first)) => store::Lifecycle::named(&first.id).map(store::Destination::Built),
+        (None, None) => None,
+    };
+
+    let moved = match landing {
+        Some(landing) => store::start_in(pool, id, landing, base, &path, &checkouts).await?,
+        None => store::start_grilling(pool, id, base, &path, &checkouts).await?,
     };
 
     match moved {
@@ -2146,7 +2191,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         return Ok(GrillingStarted::Started);
     }
 
-    if process == store::Process::Tinker {
+    if runs == Some(FirstRuns::FollowUp) {
         tokio::spawn(crate::activities::follow_up_rounds::run(
             state.clone(),
             id,
@@ -2162,7 +2207,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // nothing. Spawned rather than awaited for the Tinker's reason, and handed
     // the registration for the same one — see
     // [`crate::activities::follow_up_rounds::investigating`].
-    if process == store::Process::Investigate {
+    if runs == Some(FirstRuns::Investigation) {
         tokio::spawn(crate::activities::follow_up_rounds::investigating(
             state.clone(),
             id,
@@ -3692,8 +3737,14 @@ pub(crate) async fn take_up(state: &AppState, id: i64, confirming: &Confirming) 
     // [`store::process`] — so it reaches this by the one road every other
     // targeted Process does, and anything pointed at nothing has nothing to
     // wrap up.
-    if !takes_a_target(&conversation.process) {
+    if !takes_a_target(state, &conversation.process) {
         return Ok(TakenUp::NotHoldingOne);
+    }
+
+    // And only while its Process is offered: an unticked one is one nothing
+    // new starts on — see [`crate::processes::offered`].
+    if !crate::processes::offered(state, &conversation.process).await {
+        return Ok(TakenUp::ProcessNotOffered);
     }
 
     // Who the sessions it sends commit and push as, refused for everything a
@@ -4056,7 +4107,7 @@ pub(crate) async fn take_up(state: &AppState, id: i64, confirming: &Confirming) 
     // buys is that there is no instant in which a wrapping Conversation on a pull
     // request is not narrowed, which is what a sweep or a restart between the move
     // and the first poll would otherwise find.
-    let narrowed = narrows_the_wrap_up(&conversation.process);
+    let narrowed = narrows_the_wrap_up(state, &conversation.process);
 
     let mut settled = Vec::new();
 
@@ -5918,6 +5969,7 @@ pub(crate) async fn worktree(path: Option<PathBuf>) -> Result<Option<Worktree>> 
 /// request GitHub has, or a branch origin has, is decided at the press, where
 /// there is somewhere to ask; an empty field is the one thing a page can see for
 /// itself, and it is the one thing this waits on.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn ready_to_grill(
     state: store::Lifecycle,
     process: &store::Process,
@@ -5926,6 +5978,7 @@ pub(crate) fn ready_to_grill(
     review: &PickedView,
     brief: &str,
     target: Option<&str>,
+    targeted: bool,
 ) -> bool {
     let roles = match process {
         store::Process::Review | store::Process::Tinker => {
@@ -5939,8 +5992,7 @@ pub(crate) fn ready_to_grill(
         _ => crate::profiles::ready_to_grill(grilling, implementation, review),
     };
 
-    let pointed =
-        !takes_a_target(process) || target.is_some_and(|target| !target.trim().is_empty());
+    let pointed = !targeted || target.is_some_and(|target| !target.trim().is_empty());
 
     state == store::Lifecycle::Draft && !brief.trim().is_empty() && roles && pointed
 }
@@ -5953,28 +6005,29 @@ pub(crate) fn ready_to_grill(
 /// kept in both: one says what the record waits on, the other says what the
 /// panel draws, and a stage that gives a Process a target adds to both.
 ///
-/// **Review and Fix Merge Issues**, the two Processes pointed at work that is
-/// already somewhere else: each is a wrap-up over a pull request or a branch
-/// somebody built without Verkstead, and the field is where it is named.
+/// **Read off the Process's manifest**, its `target` (ADR-0030, *Process*):
+/// Review and Fix Merge Issues say so, each being a wrap-up over a pull request
+/// or a branch somebody built without Verkstead, and the field is where it is
+/// named. Develop, not data yet, takes none.
 ///
 /// Which is the question the take-up asks of a press as well — see [`take_up`],
 /// whose door this is: *is this Process pointed at work that is already
 /// somewhere else* rather than *is this a Review*.
-pub(crate) fn takes_a_target(process: &store::Process) -> bool {
-    matches!(
-        process,
-        store::Process::Review | store::Process::FixMergeIssues
-    )
+pub(crate) fn takes_a_target(state: &AppState, process: &store::Process) -> bool {
+    crate::processes::takes_a_target(state, process)
 }
 
 /// And which of them wrap up narrowed to what GitHub refuses a merge for: the
 /// review and the comments settled as the Conversation lands, so the wrap-up
 /// waits on **Mergeable** and the checks alone.
 ///
-/// **Fix Merge Issues**, and nothing else. Every other Process reads the branch
-/// and answers what is said on the pull request; this one is pointed at a pull
-/// request that has been reviewed and talked about already, and what is left of
-/// wrapping it up is the two things GitHub itself refuses a merge for.
+/// **Fix Merge Issues**, and nothing else — and said by its manifest's
+/// wrapping state alone, whose options turn the Wrap-up's review and comments
+/// off: see [`crate::processes::narrows_the_wrap_up`]. Every other Process
+/// reads the branch and answers what is said on the pull request; this one is
+/// pointed at a pull request that has been reviewed and talked about already,
+/// and what is left of wrapping it up is the two things GitHub itself refuses a
+/// merge for.
 ///
 /// Asked in three places and by each of them for itself, which is the pattern the
 /// rest of the wrap-up follows: the take-up writes both settles as it enters — see
@@ -5990,8 +6043,8 @@ pub(crate) fn takes_a_target(process: &store::Process) -> bool {
 /// behaves alike, with no bookkeeping per door — and a wrap-up that lost a settle
 /// by some road nobody thought of gets it back on the next poll rather than
 /// waiting for ever on it.
-pub(crate) fn narrows_the_wrap_up(process: &store::Process) -> bool {
-    matches!(process, store::Process::FixMergeIssues)
+pub(crate) fn narrows_the_wrap_up(state: &AppState, process: &store::Process) -> bool {
+    crate::processes::narrows_the_wrap_up(state, process)
 }
 
 /// And which of them are pointed at a link of a chain rather than at one pull
