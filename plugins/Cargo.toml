@@ -14,6 +14,7 @@ members = [
     "activities/wrap-up",
     "codex",
     "fixture",
+    "github",
 ]
 
 [workspace.package]

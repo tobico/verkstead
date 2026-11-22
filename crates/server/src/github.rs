@@ -1,6 +1,13 @@
-//! Verkstead's own reach into GitHub: the *host's* `gh`, run against a Repo —
-//! the one implementation of [`crate::forges::Forge`] there is yet, and the one
-//! module of the server that runs `gh` or reads what it prints.
+//! GitHub over the *host's* `gh`, run against a Repo: an implementation of
+//! [`crate::forges::Forge`], and the one module of the server that runs `gh`
+//! or reads what it prints.
+//!
+//! **Not the one a running Verkstead asks any more.** GitHub crossed the
+//! plugin boundary (Set 1768, Q36): what answers on a served workbench is the
+//! built-in GitHub plugin's component, over REST and GraphQL — see
+//! [`crate::forges::plugged`]. This stays as the suite's stand-in, where a
+//! shell script where `gh` goes is how a test says what GitHub answered, until
+//! the stand-in becomes an HTTP one and this goes with it.
 //!
 //! Not the sandbox's. The sessions keep using their own `gh` inside their
 //! sandboxes to push and to open a pull request — that is the repository's
@@ -186,24 +193,11 @@ impl Gh {
     /// reads its token off this device's copy. An Author whose copy has not
     /// arrived is nobody too, and said so.
     fn whom(&self) -> AsWhom {
-        let Some(settings) = self.settings.as_ref() else {
-            return AsWhom::Host;
-        };
-
-        let config = settings.config();
-
-        let Some(author) = config.author_of(self.author.as_deref()) else {
-            return AsWhom::Untokened;
-        };
-
-        if config.token_awaited(author.id()) {
-            return AsWhom::Awaited;
-        }
-
-        match config.token_of(author, &settings.secrets()) {
-            Some(token) => AsWhom::Token(token.to_owned()),
-            None => AsWhom::Untokened,
-        }
+        crate::forges::whom(
+            self.settings.as_ref(),
+            self.author.as_deref(),
+            crate::plugins::built_in::GITHUB,
+        )
     }
 
     /// The token to authenticate as, or `None` for a stand-in's own — or why

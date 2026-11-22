@@ -2036,6 +2036,17 @@ impl Config {
         secrets.author_token(author.id())
     }
 
+    /// And the one they work as on the Forge `forge`, which is the same
+    /// reading for any Forge: one token per Forge per Author (ADR-0030).
+    pub(crate) fn token_of_on<'s>(
+        &self,
+        author: &Author,
+        secrets: &'s Secrets,
+        forge: &str,
+    ) -> Option<&'s str> {
+        secrets.author_token_on(author.id(), forge)
+    }
+
     /// The config a **Keeper** writes for its **Annex** before the Annex first
     /// starts: whose it is, and nothing else, so every other section reads as
     /// nobody having said. **No Author of its own**: the Annex is a linked

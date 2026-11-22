@@ -58,8 +58,14 @@ pub mod worlds {
         pub mod process {
             wasmtime::component::bindgen!({ path: "wit", world: "process" });
         }
+        /// A Forge's operations, called on the store the component was
+        /// started in, which is an async one.
         pub mod forge {
-            wasmtime::component::bindgen!({ path: "wit", world: "forge" });
+            wasmtime::component::bindgen!({
+                path: "wit",
+                world: "forge",
+                exports: { default: async },
+            });
         }
         pub mod language {
             wasmtime::component::bindgen!({ path: "wit", world: "language" });
@@ -125,6 +131,10 @@ pub struct Again {
     capabilities: Vec<Capability>,
     home: Option<PathBuf>,
 
+    /// Where a granted host is reached instead, where anything is — see
+    /// [`Redirect`].
+    redirect: Redirect,
+
     /// The SHA-256 of the component's bytes, which is what says whether a
     /// plugin read again is running the same code — see [`Again::same_as`].
     digest: [u8; 32],
@@ -152,7 +162,7 @@ impl Again {
     /// `C:\Users\…` is not absolute inside the component, and says where
     /// the host keeps its accounts, which is nothing of the component's.
     pub async fn reading(&self, dir: &Path) -> Result<Loaded, Trouble> {
-        let mut grant = grant(&self.capabilities, self.home.as_deref())?;
+        let mut grant = self.granted()?;
         grant
             .wasi
             .preopened_dir(dir, ACCOUNT, FsPerms::ReadOnly)
@@ -171,8 +181,27 @@ impl Again {
     /// nothing more: a store of its own, for an export whose answers build on
     /// what it was asked before — a harness's `login`, one per login.
     pub async fn afresh(&self) -> Result<Loaded, Trouble> {
-        let grant = grant(&self.capabilities, self.home.as_deref())?;
-        started(self.clone(), grant, STARTING).await
+        started(self.clone(), self.granted()?, STARTING).await
+    }
+
+    /// And the same again holding `secret`, set in the environment variable
+    /// the manifest's `secrets` capability names — for this instance and no
+    /// other (ADR-0030, *Capabilities and trust*).
+    ///
+    /// **An instance per call is what *for that call* means.** WASI fixes a
+    /// store's environment when the store is made, so a secret set for one
+    /// call and gone by the next is a store made for the one call: the
+    /// component is compiled once, at load, and started here with the value
+    /// the host read a moment ago — which is also why nothing of it has to be
+    /// cleared afterwards. A manifest that asked for no secret is handed
+    /// none, whatever the caller holds.
+    pub async fn holding(&self, secret: &str) -> Result<Loaded, Trouble> {
+        started(self.clone(), self.granted()?.holding(secret), STARTING).await
+    }
+
+    /// What its manifest granted, with the host's redirects on it.
+    fn granted(&self) -> Result<Grant, Trouble> {
+        Ok(grant(&self.capabilities, self.home.as_deref())?.redirecting(&self.redirect))
     }
 }
 
@@ -210,6 +239,9 @@ impl WasiHttpView for Host {
 #[derive(Debug, Clone, Default)]
 pub struct Outbound {
     hosts: Vec<String>,
+
+    /// And where each of them is actually reached — see [`Redirect`].
+    redirect: Redirect,
 }
 
 impl Outbound {
@@ -219,6 +251,48 @@ impl Outbound {
                 .iter()
                 .any(|granted| granted.eq_ignore_ascii_case(host))
         })
+    }
+}
+
+/// Where a granted host is reached instead of where its name says.
+///
+/// **A seam for the suites, and nothing a plugin or a human can set.** What a
+/// test of a Forge's component needs is GitHub, and standing up the real one
+/// would be a test that needed a network, an account and somebody's pull
+/// request — so the test stands up an HTTP server of its own and the host
+/// sends the granted host there. The grant is untouched: the request is still
+/// made to `api.github.com`, still checked against the hosts the manifest
+/// asked for, and only the connection goes somewhere else. A host nobody
+/// redirected is reached where its name says, which is every host on every
+/// running Verkstead.
+#[derive(Debug, Clone, Default)]
+pub struct Redirect {
+    to: Vec<(String, String)>,
+}
+
+impl Redirect {
+    /// Nothing redirected, which is what a running server has.
+    pub fn none() -> Redirect {
+        Redirect::default()
+    }
+
+    /// `host` reached at `address` — `127.0.0.1:8422`, say — over plain HTTP,
+    /// a stand-in on this machine having no certificate anything would trust.
+    pub fn to(host: &str, address: &str) -> Redirect {
+        Redirect {
+            to: vec![(host.to_ascii_lowercase(), address.to_owned())],
+        }
+    }
+
+    /// Where `host` is to be reached, or `None` where it is reached where its
+    /// name says.
+    fn at(&self, host: Option<&str>) -> Option<&str> {
+        let host = host?;
+
+        self.to
+            .iter()
+            .find(|(named, _)| named.eq_ignore_ascii_case(host))
+            .map(|(_, address)| address.as_str())
     }
 }
 
@@ -236,12 +310,47 @@ impl WasiHttpHooks for Outbound {
                 )>,
             > + Send,
     > {
-        if self.permits(request.uri().host()) {
-            default_hooks().send_request(request, options, fut)
-        } else {
-            Box::new(async { Err(wasmtime_wasi_http::Error::HttpRequestDenied) })
+        if !self.permits(request.uri().host()) {
+            return Box::new(async { Err(wasmtime_wasi_http::Error::HttpRequestDenied) });
+        }
+
+        // Granted, and sent where the host says it is — which is where its
+        // name says on every running Verkstead, and a suite's stand-in under
+        // test. The request's own words are left as the component wrote them
+        // but the authority it is dialled at.
+        match self.redirect.at(request.uri().host()) {
+            None => default_hooks().send_request(request, options, fut),
+            Some(address) => match sent(request, address) {
+                Ok(request) => default_hooks().send_request(request, options, fut),
+                Err(error) => Box::new(async move { Err(error) }),
+            },
         }
     }
+}
+
+/// `request` dialled at `address` instead of at its own host: the scheme and
+/// the authority swapped, the path, the headers and the body as they were.
+///
+/// Plain HTTP, a stand-in on this machine having no certificate anything would
+/// trust. What the component wrote — the method, the path, the headers it set
+/// and the body — is what the stand-in is asked, so what it answers is an
+/// answer to the request GitHub would have had.
+fn sent(
+    request: http::Request<wasmtime_wasi_http::WasiBody>,
+    address: &str,
+) -> Result<http::Request<wasmtime_wasi_http::WasiBody>, wasmtime_wasi_http::Error> {
+    let (mut parts, body) = request.into_parts();
+
+    let mut uri = http::uri::Builder::new().scheme("http").authority(address);
+    if let Some(path) = parts.uri.path_and_query() {
+        uri = uri.path_and_query(path.clone());
+    }
+
+    parts.uri = uri
+        .build()
+        .map_err(|_| wasmtime_wasi_http::Error::HttpRequestUriInvalid)?;
+
+    Ok(http::Request::from_parts(parts, body))
 }
 
 /// How long a component may take to start before it is stopped and is
@@ -283,6 +392,17 @@ pub async fn load(
     manifest: &Manifest,
     home: Option<&Path>,
 ) -> Result<Option<Loaded>, Trouble> {
+    load_redirecting(files, manifest, home, Redirect::none()).await
+}
+
+/// The same, reaching each granted host where `redirect` says — see
+/// [`Redirect`].
+pub async fn load_redirecting(
+    files: Files<'_>,
+    manifest: &Manifest,
+    home: Option<&Path>,
+    redirect: Redirect,
+) -> Result<Option<Loaded>, Trouble> {
     for activity in &manifest.activities {
         checked(files, activity)?;
     }
@@ -298,7 +418,8 @@ pub async fn load(
         ))
     })?;
 
-    let mut loaded = instantiate(&bytes, &manifest.capabilities, home).await?;
+    let mut loaded =
+        instantiate_redirecting(&bytes, &manifest.capabilities, home, redirect).await?;
     exports_what_it_provides(&mut loaded, manifest)?;
     Ok(Some(loaded))
 }
@@ -322,6 +443,22 @@ fn exports_what_it_provides(loaded: &mut Loaded, manifest: &Manifest) -> Result<
             },
         )?;
     }
+
+    let forge = manifest
+        .provides
+        .iter()
+        .any(|provision| provision.category == Category::Forge);
+    if forge {
+        worlds::category::forge::Forge::new(&mut loaded.store, &loaded.instance).map_err(
+            |error| {
+                Trouble::of(format!(
+                    "The component provides a forge and doesn't export what one needs: {}.",
+                    worded(&error)
+                ))
+            },
+        )?;
+    }
+
     Ok(())
 }
 
@@ -332,13 +469,25 @@ pub async fn instantiate(
     capabilities: &[Capability],
     home: Option<&Path>,
 ) -> Result<Loaded, Trouble> {
-    started_within(bytes, capabilities, home, STARTING).await
+    started_within(bytes, capabilities, home, Redirect::none(), STARTING).await
+}
+
+/// The same, reaching each granted host where `redirect` says — see
+/// [`Redirect`], which is a suite's seam and nothing a running server sets.
+pub async fn instantiate_redirecting(
+    bytes: &[u8],
+    capabilities: &[Capability],
+    home: Option<&Path>,
+    redirect: Redirect,
+) -> Result<Loaded, Trouble> {
+    started_within(bytes, capabilities, home, redirect, STARTING).await
 }
 
 async fn started_within(
     bytes: &[u8],
     capabilities: &[Capability],
     home: Option<&Path>,
+    redirect: Redirect,
     within: Duration,
 ) -> Result<Loaded, Trouble> {
     let component = Component::new(&ENGINE, bytes).map_err(|error| {
@@ -366,9 +515,10 @@ async fn started_within(
         pre,
         capabilities: capabilities.to_vec(),
         home: home.map(Path::to_owned),
+        redirect,
         digest: Sha256::digest(bytes).into(),
     };
-    let grant = grant(capabilities, home)?;
+    let grant = again.granted()?;
     started(again, grant, within).await
 }
 
@@ -887,9 +1037,28 @@ mod unlent {
 struct Grant {
     wasi: WasiCtxBuilder,
     outbound: Outbound,
+
+    /// The variable a secret is to be set in, where the manifest asked for
+    /// one — see [`Grant::holding`].
+    secret: Option<String>,
 }
 
 impl Grant {
+    /// The same grant, reaching each granted host where `redirect` says.
+    fn redirecting(mut self, redirect: &Redirect) -> Grant {
+        self.outbound.redirect = redirect.clone();
+        self
+    }
+
+    /// And the same holding `secret`, in the variable the manifest's `secrets`
+    /// capability named — nothing at all where it asked for none.
+    fn holding(mut self, secret: &str) -> Grant {
+        if let Some(name) = self.secret.clone() {
+            self.wasi.env(name, secret);
+        }
+        self
+    }
+
     fn host(mut self) -> Host {
         Host {
             wasi: self.wasi.build(),
@@ -908,6 +1077,7 @@ fn grant(capabilities: &[Capability], home: Option<&Path>) -> Result<Grant, Trou
         .allow_udp(false)
         .allow_ip_name_lookup(false);
     let mut outbound = Outbound::default();
+    let mut secret = None;
 
     for capability in capabilities {
         match capability {
@@ -948,13 +1118,18 @@ fn grant(capabilities: &[Capability], home: Option<&Path>) -> Result<Grant, Trou
             // Nothing of WASI's: the host functions that start a Conversation
             // ask the grant themselves — see [`crate::activities`].
             Capability::Conversations => {}
-            // Nothing at the start either: the host sets the secret in the
-            // component's environment for the call that needs it.
-            Capability::Secrets { .. } => {}
+            // Nothing at the start: the variable is noted here and the host
+            // sets the secret in it for the one call that needs it — see
+            // [`Again::holding`].
+            Capability::Secrets { name } => secret = Some(name.clone()),
         }
     }
 
-    Ok(Grant { wasi, outbound })
+    Ok(Grant {
+        wasi,
+        outbound,
+        secret,
+    })
 }
 
 /// A granted path with a leading `~` read as `home`.
@@ -1591,10 +1766,16 @@ world reader {
 
     #[tokio::test]
     async fn a_component_that_never_finishes_starting_is_stopped_and_is_trouble() {
-        let trouble = started_within(&assembled(SPINS), &[], None, Duration::from_secs(2))
-            .await
-            .err()
-            .expect("a start that never finishes should not load");
+        let trouble = started_within(
+            &assembled(SPINS),
+            &[],
+            None,
+            Redirect::none(),
+            Duration::from_secs(2),
+        )
+        .await
+        .err()
+        .expect("a start that never finishes should not load");
 
         assert_eq!(
             trouble.why,
@@ -1606,9 +1787,15 @@ world reader {
     async fn a_component_that_started_has_no_deadline_left() {
         let root = two_directories();
         let capabilities = granting(&root.path().join("granted"));
-        let mut loaded = started_within(&reader(), &capabilities, None, Duration::from_millis(200))
-            .await
-            .expect("the reader should load");
+        let mut loaded = started_within(
+            &reader(),
+            &capabilities,
+            None,
+            Redirect::none(),
+            Duration::from_millis(200),
+        )
+        .await
+        .expect("the reader should load");
 
         std::thread::sleep(Duration::from_millis(500));
 
@@ -1646,6 +1833,7 @@ world reader {
     async fn a_request_to_a_host_not_granted_is_refused() {
         let mut outbound = Outbound {
             hosts: vec!["gitlab.com".to_owned()],
+            ..Outbound::default()
         };
         let request = http::Request::builder()
             .uri("https://example.com/")
@@ -1666,6 +1854,7 @@ world reader {
     fn only_a_named_host_is_permitted() {
         let outbound = Outbound {
             hosts: vec!["gitlab.com".to_owned()],
+            ..Outbound::default()
         };
 
         assert!(outbound.permits(Some("gitlab.com")));

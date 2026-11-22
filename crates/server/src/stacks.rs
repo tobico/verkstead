@@ -476,7 +476,7 @@ struct Whose {
 /// Empty where `from` is not among the open pull requests at all — a number that
 /// has since been merged or closed, or one past the end of the page `gh`
 /// answered with.
-fn chain(open: &[Numbered], from: i64) -> Vec<&Numbered> {
+pub(crate) fn chain(open: &[Numbered], from: i64) -> Vec<&Numbered> {
     // A fork's head is in another repository, so it is not a branch anything
     // here sits on and not one anything here sits under.
     let links: Vec<&Numbered> = open.iter().filter(|listed| !listed.fork).collect();

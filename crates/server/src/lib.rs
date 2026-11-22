@@ -1101,7 +1101,7 @@ pub fn router_hosting_activities(
         binds,
         data_dir,
         sessions::Sessions::under(agents),
-        gh,
+        Arc::new(gh),
         tailnet(),
         &gate,
         onboarding::Machine::here(),
@@ -1425,7 +1425,7 @@ pub fn routers_answering_devices_telling(
         nothing_bound(),
         nowhere(),
         sessions::Sessions::none(),
-        Gh::on_path(),
+        Arc::new(Gh::on_path()),
         tailnet(),
         &gate,
         machine,
@@ -1459,7 +1459,7 @@ pub fn routers_keeping_answering_devices_telling(
         nothing_bound(),
         data_dir,
         sessions::Sessions::none(),
-        Gh::on_path(),
+        Arc::new(Gh::on_path()),
         tailnet(),
         &gate,
         machine,
@@ -1510,7 +1510,7 @@ pub fn routers_running_sessions_answering_devices(
         binds,
         data_dir,
         sessions::Sessions::under(agents),
-        gh,
+        Arc::new(gh),
         tailnet(),
         &gate,
         machine,
@@ -1670,8 +1670,18 @@ fn routed_telling(
 ) -> Router {
     serving(
         standing(
-            pool, updates, binds, data_dir, sessions, github, remote, &gate, machine, escalation,
-            devices, nudges,
+            pool,
+            updates,
+            binds,
+            data_dir,
+            sessions,
+            Arc::new(github),
+            remote,
+            &gate,
+            machine,
+            escalation,
+            devices,
+            nudges,
         ),
         &gate,
     )
@@ -1698,7 +1708,7 @@ fn standing(
     binds: sandbox::SandboxConfig,
     data_dir: PathBuf,
     sessions: sessions::Sessions,
-    github: Gh,
+    github: Arc<dyn forges::Forge>,
     remote: remote::Tailscale,
     gate: &key::Gate,
     machine: onboarding::Machine,
@@ -1740,7 +1750,7 @@ fn standing(
         // the file holds at the moment it spawns — see [`sandbox`].
         binds,
 
-        github: Arc::new(github),
+        github,
         forge: forge::Registered::new(),
         wrap_ups: wrapping::WrapUps::new(),
 
@@ -2084,12 +2094,12 @@ pub struct Routers {
 /// because the peer listener beside this router announces on it too: a join
 /// arriving there raises a modal on a page served from here — see [`nudge`].
 #[allow(clippy::too_many_arguments)]
-pub fn routers_with_ui(
+pub(crate) fn routers_with_ui(
     pool: SqlitePool,
     releases: Option<&str>,
     data_dir: PathBuf,
     agents: Agents,
-    gh: Gh,
+    forge: Arc<dyn forges::Forge>,
     remote: remote::Tailscale,
     key: key::WorkbenchKey,
     escalation: Option<Arc<dyn remote::Elevate>>,
@@ -2107,7 +2117,7 @@ pub fn routers_with_ui(
         binds,
         data_dir,
         sessions::Sessions::under(agents),
-        gh,
+        forge,
         remote,
         &gate,
         onboarding::Machine::here(),
@@ -2175,7 +2185,7 @@ pub fn router_over_the_link(pool: SqlitePool, data_dir: PathBuf) -> Router {
         nothing_bound(),
         data_dir,
         sessions::Sessions::none(),
-        Gh::on_path(),
+        Arc::new(Gh::on_path()),
         tailnet(),
         &key::Gate::open(),
         onboarding::Machine::here(),
@@ -2205,7 +2215,7 @@ pub fn router_over_the_link_telling(
         nothing_bound(),
         data_dir,
         sessions::Sessions::none(),
-        Gh::on_path(),
+        Arc::new(Gh::on_path()),
         tailnet(),
         &key::Gate::open(),
         onboarding::Machine::here(),
@@ -2239,7 +2249,7 @@ pub fn router_over_the_link_running_sessions(
         binds,
         data_dir,
         sessions::Sessions::under(agents),
-        Gh::on_path(),
+        Arc::new(Gh::on_path()),
         tailnet(),
         &key::Gate::open(),
         onboarding::Machine::here(),
@@ -3100,10 +3110,10 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
             attachments,
             settings.clone(),
         ),
-        // Whatever `gh` this machine has, authenticating as the configured
-        // token — the same one the sessions get, so one token is the whole
-        // of Verkstead's GitHub auth.
-        Gh::on_path().authenticated_by(settings),
+        // The built-in GitHub plugin's own component, asking as the Author's
+        // token for it — read at the moment of each call, and set in the
+        // component's environment for that one call (ADR-0030, *Forge*).
+        forges::plugged::github(settings, &pool).await,
         // And whatever `tailscale` it has, asked about the port this server just
         // bound: a serve is this workbench's when it proxies there, and an
         // install told to listen somewhere else is one whose serve has to point

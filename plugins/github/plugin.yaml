@@ -2,9 +2,9 @@
 # request, how git in the sandbox signs in, the tool a session is lent and what
 # it can do. The grammar of a `forge` entry is `docs/plugins.md`'s *Forge*.
 #
-# No component yet: the server still answers for GitHub in-process, over the
-# host's `gh`. The capabilities below are what the component will ask for —
-# the REST and GraphQL host, and the Author's token set for each call.
+# Every operation is the component's, built from the crate beside this file:
+# it speaks REST and GraphQL to the one outbound host below, as the Author's
+# token the host sets in `GH_TOKEN` for the one call it was set for.
 uuid: b357e557-3716-4ea6-a3a8-d904c92c5eac
 name: GitHub
 author:
@@ -13,6 +13,7 @@ author:
 version: 0.1.0
 interface: 1
 description: Pull requests, checks, reviews, gists and repositories on github.com.
+component: github.wasm
 # The hosts a self-hosted GitHub answers on, beside github.com: a Repo whose
 # remote names one is on this Forge, exactly as one on github.com is. Read at
 # the moment a Repo's Forge is asked, so a host added reaches the next

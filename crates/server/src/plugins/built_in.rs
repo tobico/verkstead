@@ -394,8 +394,8 @@ mod tests {
 
     /// GitHub is a built-in Forge declaring github.com, the noun *pull
     /// request*, git's `x-access-token`, `gh` with `GH_TOKEN`, all five
-    /// capabilities and the scopes Verkstead needs — and it loads with no
-    /// component, asking for its API host and its token as a secret.
+    /// capabilities and the scopes Verkstead needs — and its component loads,
+    /// asking for its API host and its token as a secret.
     #[tokio::test]
     async fn github_is_a_built_in_forge() {
         use crate::plugins::manifest::forge;
@@ -406,7 +406,10 @@ mod tests {
         let manifest = started.manifest.expect("the manifest reads");
         assert_eq!(manifest.uuid, GITHUB);
         assert_eq!(manifest.name, "GitHub");
-        assert_eq!(manifest.component, None);
+        assert_eq!(
+            manifest.component.as_deref(),
+            Some(Path::new("github.wasm"))
+        );
         assert_eq!(
             manifest.capabilities,
             [

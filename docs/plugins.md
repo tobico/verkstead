@@ -342,8 +342,9 @@ code. It is a WebAssembly **component** built for WASI 0.2 — Rust's
 Verkstead's WIT package, `verkstead:plugin` (`crates/server/wit/plugin.wit`):
 the base world `plugin`, or the world of a Category it provides. A Category's
 world is filled by the stage that gives it its grammar: the `agent` world's
-exports are above, and the `activity` world's are below, where an Activity's
-component is named by its block rather than here; the rest hold nothing yet.
+exports are above, the `forge` world's are below it, and the `activity`
+world's are below those, where an Activity's component is named by its block
+rather than here; the rest hold nothing yet.
 
 The component may import WASI 0.2 and WASI HTTP, and nothing else. What any of
 it reaches is what `capabilities` grants, below.
@@ -1014,6 +1015,58 @@ enabled Forge, as every Repo was before there was more than one.
 nothing watching and the Timeline saying why, `verkstead done` takes the
 signal with no open pull request, the Share pane has no Publish, and the
 Repo's row and the Conversation's card say *No forge for* its host.
+
+#### The `forge` world
+
+The component of a plugin providing a forge is written against the `forge`
+world of `crates/server/wit/plugin.wit`, and is refused at load where it does
+not export every operation the server asks of a Forge. Each one may fail with
+one of four kinds — **`no-pull-request`**, nothing open under what was asked
+about; **`not-logged-in`**, the token turned down or none to ask with;
+**`no-remote`**, a remote this Forge answers for no repository of; and
+**`refused(said)`**, anything else in the Forge's own words — and a failure in
+Verkstead rather than at the Forge is the host's to word.
+
+**Every operation about a repository is handed the `origin` remote** as git
+holds it, and works out from it which repository on which host it is: a Forge
+answering for a self-hosted instance derives its API from the host there and
+nowhere else. The host never hands over a path, a component having no handle
+on anybody's checkout.
+
+**The token is never a parameter.** The Author's token for this Forge is set
+in the environment variable the manifest's `secrets` capability names, for the
+one call it was set for — a fresh instance per call — so nothing of one is
+asked for or answered back.
+
+- **`verify()`** — who the token in this call's environment is, and the scopes
+  the Forge says it carries, which the host reads against the `scopes` the
+  manifest declares. A Forge that names no scopes is not read as naming none.
+- **`pull-request(remote, branch)`** and
+  **`pull-request-numbered(remote, number)`** — the pull request open on a
+  branch, and the one a number names whether it is open or not.
+- **`open-pull-request(remote, opening)`** — one opened as a draft, from the
+  head, the base, the title and the body, answered as the Forge now has it.
+- **`open-pull-requests(remote)`** — every one open, which is what a stack is
+  walked out of: each carries its head, its base and whether its head is in
+  another repository.
+- **`details(remote, number)`**, **`checks(remote, number)`**,
+  **`landing(remote, number)`** and **`comments(remote, number)`** — what the
+  details pane draws, the checks against the head with the commit they are
+  about, whether it merges and where it has got to, and everything said on it.
+- **`comment(remote, number, body)`** — something said on it, answering where
+  it was said.
+- **`publish(description, name, content)`** and **`unpublish(id)`** — a Share
+  published as one file, and taken down again.
+- **`create-repository(name)`** — a private repository, answered as where a
+  reader goes and the remote the host writes as `origin` and pushes to. The
+  pushing is the host's: it holds the repository.
+- **`lacks-scope(said)`** — whether a refusal is the Forge turning the token
+  down for what it may do rather than turning the request down.
+- **`target-in(prose)`**, **`target-named(target)`**,
+  **`repository-in(url)`** and **`repository-of(origin)`** — the pull request
+  a Brief's prose or a Target field names, the repository a pull request's URL
+  is in, and the repository a remote is. String work, with nothing asked of
+  the Forge.
 
 ## Per-platform overrides
 

@@ -201,8 +201,251 @@ world process {
   include plugin;
 }
 
+/// What a Forge's component exports: one function per operation the server
+/// asks of a Forge (ADR-0030, *Forge*), and the four kinds a Forge's own
+/// answer can fail with.
+///
+/// **The remote is the whole of what says which repository.** Every operation
+/// about one is handed the `origin` remote as git holds it, and works out from
+/// it which repository on which host it is — a Forge answering for a
+/// self-hosted instance derives its API from the host there and nowhere else.
+/// A remote this Forge does not answer for is `no-remote`.
+///
+/// **The token is the host's to set, never a parameter.** The Author's token
+/// for this Forge is put in the component's environment for the one call it
+/// was set for, under the variable the manifest's `secrets` capability names,
+/// so no operation here takes one and nothing of one is ever answered back.
 world forge {
   include plugin;
+
+  /// Why the Forge gave no answer. The host's own kind — a failure in
+  /// Verkstead rather than at the Forge — is not here: it is what a call that
+  /// could not be made at all comes to, and the host words it.
+  variant trouble {
+    /// Nothing is open under what was asked about: no pull request on the
+    /// branch, or none under the number.
+    no-pull-request,
+    /// The Forge turned the token down, or there was none to ask with.
+    not-logged-in,
+    /// The remote is not one this Forge answers for, so there is no
+    /// repository to ask about.
+    no-remote,
+    /// Something else, in the Forge's own words.
+    refused(string),
+  }
+
+  /// A pull request to open: the branch it is from and the one it goes into,
+  /// and what it says.
+  record opening {
+    head: string,
+    base: string,
+    title: string,
+    body: string,
+  }
+
+  /// The pull request open on a branch, as the five facts worth recording.
+  record found {
+    number: s64,
+    title: string,
+    url: string,
+    head: option<string>,
+    base: option<string>,
+  }
+
+  /// One pull request of the repository by its number, open or not: the head
+  /// and the base are what a stack's links are followed by, `fork` is whether
+  /// the head is in another repository, and `open` is whether the Forge still
+  /// has it open.
+  record numbered {
+    number: s64,
+    title: string,
+    url: string,
+    head: string,
+    base: string,
+    fork: bool,
+    open: bool,
+  }
+
+  /// Whether the pull request merges into its base as it stands. `unknown` is
+  /// the Forge still working it out, and no conflict.
+  enum mergeable {
+    cleanly,
+    conflicting,
+    unknown,
+  }
+
+  /// Where a pull request has got to. `unknown` concludes nothing.
+  enum stands {
+    open,
+    merged,
+    closed,
+    unknown,
+  }
+
+  /// Whether it merges, and where it has got to.
+  record landing {
+    mergeable: mergeable,
+    stands: stands,
+  }
+
+  /// How one check is getting on: skipped counts as passed, cancelled as
+  /// failed, and a word the Forge has not said before as failed.
+  enum checked {
+    passed,
+    failed,
+    running,
+  }
+
+  /// One check against a pull request's head: what to call it and count it
+  /// by, how it is getting on, and where its run is — empty where the Forge
+  /// gave none.
+  record check {
+    name: string,
+    how: checked,
+    link: string,
+  }
+
+  /// The checks against a pull request's head, the commit they are about —
+  /// empty where the Forge gave none — and whether it merges, which rides the
+  /// same question.
+  record suite {
+    head: string,
+    checks: list<check>,
+    mergeable: mergeable,
+  }
+
+  /// One thing said on a pull request: in its conversation, at the top of a
+  /// review, or on a line of the diff.
+  record comment {
+    /// What it is for as long as it exists, which is what it is marked
+    /// addressed by.
+    which: string,
+    /// Who said it; empty for an account that has since gone.
+    author: string,
+    /// When, RFC 3339.
+    at: string,
+    /// The file and the line, for one left on the diff; empty otherwise.
+    about: string,
+    markdown: string,
+  }
+
+  /// One commit a pull request carries, as the details pane draws it.
+  record landed {
+    sha: string,
+    subject: string,
+  }
+
+  /// Everything one reading of a pull request comes back with: what the
+  /// details pane draws, and the facts that ride the same question.
+  record details {
+    commits: list<landed>,
+    comments: list<comment>,
+    checks: list<check>,
+    landing: landing,
+  }
+
+  /// What the Forge said about a token's scopes, which has three answers
+  /// rather than two: a fine-grained token has permissions rather than
+  /// scopes, and the Forge answers for one by saying nothing — which is not
+  /// the same as saying none.
+  variant scopes {
+    /// It named them. Empty is a token with none, which can do nothing.
+    named(list<string>),
+    /// It named none, which says nothing either way.
+    unsaid,
+  }
+
+  /// Who a token is, and what the Forge will let it do.
+  record account {
+    login: string,
+    scopes: scopes,
+  }
+
+  /// A Share published: the Forge's id for it, the page a link points at, and
+  /// the git remote behind that page, over which the bytes arrive.
+  record published {
+    id: string,
+    url: string,
+    push: string,
+  }
+
+  /// A repository the Forge has just made: where a reader goes, and the
+  /// remote the host writes as `origin` and pushes to.
+  record made {
+    url: string,
+    push: string,
+  }
+
+  /// A pull request a piece of prose or a Target field named: its number, and
+  /// the repository the name said where it said one.
+  record named-pull-request {
+    number: s64,
+    repository: option<string>,
+  }
+
+  /// Who the token in this call's environment is, and what the Forge will let
+  /// it do — the scopes it found, which the host reads against the ones the
+  /// manifest declares are needed.
+  export verify: func() -> result<account, trouble>;
+
+  /// The pull request open on `branch` of the repository `remote` names.
+  export pull-request: func(remote: string, branch: string) -> result<found, trouble>;
+
+  /// The pull request numbered `number` there, open or not.
+  export pull-request-numbered: func(remote: string, number: s64) -> result<numbered, trouble>;
+
+  /// Open `opening` as a draft, and answer it as the Forge now has it.
+  export open-pull-request: func(remote: string, opening: opening) -> result<numbered, trouble>;
+
+  /// Every pull request open on it, which is what a stack is walked off.
+  export open-pull-requests: func(remote: string) -> result<list<numbered>, trouble>;
+
+  /// What the details pane draws of pull request `number`, and the facts that
+  /// ride the same question.
+  export details: func(remote: string, number: s64) -> result<details, trouble>;
+
+  /// The checks against its head, and whether it merges.
+  export checks: func(remote: string, number: s64) -> result<suite, trouble>;
+
+  /// Whether it merges, and where it has got to.
+  export landing: func(remote: string, number: s64) -> result<landing, trouble>;
+
+  /// Everything said on it, in the order it was said.
+  export comments: func(remote: string, number: s64) -> result<list<comment>, trouble>;
+
+  /// Say `body` on it, and answer where it was said.
+  export comment: func(remote: string, number: s64, body: string) -> result<string, trouble>;
+
+  /// Publish a Share: one file, `name`, holding `content`, unlisted.
+  export publish: func(description: string, name: string, content: string)
+    -> result<published, trouble>;
+
+  /// And take a published one down again.
+  export unpublish: func(id: string) -> result<_, trouble>;
+
+  /// Make a private repository called `name`, and answer where it is and the
+  /// remote to push it to. The pushing is the host's: it holds the
+  /// repository.
+  export create-repository: func(name: string) -> result<made, trouble>;
+
+  /// Whether `said`, which a publish failed with, is the Forge turning the
+  /// token down for what it may do rather than turning the request down.
+  export lacks-scope: func(said: string) -> bool;
+
+  /// The first pull request `prose` names, which is what a saved Brief fills
+  /// an empty Target with.
+  export target-in: func(prose: string) -> option<named-pull-request>;
+
+  /// The pull request a Target field names as the whole of it, or none where
+  /// what it holds is a branch.
+  export target-named: func(target: string) -> option<named-pull-request>;
+
+  /// The repository a pull request's `url` is in, as the Forge names one.
+  export repository-in: func(url: string) -> option<string>;
+
+  /// The repository on this Forge that the remote `origin` is, or none where
+  /// it is not one of this Forge's own.
+  export repository-of: func(origin: string) -> option<string>;
 }
 
 world language {

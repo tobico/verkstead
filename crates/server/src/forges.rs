@@ -10,10 +10,15 @@
 //! every caller goes through it. The answers are the shapes below, and a
 //! failure is one of the interface's error kinds, [`Trouble`].
 //!
-//! **One implementation for now**: GitHub, in-process over the host's tool —
-//! see [`crate::github`], the one module that runs it. What that tool prints is
-//! read into these shapes there and nowhere else, so a caller never reads any
-//! tool's text.
+//! **A plugin's component answers it** — see [`plugged`], which is what every
+//! Forge is: the operations are its component's exports, asked as the Repo's
+//! Author with the token set in the component's environment for the one call.
+//! GitHub's is the built-in plugin's, embedded in this binary.
+//!
+//! **And the host's `gh` still answers it too**, as the suite's stand-in — see
+//! [`crate::github`], the one module that runs a program. What that tool
+//! prints is read into these shapes there and nowhere else, so a caller never
+//! reads any tool's text.
 //!
 //! **Blocking, every operation.** An implementation may run a process or wait
 //! on the network, so the async callers ask from `spawn_blocking` with a
@@ -29,7 +34,10 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
+pub(crate) mod plugged;
+
 pub(crate) use crate::plugins::manifest::forge::Capability;
+use crate::settings::Settings;
 use crate::store;
 use crate::targets::NamedPullRequest;
 
@@ -242,6 +250,37 @@ impl std::fmt::Debug for Credential {
             AsWhom::Untokened => f.write_str("Credential(the machine's, no token held)"),
             AsWhom::Awaited => f.write_str("Credential(nobody's, a token awaited)"),
         }
+    }
+}
+
+/// Who a call about a Repo is to authenticate as, read now: the Author's token
+/// for the Forge `forge`, or — where they hold none, or there is no Author —
+/// nobody, and the Forge is not asked (Set 1878, Q3). The host's own login for
+/// a tool is never read in its place.
+///
+/// One reading for every implementation of [`Forge`], because it is one
+/// question about this installation's files rather than anything a Forge
+/// answers: which Author a Repo recorded, whether this device has their copy
+/// of the token, and what it is. `settings` is `None` on a Forge with no Data
+/// Directory behind it — a stand-in's — which is left to whatever it is.
+pub(crate) fn whom(settings: Option<&Settings>, author: Option<&str>, forge: &str) -> AsWhom {
+    let Some(settings) = settings else {
+        return AsWhom::Host;
+    };
+
+    let config = settings.config();
+
+    let Some(author) = config.author_of(author) else {
+        return AsWhom::Untokened;
+    };
+
+    if config.token_awaited_on(author.id(), forge) {
+        return AsWhom::Awaited;
+    }
+
+    match config.token_of_on(author, &settings.secrets(), forge) {
+        Some(token) => AsWhom::Token(token.to_owned()),
+        None => AsWhom::Untokened,
     }
 }
 
@@ -803,7 +842,7 @@ pub(crate) async fn enabled_now(state: &crate::AppState) -> Vec<Enabled> {
 }
 
 /// The built-in Forges the Plugins records leave enabled.
-async fn built_in(pool: &sqlx::SqlitePool) -> anyhow::Result<Vec<Enabled>> {
+pub(crate) async fn built_in(pool: &sqlx::SqlitePool) -> anyhow::Result<Vec<Enabled>> {
     use crate::replicating::plugins::{Plugins, SettingValue};
 
     let records = crate::store::replicated::live_records::<Plugins>(pool).await?;
