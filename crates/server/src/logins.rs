@@ -107,7 +107,9 @@ struct Speaking {
     signed_out: Option<&'static str>,
 
     /// What the harness prints in front of the address on the line that
-    /// carries it — or `None` where the address is a line of its own.
+    /// carries it — or `None` where the address is only ever a line of its
+    /// own. A line of nothing but an address is read as one either way: see
+    /// [`address_in`].
     visit: Option<&'static str>,
 
     /// What the harness says to a code cut short, before it goes on waiting
@@ -126,7 +128,9 @@ struct Speaking {
 ///
 /// It prints `If the browser didn't open, visit: <url>` on a line of its own,
 /// and then the prompt for the code, `Paste code here if prompted > `, with no
-/// line ending after it. A code with no `#` in it gets `Invalid code` on
+/// line ending after it. Claude Code 2.1.330 breaks the line after `visit:`
+/// and prints the address as a line by itself, which [`address_in`] reads
+/// too. A code with no `#` in it gets `Invalid code` on
 /// standard error, and the harness waits on — see the module note. `auth
 /// status` answers by its exit status: `0` logged in, `1` not. An API key, in
 /// the environment or from an `apiKeyHelper`, reads as logged in.
@@ -408,6 +412,17 @@ impl Logins {
             .lock()
             .expect("the signed-out register is not poisoned")
             .clone()
+    }
+
+    /// A member's session, run from a copy of the account of `profile`, found
+    /// it signed out — see [`crate::peer::account::signed_out`], which has
+    /// checked the login here is still the one it was given.
+    ///
+    /// Marked the way a press here that found it signed out marks it, so the
+    /// card offers Log in; a login landing, or `auth status` before a press
+    /// saying otherwise, takes it off again.
+    pub(crate) fn signed_out_elsewhere(&self, state: &AppState, profile: &str) {
+        self.found(state, profile, false);
     }
 
     /// Put down what the account of `profile` was found to be, and say so to
@@ -1202,12 +1217,20 @@ const DRAWN_WIDE: u16 = 2048;
 
 /// The address in a line the harness printed, where it is the line that
 /// carries one — see [`Speaking::visit`].
+///
+/// **Behind the words or on a line of its own, whichever was printed.** Where
+/// the line carries [`Speaking::visit`], the address is what follows it; where
+/// it does not, a line that is nothing but an address is one. Claude Code
+/// moved its address from the first shape to the second between 2.1.283 and
+/// 2.1.330, and a login that read only the first sat on *Starting* for as long
+/// as it was left — so neither is taken to be the only one.
 fn address_in(line: &str, speaking: &Speaking) -> Option<String> {
-    let url = match speaking.visit {
-        Some(visit) => line.split_once(visit)?.1,
+    let line = line.trim();
+
+    let url = match speaking.visit.and_then(|visit| line.split_once(visit)) {
+        Some((_, after)) => after.trim(),
         None => line,
-    }
-    .trim();
+    };
 
     url.starts_with("https://").then(|| url.to_owned())
 }
@@ -1391,6 +1414,28 @@ mod tests {
                 &CLAUDE
             ),
             Some("https://claude.com/cai/oauth/authorize?code=true".to_owned())
+        );
+    }
+
+    /// Claude Code 2.1.330 over pipes, with a throwaway config directory: the
+    /// address under the words that point at it rather than behind them.
+    #[test]
+    fn claude_2_1_330_prints_its_address_on_a_line_of_its_own() {
+        let printed = [
+            "Opening browser to sign in…",
+            "If the browser didn't open, visit:",
+            "https://claude.ai/oauth/authorize?code=true&state=x",
+            "Paste code here if prompted > ",
+        ];
+
+        let found: Vec<_> = printed
+            .iter()
+            .filter_map(|line| address_in(line, &CLAUDE))
+            .collect();
+
+        assert_eq!(
+            found,
+            ["https://claude.ai/oauth/authorize?code=true&state=x"]
         );
     }
 

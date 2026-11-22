@@ -1036,6 +1036,64 @@ pub async fn update_profile_holding(
     rewrite_profile(pool, id, facts, Some(login)).await
 }
 
+/// **Bind this device** to a Profile: write its binding of the Profile `id`,
+/// naming `account` here, `login` being whether the account at those paths
+/// holds a login file.
+///
+/// The press of its own [`update_profile`] keeps a save from being. What it is
+/// for is a Profile bound only on other devices — one of them switched off,
+/// unlinked, or never to be seen again — which from here on is run as this
+/// device's own account rather than from a copy of somebody else's. Written
+/// over a binding this device already holds, so the press on a Profile bound
+/// here is a rewrite of its paths and nothing else.
+///
+/// `account` is the Profile's harness's shape, which is the caller's to have
+/// checked: a record's harness is not this press's to change.
+///
+/// [`Saving::NoSuchProfile`] for a record that is not there or is removed, and
+/// for one whose binding here carries a deletion stamp — a Profile removed
+/// here, whose stamp is what every other device is learning from.
+pub async fn bind_profile_here(
+    pool: &SqlitePool,
+    id: &str,
+    account: &Account,
+    login: bool,
+) -> Result<Saving> {
+    let mut tx = super::writing(pool, "binding a Profile on this device").await?;
+
+    let Some(held) = replicated::record_on::<Profiles>(&mut tx, id).await? else {
+        return Ok(Saving::NoSuchProfile);
+    };
+
+    if held.removed() {
+        return Ok(Saving::NoSuchProfile);
+    }
+
+    let here = here(&mut tx).await?;
+
+    let written = replicated::written_on::<Bindings>(
+        &mut tx,
+        &here,
+        &binding_uuid(id, &here),
+        &Binding {
+            login,
+            ..Binding::of(account)?
+        },
+        true,
+    )
+    .await?;
+
+    if written == replicated::Written::Removed {
+        return Ok(Saving::NoSuchProfile);
+    }
+
+    tx.commit()
+        .await
+        .with_context(|| format!("binding Profile {id} on this device"))?;
+
+    Ok(Saving::Saved)
+}
+
 /// Both rewrites, `login` being what was looked at where anything was.
 async fn rewrite_profile(
     pool: &SqlitePool,

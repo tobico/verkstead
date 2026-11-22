@@ -44,7 +44,7 @@ use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use verkstead_render::{AccountFile, AccountLogin};
+use verkstead_render::{AccountFile, AccountLogin, AccountSignedOut};
 
 use crate::{AppState, store};
 
@@ -62,6 +62,13 @@ pub const ACCOUNT: &str = "/api/peer/v1/profiles/{profile}/account";
 /// of: the read hands over what a root is made from and this hands one of those
 /// back, and the two are the two directions of one thing.
 pub const LOGIN: &str = "/api/peer/v1/profiles/{profile}/account/login";
+
+/// And where that device says a session there found the account **signed
+/// out**, so that the card here offers the login — see [`signed_out`].
+///
+/// Under the account for [`LOGIN`]'s reason: it is about the login this device
+/// handed over, and nothing else.
+pub const SIGNED_OUT: &str = "/api/peer/v1/profiles/{profile}/account/signed-out";
 
 /// The most a login sent back here may be before the call is refused rather than
 /// read: **sixty-four kilobytes**.
@@ -272,16 +279,95 @@ pub(crate) async fn written(
     }
 }
 
+/// `POST /api/peer/v1/profiles/{profile}/account/signed-out` — a session run
+/// from a copy of this account, on the calling device, found it signed out.
+///
+/// **This device is where the login is made, and nothing it can look at says
+/// it is needed.** The login file is still there, and the harness asked about it
+/// may call it fine — so the card here would go on reading *Logged in*, with no
+/// Log in to press, while every session elsewhere comes up signed out. So the
+/// device that saw it says so, and the Profile is marked here the way a press
+/// here that found it signed out marks it: see [`crate::logins`].
+///
+/// **Only where the login here is still the one that signed out.** The call
+/// names the login that came down by its hash — see [`AccountSignedOut`] — and
+/// a login made here since is the fix having already arrived: marking that one
+/// would offer the human a login they have just done. Either way the answer is
+/// `204`, there being nothing for the caller to do differently.
+///
+/// **A Profile that is not bound here is `404`**, as the two beside it answer
+/// one.
+pub(crate) async fn signed_out(
+    State(state): State<AppState>,
+    Path(profile): Path<String>,
+    Json(sent): Json<AccountSignedOut>,
+) -> Response {
+    let held = match store::load_profile(&state.pool, &profile).await {
+        Ok(held) => held,
+
+        Err(why) => {
+            tracing::error!(
+                error = ?why,
+                profile = %profile,
+                "a member said one of this device's accounts signed out and the Profile could \
+                 not be read",
+            );
+
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "this device could not read its own Profile\n",
+            )
+                .into_response();
+        }
+    };
+
+    let Some(held) = held.filter(|held| held.unbound.is_none()) else {
+        return (
+            StatusCode::NOT_FOUND,
+            "this device holds no binding of an Agent Profile under that id\n",
+        )
+            .into_response();
+    };
+
+    let login = crate::sandbox::root::login_at(&held.account);
+    let here = tokio::task::spawn_blocking(move || crate::mirroring::account::login_named(&login))
+        .await
+        .unwrap_or(None);
+
+    if here == sent.login {
+        tracing::info!(
+            profile = %profile,
+            "a member found this device's account signed out, so its card offers the login",
+        );
+
+        state.logins.signed_out_elsewhere(&state, &profile);
+    } else {
+        tracing::info!(
+            profile = %profile,
+            "a member found this device's account signed out on a login that has been \
+             replaced here since, so nothing is marked",
+        );
+    }
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
 /// The routes, over the state the workbench answers out of.
 ///
 /// **Built here and mounted by [`super::workbench::served`]**, for the reason the
 /// Repos beside it are: they answer out of this device's own Profiles, and a
 /// router over a second state would be answering for a second device's accounts.
 pub(crate) fn route() -> Router<AppState> {
-    Router::new().route(ACCOUNT, get(held)).route(
-        LOGIN,
-        post(written).layer(DefaultBodyLimit::max(MOST_A_LOGIN_IS)),
-    )
+    Router::new()
+        .route(ACCOUNT, get(held))
+        .route(
+            LOGIN,
+            post(written).layer(DefaultBodyLimit::max(MOST_A_LOGIN_IS)),
+        )
+        .route(
+            SIGNED_OUT,
+            post(signed_out).layer(DefaultBodyLimit::max(MOST_A_LOGIN_IS)),
+        )
 }
 
 #[cfg(test)]
@@ -293,7 +379,7 @@ mod tests {
     /// a login, and what the other takes is one.
     #[test]
     fn the_account_is_not_one_of_the_un_gated_three() {
-        for path in [ACCOUNT, LOGIN] {
+        for path in [ACCOUNT, LOGIN, SIGNED_OUT] {
             assert_ne!(path, super::super::IDENTITY);
             assert_ne!(path, super::super::joining::JOIN);
             assert_ne!(path, super::super::exchange::SETTLED);
@@ -306,7 +392,7 @@ mod tests {
     #[test]
     fn the_account_is_not_in_a_namespace_kept_back() {
         for prefix in super::super::workbench::KEPT_TO_ITSELF {
-            for path in [ACCOUNT, LOGIN] {
+            for path in [ACCOUNT, LOGIN, SIGNED_OUT] {
                 assert!(
                     !path.starts_with(prefix),
                     "{path} would be held back with {prefix}/",
@@ -319,7 +405,7 @@ mod tests {
     /// device, the one that answers among them.
     #[test]
     fn the_account_names_the_profile() {
-        for path in [ACCOUNT, LOGIN] {
+        for path in [ACCOUNT, LOGIN, SIGNED_OUT] {
             assert!(
                 path.contains("{profile}"),
                 "the path names the Profile it is about: {path}",

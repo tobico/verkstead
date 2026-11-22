@@ -329,6 +329,23 @@ pub struct AccountLogin {
     pub text: String,
 }
 
+/// What a device running a Profile from a copy tells the device it fetched the
+/// account from, when a session there finds the account **signed out**.
+///
+/// The device the Profile is bound on is the only one that can offer the login,
+/// and nothing it can look at itself says the account has gone: the login file
+/// is still there, and a harness asked about it may say it is fine. So the
+/// device that saw the sign-out says so.
+///
+/// **Which login signed out, by its SHA-256**, as lower-case hex — or `None`
+/// where the copy had no login at all. The device bound on the account marks it
+/// signed out only where its own login is still that one: a login made there
+/// since the copy was fetched is the fix arriving, not the thing that failed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountSignedOut {
+    pub login: Option<String>,
+}
+
 /// A Profile as the human has just written it, for saving or for rewriting.
 ///
 /// The account says which type it is, because the fields beside it are that

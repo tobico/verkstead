@@ -167,14 +167,16 @@ fn says_so(line: &str, phrase: &str) -> bool {
 
 /// Where the Profile a session runs under is bound, which decides what the
 /// Notice offers: a Log in press here, or the name of the device to log in on.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(crate) enum Home {
     /// Bound on this device, so its login is made here.
     Here,
 
-    /// Not bound here: its account was fetched from the device with this
-    /// Device Id, which is where its login is made.
-    Away(String),
+    /// Not bound here: its account was fetched from the device the lending
+    /// names, which is where its login is made — and which is told when a
+    /// session here finds it signed out, see
+    /// [`crate::mirroring::account::Lending::signed_out`].
+    Away(Box<crate::mirroring::account::Lending>),
 }
 
 /// The account's login file as it was when a session's root was built, so that
@@ -403,8 +405,18 @@ async fn signed_out(pool: &SqlitePool, nudges: &Nudges, watch: &Watch, said: &st
 
     let home = match &watch.home {
         Home::Here => None,
-        Home::Away(device) => Some(home_named(pool, device).await),
+        Home::Away(lending) => Some(home_named(pool, lending.at()).await),
     };
+
+    // And the device the login is made on is told, which is the one device
+    // that cannot see this: its file is still there, and without the word its
+    // card goes on reading *Logged in* with nothing to press. Off to one side,
+    // a dial being no reason to hold the stop up.
+    if let Home::Away(lending) = &watch.home {
+        let lending = lending.as_ref().clone();
+
+        tokio::spawn(async move { lending.signed_out().await });
+    }
 
     let stopped = crate::stopping::stop(
         pool,

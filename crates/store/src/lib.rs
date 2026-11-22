@@ -178,10 +178,10 @@ pub use permitted::{forbid_device, permit_device, permitted_devices};
 pub use previews::{Preview, retire_preview, standing_previews, suggest_preview};
 pub use profiles::{
     Account, AgentType, Binding, Bindings, BoundWhere, Channel, Clash, Deleting, Minted, Pairing,
-    Picked, Profile, ProfileFacts, ProfileRecord, Profiles, Saving, Settled, Unbound, binding_uuid,
-    bound_where, create_profile, create_profile_holding, delete_profile, load_profile, logins_held,
-    profile_arrived, profiles, profiles_as_saved, settle, this_device_called, update_profile,
-    update_profile_holding,
+    Picked, Profile, ProfileFacts, ProfileRecord, Profiles, Saving, Settled, Unbound,
+    bind_profile_here, binding_uuid, bound_where, create_profile, create_profile_holding,
+    delete_profile, load_profile, logins_held, profile_arrived, profiles, profiles_as_saved,
+    settle, this_device_called, update_profile, update_profile_holding,
 };
 pub use pull_requests::{
     Merging, PullRequest, Rollup, Standing, Unfinished, Wrapping, check_rollup,

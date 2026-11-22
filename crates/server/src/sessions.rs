@@ -3433,7 +3433,7 @@ impl Sessions {
             crate::profiles::shown(pairing.profile.name.as_deref()).to_owned(),
             match &lending {
                 None => crate::signouts::Home::Here,
-                Some(lending) => crate::signouts::Home::Away(lending.at().to_owned()),
+                Some(lending) => crate::signouts::Home::Away(Box::new(lending.clone())),
             },
             pairing.profile.agent_type(),
             login,

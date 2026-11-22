@@ -146,6 +146,7 @@ import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
 import { PathField } from "../PathField";
 import {
+  bindProfile,
   createProfile,
   deleteProfile,
   editProfile,
@@ -186,12 +187,14 @@ export const PROFILE_REFUSAL: Record<ProfileSaved, string> = {
     "That agent already has a profile with no name. Name this one, so the two accounts can be told apart.",
   DirNotAbsolute:
     "Give the claude directory's absolute path, starting with a slash.",
-  DirMissing: "There's nothing at the claude directory's path.",
+  DirMissing:
+    "There's nothing at the claude directory's path, or at the directory it would go in.",
   NotADirectory:
     "That isn't a directory. A session's ~/.claude is built from one.",
   ConfigNotAbsolute:
     "Give the config file's absolute path, starting with a slash.",
-  ConfigMissing: "There's nothing at the config file's path.",
+  ConfigMissing:
+    "There's nothing at the config file's path, or at the directory it would go in.",
   NotAFile: "That isn't a file. A session's ~/.claude.json is copied from one.",
   HomeNotAbsolute: "Give the home's absolute path, starting with a slash.",
   HomeMissing: "There's nothing at the home's path.",
@@ -245,7 +248,8 @@ const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
       label: "Claude directory",
       note: (
         <>
-          A session's <code>~/.claude</code> is built from it.
+          A session's <code>~/.claude</code> is built from it. Verkstead makes
+          it and the config file if they aren't there yet.
         </>
       ),
       placeholder: "/home/you/accounts/work/.claude",
@@ -825,6 +829,23 @@ export function ProfilePane(props: {
         </p>
       </Show>
 
+      {/* And the press that binds it here, which is how a profile whose
+          devices are off or gone becomes this device's own account. Its own
+          press rather than the save's, because the save is a write of the one
+          record every device pulls and this is a write of this device's paths
+          alone. */}
+      <Show when={saved()?.bound === false ? saved() : undefined}>
+        {(profile) => (
+          <SetUpHere
+            profile={profile()}
+            done={() => {
+              void queries.invalidateQueries({ queryKey: ["profiles"] });
+              void queries.invalidateQueries({ queryKey: ["conversation"] });
+            }}
+          />
+        )}
+      </Show>
+
       {/* The blank form first, so that adding one never waits on a read it has
           no use for. Everything below it is about a Profile that is saved, and
           the fallback is what is left once the list has been read and has no
@@ -907,6 +928,117 @@ export function ProfilePane(props: {
         </Match>
       </Switch>
     </>
+  );
+}
+
+/// Setting a Profile that is bound only on other devices up on this one: the
+/// paths its agent keeps an account at, on this machine, and the press that
+/// binds them.
+///
+/// **Folded behind its button until it is wanted.** Most Profiles bound
+/// elsewhere are run from a copy perfectly well, and a second set of path
+/// fields open under the first would read as the form asking for them. The
+/// press opens them, empty: the paths drawn above are another machine's, and
+/// a directory on a Mac means nothing on a Windows box.
+///
+/// What a bind that was taken means is the caller's — the list read again, the
+/// Profile now bound here, and this section gone with it.
+function SetUpHere(props: {
+  profile: ProfileEntry;
+  done: () => void;
+}): JSX.Element {
+  const [open, setOpen] = createSignal(false);
+  const [account, setAccount] = createSignal<ProfileAccount>(
+    BLANK_ACCOUNT[props.profile.account.agent_type],
+  );
+  const [refused, setRefused] = createSignal<ProfileSaved | null>(null);
+
+  const bind = useMutation(() => ({
+    mutationFn: () => bindProfile(props.profile.id, account()),
+    onSuccess: (outcome: ProfileSaved) => {
+      if (outcome !== "Saved") {
+        setRefused(outcome);
+        return;
+      }
+
+      props.done();
+    },
+  }));
+
+  const fields = (): AccountField[] =>
+    ACCOUNT_FIELDS[props.profile.account.agent_type];
+
+  return (
+    <section class={styles.standing}>
+      <Show
+        when={open()}
+        fallback={
+          <>
+            <div class={styles.actions}>
+              <button
+                type="button"
+                class="secondary"
+                onClick={() => setOpen(true)}
+              >
+                Set up on this device
+              </button>
+            </div>
+            <Note>
+              Use an account on this device for this profile, instead of a copy
+              from another device.
+            </Note>
+          </>
+        }
+      >
+        <form
+          class={styles.form}
+          onSubmit={(ev) => {
+            ev.preventDefault();
+            bind.mutate();
+          }}
+        >
+          <For each={fields()}>
+            {(field) => (
+              <>
+                <label for={`bind-${field.key}`}>{field.label}</label>
+                <Note class={styles.fieldNote}>{field.note}</Note>
+                <PathField
+                  id={`bind-${field.key}`}
+                  dotfiles
+                  files={field.file}
+                  placeholder={field.placeholder}
+                  value={path(account(), field.key)}
+                  write={(value) => {
+                    setAccount(written(account(), field.key, value));
+                    setRefused(null);
+                  }}
+                />
+              </>
+            )}
+          </For>
+
+          <div class={styles.buttons}>
+            <button type="submit" disabled={bind.isPending}>
+              Set up on this device
+            </button>
+          </div>
+
+          <Show when={refused()}>
+            {(outcome) => (
+              <ErrorLine class={styles.failure}>
+                {PROFILE_REFUSAL[outcome()]}
+              </ErrorLine>
+            )}
+          </Show>
+          <Show when={bind.isError}>
+            <ErrorLine class={styles.failure}>
+              The profile couldn't be set up on this device.{" "}
+              {bind.error?.message}
+            </ErrorLine>
+          </Show>
+        </form>
+      </Show>
+    </section>
   );
 }
 

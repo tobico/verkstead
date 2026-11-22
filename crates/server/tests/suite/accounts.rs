@@ -1378,6 +1378,120 @@ async fn a_home_that_is_not_answering_refuses_the_launch_by_name() {
     );
 }
 
+/// A home that has **left the cluster** is passed over rather than dialled: its
+/// binding outlives the link, only it could ever take that binding back, and a
+/// refusal naming a machine nobody can reach any more would be said in front of
+/// the gap that is actually there — that no device in the cluster holds the
+/// login.
+#[tokio::test]
+async fn a_home_that_has_left_the_cluster_is_not_asked_for_the_account() {
+    let b = Verkstead::running(B, PRINTS_ITS_ROOT).await;
+
+    let away = tempfile::tempdir().unwrap();
+    let gone = Device::stated(away.path(), A).unwrap();
+
+    b.linked_to(&gone, A_MACHINE, A_OS, vec!["127.0.0.1:1".to_owned()])
+        .await;
+
+    store::profile_arrived(
+        &b.pool,
+        "7a1d0c2e-0000-4000-8000-000000000008",
+        A,
+        &store::ProfileFacts {
+            name: Some("work".to_owned()),
+            account: store::Account::Claude {
+                claude_dir: PathBuf::from("/home/you/accounts/work/.claude"),
+                config_file: PathBuf::from("/home/you/accounts/work/.claude.json"),
+            },
+            models: vec![MODEL.to_owned()],
+            memory: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    store::forget_member(&b.pool, A).await.unwrap();
+
+    let mirror = b.listed("work").await;
+
+    let why = b
+        .fetches(&mirror)
+        .await
+        .expect_err("no device in the cluster holds the account");
+
+    assert!(
+        !why.saying.contains(A) && !why.saying.contains(A_MACHINE),
+        "the device that left is not the one named: {}",
+        why.saying,
+    );
+    assert!(
+        why.saying.contains("login"),
+        "the gap is said instead: {}",
+        why.saying,
+    );
+}
+
+/// A session on B that finds A's account **signed out** tells A, and A's card
+/// stops reading *Logged in*: A is where the login is made, and its file is
+/// still there, so nothing A can look at itself says the login is needed.
+#[tokio::test]
+async fn a_sign_out_away_from_home_is_told_at_home() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.account("work").await;
+
+    let mirror = b.mirror_of("work").await;
+    let lent = b.fetches(&mirror).await.expect("A answered").lent;
+
+    let before = a.profiles().await;
+    assert_eq!(
+        called(&before, "work").expect("A's own row").broken,
+        None,
+        "logged in, as far as A can tell",
+    );
+
+    mirroring::account::Lending::of(&b.pool, Some(&b.cluster), lent)
+        .signed_out()
+        .await;
+
+    let after = a.profiles().await;
+    assert_eq!(
+        called(&after, "work").expect("A's own row").broken,
+        Some(verkstead_render::Broken::SignedOut),
+        "and A's card offers the login once B has said",
+    );
+}
+
+/// But not where A's login has been made again since B fetched its copy: that
+/// login is the fix having arrived, and marking it would offer a login the human
+/// has just done.
+#[tokio::test]
+async fn a_sign_out_on_a_login_replaced_at_home_marks_nothing() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.account("work").await;
+
+    let mirror = b.mirror_of("work").await;
+    let lent = b.fetches(&mirror).await.expect("A answered").lent;
+
+    std::fs::write(
+        a.login_of("work"),
+        r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-made-again"}}"#,
+    )
+    .unwrap();
+
+    mirroring::account::Lending::of(&b.pool, Some(&b.cluster), lent)
+        .signed_out()
+        .await;
+
+    assert_eq!(
+        called(&a.profiles().await, "work")
+            .expect("A's own row")
+            .broken,
+        None,
+    );
+}
+
 /// A token refreshed **inside a session on B** is in A's account once that session
 /// ends: the login is the one file of a root a session genuinely changes, and an
 /// account lent out and never written back would be one signing itself out a

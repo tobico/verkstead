@@ -658,6 +658,9 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         )
         .route("/api/ui/profiles", get(profiles).post(create_profile))
         .route("/api/ui/profiles/{id}", post(edit_profile))
+        // Setting a Profile up on this device, a press of its own rather than
+        // a side effect of a save — see [`crate::profiles::bind`].
+        .route("/api/ui/profiles/{id}/bind", post(bind_profile))
         // Removing is a POST to a route of its own, as closing a Set unanswered
         // is: the viewer speaks one method, and the thing being done is named in
         // the path rather than in the verb.
@@ -6235,6 +6238,30 @@ async fn edit_profile(
         Err(error) => {
             tracing::error!(error = ?error, profile_id = %id, "rewriting an Agent Profile failed");
             unavailable("The agent profile couldn't be saved.")
+        }
+    }
+}
+
+/// A Profile bound on other devices set up on this one, at the paths sent —
+/// see [`crate::profiles::bind`]. Answered as a save is, the paths judged and
+/// refused in the same words.
+async fn bind_profile(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(account): Json<verkstead_render::ProfileAccount>,
+) -> HttpResponse {
+    match crate::profiles::bind(&state.pool, &id, &account).await {
+        Ok(Some(outcome)) => {
+            moved_profiles(&state, outcome == verkstead_render::ProfileSaved::Saved);
+            Json(outcome).into_response()
+        }
+        Ok(None) => refused(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::new("That account is for a different agent than this profile."),
+        ),
+        Err(error) => {
+            tracing::error!(error = ?error, profile_id = %id, "binding an Agent Profile here failed");
+            unavailable("The agent profile couldn't be set up on this device.")
         }
     }
 }
