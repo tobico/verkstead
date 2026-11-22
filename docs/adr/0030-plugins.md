@@ -329,10 +329,19 @@ anything and nothing a human could read. States over Activities is the shape
 an author writes in YAML that still runs the ladder.
 
 **Roles are the plugin's.** It declares them by name and label, one marked as
-the **building role** the Done signal, memos and previews assume; the three
-known names — Grilling, Implementation, Review — keep their per-Repo memory
-and platform defaults, and the Agent control's shape follows the count, which
+the **building role** the Done signal, memos and previews assume, and each one
+saying whether its picker offers the row that runs no session; the three known
+names — Grilling, Implementation, Review — keep their per-Repo memory and
+platform defaults, and the Agent control's shape follows the count, which
 retires ADR-0020's table in favour of the manifest.
+
+Each state declares the roles its own sessions run under, or none and runs
+under the building role: that is what a steer into it settles and what the
+Pairing a session is launched under is looked up by. A role is a **word** from
+the store up — one table keyed by name per Conversation and per Repo, rather
+than a column apiece — so a name nobody has used before is a role with a
+memory of its own from the first time something is picked for it, and its
+platform default is the value tier the three known ones but Grilling take.
 
 **Directions are mapped, not assumed.** The interview ends in a pick; a
 Process maps the directions it offers to states, the chooser draws only

@@ -36,9 +36,9 @@
 //! ranks below, half of it is the serve's: which device a Profile was minted
 //! on, and the account mirrors on disk named by the integer.
 //!
-//! Twelve of them are a column arriving rather than rows moving between tables —
-//! the Review role's Profile, the branch name somebody settled on, whether a
-//! branch is still waiting to be named, whether a session is idling on a stored
+//! Eleven of them are a column arriving rather than rows moving between tables —
+//! the branch name somebody settled on, whether a branch is still waiting to
+//! be named, whether a session is idling on a stored
 //! ask, the branch a Conversation's base was resolved through, whether a commit
 //! is a merge, which Answer an attached file was put on, whether a Profile
 //! shares its account's memory, the question a half-written steer would open
@@ -48,7 +48,7 @@
 //! already there are given the value that says what was true of them before the
 //! column existed.
 //!
-//! **And one of the twelve is filled from outside this run**, which makes it the
+//! **And one of the eleven is filled from outside this run**, which makes it the
 //! only rewrite here that is not finished by the time a database is open: a Rank
 //! carries the device that issued it (ADR-0020, *Ranks*), and the device
 //! identity is read out of the very pool this is running inside — so nothing in
@@ -69,6 +69,12 @@
 //! them before it existed, and that key names a device. So
 //! [`stamp_the_births`] sits beside [`rank_the_conversations`] and is called the
 //! same way, for the same reason and at the same moment.
+//!
+//! **And one goes the other way, taking columns into a table**: a
+//! Conversation's roles are its Process's rather than Verkstead's three
+//! (ADR-0030, *Process*), so the three Profile columns that held its Pairings
+//! become rows keyed by the role's name — see [`pairings_that_were_columns`],
+//! which runs last because the rewrites above it still name those columns.
 //!
 //! [`record_the_repo_authors`] is the third of that kind: the uuid every
 //! Repo is recorded as is minted in `config.yaml`, which nothing
@@ -94,7 +100,6 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     fix_attempts_that_named_no_repo(pool).await?;
     settlements_that_named_no_pull_request(pool).await?;
     addressed_comments_that_named_no_pull_request(pool).await?;
-    conversations_that_had_no_review_profile(pool).await?;
     conversations_whose_branch_name_had_no_owner(pool).await?;
     conversations_whose_branch_nobody_was_naming(pool).await?;
     stored_asks_nobody_was_idling_on(pool).await?;
@@ -120,7 +125,75 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     author_mirrors_that_are_records_now(pool).await?;
     profiles_that_were_numbered_here(pool).await?;
     profiles_that_are_records_now(pool).await?;
-    profile_mirrors_that_are_records_now(pool).await
+    profile_mirrors_that_are_records_now(pool).await?;
+    pairings_that_were_columns(pool).await
+}
+
+/// Move the three Pairing columns of `conversations` into
+/// `conversation_pairings`, keyed by the **role's name**, and take them away.
+///
+/// A Conversation's roles are its Process's (ADR-0030, *Process*), and a plugin
+/// may name one nobody here has used before — so which roles a Conversation has
+/// settled something about is a set of rows rather than a set of columns. The
+/// three Verkstead knows are written in under the words they were always stored
+/// under, `grilling`, `implementation` and `review`, which are the words
+/// `pairing_models` and `skipped_roles` have held beside them all along: nothing
+/// a picker draws changes, and nothing else in the database is rewritten.
+///
+/// **Last of the rewrites**, because the ones above it name those columns while
+/// they are still there — see [`profiles_made_records`], which takes their
+/// foreign keys off.
+///
+/// **A column that is not there is nothing to move**, which is what covers a
+/// database written before there was a Review role at all: it has two of the
+/// three, each moved in, and its review reads as nothing picked — exactly what
+/// the column that used to be added for it held. What such a Conversation's
+/// review runs under is still the building Pairing, decided above the store.
+///
+/// Safe to run twice: what says whether there is anything to do is the columns
+/// still being on the table, and after the first run none of them is.
+async fn pairings_that_were_columns(pool: &SqlitePool) -> Result<()> {
+    const COLUMNS: [(&str, &str); 3] = [
+        ("grilling_profile_id", "grilling"),
+        ("implementation_profile_id", "implementation"),
+        ("review_profile_id", "review"),
+    ];
+
+    let mut tx = super::writing(pool, "moving the Pairing columns into their own table").await?;
+
+    for (column, role) in COLUMNS {
+        let there: Option<(i64,)> =
+            sqlx::query_as("SELECT 1 FROM pragma_table_info('conversations') WHERE name = ?")
+                .bind(column)
+                .fetch_optional(&mut *tx)
+                .await
+                .with_context(|| {
+                    format!("looking at whether conversations.{column} is still there")
+                })?;
+
+        if there.is_none() {
+            continue;
+        }
+
+        sqlx::query(&format!(
+            "INSERT INTO conversation_pairings (conversation_id, role, profile_id)
+             SELECT id, ?, {column} FROM conversations WHERE {column} IS NOT NULL
+             ON CONFLICT (conversation_id, role) DO NOTHING"
+        ))
+        .bind(role)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("moving conversations.{column} into its own table"))?;
+
+        sqlx::query(&format!("ALTER TABLE conversations DROP COLUMN {column}"))
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("taking conversations.{column} away"))?;
+    }
+
+    tx.commit()
+        .await
+        .context("moving the Pairing columns into their own table")
 }
 
 /// Make every Agent Profile of this device's own a **Replicated record**, its
@@ -1695,51 +1768,6 @@ async fn conversations_whose_branch_name_had_no_owner(pool: &SqlitePool) -> Resu
         .execute(pool)
         .await
         .context("settling the branch names the Conversations written before this carry")?;
-
-    Ok(())
-}
-
-/// Give every Conversation written before there was a Review role the column
-/// that holds it.
-///
-/// A Conversation used to fix two Pairings and now fixes three — one for the
-/// grilling, one for what builds, one for the wrap-up's review — and the third
-/// goes in a column beside the other two rather than in a table of its own,
-/// because [`super::conversations::Role`] names a column per role and a role
-/// whose Profile half lived somewhere else would be two ways of storing the one
-/// choice.
-///
-/// Empty for every row it adds, which is what an unchosen picker is: what was
-/// grilled before this existed was reviewed under the implementation Pairing,
-/// and writing that in would be inventing a choice nobody made.
-///
-/// Which is still where such a Conversation's review runs. The column is empty
-/// and there is no way left to fill it — the pickers froze when its work
-/// started — so a review with none picked is launched under the Implementation
-/// Pairing, above the store. That is what keeps an empty column a choice nobody
-/// made rather than a wrap-up nothing can ever finish.
-///
-/// Safe to run twice: what says whether there is anything to do is the column
-/// being absent, and after the first run it is there.
-async fn conversations_that_had_no_review_profile(pool: &SqlitePool) -> Result<()> {
-    let there: Option<(String,)> =
-        sqlx::query_as("SELECT name FROM pragma_table_info('conversations') WHERE name = ?")
-            .bind("review_profile_id")
-            .fetch_optional(pool)
-            .await
-            .context("looking for the review Profile of a Conversation")?;
-
-    if there.is_some() {
-        return Ok(());
-    }
-
-    sqlx::query(
-        "ALTER TABLE conversations
-         ADD COLUMN review_profile_id INTEGER REFERENCES profiles(id)",
-    )
-    .execute(pool)
-    .await
-    .context("giving the Conversations written before this a review Profile")?;
 
     Ok(())
 }

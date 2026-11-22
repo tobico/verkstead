@@ -629,7 +629,8 @@ pub(crate) fn whose(members: &HashMap<String, store::Member>, device: &str) -> R
     }
 }
 
-/// Whether everything the next stage needs before it will start is settled.
+/// Whether every role is settled: what the pane reads before it offers the
+/// button that starts the work.
 ///
 /// Every Pairing complete — a Profile *and* a model — and no Profile broken.
 /// Broken as well as chosen because a pair that has gone is a session that
@@ -643,58 +644,22 @@ pub(crate) fn whose(members: &HashMap<String, store::Member>, device: &str) -> R
 /// refuse is never the one that runs anything.
 ///
 /// **A role picked away is settled**, and settles this: there is no session to
-/// fail to start, so a Conversation that will not be reviewed is as ready as one
-/// that will. What it is not is an empty picker — see
-/// [`verkstead_render::PickedView`]. Which leaves the review the one role read
-/// that way: the grilling picker's own such row retired with *No grilling*, so
-/// that role is answered with an account or not answered.
-pub(crate) fn ready_to_grill(
-    grilling: Option<&PairingView>,
-    implementation: Option<&PairingView>,
-    review: &PickedView,
-) -> bool {
-    runnable(grilling) && ready_to_wrap(implementation, review)
-}
-
-/// And the same with the grilling left out of it, which is what a Process that
-/// is never interviewed waits on: a **Tinker**, whose composer draws no Grilling
-/// picker at all.
+/// fail to start, so a Conversation that will not be reviewed is as ready as
+/// one that will. What it is not is an empty picker — see
+/// [`verkstead_render::PickedView`].
 ///
-/// The reading `unready_to_wrap` in [`crate::conversations`] takes for the
-/// press, said the way the pane wants it — one of them is what decides whether
-/// to offer the button and the other is what was wrong when it was pressed, and
-/// they have to be the one question.
-pub(crate) fn ready_to_wrap(implementation: Option<&PairingView>, review: &PickedView) -> bool {
-    runnable(implementation) && settled(review)
-}
-
-/// And the same with the review left out of it as well, which is what a Process
-/// run under the Implementation role alone waits on: an **Investigate**, whose
-/// composer draws the one **Agent** dropdown and no other picker.
-///
-/// The one role every Process uses and no Process can pick away — there is no
-/// work without something doing it — so this is [`runnable`] under the name of
-/// the question it answers. Said here beside the other two rather than called
-/// directly, because what a press asks and what the pane asks have to be the one
-/// reading: `unready_to_investigate` in [`crate::conversations`] is the other
-/// half of it.
-pub(crate) fn ready_to_investigate(implementation: Option<&PairingView>) -> bool {
-    runnable(implementation)
-}
-
-/// Whether the one role that can be picked away is settled: a Pairing something
-/// could be launched under, or the row that launches nothing.
-fn settled(picked: &PickedView) -> bool {
-    match picked {
+/// **Which roles is the Process's to say** (Set 1765, Q26), which is why the
+/// three readings this used to be are one: a **Tinker** declares no grilling
+/// role, so the Grilling picker is drawn for it nowhere and this waits on the
+/// two it does declare; an **Investigate** declares the one. The press asks
+/// exactly this again when it is pressed — see `unready` in
+/// [`crate::conversations`], where the reading stands beside its refusals.
+pub(crate) fn every_role_settled(pairings: &[verkstead_render::RolePairingView]) -> bool {
+    pairings.iter().all(|role| match &role.picked {
         PickedView::Nothing => false,
         PickedView::Skipped => true,
-        PickedView::Under(pairing) => runnable(Some(pairing)),
-    }
-}
-
-/// Whether one picked Pairing is something a session could be launched under.
-fn runnable(pairing: Option<&PairingView>) -> bool {
-    pairing.is_some_and(|pairing| pairing.model.is_some() && pairing.profile.broken.is_none())
+        PickedView::Under(pairing) => pairing.model.is_some() && pairing.profile.broken.is_none(),
+    })
 }
 
 /// Why this Profile cannot be run under as things stand, or `None` while its
@@ -977,54 +942,26 @@ fn made(path: &Path, file: bool) -> Resolved {
     resolve(path)
 }
 
-/// Choose the Pairing a Conversation's grilling session will run under.
-///
-/// An account and nothing else, the picker having no row that is not one: *No
-/// grilling* is retired, and a Brief that wants no interview is a **Tinker**
-/// Conversation.
-pub(crate) async fn choose_grilling(
-    pool: &SqlitePool,
-    id: i64,
-    choice: &ProfileChoice,
-) -> Result<ProfileChosen> {
-    if let Some(refusal) = unlisted(pool, choice).await? {
-        return Ok(refused(refusal));
-    }
-
-    Ok(chosen(
-        store::set_grilling_pairing(pool, id, &choice.profile_id, Some(&choice.model)).await?,
-    ))
-}
-
-/// And the one its implementation will run under.
-pub(crate) async fn choose_implementation(
-    pool: &SqlitePool,
-    id: i64,
-    choice: &ProfileChoice,
-) -> Result<ProfileChosen> {
-    if let Some(refusal) = unlisted(pool, choice).await? {
-        return Ok(refused(refusal));
-    }
-
-    Ok(chosen(
-        store::set_implementation_pairing(pool, id, &choice.profile_id, Some(&choice.model))
-            .await?,
-    ))
-}
-
-/// And the one the wrap-up's review session will run under — or the row that
-/// says there is to be no review session at all.
+/// Choose the Pairing the sessions of one of a Conversation's roles will run
+/// under — or the row that says there is to be no session for it at all.
 ///
 /// One press either way, because the picker offers them as one list: nothing is
-/// judged about a review that runs nothing, there being no Profile to have gone
+/// judged about a role that runs nothing, there being no Profile to have gone
 /// and no model to have been retyped.
-pub(crate) async fn choose_review(
+///
+/// **One press for every role**, named by the role, a Conversation's roles
+/// being its Process's (Set 1765, Q26) — and a name nobody has used before is a
+/// role from the moment something is picked for it, which is the whole of what
+/// gives it a memory of its own. Which roles there are to pick for is the
+/// manifest's and is drawn from it; this only writes what was picked.
+pub(crate) async fn choose_for(
     pool: &SqlitePool,
     id: i64,
+    role: &store::Role,
     choice: &RoleChoice,
 ) -> Result<ProfileChosen> {
     let Some(choice) = &choice.pairing else {
-        return Ok(chosen(store::skip_review(pool, id).await?));
+        return Ok(chosen(store::skip_role(pool, id, role).await?));
     };
 
     if let Some(refusal) = unlisted(pool, choice).await? {
@@ -1032,7 +969,7 @@ pub(crate) async fn choose_review(
     }
 
     Ok(chosen(
-        store::set_review_pairing(pool, id, &choice.profile_id, Some(&choice.model)).await?,
+        store::set_pairing(pool, id, role, &choice.profile_id, Some(&choice.model)).await?,
     ))
 }
 

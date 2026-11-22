@@ -215,6 +215,16 @@ modal was considered and rejected: the Repo panel is the pattern beside it.
 | Tinker | Implementation, Review (or none) | panel |
 | Fix Merge Issues | Implementation | dropdown |
 
+**That table is the manifests' now** (*amended 2026-11-22, stage 11 task 06*).
+Roles are the Process's: each one declares them in its `process` block by name
+and label, marks the one that builds, and says which of them offer the row that
+runs no session — see [ADR-0030](0030-plugins.md), *Process*. The five rows
+above are what the five bundled plugins declare, so nothing a human sees
+changes; what the viewer draws is read off the record instead of out of a table
+of its own, and the Control column is how many roles there are rather than a
+column at all. A role a plugin names that nobody has used before gets a Pairing
+memory of its own the first time something is picked for it.
+
 Develop is the default on every new draft and is not remembered per Repo: the
 Pairings are remembered because they are the same answer most of the time, and
 a Process is the one thing about a Conversation most likely to differ from the

@@ -135,6 +135,7 @@ import type {
   ProfileTrouble,
   PullRequestEvent,
   QuestionSetEvent,
+  RoleWanted,
   StageEntry,
   StageListEvent,
   StageListReached,
@@ -175,6 +176,7 @@ import { StatusButton } from "./StatusButton";
 import styles from "./Timeline.module.css";
 import { titled } from "./naming";
 import { inFlight, settled, stageState } from "./stages";
+import { away } from "./processes";
 import { STATE, stateWord } from "./states";
 import { opensRoadmap, type Opening } from "./openings";
 import { windowed } from "./windowing";
@@ -207,12 +209,6 @@ const GRILL_REFUSAL: Record<Extract<GrillingStarted, string>, string> = {
   Started: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
-  NoGrillingProfile:
-    "Choose a grilling profile and model on the brief first.",
-  NoImplementationProfile:
-    "Choose an implementation profile and model on the brief first.",
-  NoReviewProfile:
-    "Pick a review profile and model, or No review, on the brief first.",
   EmptyBrief: "Write the brief first. The work starts from it.",
   ProcessNotOffered:
     "This process's plugin is switched off or in trouble. Pick another process, or fix the plugin in Settings.",
@@ -258,6 +254,19 @@ export function companionRefusal(why: CompanionRefusal): string {
   return COMPANION_REFUSAL[why];
 }
 
+/// What a press says about a role it is waiting on a pairing for, whichever
+/// press it was: the role named as its own picker is labelled, so the sentence
+/// sends the human to the control they would go and change.
+///
+/// Exported because every press that waits on one says it: starting a grilling,
+/// adopting a stage and taking a pull request up — see
+/// [`Adoption`](./Adoption.tsx) and [`TakeUp`](./TakeUp.tsx).
+export function pairingWanted(role: RoleWanted): string {
+  return role.away
+    ? `Pick a profile and model for ${role.label}, or ${away(role)}, on the brief first.`
+    : `Choose a profile and model for ${role.label} on the brief first.`;
+}
+
 /// What to say about a start that was refused.
 ///
 /// A companion's refusal names the repository, because that is the whole of
@@ -265,6 +274,10 @@ export function companionRefusal(why: CompanionRefusal): string {
 /// thing to go and look at is one of several repos rather than the obvious one.
 export function grillRefusal(outcome: GrillingStarted): string {
   if (typeof outcome === "object") {
+    if ("NoPairing" in outcome) {
+      return pairingWanted(outcome.NoPairing);
+    }
+
     if ("ProfileBroken" in outcome) {
       return profileRefusal(outcome.ProfileBroken);
     }

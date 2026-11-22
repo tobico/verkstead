@@ -468,8 +468,10 @@ impl Workbench {
 
         for (path, body) in [
             (
-                "implementation-pairing",
-                serde_json::json!({ "profile_id": profile, "model": model }),
+                "pairings/implementation",
+                serde_json::json!({
+                    "pairing": { "profile_id": profile, "model": model },
+                }),
             ),
             ("process", serde_json::json!({ "process": "Investigate" })),
             (

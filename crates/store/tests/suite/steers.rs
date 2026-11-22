@@ -291,7 +291,7 @@ async fn a_steer_settles_the_pairing_the_human_picked() {
             id,
             Steer {
                 pairings: &[Settling {
-                    role: Role::Implementation,
+                    role: Role::implementation(),
                     profile_id: &profile,
                     model: "opus-4.8",
                 }],
@@ -311,7 +311,8 @@ async fn a_steer_settles_the_pairing_the_human_picked() {
     assert_eq!(conversation.state, Lifecycle::Wrapping);
 
     let paired = conversation
-        .implementation_pairing
+        .pairings
+        .under(&verkstead_store::Role::implementation())
         .expect("the steer settled one");
 
     assert_eq!(paired.profile.id, profile);
@@ -322,7 +323,10 @@ async fn a_steer_settles_the_pairing_the_human_picked() {
          with",
     );
     assert!(
-        conversation.grilling_pairing.is_none(),
+        conversation
+            .pairings
+            .under(&verkstead_store::Role::grilling())
+            .is_none(),
         "and only the role steered into: the other is nobody's to re-settle here",
     );
 }
@@ -344,7 +348,7 @@ async fn a_steer_naming_a_profile_that_has_gone_moves_nothing() {
             id,
             Steer {
                 pairings: &[Settling {
-                    role: Role::Implementation,
+                    role: Role::implementation(),
                     profile_id: "no-such-profile",
                     model: "opus-5",
                 }],
@@ -1053,7 +1057,7 @@ async fn a_steer_records_the_whole_form_beside_its_event() {
             id,
             Steer {
                 pairings: &[Settling {
-                    role: Role::Implementation,
+                    role: Role::implementation(),
                     profile_id: &profile,
                     model: "opus-4.8",
                 }],
@@ -1158,7 +1162,7 @@ async fn a_steer_whose_profile_has_been_removed_still_says_one_was_picked() {
         id,
         Steer {
             pairings: &[Settling {
-                role: Role::Implementation,
+                role: Role::implementation(),
                 profile_id: &profile,
                 model: "opus-5",
             }],

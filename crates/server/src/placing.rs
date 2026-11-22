@@ -1051,7 +1051,16 @@ async fn not_awake(state: &AppState, conversation_id: i64, device: &str) -> Opti
 
     let config = state.settings.config();
 
-    match crate::preflight::of(Some(devices), &state.pool, &config, &conversation, device).await {
+    match crate::preflight::of(
+        Some(devices),
+        &state.pool,
+        &config,
+        &conversation,
+        &crate::processes::labels(state, &conversation.process),
+        device,
+    )
+    .await
+    {
         Ok(reading) => (unclean(&reading) == Some(Unclean::Asleep)).then(|| Device {
             id: device.to_owned(),
             name: reading.device,
@@ -1236,7 +1245,15 @@ pub(crate) async fn woke(
     let mut answered = None;
 
     for device in waiting_on {
-        match crate::preflight::of(Some(devices), &state.pool, &config, &conversation, device).await
+        match crate::preflight::of(
+            Some(devices),
+            &state.pool,
+            &config,
+            &conversation,
+            &crate::processes::labels(state, &conversation.process),
+            device,
+        )
+        .await
         {
             Ok(reading) if reading.lacks.is_empty() => {
                 answered = Some((device, reading.device));
@@ -1346,6 +1363,7 @@ async fn placing(
                 &state.pool,
                 config,
                 conversation,
+                &crate::processes::labels(state, &conversation.process),
                 &member.device,
             )
             .await

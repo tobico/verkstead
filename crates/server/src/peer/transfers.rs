@@ -109,7 +109,7 @@ pub(crate) async fn take(
         id: arriving.born.id,
     };
 
-    let (grilling, implementation, review) = match resolved(&state, &arriving).await {
+    let pairings = match resolved(&state, &arriving).await {
         Ok(picked) => picked,
         Err(refusal) => return refusal,
     };
@@ -122,9 +122,7 @@ pub(crate) async fn take(
         naming: arriving.naming,
         state: crate::ui::state_of(arriving.state),
         rank: arriving.rank.clone(),
-        grilling,
-        implementation,
-        review,
+        pairings,
     };
 
     // Whether this device already holds a copy of this work, asked before
@@ -741,7 +739,13 @@ pub(crate) async fn sweep(State(state): State<AppState>, Path(id): Path<i64>) ->
     }
 }
 
-/// The three roles, each read into an id of this device's own.
+/// Each role the arriving work has settled something for, read into an id of
+/// this device's own and kept under the name it crossed with.
+///
+/// Whichever roles those are: a Process names the roles it is run under, so a
+/// name this device has never used is written down as it arrived rather than
+/// argued with — the Process that names it is the plugin's, and a role nobody
+/// here has seen is a role nothing here has an opinion about.
 ///
 /// `Err` is the refusal to answer with, naming the Profile that has no row here:
 /// the sending device picked the pair off its own rows, and a mirror it holds
@@ -750,16 +754,9 @@ pub(crate) async fn sweep(State(state): State<AppState>, Path(id): Path<i64>) ->
 async fn resolved(
     state: &AppState,
     arriving: &ConversationAcross,
-) -> Result<
-    (
-        store::ArrivingPicked,
-        store::ArrivingPicked,
-        store::ArrivingPicked,
-    ),
-    Response,
-> {
-    // One read of the registry for all three, rather than a lookup apiece: a
-    // Conversation names three Pairings and they are very often one account.
+) -> Result<Vec<(store::Role, store::ArrivingPicked)>, Response> {
+    // One read of the registry for all of them, rather than a lookup apiece: a
+    // Conversation's Pairings are very often one account.
     let profiles = match store::profiles(&state.pool).await {
         Ok(profiles) => profiles,
         Err(why) => {
@@ -773,21 +770,10 @@ async fn resolved(
         }
     };
 
-    let mut read = [
-        store::ArrivingPicked::Nothing,
-        store::ArrivingPicked::Nothing,
-        store::ArrivingPicked::Nothing,
-    ];
+    let mut read = Vec::new();
 
-    for (at, picked) in [
-        &arriving.grilling,
-        &arriving.implementation,
-        &arriving.review,
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        read[at] = match picked {
+    for crossed in &arriving.pairings {
+        let picked = match &crossed.picked {
             PickedAcross::Nothing => store::ArrivingPicked::Nothing,
             PickedAcross::Skipped => store::ArrivingPicked::Skipped,
 
@@ -809,11 +795,11 @@ async fn resolved(
                 }
             }
         };
+
+        read.push((store::Role::named(&crossed.role), picked));
     }
 
-    let [grilling, implementation, review] = read;
-
-    Ok((grilling, implementation, review))
+    Ok(read)
 }
 
 /// Which row of this device's `profiles` is the Profile a transfer names, where

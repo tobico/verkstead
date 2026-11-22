@@ -345,10 +345,10 @@ impl Harness for OpenCode {
         ))
     }
 
-    fn model(&self, role: store::Role) -> &str {
-        match role {
-            store::Role::Grilling => "opencode/gpt-5.1-codex",
-            store::Role::Implementation | store::Role::Review => "minimax/minimax-m2.1",
+    fn model(&self, role: &store::Role) -> &str {
+        match role.stored() {
+            store::Role::GRILLING => "opencode/gpt-5.1-codex",
+            _ => "minimax/minimax-m2.1",
         }
     }
 

@@ -131,7 +131,6 @@ import type {
   OfferedPack,
   PackAttached,
   PackRemoved,
-  Process,
   ServerAttached,
   ServerRemoved,
   TakenUp,
@@ -512,10 +511,13 @@ function Written(props: {
 }
 
 /// What an unready start is waiting on, said in its tooltip — the clauses and
-/// the roles counted off the Process's own table rather than written into the
+/// the roles counted off the Process's own roles rather than written into the
 /// sentence, so a Review says it waits on a target and a Develop does not.
-const missing = (process: Process): string =>
-  `This needs ${needed(process, { brief: true, target: true })}.`;
+const missing = (conversation: ConversationView): string =>
+  `This needs ${needed(conversation.process, conversation.pairings.length, {
+    brief: true,
+    target: true,
+  })}.`;
 
 /// The press the whole pane is arranged for, in whichever of its two shapes
 /// this Conversation's Process gives it.
@@ -611,7 +613,7 @@ function Starting(props: {
           // which is what carries the explanation.
           disabled={props.pending}
           aria-disabled={!ready()}
-          title={ready() ? undefined : missing(props.conversation.process)}
+          title={ready() ? undefined : missing(props.conversation)}
           onClick={() => ready() && props.press()}
         >
           {props.pending ? "Starting…" : (props.label ?? "Start work")}

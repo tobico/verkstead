@@ -155,7 +155,6 @@ import contents from "../src/set/Contents.module.css";
 import sheet from "../src/set/Sheet.module.css";
 import illegible from "../src/set/Unreadable.module.css";
 import { rowKey } from "../src/reaching";
-import { under } from "../src/pairing";
 // The listbox the app draws for itself, whose own names the setup row's
 // triggers are built out of — the line the reading stands on above all.
 import chrome from "../src/picking.module.css";
@@ -171,7 +170,7 @@ import {
   UNARCHIVE_REFUSAL,
 } from "../src/workbench/Actions";
 import actions from "../src/workbench/Actions.module.css";
-import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
+import { adoptRefusal } from "../src/workbench/Adoption";
 import adoption from "../src/workbench/Adoption.module.css";
 // The detail panes, each a module of its own: the brief and what the
 // conversation was configured with, a commit, a document read whole, one
@@ -218,10 +217,8 @@ import {
   DESCRIPTION,
   OFFERED,
   PROCESS,
-  ROLES,
   TARGETED,
   targeted,
-  uses,
 } from "../src/workbench/processes";
 import { knowProvidedProcesses } from "../src/workbench/provided";
 // The pause card, which is one of the record's and draws itself.
@@ -359,6 +356,9 @@ import {
   mountSidebar,
   nodes,
   nudged,
+  onRole,
+  pairedAs,
+  settledRole,
   openAgent,
   theWorkbench,
 } from "./bench";
@@ -3049,7 +3049,7 @@ describe("the adoption page", () => {
   /// the human guessing which.
   it("says which refusal a press came back with", async () => {
     for (const outcome of [
-      "NoImplementationProfile",
+      { NoPairing: { role: "implementation", label: "Implementation", away: false } },
       "RoadmapComplete",
       "StageInFlight",
       "BranchExists",
@@ -3067,7 +3067,7 @@ describe("the adoption page", () => {
 
       await waitFor(() =>
         expect(container.querySelector(`.${adoption.adoption} .${notices.error}`)!.textContent).toBe(
-          ADOPT_REFUSAL[outcome],
+          adoptRefusal(outcome),
         ),
       );
 
@@ -3214,7 +3214,6 @@ describe("the page of a draft from before, holding a pull request", () => {
     expect(screen.queryByLabelText("Grilling")).toBeNull();
 
     // Which is the record's own reading, and the table's answer to it.
-    expect(ROLES.Review.uses).toEqual(["implementation", "review"]);
 
     await openRepo(container);
 
@@ -6136,9 +6135,11 @@ describe("a conversation's pairings", () => {
   /// looks like.
   const UNCHOSEN: ConversationView = {
     ...OPEN,
-    grilling_pairing: null,
-    implementation_pairing: null,
-    review_pairing: "Nothing",
+    pairings: pairedAs(OPEN.pairings, {
+      grilling: "Nothing",
+      implementation: "Nothing",
+      review: "Nothing",
+    }),
     ready_to_grill: false,
   };
 
@@ -6173,14 +6174,14 @@ describe("a conversation's pairings", () => {
     // Separate choices, and in the fixture genuinely separate accounts: grill on
     // fable, implement on opus, review on sonnet.
     //
-    const interviewing = OPEN.grilling_pairing!;
-    const reviewed = under(OPEN.review_pairing)!;
+    const interviewing = onRole(OPEN, "grilling");
+    const reviewed = onRole(OPEN, "review");
 
     // The trigger's own reading, which is the row's less the harness the mark
     // beside it is already drawing.
     expect(showing("Grilling")).toBe(showsAs(interviewing));
     expect(showing("Implementation")).toBe(
-      showsAs(OPEN.implementation_pairing!),
+      showsAs(onRole(OPEN, "implementation")),
     );
     expect(showing("Review")).toBe(showsAs(reviewed));
     expect(
@@ -6236,7 +6237,7 @@ describe("a conversation's pairings", () => {
         expect(
           sent(
             fetching,
-            `/api/ui/conversations/${OPEN.id}/implementation-pairing`,
+            `/api/ui/conversations/${OPEN.id}/pairings/implementation`,
             index,
           ),
         ).toEqual(wire[index]),
@@ -6297,7 +6298,10 @@ describe("a conversation's pairings", () => {
   /// mark to be of: it draws its words and no element at all, rather than a gap
   /// where one would have been. And so does the picker sitting on it.
   it("draws the no-session row as words alone", async () => {
-    withConversation({ ...UNCHOSEN, review_pairing: "Skipped" });
+    withConversation({
+      ...UNCHOSEN,
+      pairings: pairedAs(UNCHOSEN.pairings, { review: "Skipped" }),
+    });
     await theAgent();
     await waitFor(() => picker("Review"));
 
@@ -6331,7 +6335,7 @@ describe("a conversation's pairings", () => {
     pick("Grilling", READINGS[0]!);
     await waitFor(() =>
       expect(
-        sent(fetching, `/api/ui/conversations/${OPEN.id}/grilling-pairing`),
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/pairings/grilling`),
       ).toEqual({
         profile_id: PROFILES[0]!.id,
         model: PROFILES[0]!.models[0],
@@ -6345,7 +6349,7 @@ describe("a conversation's pairings", () => {
       expect(
         sent(
           fetching,
-          `/api/ui/conversations/${OPEN.id}/implementation-pairing`,
+          `/api/ui/conversations/${OPEN.id}/pairings/implementation`,
         ),
       ).toEqual({
         profile_id: PROFILES[1]!.id,
@@ -6368,13 +6372,18 @@ describe("a conversation's pairings", () => {
     expect(offers("Grilling")).toEqual(READINGS);
     expect(offers("Implementation")).toEqual(READINGS);
 
-    // And it is the table that put it there rather than the pane: which roles
-    // offer one, and the words it is offered in, are both `ROLES`'s — so a row
-    // the ADR retires goes from the picker when its stage takes it out of the
-    // table, rather than living on in a literal nobody thought to look at.
-    expect(offers("Review")[0]).toBe(away(UNCHOSEN.process, "review"));
-    expect(away(UNCHOSEN.process, "grilling")).toBeUndefined();
-    expect(away(UNCHOSEN.process, "implementation")).toBeUndefined();
+    // And it is the manifest that put it there rather than the pane: which
+    // roles offer one is the Process's own `roles`, and the words it is
+    // offered in are read off the role's label — so a role that stops
+    // offering one stops offering it here, rather than living on in a
+    // literal nobody thought to look at.
+    expect(offers("Review")[0]).toBe(
+      away(settledRole(UNCHOSEN, "review")),
+    );
+    expect(away(settledRole(UNCHOSEN, "grilling"))).toBeUndefined();
+    expect(
+      away(settledRole(UNCHOSEN, "implementation")),
+    ).toBeUndefined();
 
     // And nothing picked yet on any of them, which the closed control says
     // rather than offering it as a row.
@@ -6395,7 +6404,7 @@ describe("a conversation's pairings", () => {
 
     await waitFor(() =>
       expect(
-        sent(fetching, `/api/ui/conversations/${OPEN.id}/review-pairing`),
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/pairings/review`),
       ).toEqual({ pairing: null }),
     );
   });
@@ -6411,7 +6420,7 @@ describe("a conversation's pairings", () => {
 
     await waitFor(() =>
       expect(
-        sent(fetching, `/api/ui/conversations/${OPEN.id}/review-pairing`),
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/pairings/review`),
       ).toEqual({
         pairing: {
           profile_id: PROFILES[0]!.id,
@@ -6424,7 +6433,10 @@ describe("a conversation's pairings", () => {
   /// A picker already on that row keeps it: it is a settled choice, so the
   /// placeholder is not drawn over it the way it is over an empty one.
   it("shows no review as what is chosen where it is", async () => {
-    withConversation({ ...UNCHOSEN, review_pairing: "Skipped" });
+    withConversation({
+      ...UNCHOSEN,
+      pairings: pairedAs(UNCHOSEN.pairings, { review: "Skipped" }),
+    });
     await theAgent();
     await waitFor(() => picker("Review"));
 
@@ -6436,7 +6448,9 @@ describe("a conversation's pairings", () => {
   it("reads a profile with no model beside it as nothing chosen", async () => {
     withConversation({
       ...OPEN,
-      grilling_pairing: { ...OPEN.grilling_pairing!, model: null },
+      pairings: pairedAs(OPEN.pairings, {
+        grilling: { Under: { ...onRole(OPEN, "grilling"), model: null } },
+      }),
       ready_to_grill: false,
     });
     await theAgent();
@@ -6509,13 +6523,17 @@ describe("a conversation's pairings", () => {
   it("says what is wrong with a chosen profile that has broken", async () => {
     const broken: ConversationView = {
       ...OPEN,
-      implementation_pairing: {
-        ...OPEN.implementation_pairing!,
-        profile: {
-          ...OPEN.implementation_pairing!.profile,
-          broken: "ConfigMissing",
+      pairings: pairedAs(OPEN.pairings, {
+        implementation: {
+          Under: {
+            ...onRole(OPEN, "implementation"),
+            profile: {
+              ...onRole(OPEN, "implementation").profile,
+              broken: "ConfigMissing",
+            },
+          },
         },
-      },
+      }),
       ready_to_grill: false,
     };
     withConversation(broken);
@@ -6578,7 +6596,7 @@ describe("the agent trigger", () => {
 
     await waitFor(async () =>
       expect(await shown(container)).toBe(
-        `${showsAs(OPEN.implementation_pairing!)} +2`,
+        `${showsAs(onRole(OPEN, "implementation"))} +2`,
       ),
     );
 
@@ -6593,14 +6611,16 @@ describe("the agent trigger", () => {
   /// an answer rather than another account.
   it("reads the pairing once where the other roles match or are skipped", async () => {
     theWorkbenchWith({
-      grilling_pairing: OPEN.implementation_pairing!,
-      review_pairing: "Skipped",
+      pairings: pairedAs(OPEN.pairings, {
+        grilling: { Under: onRole(OPEN, "implementation") },
+        review: "Skipped",
+      }),
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await waitFor(async () =>
       expect(await shown(container)).toBe(
-        showsAs(OPEN.implementation_pairing!),
+        showsAs(onRole(OPEN, "implementation")),
       ),
     );
   });
@@ -6609,13 +6629,15 @@ describe("the agent trigger", () => {
   /// convention for the companions it counts.
   it("counts one for a review on a different pairing", async () => {
     theWorkbenchWith({
-      grilling_pairing: OPEN.implementation_pairing!,
+      pairings: pairedAs(OPEN.pairings, {
+        grilling: { Under: onRole(OPEN, "implementation") },
+      }),
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await waitFor(async () =>
       expect(await shown(container)).toBe(
-        `${showsAs(OPEN.implementation_pairing!)} +1`,
+        `${showsAs(onRole(OPEN, "implementation"))} +1`,
       ),
     );
   });
@@ -6624,7 +6646,10 @@ describe("the agent trigger", () => {
   /// is: the trigger stands over a press that will refuse on exactly that, so it
   /// says so rather than reading out an account the work cannot start under.
   it("reads not chosen while the implementation is empty", async () => {
-    theWorkbenchWith({ implementation_pairing: null, ready_to_grill: false });
+    theWorkbenchWith({
+      pairings: pairedAs(OPEN.pairings, { implementation: "Nothing" }),
+      ready_to_grill: false,
+    });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await waitFor(async () => expect(await shown(container)).toBe("Not chosen"));
@@ -6634,26 +6659,30 @@ describe("the agent trigger", () => {
   });
 
   it("reads not chosen while another role the process uses is empty", async () => {
-    theWorkbenchWith({ grilling_pairing: null, ready_to_grill: false });
+    theWorkbenchWith({
+      pairings: pairedAs(OPEN.pairings, { grilling: "Nothing" }),
+      ready_to_grill: false,
+    });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await waitFor(async () => expect(await shown(container)).toBe("Not chosen"));
   });
 
-  /// A role the Process does not use is not one of them, though — a Review uses
-  /// Implementation and Review, so an empty Grilling on the record is nothing the
-  /// trigger is waiting on.
-  it("says nothing about a role the process does not use", async () => {
+  /// A role the Process does not declare is not one of them, though — a Review
+  /// declares Implementation and Review and no grilling role, so the record
+  /// sends no Grilling picker for the trigger to be waiting on.
+  it("says nothing about a role the process does not declare", async () => {
     theWorkbenchWith({
       process: "Review",
-      grilling_pairing: null,
-      review_pairing: { Under: OPEN.implementation_pairing! },
+      pairings: pairedAs(OPEN.pairings, {
+        review: { Under: onRole(OPEN, "implementation") },
+      }).filter((role) => role.role !== "grilling"),
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await waitFor(async () =>
       expect(await shown(container)).toBe(
-        showsAs(OPEN.implementation_pairing!),
+        showsAs(onRole(OPEN, "implementation")),
       ),
     );
   });
@@ -6678,7 +6707,10 @@ describe("the pickers a conversation's process draws", () => {
   /// And a Review draws two: what takes the grilling picker away is the Process
   /// and nothing else.
   it("draws no grilling picker under Review", async () => {
-    theWorkbenchWith({ process: "Review" });
+    theWorkbenchWith({
+      process: "Review",
+      pairings: OPEN.pairings.filter((role) => role.role !== "grilling"),
+    });
     const { container } = mount(`/conversations/${OPEN.id}`);
     await openAgent(container);
 
@@ -6686,21 +6718,22 @@ describe("the pickers a conversation's process draws", () => {
     expect(picker("Review")).toBeTruthy();
     expect(screen.queryByLabelText("Grilling")).toBeNull();
 
-    expect(uses("Review", "grilling")).toBe(false);
   });
 
   /// And the Review picker it draws offers accounts and nothing else: a Review
   /// without a review is Fix Merge Issues with the comments answered, so the row
   /// that runs no session is offered nowhere on this Process.
   it("offers no row that runs nothing on a Review", async () => {
-    theWorkbenchWith({ process: "Review" });
+    theWorkbenchWith({
+      process: "Review",
+      pairings: OPEN.pairings.filter((role) => role.role !== "grilling"),
+    });
     const { container } = mount(`/conversations/${OPEN.id}`);
     await openAgent(container);
 
     await waitFor(() => picker("Review"));
 
     expect(offers("Review")).toEqual(READINGS);
-    expect(away("Review", "review")).toBeUndefined();
     expect(OFFERED).toContain("Review");
   });
 
@@ -6724,7 +6757,10 @@ describe("the pickers a conversation's process draws", () => {
   /// picker at all — it is never interviewed, so there is no session for that
   /// role to run.
   it("draws no grilling picker under Tinker", async () => {
-    theWorkbenchWith({ process: "Tinker" });
+    theWorkbenchWith({
+      process: "Tinker",
+      pairings: OPEN.pairings.filter((role) => role.role !== "grilling"),
+    });
     const { container } = mount(`/conversations/${OPEN.id}`);
     await openAgent(container);
 
@@ -6732,8 +6768,6 @@ describe("the pickers a conversation's process draws", () => {
     expect(picker("Review")).toBeTruthy();
     expect(screen.queryByLabelText("Grilling")).toBeNull();
 
-    expect(uses("Tinker", "grilling")).toBe(false);
-    expect(away("Tinker", "review")).toBe("No review");
     expect(OFFERED).toContain("Tinker");
   });
 
@@ -6742,7 +6776,12 @@ describe("the pickers a conversation's process draws", () => {
   /// Neither a Grilling picker nor a Review one is drawn, so there is nothing
   /// here to pick a review away on and nothing for the press to wait for.
   it("draws one picker under a process that uses one role", async () => {
-    theWorkbenchWith({ process: "Investigate" });
+    theWorkbenchWith({
+      process: "Investigate",
+      pairings: OPEN.pairings.filter(
+        (role) => role.role === "implementation",
+      ),
+    });
     mount(`/conversations/${OPEN.id}`);
 
     await waitFor(() => picker("Agent"));
@@ -6750,7 +6789,6 @@ describe("the pickers a conversation's process draws", () => {
     expect(screen.queryByLabelText("Implementation")).toBeNull();
     expect(screen.queryByLabelText("Review")).toBeNull();
 
-    expect(ROLES.Investigate.uses).toEqual(["implementation"]);
     expect(OFFERED).toContain("Investigate");
   });
 
@@ -6759,7 +6797,12 @@ describe("the pickers a conversation's process draws", () => {
   /// nothing ever reads the branch under a Review Pairing and there is no picker
   /// drawn for one — and so no *No review* row anywhere on it either.
   it("draws one picker under a Fix Merge Issues, and no review row", async () => {
-    theWorkbenchWith({ process: "FixMergeIssues" });
+    theWorkbenchWith({
+      process: "FixMergeIssues",
+      pairings: OPEN.pairings.filter(
+        (role) => role.role === "implementation",
+      ),
+    });
     mount(`/conversations/${OPEN.id}`);
 
     await waitFor(() => picker("Agent"));
@@ -6773,8 +6816,6 @@ describe("the pickers a conversation's process draws", () => {
     expect(picker("Agent").id).toBe("implementation-pairing");
     expect(offers("Agent")).toEqual(READINGS);
 
-    expect(ROLES.FixMergeIssues.uses).toEqual(["implementation"]);
-    expect(away("FixMergeIssues", "review")).toBeUndefined();
     expect(OFFERED).toContain("FixMergeIssues");
   });
 });
@@ -6790,7 +6831,16 @@ describe("the pickers a conversation's process draws", () => {
 describe("the agent dropdown on a conversation", () => {
   /// The record under a one-role Process, on the account the fixture implements
   /// under.
-  const INVESTIGATING: Partial<ConversationView> = { process: "Investigate" };
+  // The record sends the roles the Process declares, so a conversation on an
+  // Investigate carries the one picker rather than three — see
+  // `the_roles_a_conversation_is_run_under_are_its_processs_own` in the
+  // server suite, which is where that list comes from.
+  const INVESTIGATING: Partial<ConversationView> = {
+    process: "Investigate",
+    pairings: OPEN.pairings.filter(
+      (role) => role.role === "implementation",
+    ),
+  };
 
   it("stands in the row as the picker itself, with no panel anywhere", async () => {
     theWorkbenchWith(INVESTIGATING);
@@ -6812,7 +6862,6 @@ describe("the agent dropdown on a conversation", () => {
       "the one picker stands in the row itself",
     ).toHaveLength(1);
 
-    expect(ROLES.Investigate.control).toBe("dropdown");
   });
 
   /// The Implementation role, whichever shape asks for it: the same picker on
@@ -6826,7 +6875,7 @@ describe("the agent dropdown on a conversation", () => {
     await waitFor(() => expect(picker("Agent")).toBeTruthy());
 
     expect(picker("Agent").id).toBe("implementation-pairing");
-    expect(showing("Agent")).toBe(showsAs(OPEN.implementation_pairing!));
+    expect(showing("Agent")).toBe(showsAs(onRole(OPEN, "implementation")));
 
     // The pairings and nothing else: Implementation is the one role that cannot
     // be picked away, there being no work without something building it.
@@ -6844,7 +6893,7 @@ describe("the agent dropdown on a conversation", () => {
 
     await waitFor(() =>
       expect(
-        sent(fetching, `/api/ui/conversations/${OPEN.id}/implementation-pairing`),
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/pairings/implementation`),
       ).toEqual({ profile_id: PROFILES[0]!.id, model: PROFILES[0]!.models[0]! }),
     );
 
@@ -8214,9 +8263,18 @@ describe("starting the work", () => {
   /// Every refusal is its own sentence, because each of them is something
   /// different for the human to go and do.
   it.each([
-    ["NoGrillingProfile", /Choose a grilling profile/],
-    ["NoImplementationProfile", /Choose an implementation profile/],
-    ["NoReviewProfile", /Pick a review profile/],
+    [
+      { NoPairing: { role: "grilling", label: "Grilling", away: false } },
+      /Choose a profile and model for Grilling/,
+    ],
+    [
+      { NoPairing: { role: "implementation", label: "Implementation", away: false } },
+      /Choose a profile and model for Implementation/,
+    ],
+    [
+      { NoPairing: { role: "review", label: "Review", away: true } },
+      /Pick a profile and model for Review, or No review,/,
+    ],
     ["EmptyBrief", /Write the brief first/],
     ["NoBaseCommit", /nothing to branch from/],
     ["BranchExists", /branch already exists/],
@@ -12522,7 +12580,7 @@ describe("steering a conversation", () => {
     await waitFor(() => expect(press.disabled).toBe(false));
     fireEvent.click(press);
 
-    const building = GRILLING.implementation_pairing!;
+    const building = onRole(GRILLING, "implementation");
 
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
@@ -12618,7 +12676,7 @@ describe("steering a conversation", () => {
     await waitFor(() => expect(press.disabled).toBe(false));
     fireEvent.click(press);
 
-    const building = GRILLING.implementation_pairing!;
+    const building = onRole(GRILLING, "implementation");
 
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
@@ -12793,7 +12851,7 @@ describe("steering a conversation", () => {
     });
     fireEvent.click(await drawn(pane, `.${steerForm.steerButtons} .${steerForm.steer}`));
 
-    const building = GRILLING.implementation_pairing!;
+    const building = onRole(GRILLING, "implementation");
 
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
@@ -12841,7 +12899,7 @@ describe("steering a conversation", () => {
     const pane = await openSteer(container);
 
     await drawn(pane, "#steer-pairing");
-    const interviewing = GRILLING.grilling_pairing!;
+    const interviewing = onRole(GRILLING, "grilling");
 
     await waitFor(() =>
       expect(showing("Run it under")).toBe(readsAs(interviewing)),
@@ -12857,7 +12915,7 @@ describe("steering a conversation", () => {
     // prefilled there — a different choice about different work.
     fireEvent.click(await drawn(pane, `.${steerForm.steerTarget} input[value="Wrapping"]`));
 
-    const building = GRILLING.implementation_pairing!;
+    const building = onRole(GRILLING, "implementation");
 
     await waitFor(() =>
       expect(showing("Run it under")).toBe(readsAs(building)),
@@ -12931,7 +12989,7 @@ describe("steering a conversation", () => {
     fireEvent.click(await drawn(pane, `.${steerForm.steerDigest} input`));
     fireEvent.click(await drawn(pane, `.${steerForm.steerButtons} .${steerForm.steer}`));
 
-    const own = GRILLING.grilling_pairing!;
+    const own = onRole(GRILLING, "grilling");
 
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
@@ -20663,7 +20721,9 @@ describe("the configuration on the brief's pane", () => {
   /// whose review pairing was never picked: what the human picked is a choice,
   /// and the pane says what it was.
   it("says no review where that is what was picked", async () => {
-    theGrillingStanding({ review_pairing: "Skipped" });
+    theGrillingStanding({
+      pairings: pairedAs(GRILLING.pairings, { review: "Skipped" }),
+    });
     await openBrief(GRILLING);
 
     expect(configuration().Review).toBe("No review.");
@@ -20676,7 +20736,9 @@ describe("the configuration on the brief's pane", () => {
   /// The grilling role has no such row — *No grilling* is retired — so a record
   /// with nothing on it reads as nothing chosen, which is what it is.
   it("says nothing chosen where no grilling pairing was picked", async () => {
-    theGrillingStanding({ grilling_pairing: null });
+    theGrillingStanding({
+      pairings: pairedAs(GRILLING.pairings, { grilling: "Nothing" }),
+    });
     await openBrief(GRILLING);
 
     expect(configuration().Grilling).toBe("Not chosen.");
@@ -20694,7 +20756,12 @@ describe("the configuration on the brief's pane", () => {
   /// the composer and the thing read back here cannot come to be called
   /// different things.
   it("says whichever process the conversation is", async () => {
-    theGrillingStanding({ process: "Review" });
+    theGrillingStanding({
+      process: "Review",
+      pairings: GRILLING.pairings.filter(
+        (role) => role.role !== "grilling",
+      ),
+    });
     await openBrief(GRILLING);
 
     expect(configuration().Process).toBe("Review");
@@ -20705,7 +20772,12 @@ describe("the configuration on the brief's pane", () => {
   /// out who would have grilled it would be naming the account of a session
   /// that will not exist — beside a composer that has stopped asking for one.
   it("names only the roles the process is run under", async () => {
-    theGrillingStanding({ process: "Review" });
+    theGrillingStanding({
+      process: "Review",
+      pairings: GRILLING.pairings.filter(
+        (role) => role.role !== "grilling",
+      ),
+    });
     await openBrief(GRILLING);
 
     await waitFor(() =>
@@ -20713,7 +20785,6 @@ describe("the configuration on the brief's pane", () => {
     );
     expect(configuration().Review).toBe("Claude Code Sonnet 5 · sonnet");
 
-    expect(uses("Review", "grilling")).toBe(false);
     expect(Object.keys(configuration())).not.toContain("Grilling");
   });
 
@@ -20736,14 +20807,17 @@ describe("the configuration on the brief's pane", () => {
   /// model there is nothing else to tell one account from another.
   it("says the half there is where a pairing named no model", async () => {
     theGrillingStanding({
-      implementation_pairing: {
-        ...GRILLING.implementation_pairing!,
-        model: null,
-      },
-    });
-    await openBrief(GRILLING);
-
-    expect(configuration().Implementation).toBe("Claude Code · opus");
+      pairings: pairedAs(OPEN.pairings, {
+        implementation: {
+          Under: {
+            ...onRole(OPEN, "implementation"),
+            profile: {
+              ...onRole(OPEN, "implementation").profile,
+              broken: "ConfigMissing",
+            },
+          },
+        },
+      }),
   });
 
   /// And the account's name is dropped where its backend has one account saved:

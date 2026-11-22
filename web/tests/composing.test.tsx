@@ -50,7 +50,7 @@ import composer from "../src/workbench/Composer.module.css";
 import sidebar from "../src/workbench/Conversations.module.css";
 import annexMark from "../src/AnnexMark.module.css";
 import setup from "../src/workbench/Setup.module.css";
-import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
+
 import {
   ATTACH_REFUSAL,
   PACK_REFUSAL,
@@ -65,7 +65,7 @@ import {
 } from "../src/workbench/Setup";
 // The Processes the picker offers and the words they are said in, read rather
 // than spelled out again: what the row offers is that list and nothing else.
-import { OFFERED, PROCESS, ROLES } from "../src/workbench/processes";
+import { OFFERED, PROCESS } from "../src/workbench/processes";
 import {
   CREATE_REFUSAL,
   REFUSAL as REPO_REFUSAL,
@@ -266,12 +266,19 @@ const remembering = (
   implementation: ProfileEntry,
   review: ProfileEntry,
 ): RepoPairingsView => ({
-  grilling: { profile: grilling, model: grilling.models[0]! },
-  implementation: {
-    profile: implementation,
-    model: implementation.models[0]!,
-  },
-  review: { Under: { profile: review, model: review.models[0]! } },
+  roles: [
+    ["grilling", grilling],
+    ["implementation", implementation],
+    ["review", review],
+  ].map(([role, profile]) => ({
+    role: role as string,
+    picked: {
+      Under: {
+        profile: profile as ProfileEntry,
+        model: (profile as ProfileEntry).models[0]!,
+      },
+    },
+  })),
 });
 
 /// The member of the cluster the tests below draft onto, and the one beside it:
@@ -1023,17 +1030,17 @@ describe("the compose page", () => {
         json(remembering(PROFILES[0]!, PROFILES[1]!, PROFILES[2]!)),
       ),
       whenever(
-        `/api/ui/conversations/${OPEN.id}/grilling-pairing`,
+        `/api/ui/conversations/${OPEN.id}/pairings/grilling`,
         json("Chosen"),
         "POST",
       ),
       whenever(
-        `/api/ui/conversations/${OPEN.id}/implementation-pairing`,
+        `/api/ui/conversations/${OPEN.id}/pairings/implementation`,
         json("Chosen"),
         "POST",
       ),
       whenever(
-        `/api/ui/conversations/${OPEN.id}/review-pairing`,
+        `/api/ui/conversations/${OPEN.id}/pairings/review`,
         json("Chosen"),
         "POST",
       ),
@@ -1057,7 +1064,7 @@ describe("the compose page", () => {
 
     await waitFor(() =>
       expect(
-        sent(fetching, `/api/ui/conversations/${OPEN.id}/review-pairing`),
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/pairings/review`),
       ).toEqual({ pairing: null }),
     );
 
@@ -1065,10 +1072,10 @@ describe("the compose page", () => {
     // picker still showing that prefill has nothing to say: sending it back
     // would be this page claiming somebody chose it.
     expect(
-      writes(fetching, `/api/ui/conversations/${OPEN.id}/grilling-pairing`),
+      writes(fetching, `/api/ui/conversations/${OPEN.id}/pairings/grilling`),
     ).toBe(0);
     expect(
-      writes(fetching, `/api/ui/conversations/${OPEN.id}/implementation-pairing`),
+      writes(fetching, `/api/ui/conversations/${OPEN.id}/pairings/implementation`),
     ).toBe(0);
   });
 
@@ -1387,7 +1394,7 @@ describe("the device the compose page is drafting onto", () => {
       const held = stored();
       expect(held.base).toBe(BRANCHES[1]);
       expect(held.companions).toHaveLength(1);
-      expect(held.grilling).not.toBeNull();
+      expect(held.pairings.grilling).toBeDefined();
     });
 
     await drawn(container, `.${setup.deviceSelect}`);
@@ -1405,9 +1412,7 @@ describe("the device the compose page is drafting onto", () => {
     expect(left.repo).toBeNull();
     expect(left.base).toBeNull();
     expect(left.companions).toEqual([]);
-    expect(left.grilling).toBeNull();
-    expect(left.implementation).toBeNull();
-    expect(left.review).toBeNull();
+    expect(left.pairings).toEqual({});
 
     // And what the human wrote stayed where it was.
     expect(
@@ -1616,7 +1621,6 @@ describe("the process a compose page is composing under", () => {
     expect(at(`.${setup.processChoice}`)).toBe(1);
     expect(at(`.${setup.agentOption}`)).toBe(2);
     expect(row.children).toHaveLength(3);
-
     // Develop for every repo, remembered nowhere: it is the one thing about a
     // conversation likeliest to differ from the last.
     expect(showing("Process")).toBe("Develop");
@@ -2358,7 +2362,6 @@ describe("the pickers a compose page's process draws", () => {
     expect(screen.getByLabelText("Review")).toBeTruthy();
     expect(screen.queryByLabelText("Grilling")).toBeNull();
 
-    expect(ROLES.Tinker.uses).toEqual(["implementation", "review"]);
     expect(OFFERED).toContain("Tinker");
   });
 
@@ -2375,7 +2378,6 @@ describe("the pickers a compose page's process draws", () => {
     expect(screen.queryByLabelText("Grilling")).toBeNull();
     expect(screen.queryByLabelText("Implementation")).toBeNull();
     expect(screen.queryByLabelText("Review")).toBeNull();
-    expect(ROLES.Investigate.uses).toEqual(["implementation"]);
     expect(OFFERED).toContain("Investigate");
   });
 
@@ -2385,12 +2387,14 @@ describe("the pickers a compose page's process draws", () => {
   /// start with everything it needs.
   it("waits on the roles the process uses and no others", async () => {
     const memory: RepoPairingsView = {
-      grilling: null,
-      implementation: {
-        profile: PROFILES[1]!,
-        model: PROFILES[1]!.models[0]!,
-      },
-      review: "Nothing",
+      roles: [
+        {
+          role: "implementation",
+          picked: {
+            Under: { profile: PROFILES[1]!, model: PROFILES[1]!.models[0]! },
+          },
+        },
+      ],
     };
 
     composedAs("Investigate");
@@ -2418,12 +2422,14 @@ describe("the pickers a compose page's process draws", () => {
   /// empty — and says so in the words the table counts.
   it("says what it is waiting on in the roles the process has", async () => {
     const memory: RepoPairingsView = {
-      grilling: null,
-      implementation: {
-        profile: PROFILES[1]!,
-        model: PROFILES[1]!.models[0]!,
-      },
-      review: "Nothing",
+      roles: [
+        {
+          role: "implementation",
+          picked: {
+            Under: { profile: PROFILES[1]!, model: PROFILES[1]!.models[0]! },
+          },
+        },
+      ],
     };
 
     composedAs("Develop");
@@ -2563,8 +2569,13 @@ describe("the agent control on a compose page", () => {
       whenever(
         `/api/ui/repos/${REPOS[1]!.id}/pairings`,
         json({
-          ...remembering(PROFILES[1]!, PROFILES[1]!, PROFILES[1]!),
-          review: "Skipped",
+          roles: remembering(
+            PROFILES[1]!,
+            PROFILES[1]!,
+            PROFILES[1]!,
+          ).roles.map((role) =>
+            role.role === "review" ? { role: "review", picked: "Skipped" } : role,
+          ),
         } satisfies RepoPairingsView),
       ),
       json(null),
@@ -2614,7 +2625,7 @@ describe("the agent control on a compose page", () => {
 
     // No repo, so no memory to read: there is nothing to prefill a role from.
     await waitFor(() => expect(agentReads()).toBe("Not chosen"));
-    expect(stored().implementation).toBeNull();
+    expect(stored().pairings.implementation).toBeUndefined();
 
     await pickRepo(container, REPOS[1]!.id);
     await waitFor(() => expect(agentReads()).toBe("Opus 5 · opus +2"));
@@ -2636,12 +2647,12 @@ describe("the agent control on a compose page", () => {
       whenever(
         `/api/ui/repos/${REPOS[1]!.id}/pairings`,
         json({
-          grilling: null,
-          implementation: {
-            profile: PROFILES[1]!,
-            model: PROFILES[1]!.models[0]!,
-          },
-          review: { Under: { profile: PROFILES[1]!, model: PROFILES[1]!.models[0]! } },
+          roles: ["implementation", "review"].map((role) => ({
+            role,
+            picked: {
+              Under: { profile: PROFILES[1]!, model: PROFILES[1]!.models[0]! },
+            },
+          })),
         } satisfies RepoPairingsView),
       ),
       json(null),
@@ -2651,7 +2662,6 @@ describe("the agent control on a compose page", () => {
     await composing(container);
 
     await waitFor(() => expect(agentReads()).toBe("Opus 5 · opus"));
-    expect(ROLES.Review.uses).toEqual(["implementation", "review"]);
   });
 });
 
@@ -2706,8 +2716,6 @@ describe("the agent dropdown on a compose page", () => {
     ).toEqual(["Repo", "Process", "Agent"]);
     expect(container.querySelector(`.${setup.agentOption}`)).toBeNull();
     expect(row.children).toHaveLength(3);
-
-    expect(ROLES.Investigate.control).toBe("dropdown");
   });
 
   /// The Implementation role, whichever shape asks for it: the same picker on
@@ -2732,7 +2740,10 @@ describe("the agent dropdown on a compose page", () => {
     // The implementation memory and not another role's, which is what the two
     // other accounts the repo remembers are there to tell it from.
     await waitFor(() => expect(showing("Agent")).toBe("Opus 5 · opus"));
-    expect(stored().implementation, "nobody touched it").toBeNull();
+    expect(
+      stored().pairings.implementation,
+      "nobody touched it",
+    ).toBeUndefined();
   });
 
   /// And a pick through it is the Implementation role's, replayed onto the
@@ -2741,17 +2752,17 @@ describe("the agent dropdown on a compose page", () => {
     investigating();
     const fetching = creating(
       whenever(
-        `/api/ui/conversations/${OPEN.id}/grilling-pairing`,
+        `/api/ui/conversations/${OPEN.id}/pairings/grilling`,
         json("Chosen"),
         "POST",
       ),
       whenever(
-        `/api/ui/conversations/${OPEN.id}/implementation-pairing`,
+        `/api/ui/conversations/${OPEN.id}/pairings/implementation`,
         json("Chosen"),
         "POST",
       ),
       whenever(
-        `/api/ui/conversations/${OPEN.id}/review-pairing`,
+        `/api/ui/conversations/${OPEN.id}/pairings/review`,
         json("Chosen"),
         "POST",
       ),
@@ -2772,7 +2783,7 @@ describe("the agent dropdown on a compose page", () => {
 
     await waitFor(() =>
       expect(
-        sent(fetching, `/api/ui/conversations/${OPEN.id}/implementation-pairing`),
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/pairings/implementation`),
       ).toEqual({
         profile_id: PROFILES[2]!.id,
         model: PROFILES[2]!.models[0]!,
@@ -5391,7 +5402,7 @@ describe("continuing a roadmap from the compose page", () => {
   it("sends no held file with the adoption", async () => {
     const fetching = adopting(
       whenever(
-        `/api/ui/conversations/${OPEN.id}/review-pairing`,
+        `/api/ui/conversations/${OPEN.id}/pairings/review`,
         json("Chosen"),
         "POST",
       ),
@@ -5467,7 +5478,7 @@ describe("continuing a roadmap from the compose page", () => {
   it("starts the adoption, applies what was touched and adopts", async () => {
     const fetching = adopting(
       whenever(
-        `/api/ui/conversations/${OPEN.id}/review-pairing`,
+        `/api/ui/conversations/${OPEN.id}/pairings/review`,
         json("Chosen"),
         "POST",
       ),
@@ -5494,7 +5505,7 @@ describe("continuing a roadmap from the compose page", () => {
     );
     await waitFor(() =>
       expect(
-        sent(fetching, `/api/ui/conversations/${OPEN.id}/review-pairing`),
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/pairings/review`),
       ).toEqual({ pairing: null }),
     );
     await waitFor(() =>
@@ -5547,7 +5558,9 @@ describe("continuing a roadmap from the compose page", () => {
     adopting(
       whenever(
         `/api/ui/conversations/${OPEN.id}/adopt`,
-        json("NoGrillingProfile" satisfies Adopted),
+        json({
+          NoPairing: { role: "grilling", label: "Grilling", away: false },
+        } satisfies Adopted),
         "POST",
       ),
     );
@@ -5562,7 +5575,8 @@ describe("continuing a roadmap from the compose page", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          `The stage couldn't be started. ${ADOPT_REFUSAL.NoGrillingProfile}`,
+          "The stage couldn't be started. Choose a profile and model for " +
+            "Grilling on the brief first.",
         ),
       ).toBeTruthy(),
     );
@@ -6420,9 +6434,7 @@ describe("what a device holds between visits", () => {
       process: "Develop",
       provided: null,
       processFilled: null,
-      grilling: "1:opus",
-      implementation: "2:fable",
-      review: null,
+      pairings: { grilling: "1:opus", implementation: "2:fable" },
       adopting: null,
       permitted: ["0011223344556677889900aabbccddee"],
       servers: ["docs"],

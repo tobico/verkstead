@@ -18,7 +18,8 @@ use std::path::PathBuf;
 use serde_json::{Map, Value};
 
 use super::{
-    PLATFORMS, Refusal, Walk, entry, optional_within, platform_key, relative, text_of, within,
+    PLATFORMS, Refusal, Walk, entry, is_word, optional_within, platform_key, relative, text_of,
+    within,
 };
 use crate::platform::Platform;
 use crate::store;
@@ -852,13 +853,6 @@ fn ask(value: &Value, field: &str) -> Result<Ask, Refusal> {
     })
 }
 
-/// The role a model's `for` names.
-const ROLES: [(&str, store::Role); 3] = [
-    ("grilling", store::Role::Grilling),
-    ("implementation", store::Role::Implementation),
-    ("review", store::Role::Review),
-];
-
 fn models(value: &Value, field: &str) -> Result<Models, Refusal> {
     let Value::Array(entries) = value else {
         return Err(Refusal::of(
@@ -908,22 +902,23 @@ fn models(value: &Value, field: &str) -> Result<Models, Refusal> {
 
         for (role_index, word) in texts(map, "for", &at("for"))?.iter().enumerate() {
             let role_field = format!("{}[{role_index}]", at("for"));
-            let Some((_, role)) = ROLES.iter().find(|(name, _)| name == word) else {
+            if !is_word(word) {
                 return Err(Refusal::of(
                     &role_field,
                     format!(
-                        "`{role_field}` is `{word}`, which isn't a role. It's one of grilling, \
-                         implementation, or review."
+                        "`{role_field}` is `{word}`, which isn't a role's name: lowercase \
+                         letters, digits and hyphens, like `implementation`."
                     ),
                 ));
-            };
-            if roles.iter().any(|(seen, _)| seen == role) {
+            }
+            let role = store::Role::named(word);
+            if roles.iter().any(|(seen, _)| *seen == role) {
                 return Err(Refusal::of(
                     &role_field,
                     format!("`{role_field}` is `{word}`, which an earlier model is already for."),
                 ));
             }
-            roles.push((*role, id.clone()));
+            roles.push((role, id.clone()));
         }
 
         list.push(Model {
@@ -1219,7 +1214,7 @@ provides:
         assert_eq!(agent.models.default, "stub-large");
         assert_eq!(
             agent.models.roles,
-            [(store::Role::Review, "stub-small".to_owned())]
+            [(store::Role::review(), "stub-small".to_owned())]
         );
         assert_eq!(agent.install.commands, ["npm install -g stub"]);
         assert_eq!(agent.install.npm.as_deref(), Some("@example/stub"));

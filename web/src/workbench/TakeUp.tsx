@@ -42,6 +42,7 @@ import {
   authorTokenAwaited,
   authorUnpicked,
   companionRefusal,
+  pairingWanted,
   otherAuthorHeld,
   profileRefusal,
 } from "./Timeline";
@@ -65,9 +66,6 @@ export const TAKE_UP_REFUSAL: Record<Extract<TakenUp, string>, string> = {
     "The Target field is empty. Name a pull request in it, by link or as #number, or the branch to wrap up.",
   Fork:
     "That pull request's branch is in a fork, so nothing fixed here could be pushed to it.",
-  NoImplementationProfile:
-    "Choose an implementation profile and model on the brief first.",
-  NoReviewProfile: "Choose a review profile and model on the brief first.",
   NoGitAuthor:
     "No git author is set, so Verkstead can't commit on the branch. Set one in Settings first.",
   FetchFailed:
@@ -96,6 +94,10 @@ export const TAKE_UP_REFUSAL: Record<Extract<TakenUp, string>, string> = {
 /// it is drawn by [`TakeUpRefusal`].
 export function takeUpRefusal(outcome: TakenUp): string {
   if (typeof outcome === "object") {
+    if ("NoPairing" in outcome) {
+      return pairingWanted(outcome.NoPairing);
+    }
+
     if ("Companion" in outcome) {
       return `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
     }

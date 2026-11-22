@@ -733,7 +733,12 @@ async fn switching_a_drafts_repo_resets_its_base_and_drops_only_the_companion_it
     );
     assert_eq!(conversation.branch, "rate-limiting");
     assert!(conversation.branch_named);
-    assert!(conversation.grilling_pairing.is_some());
+    assert!(
+        conversation
+            .pairings
+            .under(&verkstead_store::Role::grilling())
+            .is_some()
+    );
 }
 
 /// The freeze: a checkout is of one repository, so from the moment there is one

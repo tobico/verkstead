@@ -24,7 +24,7 @@ Roadmap stage: [11: The Process engine](docs/roadmaps/plugins/11-the-process-eng
 - [x] 03: Tinker, Investigate, Review and Fix Merge Issues as data — [details](03-four-processes-as-data.md)
 - [x] 04: Steers land on declared states — [details](04-steers-on-declared-states.md)
 - [x] 05: Develop as data — [details](05-develop-as-data.md)
-- [ ] 06: Roles from the manifest — [details](06-roles-from-the-manifest.md)
+- [x] 06: Roles from the manifest — [details](06-roles-from-the-manifest.md)
 - [ ] 07: The viewer from the manifest — [details](07-the-viewer-from-the-manifest.md)
 - [ ] 08: The store's `Process` enum goes — [details](08-the-process-enum-goes.md)
 - [ ] 09: `Lifecycle` goes — [details](09-lifecycle-goes.md)

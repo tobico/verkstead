@@ -38,7 +38,7 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_store::{
     Account, AgentType, Arrival, ArrivingPicked, Birth, CompanionWorktree, Deletion, Lifecycle,
-    Picked, ProfileFacts, Replacing, Transferred, arrive, birth, born_as, conversation_rank,
+    Picked, ProfileFacts, Replacing, Role, Transferred, arrive, birth, born_as, conversation_rank,
     conversations, create_profile, delete_conversation, load_conversation, open_database,
     register_repo, replace, start_conversation, sweep_arrival, transfer_away, transferred,
 };
@@ -104,15 +104,23 @@ fn arriving(repo_id: i64, profile_id: &str) -> Arrival {
         naming: false,
         state: Lifecycle::Grilling,
         rank: RANK.to_owned(),
-        grilling: ArrivingPicked::Under {
-            profile_id: profile_id.to_owned(),
-            model: Some("gpt-5".to_owned()),
-        },
-        implementation: ArrivingPicked::Under {
-            profile_id: profile_id.to_owned(),
-            model: Some("gpt-5".to_owned()),
-        },
-        review: ArrivingPicked::Skipped,
+        pairings: vec![
+            (
+                Role::grilling(),
+                ArrivingPicked::Under {
+                    profile_id: profile_id.to_owned(),
+                    model: Some("gpt-5".to_owned()),
+                },
+            ),
+            (
+                Role::implementation(),
+                ArrivingPicked::Under {
+                    profile_id: profile_id.to_owned(),
+                    model: Some("gpt-5".to_owned()),
+                },
+            ),
+            (Role::review(), ArrivingPicked::Skipped),
+        ],
     }
 }
 
@@ -138,21 +146,23 @@ async fn a_conversation_arrives_under_this_devices_own_id_with_everything_else_a
     assert_eq!(held.repo.id, repo, "in the Repo the matching settled");
 
     assert_eq!(
-        held.grilling_pairing
+        held.pairings
+            .under(&verkstead_store::Role::grilling())
             .as_ref()
             .map(|under| under.profile.id.clone()),
         Some(profile.clone()),
         "and the grilling runs under a Profile of this device's own",
     );
     assert_eq!(
-        held.implementation_pairing
+        held.pairings
+            .under(&verkstead_store::Role::implementation())
             .as_ref()
             .map(|under| under.profile.id.clone()),
         Some(profile.clone()),
         "and so does the implementation",
     );
     assert_eq!(
-        held.review_pairing,
+        held.pairings.of(&verkstead_store::Role::review()),
         Picked::Skipped,
         "and the role that was picked away arrives picked away, which is a \
          choice rather than an empty picker",
@@ -486,14 +496,15 @@ async fn a_conversation_coming_home_lands_on_the_row_it_left() {
         "on the branch it is on now",
     );
     assert_eq!(
-        held.grilling_pairing
+        held.pairings
+            .under(&verkstead_store::Role::grilling())
             .as_ref()
             .map(|under| under.profile.id.clone()),
         Some(profile.clone()),
         "under the Pairings that came with it",
     );
     assert_eq!(
-        held.review_pairing,
+        held.pairings.of(&verkstead_store::Role::review()),
         Picked::Skipped,
         "the role picked away among them",
     );

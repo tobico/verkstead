@@ -73,7 +73,7 @@ use base64::engine::general_purpose::STANDARD;
 use serde::{Deserialize, Serialize};
 use verkstead_render::{
     Arrived, BirthKey, CameFrom, ConversationAcross, MovedFor, PairingAcross, PickedAcross,
-    ProfileAcross, Transferring,
+    ProfileAcross, RoleAcross, Transferring,
 };
 use verkstead_schema::Nudge;
 
@@ -197,6 +197,7 @@ pub(crate) async fn transfer(
         &state.pool,
         &state.settings.config(),
         &conversation,
+        &crate::processes::labels(state, &conversation.process),
         device,
     )
     .await?;
@@ -406,6 +407,7 @@ async fn by_the_session(
         &state.pool,
         &state.settings.config(),
         &conversation,
+        &crate::processes::labels(state, &conversation.process),
         &device.device,
     )
     .await
@@ -579,7 +581,7 @@ fn known(members: &[store::Member]) -> String {
 /// One finding of the preflight, in the words the Transfer dialog draws it in —
 /// see `lacking` in `web/src/workbench/Transfer.tsx`.
 pub(crate) fn lacks(lacking: &verkstead_render::Lacking, device: &str) -> String {
-    use verkstead_render::{Lacking, PairingRole};
+    use verkstead_render::Lacking;
 
     match lacking {
         Lacking::Unreachable => format!(
@@ -623,11 +625,6 @@ pub(crate) fn lacks(lacking: &verkstead_render::Lacking, device: &str) -> String
             profile,
             agent_type,
         } => {
-            let role = match role {
-                PairingRole::Grilling => "Grilling",
-                PairingRole::Implementation => "Implementation",
-                PairingRole::Review => "Review",
-            };
             let stored = crate::profiles::stored(agent_type);
             let agent = crate::harness::of(stored).map_or(stored.word(), |harness| harness.named());
 
@@ -1223,19 +1220,14 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
         naming: conversation.naming,
         state: crate::ui::lifecycle(conversation.state),
         rank,
-        grilling: conversation
-            .grilling_pairing
-            .as_ref()
-            .map_or(PickedAcross::Nothing, |pairing| {
-                PickedAcross::Under(pairing_across(pairing))
-            }),
-        implementation: conversation
-            .implementation_pairing
-            .as_ref()
-            .map_or(PickedAcross::Nothing, |pairing| {
-                PickedAcross::Under(pairing_across(pairing))
-            }),
-        review: picked(&conversation.review_pairing),
+        pairings: conversation
+            .pairings
+            .each()
+            .map(|(role, settled)| RoleAcross {
+                role: role.stored().to_owned(),
+                picked: picked(settled),
+            })
+            .collect(),
     };
 
     let saying = serde_json::to_vec(&going).map_err(|why| Went {

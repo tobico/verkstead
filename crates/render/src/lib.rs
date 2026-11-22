@@ -64,20 +64,20 @@ pub use conversations::{
     ProcessEntry, ProcessPicked, ProposalView, ProvidedProcess, PullRequestCheck,
     PullRequestComment, PullRequestCommit, PullRequestDetails, PullRequestEvent,
     PullRequestSummary, QuestionSetEvent, RepoChoice, RepoSwitched, ResolveConflictsEvent,
-    Resolved, Resumed, RoadmapPane, RowDevice, Screen, ServerAttached, ServerRemoved, SetRow,
-    ShareView, ShowArchived, ShowingArchived, Shown, Size, StageDocument, StageEntry,
-    StageListEvent, StageListReached, StageSource, StageState, Started, SteerAdditionView,
-    SteerBrief, SteerCancelled, SteerCompanionRefusal, SteerEvent, SteerForm, SteerOpened,
-    SteerPairingView, SteerRecordView, SteerRow, SteerSaved, SteerSubmission, SteerTarget,
-    SteerUpgradeView, TakenUp, TargetNamed, TargetRecorded, TaskDocument, TaskEntry, TaskListEvent,
-    TaskListReached, TaskSource, TerminalClosed, TerminalOpened, TerminalPorts, TerminalView,
-    TerminalsView, TimelineEvent, TransferredTo, Uncommitted, UnreadableSetEvent, WantView,
-    Watching, Worktree, agent_output_event, agent_output_pinned, backlog_pane, brief_event,
-    commit_event, commit_pane, entered_event, handoff_event, manual_task_event, memo_card,
-    memo_event, moved_event, notice_event, proposal_view, pull_request_details, pull_request_event,
-    pull_request_reached, question_set_event, resolve_conflicts_event, roadmap_pane, stage_list,
-    stage_list_event, stage_list_reached, steer_event, task_list, task_list_event,
-    task_list_reached, unreadable_set_event,
+    Resolved, Resumed, RoadmapPane, RoleEntry, RolePairingView, RoleWanted, RowDevice, Screen,
+    ServerAttached, ServerRemoved, SetRow, ShareView, ShowArchived, ShowingArchived, Shown, Size,
+    StageDocument, StageEntry, StageListEvent, StageListReached, StageSource, StageState, Started,
+    SteerAdditionView, SteerBrief, SteerCancelled, SteerCompanionRefusal, SteerEvent, SteerForm,
+    SteerOpened, SteerPairingView, SteerRecordView, SteerRow, SteerSaved, SteerSubmission,
+    SteerTarget, SteerUpgradeView, TakenUp, TargetNamed, TargetRecorded, TaskDocument, TaskEntry,
+    TaskListEvent, TaskListReached, TaskSource, TerminalClosed, TerminalOpened, TerminalPorts,
+    TerminalView, TerminalsView, TimelineEvent, TransferredTo, Uncommitted, UnreadableSetEvent,
+    WantView, Watching, Worktree, agent_output_event, agent_output_pinned, backlog_pane,
+    brief_event, commit_event, commit_pane, entered_event, handoff_event, manual_task_event,
+    memo_card, memo_event, moved_event, notice_event, proposal_view, pull_request_details,
+    pull_request_event, pull_request_reached, question_set_event, resolve_conflicts_event,
+    roadmap_pane, stage_list, stage_list_event, stage_list_reached, steer_event, task_list,
+    task_list_event, task_list_reached, unreadable_set_event,
 };
 pub use device::{
     DeviceIdentity, DevicesView, DiscoveredDevice, FoundOn, InstallKind, LinkedDevice,
@@ -108,7 +108,7 @@ pub use profiles::{
     HarnessEntry, HarnessInstall, HarnessModel, HarnessPath, LoginOver, MemoryFile, MemoryLeft,
     MemoryWanted, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,
     ProfileDeleted, ProfileDevice, ProfileEdit, ProfileEntry, ProfileSaved, ProfileTrouble,
-    RepoPairingsView, RoleChoice,
+    RememberedRole, RepoPairingsView, RoleChoice,
 };
 pub use push::{PushKey, RelayedNews, Subscribed, Subscription, Unsubscribe};
 pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};
@@ -137,8 +137,8 @@ pub use transcript::{
 };
 pub use transfer::{
     Arrived, BirthKey, CameFrom, ChainLink, CheckoutAcross, CompanionCheckoutAcross,
-    ConversationAcross, HandedOn, HarnessThere, Lacking, MovedFor, PairingAcross, PairingRole,
-    Permitting, PickedAcross, Preflight, ProfileAcross, StageAdopting, StageAhead, StageJoin,
+    ConversationAcross, HandedOn, HarnessThere, Lacking, MovedFor, PairingAcross, Permitting,
+    PickedAcross, Preflight, ProfileAcross, RoleAcross, StageAdopting, StageAhead, StageJoin,
     StageJoined, StageJoining, StageReport, StageReported, StageWhereabouts, TipsThere,
     Transferring, UntrackedFile,
 };

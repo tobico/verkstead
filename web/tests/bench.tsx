@@ -15,13 +15,18 @@ import type {
   ConversationEntry,
   ConversationView,
   OnboardingView,
+  PairingView,
+  PickedView,
   ProfileEntry,
   RepoEntry,
   RepoPairingsView,
+  RolePairingView,
   SettingsView,
   ShowingArchived,
 } from "../src/api/types";
 import { Shell, conversationRoutes } from "../src/App";
+import { under } from "../src/pairing";
+import { settledFor } from "../src/workbench/processes";
 import { ComposePage } from "../src/workbench/Compose";
 import { Conversations } from "../src/workbench/Conversations";
 import setup from "../src/workbench/Setup.module.css";
@@ -38,6 +43,57 @@ import settings from "./fixtures/settings.json" with { type: "json" };
 /// still drafting.
 export const SIDEBAR = conversations as ConversationEntry[];
 export const OPEN = conversation as ConversationView;
+
+/// What a conversation settled for the role named `role`, as the Pairing it
+/// is — for the readings below, whose fixtures pair every role their Process
+/// declares.
+///
+/// Thrown on rather than `null`, because a test reading a role nothing is
+/// paired for is a test about a fixture that has moved rather than about the
+/// page.
+export function onRole(
+  conversation: ConversationView,
+  role: string,
+): PairingView {
+  const paired = under(settledFor(conversation.pairings, role));
+
+  if (paired === null) {
+    throw new Error(`nothing is paired for the ${role} role`);
+  }
+
+  return paired;
+}
+
+/// The role named `role` as the record sends it, label and marks and all —
+/// for the readings that ask what is drawn *around* a role rather than what it
+/// settled.
+export function settledRole(
+  conversation: ConversationView,
+  role: string,
+): RolePairingView {
+  const named = conversation.pairings.find((one) => one.role === role);
+
+  if (named === undefined) {
+    throw new Error(`this conversation's Process declares no ${role} role`);
+  }
+
+  return named;
+}
+
+/// And that list with `over` written over it, role by role: the one shape a
+/// fixture is bent into when a test wants a role settled some other way.
+///
+/// By name rather than by position, which roles a conversation has being its
+/// Process's to say (ADR-0030, *Process*) — a name the fixture has no role for
+/// writes nothing, which is the same page the fixture already draws.
+export function pairedAs(
+  pairings: RolePairingView[],
+  over: Record<string, PickedView>,
+): RolePairingView[] {
+  return pairings.map((role) =>
+    role.role in over ? { ...role, picked: over[role.role]! } : role,
+  );
+}
 
 /// And the settings, which the workbench reads one thing out of: the MCP
 /// servers declared, which are the rows the composer's Attach menu offers under
@@ -71,11 +127,7 @@ export const COMPANION_BRANCHES = ["trunk", "origin/trunk"];
 /// back is broken and every Pairing it remembered would be judged away — a
 /// golden file of this endpoint could only ever hold this same nothing. A test
 /// about a Repo that does remember something serves its own.
-export const NO_PAIRINGS: RepoPairingsView = {
-  grilling: null,
-  implementation: null,
-  review: "Nothing",
-};
+export const NO_PAIRINGS: RepoPairingsView = { roles: [] };
 
 /// And the sidebar's one setting, off with nothing behind it — which is where a
 /// workbench nobody has archived anything in stands. Written here rather than

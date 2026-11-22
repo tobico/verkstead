@@ -24,6 +24,7 @@ import type {
   ProcessChoice,
   ProcessEntry,
   ProvidedProcess,
+  RoleEntry,
 } from "../api/types";
 import { useReading } from "../freshness";
 import { OFFERED, PROCESS } from "./processes";
@@ -70,6 +71,43 @@ export function defaultChoice(): ProcessChoice {
   return first === undefined
     ? { process: "Develop" }
     : { process: "Provided", provided: { plugin: first.plugin, id: first.id } };
+}
+
+/// The entry for whichever Process `process` is: a plugin's by what `provided`
+/// names, and one of Verkstead's own by the built-in word its plugin stands
+/// for.
+///
+/// Offered or not, so a Conversation on a switched-off plugin's Process is
+/// still worded — and `undefined` for a Process this page holds nothing for,
+/// which is a list it has not read yet or a plugin removed under a
+/// Conversation.
+export function processEntry(
+  process: Process,
+  provided: ProvidedProcess | null,
+): ProcessEntry | undefined {
+  return process === "Provided"
+    ? providedProcess(provided)
+    : listed().find((entry) => entry.built_in === process);
+}
+
+/// The roles a Process declares, in the order its manifest writes them: what
+/// the **Agent** control draws a picker for, and how many of them says which
+/// shape that control takes (Set 1765, Q26).
+///
+/// Empty for a Process this page holds no entry for, which draws the one
+/// picker the dropdown shape is — see `control` in `processes.ts`.
+export function rolesOf(
+  process: Process,
+  provided: ProvidedProcess | null,
+): RoleEntry[] {
+  return processEntry(process, provided)?.roles ?? [];
+}
+
+/// And the same for a Process the composer is *picking* rather than one a
+/// Conversation is on: a choice carries `undefined` where the record carries
+/// `null`.
+export function rolesFor(choice: ProcessChoice): RoleEntry[] {
+  return rolesOf(choice.process, choice.provided ?? null);
 }
 
 /// The plugin's Process `provided` names, where this server holds it —

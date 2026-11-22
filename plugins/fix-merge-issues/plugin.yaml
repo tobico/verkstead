@@ -39,6 +39,10 @@ provides:
       - id: wrapping
         word: Wrapping
         activity: wrap-up
+        # The one role, because this wrap-up never reads the branch: with the
+        # review switched off there is no review session to pair, so a steer
+        # into it settles what builds and waits on nothing else.
+        roles: [implementation]
         options: { review: "off", comments: "off" }
         steer: { brief: none }
       - id: follow-up

@@ -29,20 +29,6 @@ use crate::{AgentType, ClonableRepo};
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-/// Which of a Conversation's three roles a Pairing is for.
-///
-/// Here rather than read off a Profile, because what a missing harness has to be
-/// named against is the Pairing that wants it: two roles can want two harnesses,
-/// and a sentence that said only *Claude Code is not over there* would leave the
-/// human to work out which picker to go and change.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum PairingRole {
-    Grilling,
-    Implementation,
-    Review,
-}
-
 /// One thing the far end has not got.
 ///
 /// Each names the *somewhere* it is to be put right, because each is a different
@@ -99,7 +85,15 @@ pub enum Lacking {
 
     /// The harness a Pairing names is not on that device's `PATH`.
     Harness {
-        role: PairingRole,
+        /// The role whose Pairing wants it, as its Process labels it.
+        ///
+        /// Named rather than read off a Profile, because what a missing harness
+        /// has to be named against is the Pairing that wants it: two roles can
+        /// want two harnesses, and a sentence that said only *Claude Code is
+        /// not over there* would leave the human to work out which picker to go
+        /// and change. The label rather than a word of Verkstead's, a
+        /// Conversation's roles being its Process's (ADR-0030, *Process*).
+        role: String,
 
         /// The Agent Profile's name as it reads here, or nothing for the one
         /// account on its harness that nobody named.
@@ -248,10 +242,21 @@ pub struct ConversationAcross {
     /// Its **Rank**, verbatim.
     pub rank: String,
 
-    /// And what each of the three roles has settled.
-    pub grilling: PickedAcross,
-    pub implementation: PickedAcross,
-    pub review: PickedAcross,
+    /// And what each role something was settled for has settled, by the name
+    /// its Process declares it under.
+    ///
+    /// Whichever roles those are rather than three: a Process names the roles
+    /// it is run under (ADR-0030, *Process*), so a Conversation on a plugin's
+    /// crosses carrying names the far end may never have seen. Each arrives
+    /// under its own name and is written down under it.
+    pub pairings: Vec<RoleAcross>,
+}
+
+/// One role's name and what it has settled, as they cross.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleAcross {
+    pub role: String,
+    pub picked: PickedAcross,
 }
 
 /// What names a Conversation across a whole cluster: the device it was drafted

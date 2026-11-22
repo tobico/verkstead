@@ -38,6 +38,7 @@ provides:
       - id: wrapping
         word: Wrapping
         activity: wrap-up
+        roles: [implementation, review]
         steer: { brief: none }
       - id: follow-up
         word: Follow-up

@@ -560,14 +560,13 @@ impl Verkstead {
     /// All three of a Conversation's pickers filled in with one Pairing, the way
     /// the composer fills them.
     async fn picks(&self, conversation: i64, profile: &str) {
-        let pairing = serde_json::json!({ "profile_id": profile, "model": MODEL }).to_string();
         let role =
             serde_json::json!({ "pairing": { "profile_id": profile, "model": MODEL } }).to_string();
 
         for (path, saying) in [
-            ("grilling-pairing", &pairing),
-            ("implementation-pairing", &pairing),
-            ("review-pairing", &role),
+            ("pairings/grilling", &role),
+            ("pairings/implementation", &role),
+            ("pairings/review", &role),
         ] {
             let said = press(
                 &self.workbench,
@@ -879,7 +878,7 @@ async fn a_rename_on_another_device_redraws_on_the_one_that_made_it() {
 
     assert_eq!(
         drawn
-            .implementation_pairing
+            .under("implementation")
             .expect("the Pairing on A survived the edit")
             .profile
             .name
@@ -1340,7 +1339,7 @@ async fn a_profile_whose_harness_is_absent_here_reads_broken_here_alone() {
     .await;
 
     let paired = opened
-        .implementation_pairing
+        .under("implementation")
         .expect("the Pairing is the Conversation's own");
 
     assert_eq!(
@@ -1766,12 +1765,16 @@ impl Verkstead {
         .await
         .unwrap();
 
-        sqlx::query("UPDATE conversations SET implementation_profile_id = ? WHERE id = ?")
-            .bind(&provisional)
-            .bind(conversation)
-            .execute(&self.pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO conversation_pairings (conversation_id, role, profile_id)
+             VALUES (?, 'implementation', ?)
+             ON CONFLICT (conversation_id, role) DO UPDATE SET profile_id = excluded.profile_id",
+        )
+        .bind(conversation)
+        .bind(&provisional)
+        .execute(&self.pool)
+        .await
+        .unwrap();
 
         provisional
     }
@@ -1782,16 +1785,18 @@ impl Verkstead {
     }
 
     /// The uuid a Conversation's implementation picker names, whether or not a
-    /// Profile is there under it — read off the column.
+    /// Profile is there under it — read off the row.
     async fn names_in_implementation(&self, conversation: i64) -> Option<String> {
-        let (named,): (Option<String>,) =
-            sqlx::query_as("SELECT implementation_profile_id FROM conversations WHERE id = ?")
-                .bind(conversation)
-                .fetch_one(&self.pool)
-                .await
-                .unwrap();
+        let named: Option<(String,)> = sqlx::query_as(
+            "SELECT profile_id FROM conversation_pairings
+             WHERE conversation_id = ? AND role = 'implementation'",
+        )
+        .bind(conversation)
+        .fetch_optional(&self.pool)
+        .await
+        .unwrap();
 
-        named
+        named.map(|(named,)| named)
     }
 
     /// The Profile a Conversation's implementation picker draws.
@@ -1803,8 +1808,8 @@ impl Verkstead {
         .await;
 
         drawn
-            .implementation_pairing
-            .map(|pairing| pairing.profile.id)
+            .under("implementation")
+            .map(|pairing| pairing.profile.id.clone())
     }
 
     /// Wait until it draws `profile` — or nothing picked, for `None` — or a

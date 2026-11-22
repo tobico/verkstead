@@ -4487,7 +4487,15 @@ work, the wrap-up's review — of which a Conversation fixes the ones its
 **Process** uses before the work starts: all three for Develop, the second and
 third for Review and Tinker, the second alone for Investigate and Fix Merge
 Issues. They are roles rather than kinds of Pairing: the same Profile, even the
-same model, may fill all three. The first line between them is planning
+same model, may fill all three.
+
+**Which roles there are is the Process's** (2026-11-22): each declares them in
+its manifest by name and label, marks the one that **builds**, and says which
+of them offer the row that runs no session — see
+[ADR-0030](docs/adr/0030-plugins.md), *Process*. These three are what the five
+Verkstead ships declare, and nothing but a plugin's Process names anything else;
+a role is a word from the store up, so a name nobody has used before is a role
+with a Pairing memory of its own the first time something is picked for it. The first line between them is planning
 against building: the grilling session's tail — writing the handoff, the backlog
 or the roadmap — is the Grilling Pairing's, and the Implementation Pairing
 drives what builds. Distinct accounts are why an inline implementation is a

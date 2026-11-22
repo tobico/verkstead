@@ -145,7 +145,7 @@ import { Switch as Toggle } from "../Switch";
 import { chosen } from "./naming";
 import { pathOf } from "./openings";
 import { PaneHead } from "./PaneHead";
-import { narrowed } from "./processes";
+import { narrowed, settledFor } from "./processes";
 import { keeping, type Keeping } from "./settling";
 import { STATE } from "./states";
 import { BasePicker, RULE } from "./Setup";
@@ -459,17 +459,6 @@ const BRIEF_NOTE: Record<SteerBrief, string> = {
 
 /// What a detour adds to its note.
 const DETOUR_NOTE = "It then returns to the state you steered it from.";
-
-/// The role whose pairing a row settles, where something runs there.
-function roleOf(
-  row: SteerRow | undefined,
-): "grilling" | "implementation" | undefined {
-  return row?.role === "grilling"
-    ? "grilling"
-    : row?.role
-      ? "implementation"
-      : undefined;
-}
 
 /// What a row is told apart by: its target, and a declared state's id beside
 /// it, there being any number of those.
@@ -1107,9 +1096,11 @@ export function Steer(props: {
   /// pairing picker under it.
   const runs = createMemo(() => (row()?.role ?? null) !== null);
 
-  /// And which role that picker settles — the one the target's sessions run
-  /// under, and for wrapping up the review role beside it.
-  const role = createMemo(() => roleOf(row()));
+  /// And which role that picker settles: the first of the roles the target
+  /// state declares, which is the role its row names — a state declaring more
+  /// takes this pick for that one and fills the rest where they have none, as
+  /// the submit does.
+  const role = createMemo(() => row()?.role ?? null);
 
   // The profile list is read here rather than passed in, so the picker is whole
   // wherever the form is opened from — the setup pane does the same.
@@ -1127,21 +1118,21 @@ export function Steer(props: {
   // already runs it under. The empty string is a conversation with none fixed
   // yet — a steered draft — which is a pick to make rather than an error.
   //
-  // One per role rather than one shared: the two are different choices about
-  // different work, and a pick made for a grilling that followed the human over
-  // to wrapping up would be the form answering a question they had not been
-  // asked.
+  // One per role rather than one shared, keyed by the role's name: the roles
+  // are different choices about different work, and a pick made for a grilling
+  // that followed the human over to wrapping up would be the form answering a
+  // question they had not been asked.
   //
-  // Neither picker offers a row that is not an account, steering into a state
+  // No picker here offers a row that is not an account, steering into a state
   // being asking for the session that state runs — so a conversation with no
   // Pairing on the role opens the field empty for them to pick who runs it.
-  const [grilling, setGrilling] = createSignal<string | null>(null);
-  const [implementation, setImplementation] = createSignal<string | null>(null);
+  const [picks, setPicks] = createSignal<Record<string, string>>({});
 
   /// Which role the record's own pairing answers for, which is the role its
   /// target runs under: the row holds one pairing because a submit sends one.
-  const answered = createMemo(() =>
-    roleOf(offered().find((one) => rowKey(one) === rowKey(held()))),
+  const answered = createMemo(
+    () =>
+      offered().find((one) => rowKey(one) === rowKey(held()))?.role ?? null,
   );
 
   /// The one the target picked runs under, and nothing where nothing runs.
@@ -1158,9 +1149,9 @@ export function Steer(props: {
       return "";
     }
 
-    const own = settling === "grilling" ? grilling() : implementation();
+    const own = picks()[settling];
 
-    if (own !== null) {
+    if (own !== undefined) {
       return own;
     }
 
@@ -1170,16 +1161,14 @@ export function Steer(props: {
       return pairing.spelled(on);
     }
 
-    return settling === "grilling"
-      ? pairing.chosen(props.conversation.grilling_pairing)
-      : pairing.chosen(props.conversation.implementation_pairing);
+    return pairing.settled(settledFor(props.conversation.pairings, settling));
   });
 
   const pick = (chosen: string) => {
-    if (role() === "grilling") {
-      setGrilling(chosen);
-    } else {
-      setImplementation(chosen);
+    const settling = role();
+
+    if (settling !== null) {
+      setPicks({ ...picks(), [settling]: chosen });
     }
 
     keeper.keep();

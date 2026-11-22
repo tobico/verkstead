@@ -637,7 +637,7 @@ async fn wanted(state: &AppState, conversation_id: i64) -> Wanted {
 async fn skipping(state: &AppState, conversation_id: i64) -> bool {
     match store::load_conversation(&state.pool, conversation_id).await {
         Ok(Some(conversation)) => {
-            conversation.review_pairing.skipped()
+            conversation.pairings.of(&store::Role::review()).skipped()
                 || crate::conversations::narrows_the_wrap_up(state, &conversation.process)
         }
         Ok(None) => false,

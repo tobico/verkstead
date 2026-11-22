@@ -78,10 +78,14 @@ pub struct Arrival {
     /// unchanged, so the row sits where it sat in the merged list.
     pub rank: String,
 
-    /// And what each role runs under, as ids of this device's own.
-    pub grilling: ArrivingPicked,
-    pub implementation: ArrivingPicked,
-    pub review: ArrivingPicked,
+    /// And what each role something was settled for runs under, by the name
+    /// the role is declared under, as ids of this device's own.
+    ///
+    /// Whichever roles the sending device had settled something about, rather
+    /// than three: which roles a Conversation has is its Process's to say, and
+    /// a Process a plugin provides may name one nobody here has used — see
+    /// [`Role`].
+    pub pairings: Vec<(Role, ArrivingPicked)>,
 }
 
 /// What one role arrives having settled — [`super::Picked`] with a local
@@ -98,9 +102,9 @@ pub enum ArrivingPicked {
 
     /// It runs no session at all.
     ///
-    /// Grilling and review only: the implementation is the one role that cannot
-    /// be picked away, and a message saying otherwise is written down as it
-    /// arrived rather than argued with.
+    /// Whichever roles the Process offers the row for: a message saying a role
+    /// that is answered with a Pairing or nothing was picked away is written
+    /// down as it arrived rather than argued with.
     Skipped,
 
     /// The Profile and model its sessions run under, the Profile by the uuid
@@ -269,10 +273,7 @@ pub async fn replace(pool: &SqlitePool, id: i64, arriving: &Arrival) -> Result<R
              rank = ?,
              base_commit = NULL,
              base_ref = NULL,
-             stop_asked_at = NULL,
-             grilling_profile_id = NULL,
-             implementation_profile_id = NULL,
-             review_profile_id = NULL
+             stop_asked_at = NULL
          WHERE id = ?",
     )
     .bind(arriving.repo_id)
@@ -292,7 +293,7 @@ pub async fn replace(pool: &SqlitePool, id: i64, arriving: &Arrival) -> Result<R
     // work is one thing is not this device's to hold an opinion about.
     super::births::stamp_over(&mut tx, id, &arriving.born).await?;
 
-    for table in ["pairing_models", "skipped_roles"] {
+    for table in ["conversation_pairings", "pairing_models", "skipped_roles"] {
         sqlx::query(&format!("DELETE FROM {table} WHERE conversation_id = ?"))
             .bind(id)
             .execute(&mut *tx)
@@ -310,15 +311,11 @@ pub async fn replace(pool: &SqlitePool, id: i64, arriving: &Arrival) -> Result<R
 /// What each role arrived having settled, written against the row.
 ///
 /// The one thing [`arrive`] and [`replace`] do the same way, and the reason they
-/// do: a Pairing is three writes over two tables and a column, and a copy that
-/// landed having lost one of them would be a Conversation refusing to start or
+/// do: a Pairing is three writes over three tables, and a copy that landed
+/// having lost one of them would be a Conversation refusing to start or
 /// starting a session the human said there was to be none of.
 async fn settled(tx: &mut sqlx::SqliteConnection, id: i64, arriving: &Arrival) -> Result<()> {
-    for (role, picked) in [
-        (Role::Grilling, &arriving.grilling),
-        (Role::Implementation, &arriving.implementation),
-        (Role::Review, &arriving.review),
-    ] {
+    for (role, picked) in &arriving.pairings {
         match picked {
             ArrivingPicked::Nothing => {}
 
@@ -329,21 +326,22 @@ async fn settled(tx: &mut sqlx::SqliteConnection, id: i64, arriving: &Arrival) -
                     .execute(&mut *tx)
                     .await
                     .with_context(|| {
-                        format!("writing down that Conversation {id} runs no {role:?} session")
+                        format!("writing down that Conversation {id} runs no {role} session")
                     })?;
             }
 
             ArrivingPicked::Under { profile_id, model } => {
-                sqlx::query(&format!(
-                    "UPDATE conversations SET {} = ? WHERE id = ?",
-                    role.column(),
-                ))
-                .bind(profile_id)
+                sqlx::query(
+                    "INSERT INTO conversation_pairings (conversation_id, role, profile_id)
+                     VALUES (?, ?, ?)",
+                )
                 .bind(id)
+                .bind(role.stored())
+                .bind(profile_id)
                 .execute(&mut *tx)
                 .await
                 .with_context(|| {
-                    format!("writing down the Profile Conversation {id} runs {role:?} under")
+                    format!("writing down the Profile Conversation {id} runs {role} under")
                 })?;
 
                 // The model where one was paired. A Pairing made before there
@@ -362,7 +360,7 @@ async fn settled(tx: &mut sqlx::SqliteConnection, id: i64, arriving: &Arrival) -
                     .execute(&mut *tx)
                     .await
                     .with_context(|| {
-                        format!("writing down the model Conversation {id} runs {role:?} on")
+                        format!("writing down the model Conversation {id} runs {role} on")
                     })?;
                 }
             }

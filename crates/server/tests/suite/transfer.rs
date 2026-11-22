@@ -925,13 +925,14 @@ impl Verkstead {
             panic!("the Conversation was not started: {started}")
         };
 
-        let pairing = serde_json::json!({ "profile_id": profile, "model": model });
-        let role = serde_json::json!({ "pairing": pairing });
+        let role = serde_json::json!({
+            "pairing": { "profile_id": profile, "model": model },
+        });
 
         for (path, saying) in [
-            ("grilling-pairing", &pairing),
-            ("implementation-pairing", &pairing),
-            ("review-pairing", &role),
+            ("pairings/grilling", &role),
+            ("pairings/implementation", &role),
+            ("pairings/review", &role),
         ] {
             let said = press(
                 &self.workbench,
@@ -2954,8 +2955,7 @@ async fn the_conversation_arrives_in_the_state_it_was_in() {
     // holds is a mirror of it, and that is what the row names.
     let mirror = b.profile_called(ACCOUNT).await;
     let pairing = arrived
-        .grilling_pairing
-        .as_ref()
+        .under("grilling")
         .expect("the grilling Pairing crossed with it");
 
     assert_eq!(pairing.profile.id, mirror.id, "B's own id for that account");
@@ -2966,8 +2966,7 @@ async fn the_conversation_arrives_in_the_state_it_was_in() {
     );
     assert_eq!(
         arrived
-            .implementation_pairing
-            .as_ref()
+            .under("implementation")
             .map(|pairing| pairing.profile.id.as_str()),
         Some(mirror.id.as_str()),
         "and the implementation's, which is the same account here",
@@ -9455,12 +9454,13 @@ async fn adopting_across(
         panic!("the adopting draft was not started: {started}")
     };
 
-    let pairing = serde_json::json!({ "profile_id": account, "model": MODEL });
-    let role = serde_json::json!({ "pairing": pairing });
+    let role = serde_json::json!({
+        "pairing": { "profile_id": account, "model": MODEL },
+    });
     for (path, saying) in [
-        ("grilling-pairing", &pairing),
-        ("implementation-pairing", &pairing),
-        ("review-pairing", &role),
+        ("pairings/grilling", &role),
+        ("pairings/implementation", &role),
+        ("pairings/review", &role),
     ] {
         let said = press(
             &a.workbench,

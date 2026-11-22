@@ -353,7 +353,11 @@ async fn recompute(
         // asked and answered — the interview itself went with the process it ran
         // in. See [`crate::grillings::again`].
         Lifecycle::Grilling => {
-            if conversation.grilling_pairing.is_none() {
+            if conversation
+                .pairings
+                .under(&store::Role::grilling())
+                .is_none()
+            {
                 return Ok(Resumed::NoGrillingPairing);
             }
 
@@ -384,7 +388,11 @@ async fn recompute(
             // What every session of the work itself runs under. Checked here
             // rather than left to the launch, which would log it and start
             // nothing — see [`crate::runner`].
-            if conversation.implementation_pairing.is_none() {
+            if conversation
+                .pairings
+                .under(&store::Role::implementation())
+                .is_none()
+            {
                 return Ok(Resumed::NoImplementationPairing);
             }
 
@@ -576,7 +584,11 @@ async fn recompute(
         // with nothing to pick up is one the press should say so about by name
         // rather than one it acts on halfway.
         Lifecycle::FollowUp => {
-            if conversation.implementation_pairing.is_none() {
+            if conversation
+                .pairings
+                .under(&store::Role::implementation())
+                .is_none()
+            {
                 return Ok(Resumed::NoImplementationPairing);
             }
 
@@ -606,7 +618,11 @@ async fn recompute(
         // There is no ending left half-made to look for here, the way a
         // follow-up's owed pull request is: an investigation never ends on one.
         Lifecycle::Investigating => {
-            if conversation.implementation_pairing.is_none() {
+            if conversation
+                .pairings
+                .under(&store::Role::implementation())
+                .is_none()
+            {
                 return Ok(Resumed::NoImplementationPairing);
             }
 

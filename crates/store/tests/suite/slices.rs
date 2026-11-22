@@ -989,9 +989,7 @@ async fn arrived(pool: &SqlitePool, repo_id: i64) -> i64 {
             naming: false,
             state: Lifecycle::Implementing,
             rank: RANK.to_owned(),
-            grilling: ArrivingPicked::Nothing,
-            implementation: ArrivingPicked::Nothing,
-            review: ArrivingPicked::Skipped,
+            pairings: vec![(verkstead_store::Role::review(), ArrivingPicked::Skipped)],
         },
     )
     .await

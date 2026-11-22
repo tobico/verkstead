@@ -36,9 +36,11 @@ const KEYS: &[&str] = &[
     "transitions",
 ];
 
-const STATE_KEYS: &[&str] = &["id", "word", "activity", "options", "steer", "detour"];
+const STATE_KEYS: &[&str] = &[
+    "id", "word", "activity", "roles", "options", "steer", "detour",
+];
 
-const ROLE_KEYS: &[&str] = &["name", "label", "building"];
+const ROLE_KEYS: &[&str] = &["name", "label", "building", "away"];
 
 /// The Directions Verkstead knows (ADR-0008), in the order the chooser draws
 /// them, as a manifest writes them.
@@ -91,6 +93,12 @@ pub struct Role {
     pub label: String,
     /// Whether it is the role the Done signal, memos and previews assume.
     pub building: bool,
+    /// Whether its picker offers the row that runs no session at all — *No
+    /// review*, and whatever a plugin's own role calls it.
+    ///
+    /// A role without it is answered with a Pairing or the press waits. The
+    /// building role never has it: there is no work without something doing it.
+    pub away: bool,
 }
 
 /// One of a Process's states.
@@ -101,6 +109,13 @@ pub struct State {
     /// What the Conversation card draws.
     pub word: String,
     pub activity: Runs,
+    /// The roles its sessions run under, in the order written — each one the
+    /// Process declares. Empty is the Process's building role, which is what a
+    /// state that says nothing runs under.
+    ///
+    /// What a steer into the state settles, and what a session its Activity
+    /// launches runs under: see [`Process::roles_in`] and [`Process::under`].
+    pub roles: Vec<String>,
     /// What the Activity is started with, beside the Conversation's facts.
     pub options: Vec<(String, String)>,
     /// The brief a steer into it takes, where it takes one.
@@ -206,6 +221,47 @@ impl Process {
     /// The state `id`, where it is declared.
     pub fn state(&self, id: &str) -> Option<&State> {
         self.states.iter().find(|state| state.id == id)
+    }
+
+    /// The roles the state `id`'s sessions run under, in the order written: the
+    /// `roles` it declares, or the building role where it declares none.
+    ///
+    /// Empty for a state this Process doesn't declare, which is a plugin
+    /// changed under a running Conversation.
+    pub fn roles_in(&self, id: &str) -> Vec<&Role> {
+        let Some(state) = self.state(id) else {
+            return Vec::new();
+        };
+
+        if state.roles.is_empty() {
+            return vec![self.building()];
+        }
+
+        state
+            .roles
+            .iter()
+            .filter_map(|name| self.roles.iter().find(|role| &role.name == name))
+            .collect()
+    }
+
+    /// Which of the state `id`'s roles a session its Activity launches naming
+    /// `word` runs under: that role where the state runs under it, and the
+    /// first it runs under otherwise.
+    ///
+    /// The fallback is what lets a Process over Verkstead's own Activities name
+    /// its roles whatever it likes: a component says the role it launches in —
+    /// `implementation`, the word every Activity Verkstead ships is written
+    /// with — and the state says which of the Process's roles that is. A state
+    /// whose roles the component does name, as all five built-ins' do, resolves
+    /// to the one it named.
+    pub fn under(&self, id: &str, word: &str) -> Option<&Role> {
+        let roles = self.roles_in(id);
+
+        roles
+            .iter()
+            .find(|role| role.name == word)
+            .or(roles.first())
+            .copied()
     }
 
     /// Refused where a state runs an Activity `find` says is unreachable, or
@@ -343,7 +399,7 @@ impl Walk<'_> {
         let target = flag(body, field, "target")?;
         let roles = roles(body, field)?;
 
-        let mut states = states(body, field, packs, dependencies, platform)?;
+        let mut states = states(body, field, &roles, packs, dependencies, platform)?;
         let directions = directions(body, field, &states)?;
         for (index, state) in states.iter().enumerate() {
             let Runs::ByDirection(each) = &state.activity else {
@@ -479,10 +535,22 @@ fn roles(body: &Map<String, Value>, field: &str) -> Result<Vec<Role>, Refusal> {
                 ),
             ));
         }
+        let away = flag(map, &at, "away")?;
+        if away && building {
+            let field = format!("{at}.away");
+            return Err(Refusal::of(
+                &field,
+                format!(
+                    "`{field}` offers the building role the row that runs no session. There is \
+                     no work without something doing it."
+                ),
+            ));
+        }
         roles.push(Role {
             name,
             label,
             building,
+            away,
         });
     }
     if !roles.iter().any(|role| role.building) {
@@ -498,6 +566,64 @@ fn roles(body: &Map<String, Value>, field: &str) -> Result<Vec<Role>, Refusal> {
     Ok(roles)
 }
 
+/// A state's `roles`: the names its sessions run under, each one `declared`
+/// names. Absent is empty, which reads as the Process's building role.
+///
+/// **What a Process names, it declares** (Set 1771, Q1), read here the same way
+/// a skill's pack is: a state naming a role the Process has no `roles` entry
+/// for is refused at the check and at the load, naming it.
+fn state_roles(
+    map: &Map<String, Value>,
+    at: &str,
+    declared: &[Role],
+) -> Result<Vec<String>, Refusal> {
+    let field = format!("{at}.roles");
+    let Some(value) = map.get("roles").filter(|value| !value.is_null()) else {
+        return Ok(Vec::new());
+    };
+
+    let Value::Array(written) = value else {
+        return Err(Refusal::of(
+            &field,
+            format!("`{field}` should be a list of the roles the state's sessions run under."),
+        ));
+    };
+
+    if written.is_empty() {
+        return Err(Refusal::of(
+            &field,
+            format!(
+                "`{field}` is empty. Name the roles the state's sessions run under, or leave \
+                 `roles` out for the building role."
+            ),
+        ));
+    }
+
+    let mut roles: Vec<String> = Vec::new();
+    for (index, value) in written.iter().enumerate() {
+        let at = format!("{field}[{index}]");
+        let name = text_of(value, &at)?;
+        if !declared.iter().any(|role| role.name == name) {
+            return Err(Refusal::of(
+                &at,
+                format!(
+                    "`{at}` is `{name}`, which this Process declares no role of. Add it to \
+                     `roles`, or name one it declares."
+                ),
+            ));
+        }
+        if roles.contains(&name) {
+            return Err(Refusal::of(
+                &at,
+                format!("`{at}` is `{name}`, which this state already runs under."),
+            ));
+        }
+        roles.push(name);
+    }
+
+    Ok(roles)
+}
+
 /// Whether `text` may be a state's id: lowercase letters, digits, hyphens and
 /// underscores — the words already stored are `follow_up` and the like.
 fn is_state(text: &str) -> bool {
@@ -510,6 +636,7 @@ fn is_state(text: &str) -> bool {
 fn states(
     body: &Map<String, Value>,
     field: &str,
+    declared: &[Role],
     packs: &[Pack],
     dependencies: &[Dependency],
     platform: Platform,
@@ -570,11 +697,13 @@ fn states(
             }
         };
         let detour = flag(map, &at, "detour")?;
+        let roles = state_roles(map, &at, declared)?;
 
         states.push(State {
             id,
             word,
             activity,
+            roles,
             options,
             steer,
             detour,

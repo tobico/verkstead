@@ -12,11 +12,25 @@
   "direction": null,
   "drafted_on": "aa00bb11cc22dd33ee44ff5566778899",
   "driven": false,
-  "grilling_pairing": null,
   "id": 2,
-  "implementation_pairing": null,
   "mcp_servers": [],
   "naming": false,
+  "pairings": [
+    {
+      "away": false,
+      "building": true,
+      "label": "Implementation",
+      "picked": "Nothing",
+      "role": "implementation"
+    },
+    {
+      "away": false,
+      "building": false,
+      "label": "Review",
+      "picked": "Nothing",
+      "role": "review"
+    }
+  ],
   "parked": null,
   "pending_steer": null,
   "permitted": [],
@@ -39,7 +53,6 @@
     "path": "/srv/repos/verkstead"
   },
   "resets": null,
-  "review_pairing": "Nothing",
   "shared": null,
   "skill_packs": [],
   "state": "Draft",

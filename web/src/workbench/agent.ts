@@ -1,4 +1,4 @@
-//! What the one **Agent** control reads while it is closed: the Implementation
+//! What the one **Agent** control reads while it is closed: the building role's
 //! Pairing, and how many of the other roles are on something else.
 //!
 //! The control behind it is a panel of the role pickers — see [`AgentOptions`]
@@ -8,23 +8,22 @@
 //! really run under, and counts the rest.
 //!
 //! Which is why there is nothing here for the control's other shape: where the
-//! table says the Process is run under one role there is no panel and no
-//! trigger over it, and a picker showing its own choice needs nobody to compose
-//! a reading of it.
+//! Process declares one role there is no panel and no trigger over it, and a
+//! picker showing its own choice needs nobody to compose a reading of it.
 //!
 //! **The Repo trigger's own convention**, which is the reason the counting reads
 //! this way rather than some other: that trigger says the repository's name and
 //! ` +1`, ` +2` for the repos the work runs alongside, because the row is one
-//! line and the names are inside the panel. This says the Implementation
+//! line and the names are inside the panel. This says the building role's
 //! Pairing and ` +1` for each other role picked onto a different one. A role
 //! picked onto the same Pairing adds nothing, there being nothing to say about
 //! it, and neither does a role picked away — *No review* is an answer rather
 //! than another account.
 //!
-//! And **[`NOTHING`] while a role the Process uses is empty**, whichever role it
-//! is: the trigger stands over a press that will refuse on exactly that, so a
-//! trigger reading an account while the panel holds an unanswered picker would
-//! be the row saying the work could start.
+//! And **[`NOTHING`] while a role the Process declares is empty**, whichever
+//! role it is: the trigger stands over a press that will refuse on exactly that,
+//! so a trigger reading an account while the panel holds an unanswered picker
+//! would be the row saying the work could start.
 //!
 //! Composed here rather than in the component for the composers' own reason —
 //! two pages ask this question, of two different things. A Conversation's picks
@@ -33,31 +32,32 @@
 //! which is the one shape the two pages share.
 
 import type { AgentType } from "../agents";
-import type { Process, ProfileEntry } from "../api/types";
+import type { ProfileEntry, RoleEntry } from "../api/types";
 import * as pairing from "../pairing";
 import { NOTHING } from "../picking";
-import { ROLES, type Role } from "./processes";
+import type { Role } from "./processes";
 
 /// What each role's picker is showing, as that picker's own `chosen` writes it:
 /// a Pairing, [`pairing.NONE`] for a role picked away, and the empty string for
 /// nothing chosen.
 ///
-/// Partial because which roles are asked about at all is the Process's — a
-/// Process using one role has one picker, and what is not drawn is not picked.
-/// A role the Process uses and this does not carry is nothing chosen, which is
-/// what an absent picker would have shown.
-export type Picked = Partial<Record<Role, string>>;
+/// Keyed by the role's name rather than by a field apiece, which roles there
+/// are being the Process's to say — a Process declaring one role has one
+/// picker, and what is not drawn is not picked. A role the Process declares and
+/// this does not carry is nothing chosen, which is what an absent picker would
+/// have shown.
+export type Picked = Record<Role, string>;
 
 /// And what the trigger reads, in the parts it is drawn out of: the mark of the
 /// harness beside the words, as every reading of who runs a session is drawn —
 /// see [`HarnessMark`](../HarnessMark.tsx).
 export type Reading = {
-  /// The Implementation Pairing's short reading, or [`NOTHING`].
+  /// The building role's Pairing, as a short reading, or [`NOTHING`].
   words: string;
   /// Whose mark goes in front of them, and `null` where there is no Pairing to
   /// be reading — the same `null` the row that runs nothing draws.
   mark: AgentType | null;
-  /// How many other roles the Process uses are on a different Pairing. Zero
+  /// How many of the Process's other roles are on a different Pairing. Zero
   /// draws nothing at all rather than ` +0`.
   also: number;
 };
@@ -71,7 +71,7 @@ export type Reading = {
 /// whether the Profile's name is said in the reading at all. See
 /// [`pairing.shown`](../pairing.ts).
 export function reading(
-  process: Process,
+  roles: RoleEntry[],
   picked: Picked,
   saved: ProfileEntry[],
 ): Reading {
@@ -80,7 +80,7 @@ export function reading(
   /// Which Pairing a role is on: `null` for a role picked away, and `undefined`
   /// for a role with nothing chosen — a pick that is no longer one of the rows
   /// among them, that being what the picker itself is showing nothing for.
-  const on = (role: Role): pairing.Pairing | null | undefined => {
+  const on = (role: string): pairing.Pairing | null | undefined => {
     const choice = picked[role] ?? "";
 
     return choice === pairing.NONE
@@ -88,14 +88,14 @@ export function reading(
       : rows.find((row) => pairing.value(row) === choice);
   };
 
-  const used = ROLES[process].uses;
-  /// The role the trigger reads. Every Process uses it — the table's `uses`
-  /// names it in all five rows, there being no work without something building
-  /// it — so the one case this misses is a table that stopped saying so, which
-  /// reads as nothing chosen rather than as some other role's account.
-  const building = on("implementation");
+  /// The role the trigger reads: the one the Process marks as building, and
+  /// the first it declares where no entry is marked — which is a Process this
+  /// page holds no entry for, read as nothing chosen rather than as some other
+  /// role's account.
+  const named = roles.find((role) => role.building) ?? roles[0];
+  const building = named === undefined ? undefined : on(named.role);
 
-  if (!building || used.some((role) => on(role) === undefined)) {
+  if (!building || roles.some((role) => on(role.role) === undefined)) {
     return { words: NOTHING, mark: null, also: 0 };
   }
 
@@ -105,11 +105,11 @@ export function reading(
     // Compared as picks rather than as Pairings: two roles on one Pairing sent
     // the same string, which is the whole of what *the same account and model*
     // means here.
-    also: used.filter(
+    also: roles.filter(
       (role) =>
-        role !== "implementation" &&
-        on(role) !== null &&
-        picked[role] !== picked.implementation,
+        role.role !== named!.role &&
+        on(role.role) !== null &&
+        picked[role.role] !== picked[named!.role],
     ).length,
   };
 }

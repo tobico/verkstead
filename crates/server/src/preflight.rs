@@ -36,7 +36,7 @@
 //! repository itself — said as a different sentence, being a different thing to
 //! go and put right.
 
-use verkstead_render::{AuthorThere, HarnessThere, Lacking, PairingRole, Preflight};
+use verkstead_render::{AuthorThere, HarnessThere, Lacking, Preflight};
 
 use crate::device::Devices;
 use crate::peer::harnesses::{HARNESSES, PLUGGED};
@@ -65,6 +65,7 @@ pub async fn of(
     pool: &sqlx::SqlitePool,
     config: &Config,
     conversation: &store::Conversation,
+    roles: &[(String, String)],
     device: &str,
 ) -> Result<Preflight, Refusal> {
     let Some(devices) = devices else {
@@ -165,7 +166,7 @@ pub async fn of(
         }
     }
 
-    for (role, pairing) in pairings(conversation) {
+    for (role, pairing) in pairings(conversation, roles) {
         let agent_type = pairing.profile.agent_type();
 
         if !there(&harnesses, agent_type) {
@@ -243,21 +244,26 @@ fn there(harnesses: &[HarnessThere], agent_type: store::AgentType) -> bool {
         .map_or(agent_type.built_in().is_some(), |harness| harness.there)
 }
 
-fn pairings(conversation: &store::Conversation) -> Vec<(PairingRole, &store::Pairing)> {
-    [
-        (
-            PairingRole::Grilling,
-            conversation.grilling_pairing.as_ref(),
-        ),
-        (
-            PairingRole::Implementation,
-            conversation.implementation_pairing.as_ref(),
-        ),
-        (PairingRole::Review, conversation.review_pairing.pairing()),
-    ]
-    .into_iter()
-    .filter_map(|(role, pairing)| pairing.map(|pairing| (role, pairing)))
-    .collect()
+/// Each role something was picked for, labelled the way its Process labels it
+/// — `roles` being its manifest's, name and label — and a role the Process
+/// does not declare labelled by its own name, which is a Conversation whose
+/// plugin changed under it.
+fn pairings<'a>(
+    conversation: &'a store::Conversation,
+    roles: &[(String, String)],
+) -> Vec<(String, &'a store::Pairing)> {
+    conversation
+        .pairings
+        .each()
+        .filter_map(|(role, picked)| {
+            let labelled = roles
+                .iter()
+                .find(|(name, _)| name == role.stored())
+                .map_or_else(|| role.stored().to_owned(), |(_, label)| label.clone());
+
+            picked.pairing().map(|pairing| (labelled, pairing))
+        })
+        .collect()
 }
 
 #[cfg(test)]

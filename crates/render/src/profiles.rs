@@ -734,17 +734,45 @@ impl PickedView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct RepoPairingsView {
-    /// A Pairing, or nothing: the grilling role has no row that runs no session,
-    /// so a skip some Repo remembers from before *No grilling* retired is read
-    /// as nothing remembered and never handed over as a choice.
-    pub grilling: Option<PairingView>,
+    /// One entry per role anything is remembered for, by the name the role is
+    /// declared under — whichever roles those are, a Process's roles being its
+    /// own (ADR-0030, *Process*).
+    ///
+    /// Each is a Pairing, the row that runs no session, or nothing — so an
+    /// entry says which of the three rather than whether anything is
+    /// remembered. A role with no entry is nothing remembered.
+    pub roles: Vec<RememberedRole>,
+}
 
-    /// And the other role with no such row.
-    pub implementation: Option<PairingView>,
+impl RepoPairingsView {
+    /// What the role named `role` is prefilled with — [`PickedView::Nothing`]
+    /// where nothing is remembered for it.
+    pub fn of(&self, role: &str) -> PickedView {
+        self.roles
+            .iter()
+            .find(|remembered| remembered.role == role)
+            .map_or(PickedView::Nothing, |remembered| remembered.picked.clone())
+    }
 
-    /// The one whose memory can hold it, so this says which of three rather than
-    /// whether anything is remembered.
-    pub review: PickedView,
+    /// And its Pairing, where a Pairing is what is remembered.
+    pub fn under(&self, role: &str) -> Option<&PairingView> {
+        self.roles
+            .iter()
+            .find(|remembered| remembered.role == role)
+            .and_then(|remembered| match &remembered.picked {
+                PickedView::Under(pairing) => Some(pairing),
+                PickedView::Nothing | PickedView::Skipped => None,
+            })
+    }
+}
+
+/// What one role's memory prefills its picker with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct RememberedRole {
+    /// The role's name, as its Process declares it.
+    pub role: String,
+    pub picked: PickedView,
 }
 
 /// Which Pairing one of a Conversation's roles runs under, or that it runs none.
@@ -752,8 +780,15 @@ pub struct RepoPairingsView {
 /// `null` is the row that runs no session: a picker that offers one offers it
 /// beside the Pairings, so the one press that picks either sends the same body
 /// — see [`PickedView`].
+///
+/// **Nothing else is read.** A body carrying a Pairing's own fields at the top
+/// level — the shape the three retired per-role presses took — would read as
+/// `pairing` missing, which is `null`, which is the row that runs no session:
+/// a pick silently turned into picking the role away. Refused instead, so a
+/// caller sending the old shape is told.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+#[serde(deny_unknown_fields)]
 pub struct RoleChoice {
     pub pairing: Option<ProfileChoice>,
 }

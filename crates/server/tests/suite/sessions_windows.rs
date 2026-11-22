@@ -952,16 +952,11 @@ async fn grilling_caching(script: &str, cache: Option<&Path>, builds: Builds, on
             }),
         };
 
-        // The review picker offers a row that is no account at all, so what it
-        // sends is which of its rows was picked.
-        let picked = match role {
-            "review" => serde_json::json!({ "pairing": pairing }),
-            _ => pairing,
-        };
+        let picked = serde_json::json!({ "pairing": pairing });
 
         let chosen: verkstead_render::ProfileChosen = post(
             &app,
-            &format!("/api/ui/conversations/{id}/{role}-pairing"),
+            &format!("/api/ui/conversations/{id}/pairings/{role}"),
             &picked,
         )
         .await;

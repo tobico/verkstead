@@ -517,29 +517,22 @@ async fn facts(
         })
         .collect();
 
-    let pairings = [
-        store::Role::Grilling,
-        store::Role::Implementation,
-        store::Role::Review,
-    ]
-    .into_iter()
-    .filter_map(|role| {
-        let pairing = match role {
-            store::Role::Grilling => conversation.grilling_pairing.clone(),
-            role => crate::runner::under(
-                role,
-                &conversation.review_pairing,
-                conversation.implementation_pairing.as_ref(),
-            ),
-        }?;
+    // Every role the Conversation's Process declares, in the order its manifest
+    // writes them, under the name it declares them by (Set 1765, Q26): what a
+    // component names at `launch` is one of these.
+    let pairings = crate::processes::roles(state, &conversation.process)
+        .into_iter()
+        .filter_map(|role| {
+            let named = store::Role::named(&role.name);
+            let pairing = crate::runner::under(&named, &conversation.pairings)?;
 
-        Some(world::Pairing {
-            role: crate::lending::role_named(role).to_owned(),
-            profile: pairing.profile.id.clone(),
-            model: pairing.runs_on().unwrap_or_default().to_owned(),
+            Some(world::Pairing {
+                role: role.name,
+                profile: pairing.profile.id.clone(),
+                model: pairing.runs_on().unwrap_or_default().to_owned(),
+            })
         })
-    })
-    .collect();
+        .collect();
 
     let skills = match state.sessions.skills() {
         Some(skills) => activity

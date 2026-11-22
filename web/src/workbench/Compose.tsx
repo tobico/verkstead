@@ -203,12 +203,10 @@ import {
   away,
   label,
   needed,
-  ROLES,
   targeted,
-  uses,
   type Role,
 } from "./processes";
-import { defaultChoice } from "./provided";
+import { defaultChoice, rolesFor } from "./provided";
 import { namesPullRequest, pullRequestRepository } from "./targets";
 import { useZero } from "./zero";
 
@@ -486,8 +484,8 @@ function Compose(props: {
   /// simply reads another memory, and a role the human did touch stands through
   /// it.
   const showing = (role: Role): string => {
-    const picked = state()[role];
-    if (picked !== null) {
+    const picked = state().pairings[role];
+    if (picked !== undefined) {
       return picked;
     }
 
@@ -496,11 +494,13 @@ function Compose(props: {
       return "";
     }
 
-    // The review is the one role whose memory can say *no session at all*; the
-    // other two are an account or nothing.
-    return role === "review"
-      ? pairing.settled(prefill.review)
-      : pairing.chosen(prefill[role]);
+    // Whichever the memory holds, by the role's name, and read as what was
+    // picked: a Pairing, the row that runs no session at all, or nothing.
+    const remembers = prefill.roles.find((one) => one.role === role);
+
+    return remembers === undefined
+      ? ""
+      : pairing.settled(remembers.picked);
   };
 
   /// What kind of work this page is composing: what the picker was moved to,
@@ -511,8 +511,8 @@ function Compose(props: {
   ///
   /// The one reading the row is drawn off, the way [`on`] is the one reading of
   /// the repo: which pickers stand in it, what the press waits on, and what an
-  /// inert press says it is waiting on all come off this and the table it
-  /// indexes.
+  /// inert press says it is waiting on all come off this and the roles its
+  /// manifest declares.
   const chosen = (): ProcessChoice =>
     state().process === null
       ? defaultChoice()
@@ -552,11 +552,15 @@ function Compose(props: {
   const onAPullRequest = () =>
     targeted(process()) && namesPullRequest(state().target);
 
+  /// The roles the Process picked declares, in the order their pickers are
+  /// drawn — its manifest's, read off the list the server sends.
+  const roles = () => rolesFor(chosen());
+
   const startable = () =>
     ready() &&
     (adopting() !== null || state().brief.trim() !== "") &&
     (!targeted(process()) || state().target.trim() !== "") &&
-    ROLES[process()].uses.every((role) => showing(role) !== "");
+    roles().every((role) => showing(role.role) !== "");
 
   /// What starting is waiting on, in the words the composer's own start says
   /// them in — the brief left out where a roadmap answers for it, and the roles
@@ -567,7 +571,7 @@ function Compose(props: {
   /// or not anybody wanted it is the page explaining itself unasked — see the
   /// composer's own start, where the same words moved for the same reason.
   const waiting = () =>
-    `Starting needs ${needed(process(), {
+    `Starting needs ${needed(process(), roles().length, {
       brief: adopting() === null,
       target: true,
     })}.`;
@@ -1054,12 +1058,13 @@ function Compose(props: {
               />
 
               {/* And who runs it, which is one control: a picker per role the
-                  Process uses, in the shape the Process asks for — a panel behind
-                  one trigger where there are several, and the one picker itself
-                  where there is one. Both of those are [`ROLES`]'s to say and not
-                  this page's. The composer's own option drawn over what this
-                  device is holding rather than over a record, so the two pages
-                  cannot come to ask this question in two shapes.
+                  Process declares, in the shape the count of them asks for — a
+                  panel behind one trigger where there are several, and the one
+                  picker itself where there is one. Both of those are the
+                  manifest's to say and not this page's. The composer's own
+                  option drawn over what this device is holding rather than over
+                  a record, so the two pages cannot come to ask this question in
+                  two shapes.
 
                   Each picker stands on what the repo was last grilled with (or
                   its prefill, where nothing has grilled it) until it is touched,
@@ -1069,53 +1074,40 @@ function Compose(props: {
               <ProfileChoices>
                 {(saved) => (
                   <AgentOptions
-                    process={process()}
+                    roles={roles()}
                     saved={saved()}
                     // Composed off what the pickers are showing rather than off
                     // what the device is holding, so the trigger and the panel
                     // read as one thing: a page whose repo memory has not landed
                     // reads *Not chosen* until it does, and switching repos simply
                     // reads another memory.
-                    picked={{
-                      grilling: showing("grilling"),
-                      implementation: showing("implementation"),
-                      review: showing("review"),
-                    }}
+                    picked={Object.fromEntries(
+                      roles().map((role) => [role.role, showing(role.role)]),
+                    )}
                   >
                     {() => (
-                      <>
-                        {/* Drawn by the table rather than by a test for a Process:
-                            a Review has no round for a grilling to open, and it is
-                            the table that says so. */}
-                        <Show when={uses(process(), "grilling")}>
+                      <For each={roles()}>
+                        {/* Drawn by the manifest rather than by a test for a
+                            Process: a Review has no round for a grilling to
+                            open, and it is the manifest that says so. */}
+                        {(role) => (
                           <RolePicker
                             saved={saved()}
-                            role="grilling"
-                            label={label(process(), "grilling")}
-                            chosen={showing("grilling")}
-                            pick={(picked) => change({ grilling: picked })}
+                            role={role.role}
+                            label={label(roles().length, role)}
+                            away={away(role)}
+                            chosen={showing(role.role)}
+                            pick={(picked) =>
+                              change({
+                                pairings: {
+                                  ...state().pairings,
+                                  [role.role]: picked,
+                                },
+                              })
+                            }
                           />
-                        </Show>
-                        <Show when={uses(process(), "implementation")}>
-                          <RolePicker
-                            saved={saved()}
-                            role="implementation"
-                            label={label(process(), "implementation")}
-                            chosen={showing("implementation")}
-                            pick={(picked) => change({ implementation: picked })}
-                          />
-                        </Show>
-                        <Show when={uses(process(), "review")}>
-                          <RolePicker
-                            saved={saved()}
-                            role="review"
-                            label={label(process(), "review")}
-                            away={away(process(), "review")}
-                            chosen={showing("review")}
-                            pick={(picked) => change({ review: picked })}
-                          />
-                        </Show>
-                      </>
+                        )}
+                      </For>
                     )}
                   </AgentOptions>
                 )}

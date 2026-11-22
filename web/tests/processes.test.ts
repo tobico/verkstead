@@ -1,18 +1,25 @@
-//! The role table, away from the two composers that draw off it: which roles
-//! each Process uses, which of them may be picked away, which shape its control
-//! takes, which of them are pointed at a target, what each of their pickers is
-//! labelled, and the words an inert start counts off it.
+//! What the viewer draws around a Process and the roles it declares: the words
+//! each Process is said in, which of them the picker offers, which are pointed
+//! at a target, the row a role's picker offers above the pairings, which shape
+//! the one **Agent** control takes, and the words an inert start counts off the
+//! roles.
+//!
+//! **Which roles a Process has is not here**: its manifest declares them and
+//! the server sends them with it (ADR-0030, *Process*) — see `provided.ts`.
+//! What is asked of this module is what Verkstead draws over whatever they
+//! turn out to be.
 //!
 //! Asked of the module rather than of a rendered row, for the reason it is a
-//! module at all: it is the one place the table is written down, and a page
+//! module at all: it is the one place these words are written down, and a page
 //! that drew three pickers because it had three components is not what says a
-//! Develop uses three roles.
+//! Develop declares three roles.
 
 import { describe, expect, it } from "vitest";
 
-import type { Process } from "../src/api/types";
+import type { Process, RoleEntry } from "../src/api/types";
 import {
   away,
+  control,
   DESCRIPTION,
   label,
   narrowed,
@@ -20,14 +27,11 @@ import {
   needed,
   OFFERED,
   PROCESS,
-  ROLE,
-  ROLES,
   roles,
+  settledFor,
   TARGETED,
   targeted,
-  uses,
 } from "../src/workbench/processes";
-import type { Role } from "../src/workbench/processes";
 
 /// Every Process the wire carries, which is every word the viewer has for one.
 /// The five Verkstead runs itself. A plugin's is worded by its manifest —
@@ -36,157 +40,106 @@ const EVERY = (Object.keys(PROCESS) as Process[]).filter(
   (process) => process !== "Provided",
 );
 
-describe("the roles a process is run under", () => {
-  /// The table ADR-0020 carries, row for row — and Develop's row is the one
-  /// every draft gets while it is the only Process offered.
-  it("says what each of the five uses", () => {
-    expect(ROLES.Develop.uses).toEqual([
-      "grilling",
-      "implementation",
-      "review",
-    ]);
-    expect(ROLES.Investigate.uses).toEqual(["implementation"]);
-    expect(ROLES.Review.uses).toEqual(["implementation", "review"]);
-    expect(ROLES.Tinker.uses).toEqual(["implementation", "review"]);
-    expect(ROLES.FixMergeIssues.uses).toEqual(["implementation"]);
+/// One role as a manifest declares it, for the readings below.
+function role(
+  name: string,
+  label: string,
+  marks: { building?: boolean; away?: boolean } = {},
+): RoleEntry {
+  return {
+    role: name,
+    label,
+    building: marks.building ?? false,
+    away: marks.away ?? false,
+  };
+}
+
+describe("the row a role's picker offers above the pairings", () => {
+  /// A role whose manifest marks it `away` offers the row that is no account at
+  /// all, worded off its label: *No review*, and whatever a plugin's own role
+  /// calls it.
+  it("is worded off the role's own label", () => {
+    expect(away(role("review", "Review", { away: true }))).toBe("No review");
+    expect(away(role("checking", "Checking", { away: true }))).toBe(
+      "No checking",
+    );
   });
 
-  /// And which of them the human may answer with nobody at all, which is what
-  /// each picker's own rows are drawn from. Two of the five offer one: Develop
-  /// and Tinker, over the review. A **Review** offers none — a Review without a
-  /// review is Fix Merge Issues with the comments answered — and *No grilling*
-  /// has gone already.
-  it("says which of them may be picked away", () => {
-    expect(ROLES.Develop.away).toEqual(["review"]);
-    expect(ROLES.Tinker.away).toEqual(["review"]);
-    expect(ROLES.Review.away).toEqual([]);
-    expect(ROLES.Investigate.away).toEqual([]);
-    expect(ROLES.FixMergeIssues.away).toEqual([]);
+  /// And a role without it has to be answered with an account: there is no row
+  /// to offer, so there is nothing to word.
+  it("is nothing for a role that has to be answered", () => {
+    expect(away(role("grilling", "Grilling"))).toBeUndefined();
+    expect(
+      away(role("implementation", "Implementation", { building: true })),
+    ).toBeUndefined();
+  });
+});
+
+describe("which shape the one Agent control takes", () => {
+  /// Counted off the Process's roles rather than read out of a table: a panel
+  /// where there are several pickers to stack under their labels, and the flat
+  /// picker where there is one. A panel over one picker would be a press to
+  /// reach a press.
+  it("is a panel for several roles and the picker itself for one", () => {
+    expect(control(3)).toBe("panel");
+    expect(control(2)).toBe("panel");
+    expect(control(1)).toBe("dropdown");
   });
 
-  /// The implementation role is on no row's list, there being no work without
-  /// something building it — which is the same fact as every row using it.
-  it("never offers the implementation role a row that runs nothing", () => {
-    for (const process of EVERY) {
-      expect(ROLES[process].away).not.toContain("implementation");
-      expect(away(process, "implementation")).toBeUndefined();
-    }
+  /// And a Process this page holds no entry for has no roles to draw, which
+  /// falls to the one picker rather than to an empty panel.
+  it("is the picker itself where there are no roles to draw", () => {
+    expect(control(0)).toBe("dropdown");
   });
+});
 
-  /// And the words the row is said in, which is what a composer asks for rather
-  /// than writing them in itself: a row a picker spelled by hand would go on
-  /// being offered through the stage that retired it.
-  it("says the words each row that runs nothing is offered in", () => {
-    expect(away("Develop", "review")).toBe("No review");
-    expect(away("Tinker", "review")).toBe("No review");
-  });
+describe("what a conversation settled for a role", () => {
+  /// By name, off the list the record sends: whichever roles its Process
+  /// declares, and nothing for one it declares none of.
+  it("is read by the role's name", () => {
+    const pairings = [
+      { ...role("implementation", "Implementation", { building: true }), picked: "Nothing" as const },
+      { ...role("review", "Review", { away: true }), picked: "Skipped" as const },
+    ];
 
-  /// And nothing where the role has to be answered with an account — the
-  /// grilling role on every Process that uses it, *No grilling* being retired.
-  it("offers no row where the table does not name the role", () => {
-    // The review on a Review among them: it is the one role that Process draws
-    // beside the implementation, and it has to be answered with an account.
-    expect(away("Review", "review")).toBeUndefined();
-    expect(away("Investigate", "review")).toBeUndefined();
-    expect(away("FixMergeIssues", "review")).toBeUndefined();
-    expect(away("Develop", "grilling")).toBeUndefined();
-    expect(away("Tinker", "grilling")).toBeUndefined();
-  });
-
-  /// A role nothing draws cannot be picked away from, so every row's `away` is
-  /// a part of its `uses` rather than a list beside it.
-  it("names nothing it does not also use", () => {
-    for (const process of EVERY) {
-      for (const role of ROLES[process].away) {
-        expect(ROLES[process].uses).toContain(role);
-      }
-    }
-  });
-
-  /// The shape the one **Agent** control takes: a panel where there are several
-  /// pickers to stack under their labels, and the flat Pairing dropdown where
-  /// there is one.
-  it("takes a panel for several roles and a dropdown for one", () => {
-    for (const process of EVERY) {
-      expect(ROLES[process].control).toBe(
-        ROLES[process].uses.length === 1 ? "dropdown" : "panel",
-      );
-    }
-
-    // And which of them a draft can be, which is all five now: three run under
-    // several roles and draw the panel, and the Investigate and the Fix Merge
-    // Issues are the two that draw the dropdown.
-    expect(OFFERED).toEqual([
-      "Develop",
-      "Tinker",
-      "Investigate",
-      "Review",
-      "FixMergeIssues",
-    ]);
-    expect(ROLES.Develop.control).toBe("panel");
-    expect(ROLES.Tinker.control).toBe("panel");
-    expect(ROLES.Review.control).toBe("panel");
-    expect(ROLES.Investigate.control).toBe("dropdown");
-    expect(ROLES.FixMergeIssues.control).toBe("dropdown");
-  });
-
-  /// Every Process the wire carries has a row, for the reason all five are
-  /// worded: a record naming one this viewer had no roles for would be a
-  /// composer with nothing in its setup row.
-  it("has a row for every process there is a word for", () => {
-    expect(Object.keys(ROLES).sort()).toEqual(Object.keys(PROCESS).sort());
-  });
-
-  /// Nothing runs without something building it, whichever Process it is.
-  it("uses the implementation role whatever the process", () => {
-    for (const process of EVERY) {
-      expect(uses(process, "implementation")).toBe(true);
-    }
-  });
-
-  it("answers whether a process uses a role", () => {
-    expect(uses("Develop", "grilling")).toBe(true);
-    // The one this stage moves off a test for a held pull request: a
-    // Conversation holding one reads as a Review, and a Review has no round for
-    // a grilling to open.
-    expect(uses("Review", "grilling")).toBe(false);
-    expect(uses("Investigate", "review")).toBe(false);
+    expect(settledFor(pairings, "review")).toBe("Skipped");
+    expect(settledFor(pairings, "implementation")).toBe("Nothing");
+    expect(settledFor(pairings, "grilling")).toBe("Nothing");
   });
 });
 
 describe("what an inert start says it is waiting on", () => {
-  /// Counted off the table rather than fixed at three: the sentence written for
-  /// a held pull request is the two-role sentence, and it is the table's now.
+  /// Counted off the Process's own roles rather than fixed at three: the
+  /// sentence written for a held pull request is the two-role sentence, and
+  /// which roles there are is the manifest's.
   it("names the roles as the process has them", () => {
-    expect(roles("Develop")).toBe("every role");
-    expect(roles("Review")).toBe("both roles");
-    expect(roles("Tinker")).toBe("both roles");
-    expect(roles("Investigate")).toBe("one role");
-    expect(roles("FixMergeIssues")).toBe("one role");
+    expect(roles(3)).toBe("every role");
+    expect(roles(2)).toBe("both roles");
+    expect(roles(1)).toBe("one role");
   });
 
-  it("says something for every process there is", () => {
-    for (const process of EVERY) {
-      expect(roles(process)).not.toBe("");
+  it("says something however many roles there are", () => {
+    for (const count of [0, 1, 2, 3, 4]) {
+      expect(roles(count)).not.toBe("");
     }
   });
 
   /// And the whole sentence, which is the clauses the caller asked for with
-  /// the target added where the table says the Process takes one.
+  /// the target added where the Process takes one.
   it("names a target where the process is pointed at one", () => {
-    expect(needed("Review", { brief: true, target: true })).toBe(
+    expect(needed("Review", 2, { brief: true, target: true })).toBe(
       "a brief, a target, and both roles picked and working",
     );
-    expect(needed("Develop", { brief: true, target: true })).toBe(
+    expect(needed("Develop", 3, { brief: true, target: true })).toBe(
       "a brief, and every role picked and working",
     );
   });
 
   /// A **Fix Merge Issues** waits on the same three things a Review does and
   /// names one role rather than two, nothing about it ever reading the branch:
-  /// the clause is counted off the table, so this is the row saying so.
+  /// the clause is counted off its roles, so this is the sentence saying so.
   it("names one role for a fix merge issues, and its target with it", () => {
-    expect(needed("FixMergeIssues", { brief: true, target: true })).toBe(
+    expect(needed("FixMergeIssues", 1, { brief: true, target: true })).toBe(
       "a brief, a target, and one role picked and working",
     );
   });
@@ -194,10 +147,10 @@ describe("what an inert start says it is waiting on", () => {
   /// And leaves out what the caller says is answered already: a page holding a
   /// roadmap has its brief, and one holding a pull request has its target.
   it("leaves out the clauses the caller does not ask for", () => {
-    expect(needed("Develop", { brief: false, target: true })).toBe(
+    expect(needed("Develop", 3, { brief: false, target: true })).toBe(
       "every role picked and working",
     );
-    expect(needed("Review", { brief: true, target: false })).toBe(
+    expect(needed("Review", 2, { brief: true, target: false })).toBe(
       "a brief, and both roles picked and working",
     );
   });
@@ -237,44 +190,31 @@ describe("the processes that are pointed at a target", () => {
   });
 });
 
-describe("the roles themselves", () => {
-  /// Spelled the way the record's own fields spell them — `grilling_pairing`
-  /// and the two beside it — because a composer indexes what it is holding by
-  /// exactly these words.
-  it("are the three the record keys its pairings by", () => {
-    const every: Role[] = ["grilling", "implementation", "review"];
-    const drawn = new Set(EVERY.flatMap((process) => ROLES[process].uses));
-
-    expect([...drawn].sort()).toEqual([...every].sort());
-  });
-});
-
 describe("what a role's picker is labelled", () => {
-  /// Inside a panel it is the role's own name: several pickers stacked, and a
-  /// name apiece is the whole of what tells them apart. The tests, the Brief's
-  /// setup facts and the Steer form all speak these three.
+  /// Inside a panel it is the role's own label, as its manifest writes it:
+  /// several pickers stacked, and a label apiece is the whole of what tells
+  /// them apart.
   it("names the role where the control is a panel", () => {
-    expect(label("Develop", "grilling")).toBe("Grilling");
-    expect(label("Develop", "implementation")).toBe("Implementation");
-    expect(label("Develop", "review")).toBe("Review");
-    expect(label("Review", "review")).toBe(ROLE.review);
+    expect(label(3, role("grilling", "Grilling"))).toBe("Grilling");
+    expect(label(3, role("implementation", "Implementation"))).toBe(
+      "Implementation",
+    );
+    expect(label(2, role("checking", "Checking"))).toBe("Checking");
   });
 
-  /// And where the table says a dropdown there is no panel to tell anything
-  /// apart in: the picker *is* the one **Agent** control, so it wears the row's
-  /// own label.
+  /// And where there is one role there is no panel to tell anything apart in:
+  /// the picker *is* the one **Agent** control, so it wears the row's own
+  /// label.
   it("says Agent where the control is the picker itself", () => {
-    expect(label("Investigate", "implementation")).toBe("Agent");
-    expect(label("FixMergeIssues", "implementation")).toBe("Agent");
+    expect(label(1, role("implementation", "Implementation"))).toBe("Agent");
+    expect(label(1, role("sketching", "Sketching"))).toBe("Agent");
   });
 
-  /// One or the other for every role every Process draws: a picker with no
-  /// label is a control a screen reader cannot name.
-  it("labels every picker any process draws", () => {
-    for (const process of EVERY) {
-      for (const role of ROLES[process].uses) {
-        expect(label(process, role)).not.toBe("");
-      }
+  /// One or the other whatever the role: a picker with no label is a control a
+  /// screen reader cannot name.
+  it("labels a picker whichever shape draws it", () => {
+    for (const count of [1, 2, 3]) {
+      expect(label(count, role("drawing", "Drawing"))).not.toBe("");
     }
   });
 });

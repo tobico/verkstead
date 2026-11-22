@@ -38,12 +38,13 @@ provides:
     roles:
       - { name: grilling, label: Grilling }
       - { name: implementation, label: Implementation, building: true }
-      - { name: review, label: Review }
+      - { name: review, label: Review, away: true }
     directions: { inline: implementing, task-list: implementing, roadmap: implementing }
     states:
       - id: grilling
         word: Grilling
         activity: interview
+        roles: [grilling]
         options: { skill: verkstead/grilling }
         steer: { brief: round }
       # No options: the three Activities this state runs are each told the work
@@ -58,6 +59,7 @@ provides:
       - id: wrapping
         word: Wrapping
         activity: wrap-up
+        roles: [implementation, review]
         steer: { brief: none }
       - id: follow-up
         word: Follow-up

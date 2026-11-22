@@ -45,8 +45,8 @@ use verkstead_render::{
     CompanionBranchRenamed, CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved,
     Confirming, ConversationClosed, ConversationMove, GrillingStarted, OfferedPack, OtherAuthor,
     PackAttached, PackRemoved, PairingView, PickedView, Process, ProcessPicked, ProfileEntry,
-    ProfileTrouble, RepoPairingsView, RepoSwitched, ServerAttached, ServerRemoved, Started,
-    TakenUp, TargetRecorded, Uncommitted, Worktree,
+    ProfileTrouble, RememberedRole, RepoPairingsView, RepoSwitched, RoleWanted, ServerAttached,
+    ServerRemoved, Started, TakenUp, TargetRecorded, Uncommitted, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -213,40 +213,25 @@ async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
         store::set_process(&state.pool, id, process).await?;
     }
 
-    let prefill = pairing_prefill(state, repo_id).await?;
+    // Every role the memory holds something for, under the name it holds it
+    // under: a role nobody had used before this Repo was grilled on it is
+    // prefilled from the first Conversation that picked for it, exactly as the
+    // three Verkstead knows are.
+    for remembered in pairing_prefill(state, repo_id).await?.roles {
+        let role = store::Role::named(&remembered.role);
 
-    if let Some(pairing) = &prefill.grilling {
-        store::set_grilling_pairing(
-            &state.pool,
-            id,
-            &pairing.profile.id,
-            pairing.model.as_deref(),
-        )
-        .await?;
-    }
-
-    if let Some(pairing) = &prefill.implementation {
-        store::set_implementation_pairing(
-            &state.pool,
-            id,
-            &pairing.profile.id,
-            pairing.model.as_deref(),
-        )
-        .await?;
-    }
-
-    // And the same one role along: a Repo last started with no review opens its
-    // next Conversation on that row too.
-    if prefill.review.skipped() {
-        store::skip_review(&state.pool, id).await?;
-    } else if let Some(pairing) = prefill.review.pairing() {
-        store::set_review_pairing(
-            &state.pool,
-            id,
-            &pairing.profile.id,
-            pairing.model.as_deref(),
-        )
-        .await?;
+        if remembered.picked.skipped() {
+            store::skip_role(&state.pool, id, &role).await?;
+        } else if let Some(pairing) = remembered.picked.pairing() {
+            store::set_pairing(
+                &state.pool,
+                id,
+                &role,
+                &pairing.profile.id,
+                pairing.model.as_deref(),
+            )
+            .await?;
+        }
     }
 
     Ok(())
@@ -264,28 +249,30 @@ async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
 /// **A Repo that has never been grilled is prefilled all the same**, off the
 /// last Conversation to start work anywhere and, where that leaves a role
 /// empty, the platform default — see [`unremembered`]. Never been grilled is
-/// all three roles with nothing remembered, a skip being as much a memory as a
+/// every role with nothing remembered, a skip being as much a memory as a
 /// Pairing: a Repo remembering even one role was grilled, and gets its memory
 /// and nothing else, exactly as before.
+///
+/// **Role by role under the names the memory holds**, whichever those are: a
+/// Process names the roles it is run under, so a Repo last grilled on one that
+/// declares a role nobody else uses remembers that role by its own name.
 pub(crate) async fn pairing_prefill(state: &AppState, repo_id: i64) -> Result<RepoPairingsView> {
     let remembered = store::remembered_pairings(&state.pool, repo_id).await?;
 
-    if !(remembered.grilling.picked()
-        || remembered.implementation.picked()
-        || remembered.review.picked())
-    {
+    if !remembered.each().any(|(_, picked)| picked.picked()) {
         return unremembered(state).await;
     }
 
-    Ok(RepoPairingsView {
-        // A skip is read and not applied, which is [`usable`]'s answer to one:
-        // the grilling picker has no row to prefill onto since *No grilling*
-        // retired, so a Repo remembering one arrives exactly as a Repo with
-        // nothing remembered for the role does.
-        grilling: usable(state, remembered.grilling).await?,
-        implementation: usable(state, remembered.implementation).await?,
-        review: prefilled(state, remembered.review).await?,
-    })
+    let mut roles = Vec::new();
+
+    for (role, picked) in remembered.each() {
+        roles.push(RememberedRole {
+            role: role.stored().to_owned(),
+            picked: prefilled(state, role, picked.clone()).await?,
+        });
+    }
+
+    Ok(RepoPairingsView { roles })
 }
 
 /// What a Repo with no memory of its own is prefilled with: the Pairings the
@@ -297,13 +284,18 @@ pub(crate) async fn pairing_prefill(state: &AppState, repo_id: i64) -> Result<Re
 /// rather than drafted, for the reason the memory is written at the press: a
 /// picker somebody left half-filled is not a choice anybody ran.
 ///
-/// **Composed role by role.** Each of the three takes the last start's Pairing
-/// where it is still usable, and the platform default where it is not — and
-/// where there was no last start at all, or it left that role empty. A role it
-/// picked away is one of those: *No review* is a pick about that piece of work,
-/// and a brand-new Repo silently wrapping up unreviewed on the strength of
-/// another Repo's would be a surprise, so the skip is not carried across. The
-/// Repo's own memory carries it as it always has; only this copy drops it.
+/// **Composed role by role.** Each takes the last start's Pairing where it is
+/// still usable, and the platform default where it is not — and where there was
+/// no last start at all, or it left that role empty. A role it picked away is
+/// one of those: *No review* is a pick about that piece of work, and a
+/// brand-new Repo silently wrapping up unreviewed on the strength of another
+/// Repo's would be a surprise, so the skip is not carried across. The Repo's own
+/// memory carries it as it always has; only this copy drops it.
+///
+/// **Which roles is every role any Process loaded here declares**, union
+/// whatever the last start settled: a draft is prefilled for whichever Process
+/// the human goes on to pick, and the picker they land on is already filled
+/// rather than empty on account of a Process they had not chosen yet.
 ///
 /// Both candidates go through [`usable`], so neither is trusted any further than
 /// a remembered Pairing is. One candidate a source: a last start that does not
@@ -313,22 +305,36 @@ async fn unremembered(state: &AppState) -> Result<RepoPairingsView> {
     let last = store::last_started_pairings(&state.pool).await?;
     let profiles = store::profiles_as_saved(&state.pool).await?;
 
-    let under = |pairing: Option<PairingView>| match pairing {
-        Some(pairing) => PickedView::Under(pairing),
-        None => PickedView::Nothing,
-    };
+    let mut named: Vec<store::Role> = Vec::new();
+    for loaded in crate::processes::listed(state).await {
+        for role in &loaded.process.roles {
+            let role = store::Role::named(&role.name);
+            if !named.contains(&role) {
+                named.push(role);
+            }
+        }
+    }
+    for (role, _) in last.each() {
+        if !named.contains(role) {
+            named.push(role.clone());
+        }
+    }
 
-    Ok(RepoPairingsView {
-        grilling: filled(state, last.grilling, &profiles, store::Role::Grilling).await?,
-        implementation: filled(
-            state,
-            last.implementation,
-            &profiles,
-            store::Role::Implementation,
-        )
-        .await?,
-        review: under(filled(state, last.review, &profiles, store::Role::Review).await?),
-    })
+    let mut roles = Vec::new();
+
+    for role in named {
+        let picked = match filled(state, last.of(&role), &profiles, &role).await? {
+            Some(pairing) => PickedView::Under(pairing),
+            None => PickedView::Nothing,
+        };
+
+        roles.push(RememberedRole {
+            role: role.stored().to_owned(),
+            picked,
+        });
+    }
+
+    Ok(RepoPairingsView { roles })
 }
 
 /// One role of [`unremembered`]: the last start's pick where it is a usable
@@ -337,7 +343,7 @@ async fn filled(
     state: &AppState,
     copied: store::Picked,
     profiles: &[store::Profile],
-    role: store::Role,
+    role: &store::Role,
 ) -> Result<Option<PairingView>> {
     if let Some(pairing) = usable(state, copied).await? {
         return Ok(Some(pairing));
@@ -355,14 +361,26 @@ async fn filled(
     .await
 }
 
-/// One role's memory as a picker would show it, for the one role that can
-/// remember the row that runs no session.
+/// One role's memory as a picker would show it.
 ///
-/// The row is not judged — there is no Profile to have gone — so it comes back
-/// as itself, and everything else goes through [`usable`].
-async fn prefilled(state: &AppState, remembered: store::Picked) -> Result<PickedView> {
+/// The row that runs no session is not judged — there is no Profile to have
+/// gone — so it comes back as itself, and everything else goes through
+/// [`usable`].
+///
+/// **Except for the grilling role**, whose such row retired with *No
+/// grilling*: a skip some Repo remembers from before it did has no picker row
+/// to prefill onto, so it is read as nothing remembered and never handed over
+/// as a choice.
+async fn prefilled(
+    state: &AppState,
+    role: &store::Role,
+    remembered: store::Picked,
+) -> Result<PickedView> {
     if remembered.skipped() {
-        return Ok(PickedView::Skipped);
+        return Ok(match role.stored() == store::Role::GRILLING {
+            true => PickedView::Nothing,
+            false => PickedView::Skipped,
+        });
     }
 
     Ok(match usable(state, remembered).await? {
@@ -1844,37 +1862,19 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // Whether each Claude account it would run under is logged in, asked
     // before the Profiles are read so that one with no login reads as broken
     // below and is refused by name — see [`crate::logins::asked`].
-    crate::logins::asked(state, chosen(&conversation)).await;
+    crate::logins::asked(state, chosen(&conversation).iter()).await;
+
+    // What kind of work this is, which decides two things below: where it lands
+    // the Conversation, and which session it starts in the Worktree. Which
+    // roles the press waits on is the Process's manifest's — see [`wanted`],
+    // which is why a Tinker never waits on a grilling Pairing and an
+    // Investigate waits on the one role it declares.
+    let process = conversation.process.clone();
 
     // Read as rows rather than judged off the ids, which is the same reading the
     // pane gets — a Profile whose pair has gone is not one to launch a session
     // under, and the id alone cannot say so.
-    let grilling = crate::profiles::pairing(state, conversation.grilling_pairing.clone()).await?;
-    let implementation =
-        crate::profiles::pairing(state, conversation.implementation_pairing.clone()).await?;
-    let review = crate::profiles::picked(state, conversation.review_pairing.clone()).await?;
-
-    // What kind of work this is, which decides three things below: which roles
-    // the press waits on, where it lands the Conversation, and which session it
-    // starts in the Worktree.
-    let process = conversation.process;
-
-    // A Tinker asks exactly what a take-up asks — the Profile the work runs
-    // under and the Profile the review reads under — because it is never
-    // interviewed and no Grilling picker is drawn for one to have been chosen
-    // on. Reused rather than written again beside it: it is the same question,
-    // so it is the same answer.
-    let unready = match process {
-        store::Process::Tinker => unready_to_wrap(implementation.as_ref(), &review),
-        // A plugin's Process runs its sessions as the implementation until its
-        // roles are put behind the Agent control.
-        store::Process::Investigate | store::Process::Provided { .. } => {
-            unready_to_investigate(implementation.as_ref())
-        }
-        _ => unready(grilling.as_ref(), implementation.as_ref(), &review),
-    };
-
-    if let Some(refusal) = unready {
+    if let Some(refusal) = unready(&wanted(state, &conversation).await?) {
         return Ok(refusal.grilling());
     }
 
@@ -2846,14 +2846,9 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     //
     // And whether each Claude account among them is logged in, asked first so
     // that one with no login reads as broken — see [`crate::logins::asked`].
-    crate::logins::asked(state, chosen(&conversation)).await;
+    crate::logins::asked(state, chosen(&conversation).iter()).await;
 
-    let grilling = crate::profiles::pairing(state, conversation.grilling_pairing.clone()).await?;
-    let implementation =
-        crate::profiles::pairing(state, conversation.implementation_pairing.clone()).await?;
-    let review = crate::profiles::picked(state, conversation.review_pairing.clone()).await?;
-
-    if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref(), &review) {
+    if let Some(refusal) = unready(&wanted(state, &conversation).await?) {
         return Ok(refusal.adopting());
     }
 
@@ -3724,12 +3719,12 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// than taken from the one before — see [`to_lose`]. One list for the whole
 /// stack, so a chain of five is asked about once.
 ///
-/// **Two roles rather than three, and one where the Process never reviews.** The
-/// work on a pull request is built, so there is no round for a grilling to open
-/// and no grilling picker on the page — see [`unready_to_wrap`]. A **Fix Merge
-/// Issues** takes the review out as well, nothing about it reading the branch,
-/// and waits on the Implementation Pairing alone — see
-/// [`unready_to_investigate`].
+/// **Whichever roles the Process declares**, which for the two this is pressed
+/// on is two and one. The work on a pull request is built, so neither declares a
+/// grilling role: there is no round for one to open and no grilling picker on
+/// the page. A **Fix Merge Issues** leaves the review out as well, nothing
+/// about it reading the branch, and waits on what builds alone — see
+/// [`unready`].
 ///
 /// **The branch is settled against origin, and origin is fetched first.**
 /// The work lives on the remote — that is what makes it something to wrap up —
@@ -3819,27 +3814,16 @@ pub(crate) async fn take_up(state: &AppState, id: i64, confirming: &Confirming) 
 
     // Whether each Claude account it would run under is logged in, asked
     // first for the reason a grill start asks — see [`crate::logins::asked`].
-    crate::logins::asked(state, chosen(&conversation)).await;
+    crate::logins::asked(state, chosen(&conversation).iter()).await;
 
     // Read as rows rather than judged off the ids, exactly as a grill start
     // reads them: a Profile whose pair has gone is not one to run a session
-    // under, and the id alone cannot say so.
-    let implementation =
-        crate::profiles::pairing(state, conversation.implementation_pairing.clone()).await?;
-    let review = crate::profiles::picked(state, conversation.review_pairing.clone()).await?;
-
-    // And how many of them this Process waits on, which is the one thing about
-    // the press its own row decides: a **Review** reads the branch under the
-    // Review Pairing and waits on it, and a **Fix Merge Issues** never reviews
-    // anything, so it waits on the Implementation Pairing alone — exactly as an
-    // Investigate does, and reusing that reading rather than writing it out
-    // again beside this one.
-    let unready = match &conversation.process {
-        store::Process::FixMergeIssues => unready_to_investigate(implementation.as_ref()),
-        _ => unready_to_wrap(implementation.as_ref(), &review),
-    };
-
-    if let Some(refusal) = unready {
+    // under, and the id alone cannot say so. And one per role this Process
+    // declares, which is the one thing about the press its own row decides: a
+    // **Review** reads the branch under the Review Pairing and declares that
+    // role, and a **Fix Merge Issues** never reviews anything and declares the
+    // one.
+    if let Some(refusal) = unready(&wanted(state, &conversation).await?) {
         return Ok(refusal.taking_up());
     }
 
@@ -5770,54 +5754,99 @@ async fn read(state: &AppState, id: i64) {
 /// nothing chosen, which is what it is: the pick to make again is the whole
 /// Pairing, Profile and model together.
 ///
-/// The rule rather than either button's answer, because both buttons ask it:
-/// starting the work and adopting a stage each want every role settled before
-/// they will do anything, and each says so in its own words — see
-/// [`Unready::grilling`] and [`Unready::adopting`].
-fn unready(
-    grilling: Option<&PairingView>,
-    implementation: Option<&PairingView>,
-    review: &PickedView,
-) -> Option<Unready> {
-    // An account or nothing, this role having no row to be picked away with:
-    // a Pairing is what answers it, and anything else is a picker to go back to.
-    let Some(grilling) = grilling.filter(|pairing| pairing.model.is_some()) else {
-        return Some(Unready::NoGrillingProfile);
-    };
+/// The rule rather than any button's answer, because every button asks it:
+/// starting the work, adopting a stage and taking a pull request up each want
+/// every role settled before they will do anything, and each says so in its own
+/// words — see [`Unready::grilling`], [`Unready::adopting`] and
+/// [`Unready::taking_up`].
+///
+/// **Every role the Process declares**, in the order its manifest writes them
+/// (Set 1765, Q26): which roles a Conversation asks for is its Process's to
+/// say, so the three readings this used to be — one for a start, one for a
+/// wrap-up with no grilling to ask about, one for an investigation with no
+/// review either — are the one reading of three different `roles` lists. A
+/// Process with no roles at all is a plugin in trouble, and the press that
+/// asked has already refused it as that.
+///
+/// A role picked away is settled: what it says is that no session runs there,
+/// which is not a Pairing missing.
+fn unready(settled: &[(RoleWanted, PickedView)]) -> Option<Unready> {
+    let mut running = Vec::new();
 
-    let Some(implementation) = implementation.filter(|pairing| pairing.model.is_some()) else {
-        return Some(Unready::NoImplementationProfile);
-    };
+    for (role, picked) in settled {
+        match picked {
+            PickedView::Skipped => {}
+            PickedView::Under(pairing) if pairing.model.is_some() => running.push(pairing),
+            _ => return Some(Unready::NoPairing(role.clone())),
+        }
+    }
 
-    let review = match review {
-        PickedView::Skipped => None,
-        PickedView::Under(pairing) if pairing.model.is_some() => Some(pairing),
-        _ => return Some(Unready::NoReviewProfile),
-    };
-
-    [Some(grilling), Some(implementation), review]
+    running
         .into_iter()
-        .flatten()
         .find_map(|pairing| trouble(&pairing.profile))
         .map(Unready::ProfileBroken)
 }
 
+/// What `conversation` settled for `role`, as every reader of it reads it.
+///
+/// The record's own answer, with one thing read over it: a skip stored for the
+/// **grilling** role is read as nothing chosen. *No grilling* retired, so
+/// nothing of this build's writes one and there is no picker row left to prefill
+/// onto — and a record from before it did is one whose interview still has to
+/// be answered with an account. See `fixed` in [`crate::steering`], which is
+/// the same reading at the steer.
+pub(crate) fn picked_for(conversation: &store::Conversation, role: &store::Role) -> store::Picked {
+    let picked = conversation.pairings.of(role);
+
+    if role.stored() == store::Role::GRILLING && matches!(picked, store::Picked::Skipped) {
+        return store::Picked::Nothing;
+    }
+
+    picked
+}
+
+/// Every role `conversation`'s Process declares, with what it has settled for
+/// it as a page would read it: [`unready`]'s argument, read once where the press
+/// reads the rest of what it is about to launch under.
+async fn wanted(
+    state: &AppState,
+    conversation: &store::Conversation,
+) -> Result<Vec<(RoleWanted, PickedView)>> {
+    let mut settled = Vec::new();
+
+    for role in crate::processes::roles(state, &conversation.process) {
+        let picked = crate::profiles::picked(
+            state,
+            picked_for(conversation, &store::Role::named(&role.name)),
+        )
+        .await?;
+
+        settled.push((
+            RoleWanted {
+                role: role.name,
+                label: role.label,
+                away: role.away,
+            },
+            picked,
+        ));
+    }
+
+    Ok(settled)
+}
+
 /// Every Profile a Conversation has chosen for a role, for a press to ask
 /// about before it reads them — see [`crate::logins::asked`].
-fn chosen(conversation: &store::Conversation) -> impl Iterator<Item = &store::Profile> {
-    let review = match &conversation.review_pairing {
-        store::Picked::Under(pairing) => Some(pairing),
-        store::Picked::Nothing | store::Picked::Skipped => None,
-    };
-
-    [
-        conversation.grilling_pairing.as_ref(),
-        conversation.implementation_pairing.as_ref(),
-        review,
-    ]
-    .into_iter()
-    .flatten()
-    .map(|pairing| &pairing.profile)
+///
+/// Whichever roles it has settled something for, rather than three: which roles
+/// it is run under is its Process's, and a Profile chosen for any of them is
+/// one a session may be launched under.
+fn chosen(conversation: &store::Conversation) -> Vec<store::Profile> {
+    conversation
+        .pairings
+        .each()
+        .filter_map(|(_, picked)| picked.pairing())
+        .map(|pairing| pairing.profile.clone())
+        .collect()
 }
 
 /// What is wrong with one chosen Profile, in the three facts the row's own
@@ -5838,13 +5867,11 @@ fn trouble(profile: &ProfileEntry) -> Option<ProfileTrouble> {
     })
 }
 
-/// What is wrong with a Conversation's pair of Profiles, before it is put in
-/// the words of whichever press asked.
+/// What is wrong with the Pairings a Conversation's roles have settled, before
+/// it is put in the words of whichever press asked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Unready {
-    NoGrillingProfile,
-    NoImplementationProfile,
-    NoReviewProfile,
+    NoPairing(RoleWanted),
     ProfileBroken(ProfileTrouble),
 }
 
@@ -5852,9 +5879,7 @@ impl Unready {
     /// Said to the press that starts a grilling.
     fn grilling(self) -> GrillingStarted {
         match self {
-            Unready::NoGrillingProfile => GrillingStarted::NoGrillingProfile,
-            Unready::NoImplementationProfile => GrillingStarted::NoImplementationProfile,
-            Unready::NoReviewProfile => GrillingStarted::NoReviewProfile,
+            Unready::NoPairing(role) => GrillingStarted::NoPairing(role),
             Unready::ProfileBroken(trouble) => GrillingStarted::ProfileBroken(trouble),
         }
     }
@@ -5862,73 +5887,21 @@ impl Unready {
     /// And to the press that adopts a stage.
     fn adopting(self) -> Adopted {
         match self {
-            Unready::NoGrillingProfile => Adopted::NoGrillingProfile,
-            Unready::NoImplementationProfile => Adopted::NoImplementationProfile,
-            Unready::NoReviewProfile => Adopted::NoReviewProfile,
+            Unready::NoPairing(role) => Adopted::NoPairing(role),
             Unready::ProfileBroken(trouble) => Adopted::ProfileBroken(trouble),
         }
     }
 
-    /// And to the press that takes a pull request up, which has no word for a
-    /// grilling because it never asks about one — see [`unready_to_wrap`] and
-    /// [`unready_to_investigate`], the two readings that make one of these for
-    /// it, neither of which looks at a grilling.
+    /// And to the press that takes a pull request up, which never names a
+    /// grilling because the Processes it is pressed on declare no such role:
+    /// the work on a pull request is built, there is no round for a grilling
+    /// to open, and no picker is drawn for one.
     fn taking_up(self) -> TakenUp {
         match self {
-            Unready::NoImplementationProfile | Unready::NoGrillingProfile => {
-                TakenUp::NoImplementationProfile
-            }
-            Unready::NoReviewProfile => TakenUp::NoReviewProfile,
+            Unready::NoPairing(role) => TakenUp::NoPairing(role),
             Unready::ProfileBroken(trouble) => TakenUp::ProfileBroken(trouble),
         }
     }
-}
-
-/// What is wrong with the two Profiles a wrap-up runs under, or nothing at all.
-///
-/// [`unready`]'s reading with the grilling taken out of it, which is the whole
-/// of the difference between a take-up and every other press: the work on a pull
-/// request is built, there is no round for a grilling to open, and the picker is
-/// drawn nowhere for one to have been chosen on. What is left is the Profile the
-/// fixes run under and the Profile the review reads under, judged exactly as
-/// they are beside a grilling.
-fn unready_to_wrap(implementation: Option<&PairingView>, review: &PickedView) -> Option<Unready> {
-    let Some(implementation) = implementation.filter(|pairing| pairing.model.is_some()) else {
-        return Some(Unready::NoImplementationProfile);
-    };
-
-    let review = match review {
-        PickedView::Skipped => None,
-        PickedView::Under(pairing) if pairing.model.is_some() => Some(pairing),
-        _ => return Some(Unready::NoReviewProfile),
-    };
-
-    [Some(implementation), review]
-        .into_iter()
-        .flatten()
-        .find_map(|pairing| trouble(&pairing.profile))
-        .map(Unready::ProfileBroken)
-}
-
-/// And what is wrong with the one Profile an investigation runs under, or
-/// nothing at all.
-///
-/// [`unready_to_wrap`]'s reading with the review taken out of it as well, which
-/// is the whole of an **Investigate**: nothing is built, so there is nothing to
-/// review, and the composer draws the one **Agent** dropdown over the
-/// Implementation picker and nothing else. What is left is the Profile the
-/// session runs under, judged exactly as it is beside a grilling.
-///
-/// **And the whole of a Fix Merge Issues too**, which is why a take-up asks it —
-/// see [`take_up`]. That Process is a wrap-up whose review is settled before it
-/// looks, so no session ever reads the branch under a Review Pairing and there
-/// is no picker drawn for one: the same one role, judged the same way.
-fn unready_to_investigate(implementation: Option<&PairingView>) -> Option<Unready> {
-    let Some(implementation) = implementation.filter(|pairing| pairing.model.is_some()) else {
-        return Some(Unready::NoImplementationProfile);
-    };
-
-    trouble(&implementation.profile).map(Unready::ProfileBroken)
 }
 
 /// The Brief the round a Conversation is in started from.
@@ -6018,46 +5991,31 @@ pub(crate) async fn worktree(path: Option<PathBuf>) -> Result<Option<Worktree>> 
 /// the Conversation again — and it deliberately says nothing about the branch or
 /// the base commit, which are decided against git when the button is pressed.
 ///
-/// **The same reading the press takes**, one Process at a time: a **Tinker** is
-/// never interviewed, so the Grilling picker is drawn for it nowhere and the
-/// button waits on the two roles a wrap-up waits on; a **Review** is the wrap-up
-/// itself and waits on exactly those two, and on something in the Target field
-/// besides; an **Investigate** is run under the Implementation role alone, so it
-/// waits on that one; and a **Fix Merge Issues** waits on that one role and on
-/// the Target field, being a wrap-up nothing reviews. The press asks exactly this
-/// again when it is pressed — see [`start_grilling`] and [`take_up`], where the
-/// readings stand beside their refusals.
+/// **The same reading the press takes**, and one reading for every Process: the
+/// roles it waits on are the ones the manifest declares, so a **Tinker** waits
+/// on the two it names and no Grilling picker is drawn for it, an
+/// **Investigate** waits on the one, and a **Review** waits on its two and on
+/// something in the Target field besides. The press asks exactly this again when
+/// it is pressed — see [`start_grilling`] and [`take_up`], where the readings
+/// stand beside their refusals.
 ///
 /// **A target and not a *good* target.** Whether what is in the field is a pull
 /// request GitHub has, or a branch origin has, is decided at the press, where
 /// there is somewhere to ask; an empty field is the one thing a page can see for
 /// itself, and it is the one thing this waits on.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn ready_to_grill(
     state: store::Lifecycle,
-    process: &store::Process,
-    grilling: Option<&PairingView>,
-    implementation: Option<&PairingView>,
-    review: &PickedView,
+    pairings: &[verkstead_render::RolePairingView],
     brief: &str,
     target: Option<&str>,
     targeted: bool,
 ) -> bool {
-    let roles = match process {
-        store::Process::Review | store::Process::Tinker => {
-            crate::profiles::ready_to_wrap(implementation, review)
-        }
-        // A plugin's Process runs its sessions as the implementation for now:
-        // its roles go behind the Agent control with the stage's sixth task.
-        store::Process::Investigate
-        | store::Process::FixMergeIssues
-        | store::Process::Provided { .. } => crate::profiles::ready_to_investigate(implementation),
-        _ => crate::profiles::ready_to_grill(grilling, implementation, review),
-    };
-
     let pointed = !targeted || target.is_some_and(|target| !target.trim().is_empty());
 
-    state == store::Lifecycle::Draft && !brief.trim().is_empty() && roles && pointed
+    state == store::Lifecycle::Draft
+        && !brief.trim().is_empty()
+        && crate::profiles::every_role_settled(pairings)
+        && pointed
 }
 
 /// Which Processes are pointed at work that is already somewhere else, and so

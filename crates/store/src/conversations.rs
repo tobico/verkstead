@@ -423,30 +423,17 @@ pub struct Conversation {
     /// as the column holds it. `None` for every other state.
     pub declared_state: Option<String>,
 
-    /// The Profile and model the grilling session runs under, once they are
-    /// chosen.
+    /// The Profile and model each of its roles' sessions run under, once they
+    /// are chosen — by the name the role is declared under (see [`Role`]).
     ///
-    /// A Pairing or nothing, there being no row to pick this role away with:
-    /// *No grilling* is retired, and a record written while it was there is read
-    /// as nothing chosen — exactly as a Repo's remembered skip is. Which is the
-    /// only way a skip can still be on one, nothing having written one since.
-    pub grilling_pairing: Option<super::Pairing>,
-
-    /// And the ones the implementation runs under. A separate choice because it
-    /// is genuinely a separate account and model — and because the
-    /// implementation session cannot simply carry the grilling one on.
-    pub implementation_pairing: Option<super::Pairing>,
-
-    /// And what the wrap-up's review session runs under. A third choice of its
-    /// own for the reason the second is one: reviewing is a fresh set of eyes on
-    /// what was built, so the account that looks at the work is picked apart
-    /// from the account that built it.
-    ///
-    /// The other role that can be picked away altogether — see
-    /// [`super::Picked`]. A Conversation whose human picked *no review* wraps up
-    /// without a review session, which is a settled choice rather than a Pairing
-    /// missing.
-    pub review_pairing: super::Picked,
+    /// One choice per role rather than one for the Conversation, because each
+    /// is genuinely a separate account and model: the interview is not the
+    /// build carried on, and reviewing is a fresh set of eyes on what was
+    /// built. Which roles there are to pick for is the Process's, so this says
+    /// only what has been picked — a role with nothing picked reads as
+    /// [`super::Picked::Nothing`], whether because nobody has chosen yet or
+    /// because this Process has no such role.
+    pub pairings: Pairings,
 
     /// Where the Conversation's worktree was put, once grilling has made one.
     ///
@@ -1460,10 +1447,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              base_commit               TEXT,
              base_ref                  TEXT,
              state                     TEXT NOT NULL,
-             rank                      TEXT,
-             grilling_profile_id       TEXT,
-             implementation_profile_id TEXT,
-             review_profile_id         TEXT
+             rank                      TEXT
          ) STRICT",
     )
     .execute(pool)
@@ -1748,15 +1732,33 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the table of when stages that came home joined")?;
 
-    // The model half of a Conversation's Pairings, one row per role. A
-    // table of its own for the reason the direction is one: there is no
-    // migration machinery here and `conversations` is STRICT and left alone —
-    // so the Profile half stays in the column it has always been in and the
-    // model half arrives beside it.
+    // The Profile half of a Conversation's Pairings, one row per role, keyed by
+    // the role's **name**: a Process declares the roles it is run under, so
+    // which of them a Conversation has is not a fixed set of columns (ADR-0030,
+    // *Process*). Three columns on `conversations` held them while the roles
+    // were Verkstead's three, and those are moved in here once — see
+    // [`super::migrations::pairings_that_were_columns`].
     //
-    // One row per role by the primary key, and a role with no row is one whose
-    // Pairing has no model: either nothing has been chosen for it at all, or it
-    // was chosen before pairings existed, which the Profile column tells apart.
+    // One row per role by the primary key, and a role with no row is one
+    // nothing has been picked for — or one whose row was taken away by picking
+    // it away, the skip below being where that is written.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS conversation_pairings (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             role            TEXT NOT NULL,
+             profile_id      TEXT NOT NULL,
+             PRIMARY KEY (conversation_id, role)
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the conversation pairings table")?;
+
+    // And the model half, one row per role beside it. A table of its own
+    // because it arrived after the Profile half did, and a role with no row
+    // here is one whose Pairing has no model: either nothing has been chosen
+    // for it at all, or it was chosen before pairings had models, which the
+    // Profile row tells apart.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS pairing_models (
              conversation_id INTEGER NOT NULL REFERENCES conversations(id),
@@ -2672,9 +2674,6 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         Option<String>,
         Option<String>,
         String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
         i64,
         String,
         String,
@@ -2688,8 +2687,6 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
                 c.named_branch IS NOT NULL AS branch_named,
                 c.naming,
                 c.base_commit, c.base_ref, c.state,
-                c.grilling_profile_id, c.implementation_profile_id,
-                c.review_profile_id,
                 r.id, r.path, r.name, r.default_branch,
                 (SELECT author FROM repo_authors WHERE repo_id = r.id)
          FROM conversations c
@@ -2710,9 +2707,6 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         base_commit,
         base_ref,
         state,
-        grilling_profile_id,
-        implementation_profile_id,
-        review_profile_id,
         repo_id,
         repo_path,
         repo_name,
@@ -2745,10 +2739,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         base_ref: base_ref.filter(|named| !named.is_empty()),
         state: lifecycle,
         declared_state: (lifecycle == Lifecycle::Declared).then_some(state),
-        grilling_pairing: pairing(pool, id, Role::Grilling, grilling_profile_id).await?,
-        implementation_pairing: pairing(pool, id, Role::Implementation, implementation_profile_id)
-            .await?,
-        review_pairing: picked(pool, id, Role::Review, review_profile_id).await?,
+        pairings: pairings(pool, id).await?,
         worktree: worktree(pool, id).await?,
         direction: direction(pool, id).await?,
         process,
@@ -2986,74 +2977,66 @@ pub async fn recorded_conversations(pool: &SqlitePool) -> Result<Vec<i64>> {
     Ok(rows.into_iter().map(|(id,)| id).collect())
 }
 
-/// One of a Conversation's Pairings: the Profile its column names, and the
-/// model paired with it where one was.
+/// What a Conversation has settled about each role something was picked for.
 ///
-/// A role with no Profile has no Pairing at all, whatever `pairing_models`
-/// holds: the model half alone is nothing to run a session under.
-async fn pairing(
-    pool: &SqlitePool,
-    conversation: i64,
-    role: Role,
-    profile_id: Option<String>,
-) -> Result<Option<super::Pairing>> {
-    let Some(profile_id) = profile_id else {
-        return Ok(None);
-    };
-
-    let Some(profile) = super::load_profile(pool, &profile_id).await? else {
-        return Ok(None);
-    };
-
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT model FROM pairing_models WHERE conversation_id = ? AND role = ?")
-            .bind(conversation)
-            .bind(role.stored())
-            .fetch_optional(pool)
-            .await
-            .with_context(|| format!("reading the model Conversation {conversation} paired"))?;
-
-    Ok(Some(super::Pairing {
-        profile,
-        model: row.map(|(model,)| model),
-    }))
-}
-
-/// The whole of what a Conversation has settled about one of its roles: a
-/// Pairing, the row that runs no session, or nothing yet.
+/// The roles of both tables rather than of a list Verkstead keeps: which roles
+/// a Conversation has is its Process's to say, so what is read back is whatever
+/// has a row — a Pairing, or the row that runs no session.
 ///
-/// The skip is read first because it is the stronger fact: picking it takes the
-/// Profile away in the same write, so a row here is what the human last picked
-/// whatever the column says.
-async fn picked(
-    pool: &SqlitePool,
-    conversation: i64,
-    role: Role,
-    profile_id: Option<String>,
-) -> Result<super::Picked> {
-    if skipped(pool, conversation, role).await? {
-        return Ok(super::Picked::Skipped);
+/// A role whose Profile is gone has no Pairing at all, whatever `pairing_models`
+/// holds: the model half alone is nothing to run a session under. Which leaves
+/// it reading as nothing picked, exactly as it did while the Profile half was a
+/// column something had nulled.
+async fn pairings(pool: &SqlitePool, conversation: i64) -> Result<Pairings> {
+    let rows: Vec<(String, Option<String>, Option<String>, bool)> = sqlx::query_as(
+        "SELECT role, profile_id, model, skipped FROM (
+             SELECT p.role AS role, p.profile_id AS profile_id,
+                    (SELECT model FROM pairing_models m
+                      WHERE m.conversation_id = p.conversation_id AND m.role = p.role) AS model,
+                    FALSE AS skipped
+             FROM conversation_pairings p
+             WHERE p.conversation_id = ?
+             UNION ALL
+             SELECT s.role, NULL, NULL, TRUE
+             FROM skipped_roles s
+             WHERE s.conversation_id = ?
+         )
+         ORDER BY role",
+    )
+    .bind(conversation)
+    .bind(conversation)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("reading what Conversation {conversation} is paired with"))?;
+
+    let mut settled: Vec<(Role, super::Picked)> = Vec::new();
+
+    for (role, profile_id, model, skipped) in rows {
+        let role = Role::named(&role);
+
+        // The skip is the stronger fact, as it always was: picking it takes the
+        // Profile away in the same write, so a row in `skipped_roles` is what
+        // the human last picked whatever is beside it.
+        let picked = if skipped {
+            super::Picked::Skipped
+        } else {
+            match profile_id {
+                Some(profile_id) => match super::load_profile(pool, &profile_id).await? {
+                    Some(profile) => super::Picked::Under(super::Pairing { profile, model }),
+                    None => super::Picked::Nothing,
+                },
+                None => super::Picked::Nothing,
+            }
+        };
+
+        match settled.iter_mut().find(|(named, _)| *named == role) {
+            Some(already) if picked == super::Picked::Skipped => already.1 = picked,
+            Some(_) => {}
+            None => settled.push((role, picked)),
+        }
     }
 
-    Ok(match pairing(pool, conversation, role, profile_id).await? {
-        Some(pairing) => super::Picked::Under(pairing),
-        None => super::Picked::Nothing,
-    })
-}
-
-/// Whether the human picked this role away.
-async fn skipped(pool: &SqlitePool, conversation: i64, role: Role) -> Result<bool> {
-    let row: Option<(i64,)> =
-        sqlx::query_as("SELECT 1 FROM skipped_roles WHERE conversation_id = ? AND role = ?")
-            .bind(conversation)
-            .bind(role.stored())
-            .fetch_optional(pool)
-            .await
-            .with_context(|| {
-                format!("reading whether Conversation {conversation} skipped a role")
-            })?;
-
-    Ok(row.is_some())
+    Ok(Pairings::of_each(settled))
 }
 
 /// Where a Conversation's worktree was put, if it has one.
@@ -3654,38 +3637,98 @@ pub async fn hold_pull_request(
     Ok(())
 }
 
-/// Which of the three roles a Pairing is being chosen for.
+/// Which role a Pairing is being chosen for: the **name** its Process declares
+/// it by (ADR-0030, *Process*).
 ///
-/// The word the `pairing_models` table holds, and the column the Profile half
-/// goes in — the two halves of one choice, so the role names both rather than
-/// letting a caller pass one and forget the other.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Role {
-    Grilling,
-    Implementation,
-    Review,
-}
+/// A word rather than a variant, because the roles a Conversation is run under
+/// are its Process's — one Process names three and another one, and a plugin's
+/// may name a role nobody has used before. The word is what every table keyed
+/// by a role holds: `conversation_pairings`, `pairing_models`, `skipped_roles`,
+/// and the Repo's memory beside them.
+///
+/// The three Verkstead knows are [`Role::GRILLING`], [`Role::IMPLEMENTATION`]
+/// and [`Role::REVIEW`]. They are the names the five Processes it ships declare
+/// and the names everything stored before a role was a word is held under, so
+/// nothing in a database is rewritten for this; they have no standing here
+/// beyond being the three that already have rows.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Role(String);
 
 impl Role {
-    /// Every one of them, in the order the work goes through them: what the
-    /// memory is written from and read back into, so that adding a role is the
-    /// variant and nothing else.
-    pub(crate) const ALL: [Self; 3] = [Self::Grilling, Self::Implementation, Self::Review];
+    /// What runs the interview.
+    pub const GRILLING: &'static str = "grilling";
+    /// What builds, which is every built-in Process's building role.
+    pub const IMPLEMENTATION: &'static str = "implementation";
+    /// What looks at what was built.
+    pub const REVIEW: &'static str = "review";
 
-    pub(crate) fn stored(self) -> &'static str {
-        match self {
-            Self::Grilling => "grilling",
-            Self::Implementation => "implementation",
-            Self::Review => "review",
+    /// The role named `word`, whatever it is: a name nobody has used before is
+    /// a role of its own from the moment something is picked for it.
+    pub fn named(word: &str) -> Self {
+        Self(word.to_owned())
+    }
+
+    pub fn grilling() -> Self {
+        Self::named(Self::GRILLING)
+    }
+
+    pub fn implementation() -> Self {
+        Self::named(Self::IMPLEMENTATION)
+    }
+
+    pub fn review() -> Self {
+        Self::named(Self::REVIEW)
+    }
+
+    /// The word the tables hold, which is the name itself.
+    pub fn stored(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for Role {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// What a Conversation has settled about each role something has been picked
+/// for, by name.
+///
+/// Only the roles with a row of their own: a role nobody has picked for reads
+/// as [`super::Picked::Nothing`] and is not listed, which is the same answer as
+/// one its Process never declared. Which roles a Conversation *wants* answered
+/// is its Process's to say and is asked of the manifest, never of this.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Pairings(Vec<(Role, super::Picked)>);
+
+impl Pairings {
+    /// The roles something was settled for, by name — what a read of the
+    /// record builds, and what a test stands in for one with.
+    pub fn of_each(settled: Vec<(Role, super::Picked)>) -> Self {
+        Self(settled)
+    }
+
+    /// What was settled for `role` — [`super::Picked::Nothing`] where nothing
+    /// was.
+    pub fn of(&self, role: &Role) -> super::Picked {
+        self.0
+            .iter()
+            .find(|(named, _)| named == role)
+            .map_or(super::Picked::Nothing, |(_, picked)| picked.clone())
+    }
+
+    /// Its Pairing, where that is what was settled.
+    pub fn under(&self, role: &Role) -> Option<super::Pairing> {
+        match self.of(role) {
+            super::Picked::Under(pairing) => Some(pairing),
+            super::Picked::Nothing | super::Picked::Skipped => None,
         }
     }
 
-    pub(crate) fn column(self) -> &'static str {
-        match self {
-            Self::Grilling => "grilling_profile_id",
-            Self::Implementation => "implementation_profile_id",
-            Self::Review => "review_profile_id",
-        }
+    /// Every role something was settled for, by name in order.
+    pub fn each(&self) -> impl Iterator<Item = (&Role, &super::Picked)> {
+        self.0.iter().map(|(role, picked)| (role, picked))
     }
 }
 
@@ -3696,7 +3739,7 @@ pub async fn set_grilling_pairing(
     profile_id: &str,
     model: Option<&str>,
 ) -> Result<Chosen> {
-    choose(pool, id, Role::Grilling, profile_id, model).await
+    choose(pool, id, &Role::grilling(), profile_id, model).await
 }
 
 /// Choose the Pairing the implementation will run under.
@@ -3706,7 +3749,7 @@ pub async fn set_implementation_pairing(
     profile_id: &str,
     model: Option<&str>,
 ) -> Result<Chosen> {
-    choose(pool, id, Role::Implementation, profile_id, model).await
+    choose(pool, id, &Role::implementation(), profile_id, model).await
 }
 
 /// And the one the wrap-up's review session will run under.
@@ -3716,7 +3759,19 @@ pub async fn set_review_pairing(
     profile_id: &str,
     model: Option<&str>,
 ) -> Result<Chosen> {
-    choose(pool, id, Role::Review, profile_id, model).await
+    choose(pool, id, &Role::review(), profile_id, model).await
+}
+
+/// Or the Pairing whichever role the Process declares will run under: the one
+/// any of the three above is, said by name.
+pub async fn set_pairing(
+    pool: &SqlitePool,
+    id: i64,
+    role: &Role,
+    profile_id: &str,
+    model: Option<&str>,
+) -> Result<Chosen> {
+    choose(pool, id, role, profile_id, model).await
 }
 
 /// Or pick the row that says there is to be no review at all.
@@ -3725,11 +3780,15 @@ pub async fn set_review_pairing(
 /// Conversation drafts, fixed when the work starts, and a Conversation that has
 /// picked it is as ready to start as one that picked a Pairing.
 ///
-/// The Profile column and the model row go with it, so what is left is the one
-/// fact — this role runs nothing — rather than that beside an account nobody
-/// will launch.
+/// The Pairing's two rows go with it, so what is left is the one fact — this
+/// role runs nothing — rather than that beside an account nobody will launch.
 pub async fn skip_review(pool: &SqlitePool, id: i64) -> Result<Chosen> {
-    skip(pool, id, Role::Review).await
+    skip(pool, id, &Role::review()).await
+}
+
+/// Or pick whichever role away by name, which is the same act.
+pub async fn skip_role(pool: &SqlitePool, id: i64, role: &Role) -> Result<Chosen> {
+    skip(pool, id, role).await
 }
 
 /// Record that a role runs no session at all.
@@ -3737,7 +3796,7 @@ pub async fn skip_review(pool: &SqlitePool, id: i64) -> Result<Chosen> {
 /// [`choose`]'s shape and [`choose`]'s refusals, because it is the same act:
 /// the human picking one row of the one list, on a Conversation that is still
 /// drafting.
-async fn skip(pool: &SqlitePool, id: i64, role: Role) -> Result<Chosen> {
+async fn skip(pool: &SqlitePool, id: i64, role: &Role) -> Result<Chosen> {
     let mut tx = super::writing(pool, "picking a role away from a Conversation").await?;
 
     if let Some(refusal) = not_drafting(&mut tx, id).await? {
@@ -3747,14 +3806,12 @@ async fn skip(pool: &SqlitePool, id: i64, role: Role) -> Result<Chosen> {
         });
     }
 
-    sqlx::query(&format!(
-        "UPDATE conversations SET {} = NULL WHERE id = ?",
-        role.column()
-    ))
-    .bind(id)
-    .execute(&mut *tx)
-    .await
-    .with_context(|| format!("clearing the Profile Conversation {id} had chosen"))?;
+    sqlx::query("DELETE FROM conversation_pairings WHERE conversation_id = ? AND role = ?")
+        .bind(id)
+        .bind(role.stored())
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("clearing the Profile Conversation {id} had chosen"))?;
 
     sqlx::query("DELETE FROM pairing_models WHERE conversation_id = ? AND role = ?")
         .bind(id)
@@ -3797,7 +3854,7 @@ async fn skip(pool: &SqlitePool, id: i64, role: Role) -> Result<Chosen> {
 async fn choose(
     pool: &SqlitePool,
     id: i64,
-    role: Role,
+    role: &Role,
     profile_id: &str,
     model: Option<&str>,
 ) -> Result<Chosen> {
@@ -3841,7 +3898,7 @@ async fn choose(
 pub(crate) async fn settle(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     id: i64,
-    role: Role,
+    role: &Role,
     profile_id: &str,
     model: Option<&str>,
 ) -> Result<bool> {
@@ -3849,20 +3906,27 @@ pub(crate) async fn settle(
         return Ok(false);
     }
 
-    let changed = sqlx::query(&format!(
-        "UPDATE conversations SET {} = ? WHERE id = ?",
-        role.column()
-    ))
-    .bind(profile_id)
-    .bind(id)
-    .execute(&mut **tx)
-    .await
-    .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?
-    .rows_affected();
+    let there: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await
+        .with_context(|| format!("looking for Conversation {id} to choose a Profile for"))?;
 
-    if changed == 0 {
+    if there.is_none() {
         return Ok(false);
     }
+
+    sqlx::query(
+        "INSERT INTO conversation_pairings (conversation_id, role, profile_id)
+         VALUES (?, ?, ?)
+         ON CONFLICT (conversation_id, role) DO UPDATE SET profile_id = excluded.profile_id",
+    )
+    .bind(id)
+    .bind(role.stored())
+    .bind(profile_id)
+    .execute(&mut **tx)
+    .await
+    .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?;
 
     sqlx::query("DELETE FROM pairing_models WHERE conversation_id = ? AND role = ?")
         .bind(id)
@@ -6223,7 +6287,7 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         if !settle(
             &mut tx,
             id,
-            pairing.role,
+            &pairing.role,
             pairing.profile_id,
             Some(pairing.model),
         )
@@ -6364,7 +6428,7 @@ pub struct Steer<'a> {
 ///
 /// The model borrowed rather than owned, this being read straight off what the
 /// form submitted and living exactly as long as the call.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settling<'a> {
     /// Which role's Pairing is being re-settled: the one the state steered into
     /// runs its sessions under.

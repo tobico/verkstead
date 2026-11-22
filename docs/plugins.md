@@ -373,7 +373,7 @@ provides:
     description: Rounds of changes on a branch, then the wrap-up.
     roles:
       - { name: implementation, label: Implementation, building: true }
-      - { name: review, label: Review }
+      - { name: review, label: Review, away: true }
     states:
       - id: sketching
         word: Sketching
@@ -383,6 +383,7 @@ provides:
       - id: wrapping
         word: Wrapping up
         activity: wrap-up
+        roles: [implementation, review]
     transitions:
       sketching: { committed: wrapping, nothing: done }
       wrapping: { settled: done, merged: done, closed: stopped, given-up: stopped }
@@ -398,7 +399,18 @@ provides:
 - **`roles`** — required, a list of each role a session of it runs under, by
   `name` — lowercase letters, digits and hyphens — and the `label` drawn for
   it. Exactly one is marked `building: true`: the role the Done signal, memos
-  and previews assume.
+  and previews assume. A role marked `away: true` offers the row that runs no
+  session at all above its Pairings — *No review*, worded off the label — and
+  one without it is answered with a Pairing or Start waits; the building role
+  may not have it, there being no work without something doing it.
+
+  **The Agent control's shape follows how many there are**: one role is the
+  flat Pairing dropdown labelled *Agent*, and more is a panel of one picker per
+  role under its own label. The three names Verkstead knows — `grilling`,
+  `implementation` and `review` — keep the per-Repo Pairing memory and the
+  platform default models they have always had; a name nobody has used before
+  is a role of its own, remembered against the Repo the first time something is
+  picked for it.
 - **`states`** — required, a list, in order: **Start enters the first.** Each
   has:
   - **`id`** — what the Conversation's state is stored as: lowercase letters,
@@ -409,6 +421,14 @@ provides:
   - **`activity`** — the `id` of the Activity it runs. The plugin's own
     Activities are looked in first, then each dependency's in the order they
     are written.
+  - **`roles`** — optional, a list of the roles its sessions run under, each
+    one the Process declares; absent is the **building role**. What a steer
+    into the state settles, and what the Pairing a session is launched under is
+    looked up by: a session the Activity launches naming one of them runs under
+    that role, and one naming anything else runs under the first. A state
+    declaring several takes a steer's one pick for the first and fills the rest
+    where nothing is picked for them, which is how a wrap-up settles what
+    builds without replacing the account chosen to review.
   - **`options`** — optional, a map of what the Activity is started with
     beside the Conversation's facts, each value text, a number, or `true` or
     `false`. Which options an Activity reads is the Activity's to say. A
@@ -450,7 +470,11 @@ transitions map the Outcomes of every one of them:
 ```yaml
     directions: { inline: implementing, task-list: implementing, roadmap: implementing }
     states:
-      - { id: grilling, word: Grilling, activity: interview, steer: { brief: round } }
+      - id: grilling
+        word: Grilling
+        activity: interview
+        roles: [grilling]
+        steer: { brief: round }
       - id: implementing
         word: Implementing
         activity: { inline: one-session, task-list: backlog-runner, roadmap: stage-runner }
@@ -469,7 +493,8 @@ transitions map the Outcomes of every one of them:
 running an Activity that neither the plugin nor a dependency provides, or
 under a skill from a pack neither does, naming it; an Outcome unmapped; a
 transition from or to a state that isn't declared; no building role, or two; a
-Direction leading to no state. What an installed dependency provides is known
+building role offered the row that runs no session; a state naming a role the
+Process declares none of, naming it; a Direction leading to no state. What an installed dependency provides is known
 once it has loaded, so that much is checked by the loader, and is the plugin's
 trouble rather than a refusal at the card. A Process whose dependency is
 missing, disabled or outdated loads **in trouble**, its row saying which
@@ -1015,8 +1040,9 @@ harness's goes, and the channel decides which kinds of ask the Guide describes.
 **`models`** — required: the models a Profile of it offers, each an **`id`**,
 what the harness is told, and a **`name`**, what is drawn. Exactly one is
 **`default: true`**, which a Pairing runs where nothing else says; **`for`**
-lists the roles — `grilling`, `implementation`, `review` — whose default is
-that model instead, each role on one model at most. The Profile form offers the
+lists the roles whose default is that model instead, by the names their
+Processes declare them under — `grilling`, `implementation` and `review` are
+the three Verkstead's own use — each role on one model at most. The Profile form offers the
 list in the order written; a fresh Repo's default Pairing reaches a plugin
 harness only where no built-in harness has a Profile.
 

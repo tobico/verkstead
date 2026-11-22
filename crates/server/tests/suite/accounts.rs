@@ -835,13 +835,14 @@ impl Verkstead {
             panic!("the Conversation was not started: {started}")
         };
 
-        let pairing = serde_json::json!({ "profile_id": profile, "model": MODEL });
-        let role = serde_json::json!({ "pairing": pairing });
+        let role = serde_json::json!({
+            "pairing": { "profile_id": profile, "model": MODEL },
+        });
 
         for (path, saying) in [
-            ("grilling-pairing", &pairing),
-            ("implementation-pairing", &pairing),
-            ("review-pairing", &role),
+            ("pairings/grilling", &role),
+            ("pairings/implementation", &role),
+            ("pairings/review", &role),
         ] {
             let said = press(
                 &self.workbench,

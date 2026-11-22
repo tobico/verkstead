@@ -453,6 +453,40 @@ async fn a_process_naming_an_activity_it_does_not_depend_on_is_refused() {
     );
 }
 
+/// And a state naming a role the Process declares none of is refused at the
+/// card the same way, naming it: what a Process names, it declares — its roles
+/// as much as its Activities (Set 1765, Q26).
+#[tokio::test]
+async fn a_state_naming_a_role_the_process_does_not_declare_is_refused() {
+    let (app, dir) = kept().await;
+    let path = plugin(
+        dir.path(),
+        "triage",
+        &processing(
+            &manifest(PLUGIN, "Triage", &[]),
+            "wrap-up",
+            "{settled: done}",
+        )
+        .replace(
+            "- {id: sorting, word: Sorting, activity: wrap-up}",
+            "- {id: sorting, word: Sorting, activity: wrap-up, roles: [sorter]}",
+        ),
+    );
+
+    let (status, said) = pressing(
+        &app,
+        "/api/ui/plugins/read",
+        serde_json::json!({ "source": path }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{said}");
+    assert!(
+        said.contains("`provides[0].states[0].roles[0]` is `sorter`"),
+        "{said}"
+    );
+}
+
 /// Unticking the plugin whose Activity a Process runs puts the Process's
 /// plugin in trouble, saying which dependency is wanted; ticked again, it
 /// loads.

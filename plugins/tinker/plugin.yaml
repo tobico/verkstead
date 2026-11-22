@@ -34,7 +34,7 @@ provides:
     description: Make a series of simple one-off changes with minimal fuss
     roles:
       - { name: implementation, label: Implementation, building: true }
-      - { name: review, label: Review }
+      - { name: review, label: Review, away: true }
     states:
       - id: follow-up
         word: Follow-up
@@ -44,6 +44,7 @@ provides:
       - id: wrapping
         word: Wrapping
         activity: wrap-up
+        roles: [implementation, review]
         steer: { brief: none }
       - id: investigating
         word: Investigating

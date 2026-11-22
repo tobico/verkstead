@@ -592,12 +592,12 @@ impl Harness for Plugged {
     }
 
     /// The model the manifest names for `role`, or its default.
-    fn model(&self, role: store::Role) -> &str {
+    fn model(&self, role: &store::Role) -> &str {
         self.agent
             .models
             .roles
             .iter()
-            .find(|(declared, _)| *declared == role)
+            .find(|(declared, _)| declared == role)
             .map_or(&self.agent.models.default, |(_, model)| model)
     }
 

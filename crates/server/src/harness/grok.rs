@@ -283,7 +283,7 @@ impl Harness for Grok {
         platform == Platform::Linux
     }
 
-    fn model(&self, _role: store::Role) -> &str {
+    fn model(&self, _role: &store::Role) -> &str {
         "grok-4.6"
     }
 

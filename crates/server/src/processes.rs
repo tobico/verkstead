@@ -32,7 +32,7 @@ use std::path::PathBuf;
 use crate::AppState;
 use crate::drivers::Driving;
 use crate::plugins::built_in::BuiltIn;
-use crate::plugins::manifest::process::{Brief, Process, Runs, State, To};
+use crate::plugins::manifest::process::{Brief, Process, Role, Runs, State, To};
 use crate::plugins::manifest::{Activity, Capability, Files, STEERED};
 use crate::store;
 
@@ -106,6 +106,17 @@ impl Loaded {
                 .map(|state| verkstead_render::DeclaredStateEntry {
                     id: state.id.clone(),
                     word: state.word.clone(),
+                })
+                .collect(),
+            roles: self
+                .process
+                .roles
+                .iter()
+                .map(|role| verkstead_render::RoleEntry {
+                    role: role.name.clone(),
+                    label: role.label.clone(),
+                    building: role.building,
+                    away: role.away,
                 })
                 .collect(),
             built_in: crate::plugins::built_in::stood_for(&self.plugin, &self.process.id)
@@ -386,6 +397,72 @@ pub(crate) fn narrows_the_wrap_up(state: &AppState, process: &store::Process) ->
 /// The state a built-in Process wraps up in, by the word the record holds.
 pub(crate) const WRAPPING: &str = "wrapping";
 
+/// The word of the state a Conversation stands in, as its Process's manifest
+/// names it.
+///
+/// A declared state carries its id; one of Verkstead's own carries the word the
+/// `conversations.state` column holds, which is the id the five built-in
+/// plugins give their states — see [`crate::plugins::built_in`].
+pub(crate) fn standing_in(conversation: &store::Conversation) -> &str {
+    conversation
+        .declared_state
+        .as_deref()
+        .unwrap_or_else(|| conversation.state.stored())
+}
+
+/// The roles `process` declares, in the order its manifest writes them: what
+/// the Agent control draws a picker for, and what a Start waits on (Set 1765,
+/// Q26).
+///
+/// Empty for a Process whose plugin is not loaded, which is a Conversation in
+/// trouble — see [`trouble`].
+pub(crate) fn roles(state: &AppState, process: &store::Process) -> Vec<Role> {
+    of(state, process).map_or_else(Vec::new, |loaded| loaded.process.roles.clone())
+}
+
+/// The roles `process` declares, each as its name and the label drawn for it —
+/// what a page or a sentence names a role by.
+pub(crate) fn labels(state: &AppState, process: &store::Process) -> Vec<(String, String)> {
+    roles(state, process)
+        .into_iter()
+        .map(|role| (role.name, role.label))
+        .collect()
+}
+
+/// The role `process` marks as building: what the Done signal, Memos and
+/// previews assume, and what a state declaring no roles of its own runs under.
+pub(crate) fn building(state: &AppState, process: &store::Process) -> Option<Role> {
+    of(state, process).map(|loaded| loaded.process.building().clone())
+}
+
+/// The roles the state `standing` of `process` runs its sessions under, in the
+/// order written — the state's own `roles`, or the building role where it
+/// declares none.
+///
+/// What a steer into that state settles, and what the Pairings a session is
+/// launched under are looked up by.
+pub(crate) fn roles_in(state: &AppState, process: &store::Process, standing: &str) -> Vec<Role> {
+    of(state, process).map_or_else(Vec::new, |loaded| {
+        loaded
+            .process
+            .roles_in(standing)
+            .into_iter()
+            .cloned()
+            .collect()
+    })
+}
+
+/// Which of the state `standing`'s roles a session an Activity launches naming
+/// `word` runs under — see [`Process::under`].
+pub(crate) fn under(
+    state: &AppState,
+    process: &store::Process,
+    standing: &str,
+    word: &str,
+) -> Option<Role> {
+    of(state, process).and_then(|loaded| loaded.process.under(standing, word).cloned())
+}
+
 /// What a steer into the state `standing` of a Process takes, where its
 /// manifest marks it as taking one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -395,9 +472,6 @@ pub(crate) struct Mark {
     /// Whether it goes back to where it was steered from once its Activity
     /// ends.
     pub(crate) detour: bool,
-    /// Whether it runs the interview, whose sessions run under the grilling
-    /// role.
-    pub(crate) grills: bool,
 }
 
 impl Mark {
@@ -405,11 +479,6 @@ impl Mark {
         Some(Mark {
             brief: declared.steer?,
             detour: declared.detour,
-            grills: declared
-                .activity
-                .activities()
-                .iter()
-                .any(|(_, id)| *id == "interview"),
         })
     }
 }

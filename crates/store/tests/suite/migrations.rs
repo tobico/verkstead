@@ -2155,14 +2155,15 @@ async fn the_rebuilt_wrap_up_tables_hold_a_stack_and_are_rewritten_once() {
     );
 }
 
-/// A Conversation written before there was a Review role opens with the column
-/// that holds one, unchosen.
+/// A Conversation whose Pairings were columns opens with them rows of
+/// `conversation_pairings`, keyed by the role's name — and the review role of a
+/// database from before there was one reads as unchosen.
 ///
 /// Unchosen rather than filled in from what it was built by: what such a
 /// Conversation was reviewed under was the implementation Pairing, and writing
 /// that in would be recording a choice nobody made.
 #[tokio::test]
-async fn a_conversation_from_before_the_review_role_opens_with_it_unchosen() {
+async fn pairings_that_were_columns_open_as_rows_keyed_by_the_roles_name() {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
@@ -2179,12 +2180,45 @@ async fn a_conversation_from_before_the_review_role_opens_with_it_unchosen() {
         .unwrap()
         .unwrap();
 
-    // The column off, which is the whole of what says this database is one from
-    // before: nothing else about such a Conversation is any different.
-    sqlx::query("ALTER TABLE conversations DROP COLUMN review_profile_id")
-        .execute(&pool)
-        .await
-        .unwrap();
+    let profile = create_profile(
+        &pool,
+        &ProfileFacts {
+            name: Some("fable".to_owned()),
+            account: Account::claude(
+                PathBuf::from("/watched/accounts/fable/.claude"),
+                PathBuf::from("/watched/accounts/fable/.claude.json"),
+            ),
+            models: vec!["claude-fable-5".to_owned()],
+            memory: true,
+        },
+    )
+    .await
+    .unwrap()
+    .expect("a Profile to be paired with");
+
+    // The two columns the Pairings lived in, back on the table with the
+    // review's one absent and the rows gone, which is the whole of what says
+    // this database is one from before: nothing else about such a Conversation
+    // is any different.
+    for statement in [
+        "DELETE FROM conversation_pairings",
+        "ALTER TABLE conversations ADD COLUMN grilling_profile_id TEXT",
+        "ALTER TABLE conversations ADD COLUMN implementation_profile_id TEXT",
+    ] {
+        sqlx::query(statement).execute(&pool).await.unwrap();
+    }
+
+    sqlx::query(
+        "UPDATE conversations
+         SET grilling_profile_id = ?, implementation_profile_id = ?
+         WHERE id = ?",
+    )
+    .bind(&profile.id)
+    .bind(&profile.id)
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     pool.close().await;
 
@@ -2197,27 +2231,49 @@ async fn a_conversation_from_before_the_review_role_opens_with_it_unchosen() {
         .unwrap()
         .expect("it opens, which is most of what this is about");
 
+    for role in [
+        verkstead_store::Role::grilling(),
+        verkstead_store::Role::implementation(),
+    ] {
+        assert_eq!(
+            conversation
+                .pairings
+                .under(&role)
+                .map(|pairing| pairing.profile.id.clone()),
+            Some(profile.id.clone()),
+            "the column's Profile reads back under the role's name",
+        );
+    }
+
     assert!(
-        !conversation.review_pairing.picked(),
+        !conversation
+            .pairings
+            .of(&verkstead_store::Role::review())
+            .picked(),
         "and the picker it arrives with is the one a Conversation with no memory gets",
     );
 
     pool.close().await;
 
     // And a database opened twice is rewritten once: the second run finds the
-    // column there and leaves it alone.
+    // columns gone and leaves the rows alone.
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
 
-    assert!(
-        !load_conversation(&pool, id)
-            .await
-            .unwrap()
-            .expect("it opens again")
-            .review_pairing
-            .picked()
+    let again = load_conversation(&pool, id)
+        .await
+        .unwrap()
+        .expect("it opens again");
+
+    assert_eq!(
+        again
+            .pairings
+            .under(&verkstead_store::Role::grilling())
+            .map(|pairing| pairing.profile.id.clone()),
+        Some(profile.id.clone()),
     );
+    assert!(!again.pairings.of(&verkstead_store::Role::review()).picked());
 }
 
 /// A Conversation written before a branch name had an owner keeps the name it
@@ -3609,12 +3665,10 @@ async fn profiles_numbered_before_uuids(dir: &Path) -> (i64, i64) {
              model      TEXT NOT NULL,
              PRIMARY KEY (repo_id, role)
          ) STRICT",
-        "ALTER TABLE conversations DROP COLUMN grilling_profile_id",
+        "DELETE FROM conversation_pairings",
         "ALTER TABLE conversations ADD COLUMN grilling_profile_id INTEGER REFERENCES profiles(id)",
-        "ALTER TABLE conversations DROP COLUMN implementation_profile_id",
         "ALTER TABLE conversations ADD COLUMN implementation_profile_id INTEGER \
          REFERENCES profiles(id)",
-        "ALTER TABLE conversations DROP COLUMN review_profile_id",
         "ALTER TABLE conversations ADD COLUMN review_profile_id INTEGER REFERENCES profiles(id)",
         "ALTER TABLE conversations DROP COLUMN stopped_signed_out",
         "ALTER TABLE conversations ADD COLUMN stopped_signed_out INTEGER",
@@ -3783,23 +3837,34 @@ async fn the_profiles_of_before_the_uuids_are_named_by_one_everywhere() {
         let model = Some("claude-fable-5".to_owned());
 
         assert_eq!(
-            named(conversation.grilling_pairing.as_ref()),
+            named(
+                conversation
+                    .pairings
+                    .under(&verkstead_store::Role::grilling())
+                    .as_ref()
+            ),
             Some((ours.id.clone(), model.clone())),
             "the grilling Pairing: {opening}",
         );
-        let (implementation,): (Option<String>,) =
-            sqlx::query_as("SELECT implementation_profile_id FROM conversations WHERE id = ?")
-                .bind(id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let (implementation,): (String,) = sqlx::query_as(
+            "SELECT profile_id FROM conversation_pairings
+             WHERE conversation_id = ? AND role = 'implementation'",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(
-            implementation.as_ref(),
-            Some(&theirs),
+            implementation, theirs,
             "the implementation Pairing still names the mirror: {opening}",
         );
         assert_eq!(
-            named(conversation.review_pairing.pairing()),
+            named(
+                conversation
+                    .pairings
+                    .under(&verkstead_store::Role::review())
+                    .as_ref()
+            ),
             Some((ours.id.clone(), model.clone())),
             "the review Pairing: {opening}",
         );
@@ -3947,12 +4012,15 @@ async fn a_mirror_under_its_homes_uuid_is_written_down_as_a_record() {
         .await
         .unwrap()
         .unwrap();
-    sqlx::query("UPDATE conversations SET grilling_profile_id = ? WHERE id = ?")
-        .bind(theirs)
-        .bind(id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "INSERT INTO conversation_pairings (conversation_id, role, profile_id)
+         VALUES (?, 'grilling', ?)",
+    )
+    .bind(id)
+    .bind(theirs)
+    .execute(&pool)
+    .await
+    .unwrap();
     sqlx::query(
         "INSERT INTO pairing_models (conversation_id, role, model)
          VALUES (?, 'grilling', 'claude-opus-5')",
@@ -4007,7 +4075,8 @@ async fn a_mirror_under_its_homes_uuid_is_written_down_as_a_record() {
                 .await
                 .unwrap()
                 .unwrap()
-                .grilling_pairing
+                .pairings
+                .under(&verkstead_store::Role::grilling())
                 .map(|pairing| pairing.profile.id),
             Some(theirs.to_owned()),
             "the Pairing that named the mirror draws the record: {opening}",

@@ -27,15 +27,35 @@ use verkstead_render::{
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle, Merging, OtherAuthor,
     PickedView, PinnedEvent, Process, ProcessPicked, ProfileChosen, ProfileSaved, ProfileTrouble,
-    Registered, RepoEntry, RepoSwitched, Resolved, Resumed, RoadmapPane, ShowingArchived,
-    StageState, Standing, Started, SteerCancelled, SteerCompanionRefusal, SteerOpened,
-    SteerPairingView, SteerSaved, TakenUp, TargetRecorded, TimelineEvent, Uncommitted,
+    Registered, RepoEntry, RepoSwitched, Resolved, Resumed, RoadmapPane, RoleWanted,
+    ShowingArchived, StageState, Standing, Started, SteerCancelled, SteerCompanionRefusal,
+    SteerOpened, SteerPairingView, SteerSaved, TakenUp, TargetRecorded, TimelineEvent, Uncommitted,
 };
 use verkstead_server::plugins::built_in::DEVELOP;
 use verkstead_server::settings::{Author, Recorded, Settings};
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
 use crate::fixture_repositories::{repository, repository_and_clone};
+
+/// The role a press says it is waiting on a Pairing for, as the five built-in
+/// Processes label the three Verkstead knows.
+///
+/// Develop and Tinker offer their review role the row that runs no session,
+/// and no other role of theirs has one.
+fn wanted(role: &str, label: &str) -> RoleWanted {
+    asked(role, label, role == "review")
+}
+
+/// And the same where the Process offers it no such row, which is how a
+/// **Review** declares its review: a Review without a review is a Fix Merge
+/// Issues with the comments answered.
+fn asked(role: &str, label: &str, away: bool) -> RoleWanted {
+    RoleWanted {
+        role: role.to_owned(),
+        label: label.to_owned(),
+        away,
+    }
+}
 
 /// A router, plus the directory holding its database and its data directory
 /// alive.
@@ -1687,18 +1707,15 @@ async fn profile(app: &Router, elsewhere: &Path, name: &str) -> String {
 /// Pair a Profile with the one model [`profile`] gives every Profile here, for
 /// one of a Conversation's roles.
 async fn choose(app: &Router, id: i64, role: &str, profile_id: &str) {
-    let pairing = serde_json::json!({ "profile_id": profile_id, "model": "claude-opus-5" });
-
-    // The review picker offers a row that is not an account, so what it sends is
-    // which row was picked rather than a Pairing outright — see [`no_review`].
-    let picked = match role {
-        "review" => serde_json::json!({ "pairing": pairing }),
-        _ => pairing,
-    };
+    // Which row was picked rather than a Pairing outright, because a picker may
+    // offer a row that is not an account at all — see [`no_review`].
+    let picked = serde_json::json!({
+        "pairing": { "profile_id": profile_id, "model": "claude-opus-5" },
+    });
 
     let chosen: verkstead_render::ProfileChosen = post(
         app,
-        &format!("/api/ui/conversations/{id}/{role}-pairing"),
+        &format!("/api/ui/conversations/{id}/pairings/{role}"),
         &picked,
     )
     .await;
@@ -1709,7 +1726,7 @@ async fn choose(app: &Router, id: i64, role: &str, profile_id: &str) {
 async fn no_review(app: &Router, id: i64) -> verkstead_render::ProfileChosen {
     post(
         app,
-        &format!("/api/ui/conversations/{id}/review-pairing"),
+        &format!("/api/ui/conversations/{id}/pairings/review"),
         &serde_json::json!({ "pairing": null }),
     )
     .await
@@ -2126,7 +2143,7 @@ async fn a_tinker_waits_on_two_roles_and_never_on_the_grilling_one() {
 
     assert_eq!(
         grill(&app, id).await,
-        GrillingStarted::NoImplementationProfile,
+        GrillingStarted::NoPairing(wanted("implementation", "Implementation")),
         "the role the work runs under is asked for first, and nothing asks \
          about a grilling",
     );
@@ -2141,7 +2158,7 @@ async fn a_tinker_waits_on_two_roles_and_never_on_the_grilling_one() {
 
     assert_eq!(
         grill(&app, id).await,
-        GrillingStarted::NoReviewProfile,
+        GrillingStarted::NoPairing(wanted("review", "Review")),
         "and then the role the wrap-up's review reads under",
     );
     assert!(!opened(&app, id).await.ready_to_grill);
@@ -2306,7 +2323,7 @@ async fn an_investigate_waits_on_one_role_and_a_brief_and_nothing_else() {
 
     assert_eq!(
         grill(&app, id).await,
-        GrillingStarted::NoImplementationProfile,
+        GrillingStarted::NoPairing(wanted("implementation", "Implementation")),
         "the role the session runs under is the only one asked about",
     );
     assert!(!opened(&app, id).await.ready_to_grill);
@@ -2694,7 +2711,10 @@ async fn starting_is_refused_by_name_when_a_profile_is_unchosen() {
     let id = started(&app, repo_id).await;
     write_brief(&app, id, "# Rate limiting\n").await;
 
-    assert_eq!(grill(&app, id).await, GrillingStarted::NoGrillingProfile);
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::NoPairing(wanted("grilling", "Grilling"))
+    );
 
     choose(
         &app,
@@ -2705,7 +2725,7 @@ async fn starting_is_refused_by_name_when_a_profile_is_unchosen() {
     .await;
     assert_eq!(
         grill(&app, id).await,
-        GrillingStarted::NoImplementationProfile
+        GrillingStarted::NoPairing(wanted("implementation", "Implementation"))
     );
 
     choose(
@@ -2715,7 +2735,10 @@ async fn starting_is_refused_by_name_when_a_profile_is_unchosen() {
         &profile(&app, elsewhere.path(), "opus").await,
     )
     .await;
-    assert_eq!(grill(&app, id).await, GrillingStarted::NoReviewProfile);
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::NoPairing(wanted("review", "Review"))
+    );
 
     choose(
         &app,
@@ -4881,8 +4904,7 @@ async fn a_conversation_whose_profile_was_removed_is_steered_back_onto_another()
 
     let interviewing = opened(&app, id)
         .await
-        .grilling_pairing
-        .as_ref()
+        .under("grilling")
         .expect("the fixture picks one per role")
         .profile
         .id
@@ -4897,7 +4919,7 @@ async fn a_conversation_whose_profile_was_removed_is_steered_back_onto_another()
     assert_eq!(removed, verkstead_render::ProfileDeleted::Removed);
 
     assert_eq!(
-        opened(&app, id).await.grilling_pairing,
+        opened(&app, id).await.under("grilling"),
         None,
         "the role that named it has nothing settled for it any more",
     );
@@ -4926,8 +4948,7 @@ async fn a_conversation_whose_profile_was_removed_is_steered_back_onto_another()
     let view = opened(&app, id).await;
 
     assert_eq!(
-        view.grilling_pairing
-            .as_ref()
+        view.under("grilling")
             .expect("the steer settled the role that had lost its account")
             .profile
             .id,
@@ -4948,10 +4969,11 @@ async fn steering_into_grilling_settles_the_grilling_pairing() {
     let id = ready(&app, elsewhere.path(), repo_id).await;
 
     let picked = profile(&app, elsewhere.path(), "steering").await;
-    let building = opened(&app, id)
-        .await
-        .implementation_pairing
-        .expect("the fixture picks one per role");
+    let drafting = opened(&app, id).await;
+    let building = drafting
+        .under("implementation")
+        .expect("the fixture picks one per role")
+        .clone();
 
     assert_eq!(steer(&app, id).await, SteerOpened::Opened);
 
@@ -4970,8 +4992,7 @@ async fn steering_into_grilling_settles_the_grilling_pairing() {
 
     let view = opened(&app, id).await;
     let interviewing = view
-        .grilling_pairing
-        .as_ref()
+        .under("grilling")
         .expect("the steer settled the role it was steered into");
 
     assert_eq!(interviewing.profile.id, picked);
@@ -4981,10 +5002,64 @@ async fn steering_into_grilling_settles_the_grilling_pairing() {
         "both halves of it: either alone is not something to launch a session with",
     );
     assert_eq!(
-        view.implementation_pairing
-            .map(|pairing| pairing.profile.id),
+        view.under("implementation")
+            .map(|pairing| pairing.profile.id.clone()),
         Some(building.profile.id),
         "and the other is exactly where it was",
+    );
+}
+
+/// And so does a steer into a Grilling on a Process whose manifest declares no
+/// state for one: a **Tinker** is never interviewed, so there is no `grilling`
+/// state for the roles to be read off — and the round the steer opens runs an
+/// interview all the same, under the grilling role (see `roles` in the server's
+/// `steering`).
+///
+/// Read off the record rather than off the view, because the view draws a
+/// picker per role the Process *declares*: a Tinker's Agent control has no
+/// Grilling picker, which is the whole reason the form is where this is picked.
+#[tokio::test]
+async fn steering_a_tinker_into_grilling_settles_the_grilling_pairing() {
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+
+    assert_eq!(
+        pick_process(&app, id, Process::Tinker).await,
+        ProcessPicked::Picked
+    );
+
+    let picked = profile(&app, elsewhere.path(), "steering").await;
+
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+
+    let steered: ConversationSteered = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/steer/submit"),
+        &serde_json::json!({
+            "target": "Grilling",
+            "interrupt": false,
+            "pairing": { "profile_id": picked, "model": "claude-opus-5" },
+        }),
+    )
+    .await;
+
+    assert_eq!(steered, ConversationSteered::Steered);
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    let conversation = store::load_conversation(&pool, id)
+        .await
+        .unwrap()
+        .expect("the Conversation is still there");
+
+    assert_eq!(
+        conversation
+            .pairings
+            .under(&store::Role::grilling())
+            .map(|pairing| pairing.profile.id),
+        Some(picked),
+        "the role the interview runs under, settled by the one pick",
     );
 }
 
@@ -5028,13 +5103,11 @@ async fn steering_into_wrapping_leaves_a_review_account_the_human_chose_alone() 
     let picked = profile(&app, elsewhere.path(), "steering").await;
     let before = opened(&app, id).await;
     let interviewing = before
-        .grilling_pairing
-        .as_ref()
+        .under("grilling")
         .cloned()
         .expect("the fixture picks one per role");
     let reviewing = before
-        .review_pairing
-        .pairing()
+        .under("review")
         .cloned()
         .expect("and one of them is an account of its own for the review");
 
@@ -5056,21 +5129,19 @@ async fn steering_into_wrapping_leaves_a_review_account_the_human_chose_alone() 
     let view = opened(&app, id).await;
 
     assert_eq!(
-        view.implementation_pairing
-            .map(|pairing| pairing.profile.id),
+        view.under("implementation")
+            .map(|pairing| pairing.profile.id.clone()),
         Some(picked),
         "what the fixes run under",
     );
     assert_eq!(
-        view.review_pairing
-            .pairing()
+        view.under("review")
             .map(|pairing| pairing.profile.id.as_str()),
         Some(reviewing.profile.id.as_str()),
         "and the account chosen to review is still the one that reviews",
     );
     assert_eq!(
-        view.grilling_pairing
-            .as_ref()
+        view.under("grilling")
             .map(|pairing| pairing.profile.id.as_str()),
         Some(interviewing.profile.id.as_str()),
         "and the role nothing wraps under is exactly where it was",
@@ -5117,7 +5188,7 @@ async fn steering_into_wrapping_fills_a_review_nobody_picked_an_account_for() {
 
     assert_eq!(steered, ConversationSteered::Steered);
     assert_eq!(
-        opened(&app, id).await.review_pairing,
+        opened(&app, id).await.paired("review"),
         PickedView::Nothing,
         "the move settled what builds and left the review unpicked",
     );
@@ -5165,8 +5236,7 @@ async fn steering_into_wrapping_fills_a_review_nobody_picked_an_account_for() {
     assert_eq!(
         opened(&app, id)
             .await
-            .review_pairing
-            .pairing()
+            .under("review")
             .map(|pairing| pairing.profile.id.clone()),
         Some(building),
         "a role with nothing picked for it takes the pick",
@@ -5232,13 +5302,13 @@ async fn steering_into_wrapping_leaves_a_conversation_with_no_review_unreviewed(
     let view = opened(&app, id).await;
 
     assert_eq!(
-        view.implementation_pairing
-            .map(|pairing| pairing.profile.id),
+        view.under("implementation")
+            .map(|pairing| pairing.profile.id.clone()),
         Some(picked),
         "what the fixes run under, settled off the pick as ever",
     );
     assert_eq!(
-        view.review_pairing,
+        view.paired("review"),
         PickedView::Skipped,
         "and the review the human turned off stays off",
     );
@@ -7309,10 +7379,9 @@ async fn a_sessions_event_says_what_it_was_launched_under() {
 
     // The Pairing this Conversation's grilling was settled under, which is what
     // the server has in hand at the moment it starts a session.
-    let picked = opened(&app, id)
-        .await
-        .grilling_pairing
-        .as_ref()
+    let drawn = opened(&app, id).await;
+    let picked = drawn
+        .under("grilling")
         .expect("the grilling was paired before it started")
         .clone();
     let pairing = store::Pairing {
@@ -7405,10 +7474,9 @@ async fn what_the_profile_became_afterwards_changes_nothing() {
         .await
         .unwrap();
 
-    let picked = opened(&app, id)
-        .await
-        .grilling_pairing
-        .as_ref()
+    let drawn = opened(&app, id).await;
+    let picked = drawn
+        .under("grilling")
         .expect("the grilling was paired before it started")
         .clone();
     let pairing = store::Pairing {
@@ -7531,10 +7599,9 @@ async fn a_session_paired_before_the_agent_was_recorded_says_nothing_about_it() 
         .await
         .unwrap();
 
-    let picked = opened(&app, id)
-        .await
-        .grilling_pairing
-        .as_ref()
+    let drawn = opened(&app, id).await;
+    let picked = drawn
+        .under("grilling")
         .expect("the grilling was paired before it started")
         .clone();
     let pairing = store::Pairing {
@@ -9894,9 +9961,12 @@ async fn adopting_a_declaring_roadmap_starts_every_stage_that_is_ready() {
     );
 
     // The same Pairings, every one of them.
-    assert_eq!(beside.grilling_pairing, first.grilling_pairing);
-    assert_eq!(beside.implementation_pairing, first.implementation_pairing);
-    assert_eq!(beside.review_pairing, first.review_pairing);
+    assert_eq!(beside.under("grilling"), first.under("grilling"));
+    assert_eq!(
+        beside.under("implementation"),
+        first.under("implementation")
+    );
+    assert_eq!(beside.paired("review"), first.paired("review"));
 
     // The same companions, checked out beside it rather than merely recorded.
     assert_eq!(companions(&app, second.id).await, ["askance"]);
@@ -10503,7 +10573,10 @@ async fn adopting_is_refused_by_name_when_a_profile_is_unchosen() {
 
     let id = adopting(&app, repo_id, "mvp").await;
 
-    assert_eq!(press_adopt(&app, id).await, Adopted::NoGrillingProfile);
+    assert_eq!(
+        press_adopt(&app, id).await,
+        Adopted::NoPairing(wanted("grilling", "Grilling"))
+    );
     nothing_adopted(&app, id, &repo).await;
 
     choose(
@@ -10516,7 +10589,7 @@ async fn adopting_is_refused_by_name_when_a_profile_is_unchosen() {
 
     assert_eq!(
         press_adopt(&app, id).await,
-        Adopted::NoImplementationProfile
+        Adopted::NoPairing(wanted("implementation", "Implementation"))
     );
     nothing_adopted(&app, id, &repo).await;
 
@@ -10528,7 +10601,10 @@ async fn adopting_is_refused_by_name_when_a_profile_is_unchosen() {
     )
     .await;
 
-    assert_eq!(press_adopt(&app, id).await, Adopted::NoReviewProfile);
+    assert_eq!(
+        press_adopt(&app, id).await,
+        Adopted::NoPairing(wanted("review", "Review"))
+    );
     nothing_adopted(&app, id, &repo).await;
 
     choose(
@@ -11030,7 +11106,10 @@ async fn the_cheap_refusals_are_answered_before_the_ones_git_is_paid_for() {
 
     let id = adopting(&app, repo_id, "mvp").await;
 
-    assert_eq!(press_adopt(&app, id).await, Adopted::NoGrillingProfile);
+    assert_eq!(
+        press_adopt(&app, id).await,
+        Adopted::NoPairing(wanted("grilling", "Grilling"))
+    );
     assert_eq!(
         opened(&app, id).await.state,
         Lifecycle::Draft,
@@ -11357,7 +11436,7 @@ async fn a_review_is_refused_by_name_for_each_profile_it_is_short_of() {
 
     assert_eq!(
         press_take_up(&app, id).await,
-        TakenUp::NoImplementationProfile
+        TakenUp::NoPairing(wanted("implementation", "Implementation"))
     );
     nothing_taken_up(&app, id, &repo).await;
 
@@ -11369,7 +11448,10 @@ async fn a_review_is_refused_by_name_for_each_profile_it_is_short_of() {
     )
     .await;
 
-    assert_eq!(press_take_up(&app, id).await, TakenUp::NoReviewProfile);
+    assert_eq!(
+        press_take_up(&app, id).await,
+        TakenUp::NoPairing(asked("review", "Review", false))
+    );
     nothing_taken_up(&app, id, &repo).await;
 
     choose(
@@ -11649,8 +11731,8 @@ async fn a_review_takes_up_the_pull_request_its_brief_names() {
     assert_eq!(pinned.title, "Rate limiting for the public API");
     assert_eq!(pinned.url, "https://github.com/tobico/verkstead/pull/41");
 
-    assert!(view.implementation_pairing.is_some());
-    assert!(matches!(view.review_pairing, PickedView::Under(_)));
+    assert!(view.under("implementation").is_some());
+    assert!(matches!(view.paired("review"), PickedView::Under(_)));
 }
 
 /// And a bare `#number` names it just as well: a number is unambiguous in the
@@ -13751,7 +13833,7 @@ async fn a_review_is_ready_on_a_brief_and_both_pairings() {
     let view = opened(&app, id).await;
     assert!(view.ready_to_grill);
     assert!(
-        view.grilling_pairing.is_none(),
+        view.under("grilling").is_none(),
         "and no grilling was ever asked for",
     );
 }
@@ -13773,7 +13855,7 @@ async fn a_review_pressed_with_no_profiles_is_refused_about_them_first() {
 
     assert_eq!(
         press_take_up(&app, id).await,
-        TakenUp::NoImplementationProfile,
+        TakenUp::NoPairing(wanted("implementation", "Implementation")),
         "and nothing about GitHub was asked to find that out",
     );
     nothing_taken_up(&app, id, &repo).await;
@@ -13874,13 +13956,13 @@ async fn a_fix_merge_issues_is_ready_on_a_brief_a_target_and_one_pairing() {
     let view = opened(&app, id).await;
     assert!(view.ready_to_grill, "which is the third of the three");
     assert!(
-        view.grilling_pairing.is_none(),
+        view.under("grilling").is_none(),
         "and no grilling was ever asked for",
     );
     assert!(
-        matches!(view.review_pairing, PickedView::Nothing),
+        matches!(view.paired("review"), PickedView::Nothing),
         "nor a review: {:?}",
-        view.review_pairing,
+        view.paired("review"),
     );
 }
 
@@ -13938,11 +14020,11 @@ async fn a_fix_merge_issues_takes_up_the_pull_request_its_brief_names() {
         "the branch GitHub says it merges into, which is what a conflict is measured against",
     );
 
-    assert!(view.implementation_pairing.is_some());
+    assert!(view.under("implementation").is_some());
     assert!(
-        matches!(view.review_pairing, PickedView::Nothing),
+        matches!(view.paired("review"), PickedView::Nothing),
         "and it wraps up under the one role it was started on: {:?}",
-        view.review_pairing,
+        view.paired("review"),
     );
 }
 
@@ -14035,7 +14117,7 @@ async fn a_fix_merge_issues_keeps_every_take_up_refusal_by_name() {
     );
     assert_eq!(
         press_take_up(&app, bare).await,
-        TakenUp::NoImplementationProfile,
+        TakenUp::NoPairing(wanted("implementation", "Implementation")),
         "the one role it is short of, and nothing about GitHub was asked to find out",
     );
 
@@ -15958,7 +16040,7 @@ async fn no_review_makes_a_draft_as_ready_to_start_as_a_review_pairing_does() {
 
     assert_eq!(
         grill(&app, id).await,
-        GrillingStarted::NoReviewProfile,
+        GrillingStarted::NoPairing(wanted("review", "Review")),
         "the picker nobody has touched refuses the start",
     );
     assert!(!opened(&app, id).await.ready_to_grill);
@@ -15967,7 +16049,7 @@ async fn no_review_makes_a_draft_as_ready_to_start_as_a_review_pairing_does() {
 
     let view = opened(&app, id).await;
     assert_eq!(
-        view.review_pairing,
+        view.paired("review"),
         PickedView::Skipped,
         "the row that runs nothing, read back as the choice it was",
     );
@@ -15994,7 +16076,7 @@ async fn no_review_is_fixed_once_the_grilling_has_started() {
         "there is no picking left once the work has started",
     );
     assert_eq!(
-        opened(&app, id).await.review_pairing,
+        opened(&app, id).await.paired("review"),
         PickedView::Skipped,
         "and what it started under is exactly where it was",
     );
@@ -16025,7 +16107,7 @@ async fn an_empty_grilling_picker_refuses_the_start_until_a_pairing_answers_it()
 
     assert_eq!(
         grill(&app, id).await,
-        GrillingStarted::NoGrillingProfile,
+        GrillingStarted::NoPairing(wanted("grilling", "Grilling")),
         "the picker nobody has touched refuses the start",
     );
     assert!(!opened(&app, id).await.ready_to_grill);
@@ -16040,7 +16122,7 @@ async fn an_empty_grilling_picker_refuses_the_start_until_a_pairing_answers_it()
 
     let view = opened(&app, id).await;
     assert!(
-        view.grilling_pairing.is_some(),
+        view.under("grilling").is_some(),
         "an account is what answers the role",
     );
     assert!(view.ready_to_grill);

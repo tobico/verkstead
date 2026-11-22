@@ -208,7 +208,7 @@ label: string | null, added: Added, state: AdditionState, };
  * watching says itself on a Timeline instead — see the server's `continuing`
  * module, which starts the same stage by the other route.
  */
-export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | { "Misdeclared": { 
+export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | { "NoPairing": RoleWanted } | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | { "Misdeclared": { 
 /**
  * Why, as the judgement put it.
  */
@@ -2006,30 +2006,18 @@ companions: Array<CompanionView>, state: Lifecycle,
  */
 declared_state: string | null, 
 /**
- * The Profile and model the grilling session will run under, whole rather
- * than by id: the pane says what they are, and whether the Profile is
+ * What each role its Process declares will run its sessions under, in the
+ * order the **Agent** control draws them — whole rather than by id: the
+ * pane says what the Profile and model are, and whether the Profile is
  * still runnable.
  *
- * A Pairing or nothing, the picker having no row that runs no session:
- * *No grilling* is retired, and a record written while it was there reads
- * as nothing picked — see [`crate::PickedView`], which the two roles that
- * do have one still use.
+ * One entry per role rather than three fields, a Conversation's roles
+ * being its Process's (ADR-0030, *Process*). Each says which of three the
+ * human picked rather than whether they picked at all — a Pairing, the row
+ * that runs no session, or nothing yet; a picker that offers no such row
+ * simply never reads it back.
  */
-grilling_pairing: PairingView | null, 
-/**
- * And the ones the implementation will run under. Chosen separately
- * because it is genuinely a separate account and model.
- */
-implementation_pairing: PairingView | null, 
-/**
- * And what the wrap-up's review session will run under, chosen separately
- * again: reviewing is a fresh set of eyes on what was built.
- *
- * The other role the picker offers a row that runs no session for, so this
- * says which of three the human picked rather than whether they picked at
- * all.
- */
-review_pairing: PickedView, 
+pairings: Array<RolePairingView>, 
 /**
  * Whether everything needed before the work will start is settled: every
  * role picked — a Pairing complete and no Profile broken, or the row that
@@ -3604,7 +3592,7 @@ export type FoundOn = "Lan" | "Tailscale";
  * the Repo they are about. Nothing gates the button on a companion: the
  * configuration is always complete, so refusal at the start is the whole story.
  */
-export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "EmptyBrief" | "ProcessNotOffered" | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | { "NoPairing": RoleWanted } | { "ProfileBroken": ProfileTrouble } | "EmptyBrief" | "ProcessNotOffered" | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
 /**
  * What the companion Repo is called, which is what the human picked it
  * by and what they will go and look at.
@@ -3900,7 +3888,18 @@ here: string,
 /**
  * And what that device's is called.
  */
-there: string, } } | { "RepoAuthorUnpicked": { name: string, companion: boolean, } } | { "Harness": { role: PairingRole, 
+there: string, } } | { "RepoAuthorUnpicked": { name: string, companion: boolean, } } | { "Harness": { 
+/**
+ * The role whose Pairing wants it, as its Process labels it.
+ *
+ * Named rather than read off a Profile, because what a missing harness
+ * has to be named against is the Pairing that wants it: two roles can
+ * want two harnesses, and a sentence that said only *Claude Code is
+ * not over there* would leave the human to work out which picker to go
+ * and change. The label rather than a word of Verkstead's, a
+ * Conversation's roles being its Process's (ADR-0030, *Process*).
+ */
+role: string, 
 /**
  * The Agent Profile's name as it reads here, or nothing for the one
  * account on its harness that nobody named.
@@ -4696,16 +4695,6 @@ export type PackAttached = "Attached" | "NoSuchConversation" | "NotDrafting" | "
 export type PackRemoved = "Removed" | "NoSuchConversation" | "NotDrafting";
 
 /**
- * Which of a Conversation's three roles a Pairing is for.
- *
- * Here rather than read off a Profile, because what a missing harness has to be
- * named against is the Pairing that wants it: two roles can want two harnesses,
- * and a sentence that said only *Claude Code is not over there* would leave the
- * human to work out which picker to go and change.
- */
-export type PairingRole = "Grilling" | "Implementation" | "Review";
-
-/**
  * One of a Conversation's Pairings, as the page shows it: the Profile
  * whole, and the model paired with it.
  *
@@ -5416,6 +5405,13 @@ offered: boolean,
  */
 states: Array<DeclaredStateEntry>, 
 /**
+ * Each role it declares, in the order its manifest writes them: the order
+ * the **Agent** control draws their pickers in, and how many of them says
+ * which shape that control takes — one role a flat dropdown, more a panel
+ * (ADR-0020, *A Conversation has a Process*; Set 1765, Q26).
+ */
+roles: Array<RoleEntry>, 
+/**
  * The record's own word for it, where it is one of Verkstead's
  * Processes written as data: a Conversation on it carries that word, and
  * the viewer words it from its own tables until those are read from here.
@@ -6001,6 +5997,15 @@ export type Registration = { path: string,
 author?: string, };
 
 /**
+ * What one role's memory prefills its picker with.
+ */
+export type RememberedRole = { 
+/**
+ * The role's name, as its Process declares it.
+ */
+role: string, picked: PickedView, };
+
+/**
  * Whether the human is done with the banner that points at this section.
  *
  * The banner stands on a Conversation page above the Timeline, at every
@@ -6172,20 +6177,15 @@ origin: string | null, };
  */
 export type RepoPairingsView = { 
 /**
- * A Pairing, or nothing: the grilling role has no row that runs no session,
- * so a skip some Repo remembers from before *No grilling* retired is read
- * as nothing remembered and never handed over as a choice.
+ * One entry per role anything is remembered for, by the name the role is
+ * declared under — whichever roles those are, a Process's roles being its
+ * own (ADR-0030, *Process*).
+ *
+ * Each is a Pairing, the row that runs no session, or nothing — so an
+ * entry says which of the three rather than whether anything is
+ * remembered. A role with no entry is nothing remembered.
  */
-grilling: PairingView | null, 
-/**
- * And the other role with no such row.
- */
-implementation: PairingView | null, 
-/**
- * The one whose memory can hold it, so this says which of three rather than
- * whether anything is remembered.
- */
-review: PickedView, };
+roles: Array<RememberedRole>, };
 
 /**
  * What became of taking one off the registry.
@@ -6448,8 +6448,76 @@ diagrams: boolean, };
  * `null` is the row that runs no session: a picker that offers one offers it
  * beside the Pairings, so the one press that picks either sends the same body
  * — see [`PickedView`].
+ *
+ * **Nothing else is read.** A body carrying a Pairing's own fields at the top
+ * level — the shape the three retired per-role presses took — would read as
+ * `pairing` missing, which is `null`, which is the row that runs no session:
+ * a pick silently turned into picking the role away. Refused instead, so a
+ * caller sending the old shape is told.
  */
 export type RoleChoice = { pairing: ProfileChoice | null, };
+
+/**
+ * One role a Process declares, as its manifest declares it.
+ */
+export type RoleEntry = { 
+/**
+ * What its Pairing is stored and picked by.
+ */
+role: string, 
+/**
+ * What its picker is labelled inside the panel.
+ */
+label: string, 
+/**
+ * Whether it is the role the Done signal, memos and previews assume.
+ */
+building: boolean, 
+/**
+ * And whether its picker offers the row that runs no session at all: *No
+ * review*, and whatever a plugin's own role calls it. A role without it is
+ * answered with a Pairing or the press waits.
+ */
+away: boolean, };
+
+/**
+ * One of a Conversation's roles and what it will run under: the role as its
+ * Process declares it, and the pick beside it.
+ */
+export type RolePairingView = { 
+/**
+ * What a pick is posted under and what the record stores it by.
+ */
+role: string, 
+/**
+ * What its picker is labelled inside the panel.
+ */
+label: string, 
+/**
+ * Whether it is the role the Done signal, memos and previews assume.
+ */
+building: boolean, 
+/**
+ * And whether its picker offers the row that runs no session at all: *No
+ * review*, and whatever a plugin's own role calls it. A role without it is
+ * answered with a Pairing or the press waits.
+ */
+away: boolean, picked: PickedView, };
+
+/**
+ * The role a press is waiting on a Pairing for: its name, as its Process
+ * declares it, and the label its picker is drawn under.
+ *
+ * Both, because the two are for two different things: the label is what the
+ * sentence says, and the name is what the page looks the picker's own rows up
+ * by.
+ */
+export type RoleWanted = { role: string, label: string, 
+/**
+ * And whether its picker offers the row that runs no session, which the
+ * sentence names where it does: *or No review*.
+ */
+away: boolean, };
 
 /**
  * Which device a sidebar row belongs to, as the row itself says it.
@@ -7896,9 +7964,10 @@ brief: SteerBrief,
  */
 detour: boolean, 
 /**
- * The role whose Pairing the row's sessions run under — `grilling` for a
- * state running the interview, `implementation` otherwise — or nothing
- * where nothing runs.
+ * The role whose Pairing the row's one picker settles: the first of the
+ * roles the target state declares, by its name — or nothing where nothing
+ * runs there. A state declaring more takes this pick for the first and
+ * fills the rest where they have none.
  */
 role: string | null, };
 
@@ -8225,7 +8294,7 @@ at: string,
 /**
  * What git said, as it said it.
  */
-said: string, } } | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
+said: string, } } | { "NoPairing": RoleWanted } | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
 /**
  * Where it is checked out, as git named it.
  */

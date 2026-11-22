@@ -3317,22 +3317,17 @@ impl Bench {
         for role in roles {
             let role = *role;
             let profile = profile(&self.app, self.elsewhere.path(), role).await;
-            let pairing = serde_json::json!({
-                "profile_id": profile,
-                "model": format!("claude-{role}-5"),
-            });
 
-            // The review picker offers a row that is no account at all, so what
-            // it sends is which of its rows was picked — see
+            // Which of its rows was picked rather than a Pairing outright,
+            // because a picker may offer a row that is no account at all — see
             // [`Bench::unreviewed`].
-            let picked = match role {
-                "review" => serde_json::json!({ "pairing": pairing }),
-                _ => pairing,
-            };
+            let picked = serde_json::json!({
+                "pairing": { "profile_id": profile, "model": format!("claude-{role}-5") },
+            });
 
             let chosen: verkstead_render::ProfileChosen = post(
                 &self.app,
-                &format!("/api/ui/conversations/{id}/{role}-pairing"),
+                &format!("/api/ui/conversations/{id}/pairings/{role}"),
                 &picked,
             )
             .await;
@@ -3505,15 +3500,13 @@ impl Bench {
             ("implementation", CODEX_MODEL),
             ("review", CODEX_MODEL),
         ] {
-            let pairing = serde_json::json!({ "profile_id": profile_id, "model": model });
-            let picked = match role {
-                "review" => serde_json::json!({ "pairing": pairing }),
-                _ => pairing,
-            };
+            let picked = serde_json::json!({
+                "pairing": { "profile_id": profile_id, "model": model },
+            });
 
             let chosen: verkstead_render::ProfileChosen = post(
                 &self.app,
-                &format!("/api/ui/conversations/{id}/{role}-pairing"),
+                &format!("/api/ui/conversations/{id}/pairings/{role}"),
                 &picked,
             )
             .await;
@@ -3584,19 +3577,13 @@ impl Bench {
             .id;
 
         for (role, model) in roles {
-            let pairing = serde_json::json!({ "profile_id": profile_id, "model": model });
-
-            // The one picker that offers a row which is no account at all sends
-            // which row was picked, exactly as [`Bench::under_every_pairing`]
-            // does.
-            let picked = match *role {
-                "review" => serde_json::json!({ "pairing": pairing }),
-                _ => pairing,
-            };
+            let picked = serde_json::json!({
+                "pairing": { "profile_id": profile_id, "model": model },
+            });
 
             let chosen: verkstead_render::ProfileChosen = post(
                 &self.app,
-                &format!("/api/ui/conversations/{id}/{role}-pairing"),
+                &format!("/api/ui/conversations/{id}/pairings/{role}"),
                 &picked,
             )
             .await;
@@ -3613,7 +3600,7 @@ impl Bench {
     async fn unreviewed(&self, id: i64) {
         let chosen: verkstead_render::ProfileChosen = post(
             &self.app,
-            &format!("/api/ui/conversations/{id}/review-pairing"),
+            &format!("/api/ui/conversations/{id}/pairings/review"),
             &serde_json::json!({ "pairing": null }),
         )
         .await;
@@ -5014,7 +5001,7 @@ async fn removing_the_profile_a_running_session_was_launched_under_leaves_it_run
     }
 
     assert_eq!(
-        fixture.view().await.grilling_pairing,
+        fixture.view().await.under("grilling"),
         None,
         "the Conversation is nulled out of while its session runs",
     );
@@ -19929,21 +19916,19 @@ async fn nothing_moves_a_stopped_conversation_onto_another_profile() {
 
     assert_eq!(
         after
-            .grilling_pairing
-            .as_ref()
+            .under("grilling")
             .map(|pairing| pairing.profile.id.clone()),
         before
-            .grilling_pairing
-            .as_ref()
+            .under("grilling")
             .map(|pairing| pairing.profile.id.clone()),
     );
     assert_eq!(
         after
-            .implementation_pairing
-            .map(|pairing| pairing.profile.id),
+            .under("implementation")
+            .map(|pairing| pairing.profile.id.clone()),
         before
-            .implementation_pairing
-            .map(|pairing| pairing.profile.id),
+            .under("implementation")
+            .map(|pairing| pairing.profile.id.clone()),
         "the account that ran out is the account the rest of the run is spent on",
     );
 }
@@ -21085,16 +21070,14 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
     );
     assert_eq!(
         stage
-            .implementation_pairing
-            .as_ref()
+            .under("implementation")
             .and_then(|pairing| pairing.profile.name.clone()),
         Some("implementation".to_owned()),
         "under the same Profiles, there being nobody to choose them again",
     );
     assert_eq!(
         stage
-            .grilling_pairing
-            .as_ref()
+            .under("grilling")
             .and_then(|pairing| pairing.profile.name.clone()),
         Some("grilling".to_owned()),
         "the grilling one among them — a stage steered into a second round is \
@@ -21643,18 +21626,13 @@ async fn the_servers_places_hold_a_settle_back_and_never_a_press() {
             .id
             .clone();
 
-        let pairing = serde_json::json!({
-            "profile_id": profile,
-            "model": format!("claude-{role}-5"),
+        let picked = serde_json::json!({
+            "pairing": { "profile_id": profile, "model": format!("claude-{role}-5") },
         });
-        let picked = match role {
-            "review" => serde_json::json!({ "pairing": pairing }),
-            _ => pairing,
-        };
 
         let chosen: verkstead_render::ProfileChosen = post(
             &fixture.app,
-            &format!("/api/ui/conversations/{adopting}/{role}-pairing"),
+            &format!("/api/ui/conversations/{adopting}/pairings/{role}"),
             &picked,
         )
         .await;
@@ -21837,10 +21815,12 @@ async fn composed_beside(fixture: &Grilling, process: Process) -> i64 {
 
     let chosen: verkstead_render::ProfileChosen = post(
         &fixture.app,
-        &format!("/api/ui/conversations/{id}/implementation-pairing"),
+        &format!("/api/ui/conversations/{id}/pairings/implementation"),
         &serde_json::json!({
-            "profile_id": implementation,
-            "model": "claude-implementation-5",
+            "pairing": {
+                "profile_id": implementation,
+                "model": "claude-implementation-5",
+            },
         }),
     )
     .await;
@@ -38622,8 +38602,8 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
         fixture
             .view()
             .await
-            .implementation_pairing
-            .map(|pairing| pairing.profile.id),
+            .under("implementation")
+            .map(|pairing| pairing.profile.id.clone()),
         "the work is running under the other one, so this is a change to make",
     );
 
@@ -38656,11 +38636,8 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
         ConversationSteered::Steered,
     );
 
-    let paired = fixture
-        .view()
-        .await
-        .implementation_pairing
-        .expect("the steer settled one");
+    let view = fixture.view().await;
+    let paired = view.under("implementation").expect("the steer settled one");
 
     assert_eq!(paired.profile.id, picked);
     assert_eq!(
@@ -38696,8 +38673,8 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
         fixture
             .view()
             .await
-            .implementation_pairing
-            .and_then(|pairing| pairing.model),
+            .under("implementation")
+            .and_then(|pairing| pairing.model.clone()),
         Some("claude-grilling-4.8".to_owned()),
         "the model moved under a Profile that did not",
     );
@@ -41376,14 +41353,13 @@ async fn a_stage_inherits_the_no_review_its_roadmap_was_grilled_with() {
     let stage = stage_of(&fixture).await;
 
     assert_eq!(
-        stage.review_pairing,
+        stage.paired("review"),
         PickedView::Skipped,
         "the row its roadmap was grilled on, and so the row its stages run on",
     );
     assert_eq!(
         stage
-            .implementation_pairing
-            .as_ref()
+            .under("implementation")
             .and_then(|pairing| pairing.profile.name.clone()),
         Some("implementation".to_owned()),
         "with the roles beside it inherited as they always were",
@@ -44959,4 +44935,344 @@ async fn a_declared_question_is_required_and_reaches_the_activity() {
         prompt.contains("# What I want found out") && prompt.contains("Does it count the 429s?"),
         "{prompt}"
     );
+}
+
+/// The uuid of the fixture plugin providing the Process *Sketching*, whose
+/// three roles are its own and whose building role is none of Verkstead's.
+const SKETCHING: &str = "9c2d7a51-3e6b-4f08-9a1c-5d4e2b7f0a63";
+
+/// Install a plugin providing the Process *Sketching*: three roles of its own
+/// — `sketching`, which it marks as building, `drawing` and `checking` — over
+/// two states, each a One session registered as building.
+///
+/// The `sketched` state runs under the building role and the `checked` state
+/// under one that is not, which is the whole of what the Memo and preview gate
+/// turns on (Set 1765, Q26). `drawing` is declared and run nowhere: a role a
+/// Process declares is a picker the press waits on whether or not a state names
+/// it.
+async fn installing_sketching(app: &axum::Router, elsewhere: &std::path::Path) {
+    let plugin = elsewhere.join("sketching");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(
+        plugin.join("plugin.yaml"),
+        format!(
+            "uuid: {SKETCHING}\n\
+             name: Sketching\n\
+             author:\n  name: Grace Hopper\n  email: grace@example.com\n\
+             version: 1.0.0\n\
+             interface: 1\n\
+             dependencies:\n\
+             \x20 - uuid: d7a5e719-8491-46a7-b7d7-8f9f85e57bd6\n\
+             \x20   name: Activities\n\
+             \x20   author:\n      name: Tobias Cohen\n      email: tobi@tobico.net\n\
+             \x20   version: ^0.1\n\
+             \x20 - uuid: 15447a8d-f28d-4573-8b8b-a7226d477755\n\
+             \x20   name: Verkstead\n\
+             \x20   author:\n      name: Tobias Cohen\n      email: tobi@tobico.net\n\
+             \x20   version: ^0.1\n\
+             provides:\n\
+             \x20 - category: process\n\
+             \x20   id: sketching\n\
+             \x20   name: Sketching\n\
+             \x20   description: Sketch it, then have it looked at.\n\
+             \x20   roles:\n\
+             \x20     - {{ name: sketching, label: Sketching, building: true }}\n\
+             \x20     - {{ name: drawing, label: Drawing }}\n\
+             \x20     - {{ name: checking, label: Checking }}\n\
+             \x20   states:\n\
+             \x20     - id: sketched\n\
+             \x20       word: Sketched\n\
+             \x20       activity: one-session\n\
+             \x20       roles: [sketching]\n\
+             \x20       options: {{ skill: verkstead/instruction, prompt: Sketch it., evidence: nothing, building: finish }}\n\
+             \x20     - id: checked\n\
+             \x20       word: Checked\n\
+             \x20       activity: one-session\n\
+             \x20       roles: [checking]\n\
+             \x20       options: {{ skill: verkstead/instruction, prompt: Check it., evidence: nothing, building: finish }}\n\
+             \x20   transitions:\n\
+             \x20     sketched: {{ done: checked, refused: stopped }}\n\
+             \x20     checked: {{ done: done, refused: stopped }}\n\
+             capabilities: []\n"
+        ),
+    )
+    .unwrap();
+
+    let consent: verkstead_render::PluginConsent = post(
+        app,
+        "/api/ui/plugins/read",
+        &serde_json::json!({ "source": plugin }),
+    )
+    .await;
+    let view: verkstead_render::PluginsView = post(
+        app,
+        "/api/ui/plugins",
+        &serde_json::json!({ "source": plugin, "granted": consent.capabilities }),
+    )
+    .await;
+    let row = view
+        .installed
+        .iter()
+        .find(|row| row.uuid == SKETCHING)
+        .expect("the plugin is listed");
+    assert_eq!(row.trouble, None, "and loads: {row:?}");
+}
+
+/// A Conversation on *Sketching*, picked for each of its three roles, briefed
+/// and started — plus the Repo it is on, for the memory the start writes.
+async fn sketching(spill: tempfile::TempDir, stub: &str) -> (Grilling, i64) {
+    let bench = bench_at_pace(spill, stub, PULL_REQUEST, *BRISKLY, None).await;
+    let app = bench.app.clone();
+
+    installing_sketching(&app, bench.elsewhere.path()).await;
+
+    let started: Started = post(
+        &app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    let picked: ProcessPicked = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/process"),
+        &serde_json::json!({
+            "process": Process::Provided,
+            "provided": { "plugin": SKETCHING, "id": "sketching" },
+        }),
+    )
+    .await;
+    assert_eq!(picked, ProcessPicked::Picked);
+
+    // Every role it declares, by the name it declares it under: none of the
+    // three is one Verkstead knows, and each is a picker the press waits on.
+    bench
+        .paired(id, &["sketching", "drawing", "checking"])
+        .await;
+
+    let saved: BriefSaved = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": BRIEF }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    let start: GrillingStarted = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/grill"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(start, GrillingStarted::Started);
+
+    let repo_id = bench.repo_id;
+
+    (bench.holding(id), repo_id)
+}
+
+/// A stub for *Sketching*, the shape [`two_steps_stub`] has: it runs
+/// `sketched` or `checked` for whichever state's session it is, and then idles.
+fn sketching_stub(sketched: &str, checked: &str) -> String {
+    format!(
+        r#"case "$2" in
+*'Sketch it.'*)
+{sketched}
+;;
+*'Check it.'*)
+{checked}
+;;
+esac
+while :; do sleep 1; done"#
+    )
+}
+
+/// Which roles a Conversation's **Agent** control draws a picker for, and what
+/// each is labelled: the Process's own, in the order its manifest writes them.
+///
+/// One role is a flat dropdown and more a panel, which is the viewer's reading
+/// of how many there are — see `ROLES` in `web/src/workbench/processes.ts`. The
+/// list and its labels are what this says.
+#[tokio::test]
+async fn the_roles_a_conversation_is_run_under_are_its_processs_own() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = sketching_stub("", "");
+    let (fixture, _) = sketching(spill, &stub).await;
+
+    let view = fixture.view().await;
+    let drawn = |roles: &[verkstead_render::RolePairingView]| {
+        roles
+            .iter()
+            .map(|role| (role.role.clone(), role.label.clone(), role.building))
+            .collect::<Vec<_>>()
+    };
+    let three = [
+        ("sketching".to_owned(), "Sketching".to_owned(), true),
+        ("drawing".to_owned(), "Drawing".to_owned(), false),
+        ("checking".to_owned(), "Checking".to_owned(), false),
+    ];
+
+    assert_eq!(
+        drawn(&view.pairings),
+        three,
+        "three roles of the Process's own, labelled as its manifest labels them",
+    );
+    assert!(
+        view.pairings
+            .iter()
+            .all(|role| matches!(role.picked, PickedView::Under(_))),
+        "each with the Pairing picked for it: {:?}",
+        view.pairings,
+    );
+
+    // And the Process's own entry says the same, which is what the composer
+    // draws its pickers off before there is a Conversation on it.
+    let processes: Vec<verkstead_render::ProcessEntry> =
+        get(&fixture.app, "/api/ui/processes").await;
+    let entry = |plugin: &str| {
+        processes
+            .iter()
+            .find(|entry| entry.plugin == plugin)
+            .unwrap_or_else(|| panic!("{plugin} is listed"))
+            .roles
+            .iter()
+            .map(|role| (role.role.clone(), role.label.clone(), role.building))
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(entry(SKETCHING), three);
+
+    // Against a Process of one role, which is the other shape the control
+    // takes: one picker, and no panel over it. Develop's is the three
+    // Verkstead knows, in the order its manifest writes them.
+    assert_eq!(
+        entry(verkstead_server::plugins::built_in::INVESTIGATE),
+        [(
+            "implementation".to_owned(),
+            "Implementation".to_owned(),
+            true
+        )],
+    );
+    assert_eq!(
+        entry(verkstead_server::plugins::built_in::DEVELOP),
+        [
+            ("grilling".to_owned(), "Grilling".to_owned(), false),
+            (
+                "implementation".to_owned(),
+                "Implementation".to_owned(),
+                true
+            ),
+            ("review".to_owned(), "Review".to_owned(), false),
+        ],
+    );
+}
+
+/// A role name nobody has used before is remembered against the Repo once a
+/// Conversation is started under it, exactly as the three Verkstead knows are:
+/// the next Conversation on that Repo arrives with it prefilled.
+#[tokio::test]
+async fn a_role_nobody_has_used_before_is_remembered_against_the_repo() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = sketching_stub("", "");
+    let (fixture, repo_id) = sketching(spill, &stub).await;
+
+    let remembered: verkstead_render::RepoPairingsView =
+        get(&fixture.app, &format!("/api/ui/repos/{repo_id}/pairings")).await;
+
+    for role in ["sketching", "drawing", "checking"] {
+        let pairing = remembered
+            .under(role)
+            .unwrap_or_else(|| panic!("the Repo remembers the {role} role: {remembered:?}"));
+
+        assert_eq!(
+            pairing.profile.name.as_deref(),
+            Some(role),
+            "under the account that role was grilled with",
+        );
+        assert_eq!(
+            pairing.model.as_deref(),
+            Some(format!("claude-{role}-5").as_str()),
+        );
+    }
+}
+
+/// Only the building role's session may leave a Memo or suggest a preview, and
+/// the building role is the Process's: a session the `sketched` state launches
+/// may, and one the `checked` state launches is refused — on a Process whose
+/// building role is not `implementation`.
+#[tokio::test]
+async fn a_memo_is_the_building_roles_session_whichever_role_that_is() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = sketching_stub(
+        "while [ ! -f /tmp/verkstead/sketched ]; do sleep 0.05; done\n: > /tmp/verkstead/done",
+        "",
+    );
+    let (fixture, _) = sketching(spill, &stub).await;
+
+    fixture
+        .until(|view| (view.declared_state.as_deref() == Some("sketched")).then_some(()))
+        .await;
+
+    let (status, body) = until_a_memo(&fixture, "The stub idles", StatusCode::OK).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the building role's session: {body}"
+    );
+    assert_eq!(memos(&fixture).await.len(), 1, "and it lands");
+
+    let (status, body) = suggest_a_preview(&fixture, "Try it", "cargo run\n").await;
+    assert_eq!(status, StatusCode::OK, "and so may its preview: {body}");
+
+    // On to the state that runs under a role the Process does not mark as
+    // building, where the same two are refused.
+    std::fs::write(handoff_directory(&fixture).join("sketched"), "").unwrap();
+    fixture
+        .until(|view| (view.declared_state.as_deref() == Some("checked")).then_some(()))
+        .await;
+
+    let (status, body) = until_a_memo(&fixture, "Looks fine", StatusCode::CONFLICT).await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "refused: {body}");
+    let said = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        said.contains("only a building session may leave a memo"),
+        "naming the rule: {body}",
+    );
+    assert_eq!(
+        memos(&fixture).await.len(),
+        1,
+        "and nothing lands beside the one the building role left",
+    );
+
+    let (status, body) = suggest_a_preview(&fixture, "Try it again", "cargo test\n").await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "and nor may its preview: {body}"
+    );
+}
+
+/// Leave a Memo until the server answers `wanted`, or until the patience runs
+/// out — and hand back whatever it last answered.
+///
+/// A state is entered before the session its Activity launches is running, so a
+/// memo pressed the moment the card changes is refused as *there is no session
+/// running*: the refusal this is waiting for is the one about the role, which
+/// only a session can be refused.
+async fn until_a_memo(fixture: &Grilling, title: &str, wanted: StatusCode) -> (StatusCode, String) {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let answered = leave_a_memo(fixture, title, "Nothing to raise.\n").await;
+
+        if answered.0 == wanted || Instant::now() >= deadline {
+            return answered;
+        }
+
+        pause(Duration::from_millis(25)).await;
+    }
 }

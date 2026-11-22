@@ -133,10 +133,100 @@ pub struct ProcessEntry {
     /// Each state it declares, in order, with the word the card draws.
     pub states: Vec<DeclaredStateEntry>,
 
+    /// Each role it declares, in the order its manifest writes them: the order
+    /// the **Agent** control draws their pickers in, and how many of them says
+    /// which shape that control takes — one role a flat dropdown, more a panel
+    /// (ADR-0020, *A Conversation has a Process*; Set 1765, Q26).
+    pub roles: Vec<RoleEntry>,
+
     /// The record's own word for it, where it is one of Verkstead's
     /// Processes written as data: a Conversation on it carries that word, and
     /// the viewer words it from its own tables until those are read from here.
     pub built_in: Option<Process>,
+}
+
+impl ConversationView {
+    /// What the role named `role` will run its sessions under.
+    ///
+    /// [`PickedView::Nothing`] where its Process declares no such role, which
+    /// is the same answer as a picker nobody has filled: what roles there are
+    /// is the Process's to say, and a reader asking after one it does not
+    /// declare is asking about a picker that is drawn nowhere.
+    pub fn paired(&self, role: &str) -> PickedView {
+        self.pairings
+            .iter()
+            .find(|settled| settled.role == role)
+            .map_or(PickedView::Nothing, |settled| settled.picked.clone())
+    }
+
+    /// And its Pairing, where a Pairing is what was picked for it.
+    pub fn under(&self, role: &str) -> Option<&PairingView> {
+        self.pairings
+            .iter()
+            .find(|settled| settled.role == role)
+            .and_then(|settled| match &settled.picked {
+                PickedView::Under(pairing) => Some(pairing),
+                PickedView::Nothing | PickedView::Skipped => None,
+            })
+    }
+}
+
+/// One of a Conversation's roles and what it will run under: the role as its
+/// Process declares it, and the pick beside it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct RolePairingView {
+    /// What a pick is posted under and what the record stores it by.
+    pub role: String,
+
+    /// What its picker is labelled inside the panel.
+    pub label: String,
+
+    /// Whether it is the role the Done signal, memos and previews assume.
+    pub building: bool,
+
+    /// And whether its picker offers the row that runs no session at all: *No
+    /// review*, and whatever a plugin's own role calls it. A role without it is
+    /// answered with a Pairing or the press waits.
+    pub away: bool,
+
+    pub picked: PickedView,
+}
+
+/// One role a Process declares, as its manifest declares it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct RoleEntry {
+    /// What its Pairing is stored and picked by.
+    pub role: String,
+
+    /// What its picker is labelled inside the panel.
+    pub label: String,
+
+    /// Whether it is the role the Done signal, memos and previews assume.
+    pub building: bool,
+
+    /// And whether its picker offers the row that runs no session at all: *No
+    /// review*, and whatever a plugin's own role calls it. A role without it is
+    /// answered with a Pairing or the press waits.
+    pub away: bool,
+}
+
+/// The role a press is waiting on a Pairing for: its name, as its Process
+/// declares it, and the label its picker is drawn under.
+///
+/// Both, because the two are for two different things: the label is what the
+/// sentence says, and the name is what the page looks the picker's own rows up
+/// by.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct RoleWanted {
+    pub role: String,
+    pub label: String,
+
+    /// And whether its picker offers the row that runs no session, which the
+    /// sentence names where it does: *or No review*.
+    pub away: bool,
 }
 
 /// A declared state and its word.
@@ -653,27 +743,17 @@ pub struct ConversationView {
     /// Process declares — the word is the Process's, in [`ProcessEntry`].
     pub declared_state: Option<String>,
 
-    /// The Profile and model the grilling session will run under, whole rather
-    /// than by id: the pane says what they are, and whether the Profile is
+    /// What each role its Process declares will run its sessions under, in the
+    /// order the **Agent** control draws them — whole rather than by id: the
+    /// pane says what the Profile and model are, and whether the Profile is
     /// still runnable.
     ///
-    /// A Pairing or nothing, the picker having no row that runs no session:
-    /// *No grilling* is retired, and a record written while it was there reads
-    /// as nothing picked — see [`crate::PickedView`], which the two roles that
-    /// do have one still use.
-    pub grilling_pairing: Option<PairingView>,
-
-    /// And the ones the implementation will run under. Chosen separately
-    /// because it is genuinely a separate account and model.
-    pub implementation_pairing: Option<PairingView>,
-
-    /// And what the wrap-up's review session will run under, chosen separately
-    /// again: reviewing is a fresh set of eyes on what was built.
-    ///
-    /// The other role the picker offers a row that runs no session for, so this
-    /// says which of three the human picked rather than whether they picked at
-    /// all.
-    pub review_pairing: PickedView,
+    /// One entry per role rather than three fields, a Conversation's roles
+    /// being its Process's (ADR-0030, *Process*). Each says which of three the
+    /// human picked rather than whether they picked at all — a Pairing, the row
+    /// that runs no session, or nothing yet; a picker that offers no such row
+    /// simply never reads it back.
+    pub pairings: Vec<RolePairingView>,
 
     /// Whether everything needed before the work will start is settled: every
     /// role picked — a Pairing complete and no Profile broken, or the row that
@@ -4985,17 +5065,15 @@ pub enum GrillingStarted {
     /// It is past drafting, so it has been started once already — or closed.
     NotDrafting,
 
-    /// No Agent Profile is chosen for the grilling session.
-    NoGrillingProfile,
-
-    /// None is chosen for the implementation either. Fixed before starting
-    /// rather than after, because the grilling ends by handing over to it.
-    NoImplementationProfile,
-
-    /// Nor for the review the wrap-up runs. Fixed before starting for the same
-    /// reason: what the work is looked at by is settled before the work begins
-    /// rather than swapped underneath it.
-    NoReviewProfile,
+    /// No Pairing is settled for one of the roles the Conversation's Process
+    /// declares.
+    ///
+    /// **Every role it names**, because each is a session something would
+    /// launch: they are fixed before the work starts rather than swapped
+    /// underneath it, and which of them there are is the Process's to say
+    /// (ADR-0030, *Process*). A role the human picked away is settled — what it
+    /// says is that no session runs there.
+    NoPairing(RoleWanted),
 
     /// A chosen Profile cannot be run under as things stand — its account is
     /// not where it was left or has signed out, or it is a member's and
@@ -5439,9 +5517,10 @@ pub struct SteerRow {
     /// Activity ends.
     pub detour: bool,
 
-    /// The role whose Pairing the row's sessions run under — `grilling` for a
-    /// state running the interview, `implementation` otherwise — or nothing
-    /// where nothing runs.
+    /// The role whose Pairing the row's one picker settles: the first of the
+    /// roles the target state declares, by its name — or nothing where nothing
+    /// runs there. A state declaring more takes this pick for the first and
+    /// fills the rest where they have none.
     pub role: Option<String>,
 }
 
@@ -5956,19 +6035,10 @@ pub enum Adopted {
     /// Brief and a grilling. There is no roadmap here to take a stage from.
     NotAdopting,
 
-    /// No Agent Profile is chosen for the grilling. Carried by an adopted stage
-    /// rather than run under: every stage after it inherits both Profiles from
-    /// its predecessor, and a Conversation steered into a second round is
-    /// grilled.
-    NoGrillingProfile,
-
-    /// And none is chosen for the implementation, which is what the stage's own
-    /// work runs under.
-    NoImplementationProfile,
-
-    /// Nor for the review, which is what looks at what the stage built — and
-    /// which every stage after this one inherits along with the other two.
-    NoReviewProfile,
+    /// No Pairing is settled for one of the roles the Conversation's Process
+    /// declares — every one of which an adopted stage carries, its successors
+    /// inheriting them from it.
+    NoPairing(RoleWanted),
 
     /// A chosen Profile cannot be run under as things stand — its account is
     /// not where it was left, or it is a member's and something about this
@@ -6244,17 +6314,13 @@ pub enum TakenUp {
         said: String,
     },
 
-    /// No Agent Profile is chosen for the implementation, which is what a red
-    /// check and a conflict are fixed under.
+    /// No Pairing is settled for one of the roles the Conversation's Process
+    /// declares — what a red check and a conflict are fixed under among them.
     ///
-    /// The grilling is not among these, unlike an adoption's: the work on a
-    /// pull request is built, there is no round for a grilling to open, and the
-    /// picker is not drawn.
-    NoImplementationProfile,
-
-    /// Nor for the review, which is what reads the branch and what has been
-    /// said on it.
-    NoReviewProfile,
+    /// A **Review** and a **Fix merge issues** declare no grilling role, which
+    /// is why this never names one: the work on a pull request is built, there
+    /// is no round for a grilling to open, and no picker is drawn for one.
+    NoPairing(RoleWanted),
 
     /// A chosen Profile cannot be run under as things stand — its account is
     /// not where it was left, or it is a member's and something about this

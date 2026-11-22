@@ -77,9 +77,7 @@ import {
   attachFile,
   attachPack,
   attachServer,
-  chooseGrillingPairing,
-  chooseImplementationPairing,
-  chooseReviewPairing,
+  choosePairing,
   draftMovedTo,
   nameTarget,
   permitDevice,
@@ -261,11 +259,15 @@ export type Composed = {
   /// And what the fill last wrote into [`Composed.process`], `null` until it
   /// has written anything.
   processFilled: Process | null;
-  /// Who runs each of the three roles, as a picker writes it — `null` for a
-  /// role nobody has touched. See `src/pairing.ts`.
-  grilling: string | null;
-  implementation: string | null;
-  review: string | null;
+  /// Who runs each role, as that role's picker writes it, keyed by the role's
+  /// name — a role nobody has touched has no entry at all.
+  ///
+  /// By name rather than one field per role, which roles there are being the
+  /// Process's to say (ADR-0030, *Process*): a plugin's Process may name one
+  /// nobody has used before, and the picker drawn for it writes here under that
+  /// name. A body held from before this reads its three fields in — see
+  /// [`composed`]. See `src/pairing.ts`.
+  pairings: Record<string, string>;
   /// The roadmap this page is loaded with, or `null` where it is composing a
   /// piece of work of its own.
   ///
@@ -414,9 +416,7 @@ export function blank(): Composed {
     process: null,
     provided: null,
     processFilled: null,
-    grilling: null,
-    implementation: null,
-    review: null,
+    pairings: {},
     adopting: null,
     permitted: [],
     servers: [],
@@ -453,9 +453,7 @@ export function elsewhere(state: Composed, device: Device): Composed {
     repoFilled: null,
     base: null,
     companions: [],
-    grilling: null,
-    implementation: null,
-    review: null,
+    pairings: {},
   };
 }
 
@@ -485,9 +483,7 @@ export function empty(state: Composed): boolean {
     state.base === null &&
     state.companions.length === 0 &&
     state.process === null &&
-    state.grilling === null &&
-    state.implementation === null &&
-    state.review === null &&
+    Object.keys(state.pairings).length === 0 &&
     state.adopting === null &&
     state.permitted.length === 0 &&
     state.servers.length === 0 &&
@@ -700,39 +696,14 @@ export async function create(
     );
   }
 
-  if (state.grilling !== null) {
-    const outcome = await chooseGrillingPairing(
-      to,
-      id,
-      pairing.choice(state.grilling),
-    );
+  // One press per role the human touched a picker for, by the role's name:
+  // which roles there are is the Process's, so what is sent is what was picked
+  // rather than three fields.
+  for (const [role, picked] of Object.entries(state.pairings)) {
+    const outcome = await choosePairing(to, id, role, pairing.role(picked));
     said(
       outcome === "Chosen",
-      `The grilling profile couldn't be chosen. ${CHOICE_REFUSAL[outcome]}`,
-    );
-  }
-
-  if (state.implementation !== null) {
-    const outcome = await chooseImplementationPairing(
-      to,
-      id,
-      pairing.choice(state.implementation),
-    );
-    said(
-      outcome === "Chosen",
-      `The implementation profile couldn't be chosen. ${CHOICE_REFUSAL[outcome]}`,
-    );
-  }
-
-  if (state.review !== null) {
-    const outcome = await chooseReviewPairing(
-      to,
-      id,
-      pairing.role(state.review),
-    );
-    said(
-      outcome === "Chosen",
-      `The review profile couldn't be chosen. ${CHOICE_REFUSAL[outcome]}`,
+      `The ${role} profile couldn't be chosen. ${CHOICE_REFUSAL[outcome]}`,
     );
   }
 
@@ -1282,7 +1253,10 @@ function parsed(body: string): Composed | null {
     return null;
   }
 
-  const held = payload as Partial<Composed>;
+  // Loosely, because a body held from an older build carries fields `Composed`
+  // no longer has — the three Pairing fields the roles were before they were a
+  // map, which [`carried`] reads in.
+  const held = payload as Partial<Composed> & Record<string, unknown>;
 
   if (
     !onDevice(held.device) ||
@@ -1305,9 +1279,18 @@ function parsed(body: string): Composed | null {
     !kind(held.process) ||
     // A body from before a plugin's Process could be picked has none.
     !whose(held.provided) ||
+    // A body from before the roles were a map holds the three fields instead,
+    // each of which reads in as an entry — see [`carried`].
     !picked(held.grilling) ||
     !picked(held.implementation) ||
     !picked(held.review) ||
+    !(
+      held.pairings === undefined ||
+      (typeof held.pairings === "object" &&
+        held.pairings !== null &&
+        !Array.isArray(held.pairings) &&
+        Object.values(held.pairings).every((one) => typeof one === "string"))
+    ) ||
     !loaded(held.adopting) ||
     // A body from before the ticks has none, which is nothing ticked.
     !(
@@ -1369,9 +1352,7 @@ function parsed(body: string): Composed | null {
     process: held.process ?? null,
     provided: held.provided ?? null,
     processFilled: held.processFilled ?? null,
-    grilling: held.grilling,
-    implementation: held.implementation,
-    review: held.review,
+    pairings: held.pairings ?? carried(held),
     adopting: held.adopting ?? null,
     permitted: held.permitted ?? [],
     servers: held.servers ?? [],
@@ -1451,6 +1432,24 @@ function whole(value: unknown): value is number | null {
 }
 
 /// And whether this is a role's choice or the absence of one.
-function picked(value: unknown): value is string | null {
-  return value === null || typeof value === "string";
+function picked(value: unknown): value is string | null | undefined {
+  return value === null || value === undefined || typeof value === "string";
+}
+
+/// The roles a body held from before they were a map had picked, read in as the
+/// map: the three fields it kept, each under its own name, and nothing for the
+/// ones nobody had touched.
+///
+/// A draft left on a picker before this build is still a draft somebody filled
+/// in, and it is the three roles of the five Processes Verkstead ships — so the
+/// picks read back exactly where their pickers draw them.
+function carried(held: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(
+    (["grilling", "implementation", "review"] as const)
+      .map((role) => [role, held[role]] as const)
+      .filter(
+        (entry): entry is readonly [string, string] =>
+          typeof entry[1] === "string",
+      ),
+  );
 }

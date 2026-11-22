@@ -1559,23 +1559,24 @@ pub(crate) async fn anything_to_work(worktree: &Path) -> bool {
 /// so it is `None` here, and nothing reaches here for it anyway: such a wrap-up
 /// settles its review without launching anything. See [`crate::review`].
 ///
-/// Every other role is the Implementation Pairing, which is what the work
-/// itself carrying on runs under — which is every launch here but the review.
-pub(crate) fn under(
-    role: store::Role,
-    review: &store::Picked,
-    implementation: Option<&store::Pairing>,
-) -> Option<store::Pairing> {
-    match role {
-        store::Role::Review => match review {
+/// Every other role is read off what the Conversation settled for it and
+/// nothing else: the fallback is the review's alone, both of its reasons being
+/// facts about *that* role's history rather than about roles. A role a Process
+/// declares for itself is answered before its work starts, as every role is.
+pub(crate) fn under(role: &store::Role, pairings: &store::Pairings) -> Option<store::Pairing> {
+    let picked = pairings.of(role);
+
+    if role.stored() == store::Role::REVIEW {
+        return match picked {
             store::Picked::Skipped => None,
             picked => picked
                 .pairing()
                 .cloned()
-                .or_else(|| implementation.cloned()),
-        },
-        _ => implementation.cloned(),
+                .or_else(|| pairings.under(&store::Role::implementation())),
+        };
     }
+
+    picked.pairing().cloned()
 }
 
 /// What a prompt is written from: where this server installed the skills, and
@@ -1655,7 +1656,7 @@ async fn launch_step(
     let session = lent
         .start(
             skill,
-            store::Role::Implementation,
+            &store::Role::implementation(),
             prompt(&documents),
             evidence,
             step.ends(),
@@ -2402,22 +2403,54 @@ mod tests {
         }
     }
 
+    /// What a Conversation settled for a role, as the record holds it.
+    fn settled(roles: &[(&str, store::Picked)]) -> store::Pairings {
+        store::Pairings::of_each(
+            roles
+                .iter()
+                .map(|(role, picked)| (store::Role::named(role), picked.clone()))
+                .collect(),
+        )
+    }
+
     /// Each role runs under the account picked for it, which is the ordinary
     /// Conversation: the review reads its own and everything else reads what
-    /// builds.
+    /// was picked for it.
     #[test]
     fn a_session_runs_under_the_account_picked_for_its_role() {
-        let review = store::Picked::Under(pairing("reviewing"));
-        let building = pairing("building");
+        let pairings = settled(&[
+            ("review", store::Picked::Under(pairing("reviewing"))),
+            ("implementation", store::Picked::Under(pairing("building"))),
+        ]);
 
         assert_eq!(
-            under(store::Role::Review, &review, Some(&building)),
+            under(&store::Role::review(), &pairings),
             Some(pairing("reviewing")),
         );
         assert_eq!(
-            under(store::Role::Implementation, &review, Some(&building)),
+            under(&store::Role::implementation(), &pairings),
             Some(pairing("building")),
             "the work itself carrying on is the account that built it",
+        );
+    }
+
+    /// A role a Process declared for itself runs under what was picked for it
+    /// by name, and nothing stands in for it.
+    #[test]
+    fn a_role_a_process_declared_runs_under_its_own_account() {
+        let pairings = settled(&[
+            ("sketching", store::Picked::Under(pairing("sketching"))),
+            ("implementation", store::Picked::Under(pairing("building"))),
+        ]);
+
+        assert_eq!(
+            under(&store::Role::named("sketching"), &pairings),
+            Some(pairing("sketching")),
+        );
+        assert_eq!(
+            under(&store::Role::named("exporting"), &pairings),
+            None,
+            "a role nothing was picked for launches nothing",
         );
     }
 
@@ -2431,14 +2464,10 @@ mod tests {
     /// settles, and the wrap-up waits for ever.
     #[test]
     fn a_review_nobody_picked_an_account_for_runs_under_what_built_the_work() {
-        let building = pairing("building");
+        let pairings = settled(&[("implementation", store::Picked::Under(pairing("building")))]);
 
         assert_eq!(
-            under(
-                store::Role::Review,
-                &store::Picked::Nothing,
-                Some(&building)
-            ),
+            under(&store::Role::review(), &pairings),
             Some(pairing("building")),
         );
     }
@@ -2450,22 +2479,20 @@ mod tests {
     /// back would run the review the human turned off.
     #[test]
     fn a_review_picked_away_falls_back_to_nothing() {
-        assert_eq!(
-            under(
-                store::Role::Review,
-                &store::Picked::Skipped,
-                Some(&pairing("building")),
-            ),
-            None,
-        );
+        let pairings = settled(&[
+            ("review", store::Picked::Skipped),
+            ("implementation", store::Picked::Under(pairing("building"))),
+        ]);
+
+        assert_eq!(under(&store::Role::review(), &pairings), None);
     }
 
-    /// And with nothing to build under there is nothing to launch, whichever
+    /// And with nothing picked at all there is nothing to launch, whichever
     /// role is asking.
     #[test]
-    fn a_conversation_with_no_implementation_pairing_launches_nothing() {
-        for role in [store::Role::Review, store::Role::Implementation] {
-            assert_eq!(under(role, &store::Picked::Nothing, None), None, "{role:?}");
+    fn a_conversation_with_no_pairings_launches_nothing() {
+        for role in [store::Role::review(), store::Role::implementation()] {
+            assert_eq!(under(&role, &store::Pairings::default()), None, "{role}");
         }
     }
 }

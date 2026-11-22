@@ -49,15 +49,15 @@ use verkstead_render::{
     Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption,
     NewAnnex, NewCompanion, NewConversation, NewJoin, NewRank, OfferedPack, OpenTerminal,
     PackAttached, PackRemoved, PairingView, Parked, PendingSteerView, Permitting, Picking, Process,
-    ProcessChoice, ProcessEntry, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry,
-    ProvidedProcess, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
-    RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, Running, ServeEdit,
-    ServePress, ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading, SetView,
-    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit,
-    SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled, SteerForm,
-    SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, StoreView, Submitted, Subscribed,
-    Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit,
-    TokenSaved, TransferredTo, Transferring, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    ProcessChoice, ProcessEntry, ProcessPicked, ProfileEdit, ProfileEntry, ProvidedProcess,
+    PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved,
+    Resumed, RoleChoice, RuleField, RuleRefused, Running, ServeEdit, ServePress, ServerAttached,
+    ServerField, ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved,
+    SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
+    SteerSaved, SteerSubmission, StoreView, Submitted, Subscribed, Subscription, TakenUp,
+    TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
+    TransferredTo, Transferring, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -658,17 +658,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/steer/submit",
             post(steer_submit),
         )
+        // One route for every role, named by the role: which roles a
+        // Conversation has is its Process's to say, so three routes would be
+        // three of the roles Verkstead happens to know.
         .route(
-            "/api/ui/conversations/{id}/grilling-pairing",
-            post(choose_grilling_pairing),
-        )
-        .route(
-            "/api/ui/conversations/{id}/implementation-pairing",
-            post(choose_implementation_pairing),
-        )
-        .route(
-            "/api/ui/conversations/{id}/review-pairing",
-            post(choose_review_pairing),
+            "/api/ui/conversations/{id}/pairings/{role}",
+            post(choose_pairing),
         )
         .route("/api/ui/harnesses", get(harnesses))
         .route("/api/ui/processes", get(processes))
@@ -2146,37 +2141,33 @@ pub(crate) async fn conversation_view(
 
     // The Pairings are read as rows rather than as ids: what the pane says
     // about a Profile, and whether it can still be run under, is the same
-    // reading the Profile list gets.
-    let grilling_pairing = match crate::profiles::pairing(state, conversation.grilling_pairing)
+    // reading the Profile list gets. One per role the Process declares, in the
+    // order its manifest writes them, which is the order the Agent control
+    // draws their pickers in.
+    let mut pairings: Vec<verkstead_render::RolePairingView> = Vec::new();
+
+    for role in crate::processes::roles(state, &conversation.process) {
+        let picked = match crate::profiles::picked(
+            state,
+            crate::conversations::picked_for(&conversation, &store::Role::named(&role.name)),
+        )
         .await
-    {
-        Ok(pairing) => pairing,
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "reading a grilling Pairing failed");
-            return Err(unavailable("The conversation couldn't be read."));
-        }
-    };
+        {
+            Ok(picked) => picked,
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id = id, role = role.name, "reading a Pairing failed");
+                return Err(unavailable("The conversation couldn't be read."));
+            }
+        };
 
-    let implementation_pairing = match crate::profiles::pairing(
-        state,
-        conversation.implementation_pairing,
-    )
-    .await
-    {
-        Ok(pairing) => pairing,
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "reading an implementation Pairing failed");
-            return Err(unavailable("The conversation couldn't be read."));
-        }
-    };
-
-    let review_pairing = match crate::profiles::picked(state, conversation.review_pairing).await {
-        Ok(pairing) => pairing,
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "reading a review Pairing failed");
-            return Err(unavailable("The conversation couldn't be read."));
-        }
-    };
+        pairings.push(verkstead_render::RolePairingView {
+            role: role.name,
+            label: role.label,
+            building: role.building,
+            away: role.away,
+            picked,
+        });
+    }
 
     // What the worktree holds rather than what the record remembers: the
     // backlog, as `.tasks/` stands right now. Read off the filesystem for the
@@ -2395,10 +2386,7 @@ pub(crate) async fn conversation_view(
 
     let ready_to_grill = crate::conversations::ready_to_grill(
         conversation.state,
-        &conversation.process,
-        grilling_pairing.as_ref(),
-        implementation_pairing.as_ref(),
-        &review_pairing,
+        &pairings,
         brief,
         conversation.target.as_deref(),
         crate::conversations::takes_a_target(state, &conversation.process),
@@ -2860,9 +2848,7 @@ pub(crate) async fn conversation_view(
         ready_to_continue,
         adopting,
         target: conversation.target,
-        grilling_pairing,
-        implementation_pairing,
-        review_pairing,
+        pairings,
         worktree,
         direction: conversation.direction,
         pinned,
@@ -5925,6 +5911,7 @@ async fn preflight(
         &state.pool,
         &state.settings.config(),
         &conversation,
+        &crate::processes::labels(&state, &conversation.process),
         &device,
     )
     .await
@@ -6242,63 +6229,27 @@ async fn show_archived(
     }
 }
 
-/// `POST /api/ui/conversations/{id}/grilling-pairing` — which account and model
-/// the grilling session runs under.
-async fn choose_grilling_pairing(
+/// `POST /api/ui/conversations/{id}/pairings/{role}` — which account and model
+/// the sessions of one of the Conversation's roles run under, or the row that
+/// says there is to be no session for it at all.
+///
+/// The role by name, whichever its Process declares (Set 1765, Q26): the
+/// grilling, the implementation and the review come through here, and so does a
+/// role a plugin's Process named itself.
+async fn choose_pairing(
     State(state): State<AppState>,
-    Path(id): Path<String>,
-    Json(choice): Json<ProfileChoice>,
-) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return Json(verkstead_render::ProfileChosen::NoSuchConversation).into_response();
-    };
-
-    match crate::profiles::choose_grilling(&state.pool, id, &choice).await {
-        Ok(outcome) => Json(outcome).into_response(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "choosing a grilling Pairing failed");
-            unavailable("The grilling pairing couldn't be chosen.")
-        }
-    }
-}
-
-/// `POST /api/ui/conversations/{id}/implementation-pairing` — and the one the
-/// implementation runs under, which is a separate choice.
-async fn choose_implementation_pairing(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Json(choice): Json<ProfileChoice>,
-) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return Json(verkstead_render::ProfileChosen::NoSuchConversation).into_response();
-    };
-
-    match crate::profiles::choose_implementation(&state.pool, id, &choice).await {
-        Ok(outcome) => Json(outcome).into_response(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "choosing an implementation Pairing failed");
-            unavailable("The implementation pairing couldn't be chosen.")
-        }
-    }
-}
-
-/// `POST /api/ui/conversations/{id}/review-pairing` — and the one the wrap-up's
-/// review runs under, which is a third separate choice: a Pairing, or the row
-/// that says there is to be no review at all.
-async fn choose_review_pairing(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path((id, role)): Path<(String, String)>,
     Json(choice): Json<RoleChoice>,
 ) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(verkstead_render::ProfileChosen::NoSuchConversation).into_response();
     };
 
-    match crate::profiles::choose_review(&state.pool, id, &choice).await {
+    match crate::profiles::choose_for(&state.pool, id, &store::Role::named(&role), &choice).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "choosing a review Pairing failed");
-            unavailable("The review pairing couldn't be chosen.")
+            tracing::error!(error = ?error, conversation_id = id, role, "choosing a Pairing failed");
+            unavailable("The pairing couldn't be chosen.")
         }
     }
 }

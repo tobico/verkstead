@@ -40,7 +40,7 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{AuthorEntry, ClonableRepo, Lacking, PairingRole, Preflight, ProfileEntry};
+use verkstead_render::{AuthorEntry, ClonableRepo, Lacking, Preflight, ProfileEntry};
 use verkstead_schema::Nudge;
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
@@ -330,14 +330,13 @@ impl Verkstead {
                 .unwrap()
                 .expect("the Repo is registered");
 
-        let pairing = serde_json::json!({ "profile_id": profile, "model": MODEL }).to_string();
         let role =
             serde_json::json!({ "pairing": { "profile_id": profile, "model": MODEL } }).to_string();
 
         for (path, saying) in [
-            ("grilling-pairing", &pairing),
-            ("implementation-pairing", &pairing),
-            ("review-pairing", &role),
+            ("pairings/grilling", &role),
+            ("pairings/implementation", &role),
+            ("pairings/review", &role),
         ] {
             let said = press(
                 &self.workbench,
@@ -752,8 +751,8 @@ async fn a_harness_the_far_end_has_not_got_is_named_with_its_pairings() {
     let profile = a.saves("work").await;
     let conversation = a.conversation(&here, &profile).await;
 
-    let harness = |role| Lacking::Harness {
-        role,
+    let harness = |role: &str| Lacking::Harness {
+        role: role.to_owned(),
         profile: Some("work".to_owned()),
         agent_type: verkstead_render::AgentType::CLAUDE,
     };
@@ -761,9 +760,9 @@ async fn a_harness_the_far_end_has_not_got_is_named_with_its_pairings() {
     assert_eq!(
         a.preflight(conversation, B).await.lacks,
         vec![
-            harness(PairingRole::Grilling),
-            harness(PairingRole::Implementation),
-            harness(PairingRole::Review),
+            harness("Grilling"),
+            harness("Implementation"),
+            harness("Review"),
         ],
         "the repository is there and the harness the three Pairings run is not",
     );
@@ -804,8 +803,8 @@ async fn a_harness_only_a_newer_member_knows_is_passed_over() {
     let profile = a.saves("work").await;
     let conversation = a.conversation(&here, &profile).await;
 
-    let harness = |role| Lacking::Harness {
-        role,
+    let harness = |role: &str| Lacking::Harness {
+        role: role.to_owned(),
         profile: Some("work".to_owned()),
         agent_type: verkstead_render::AgentType::CLAUDE,
     };
@@ -813,9 +812,9 @@ async fn a_harness_only_a_newer_member_knows_is_passed_over() {
     assert_eq!(
         a.preflight(conversation, B).await.lacks,
         vec![
-            harness(PairingRole::Grilling),
-            harness(PairingRole::Implementation),
-            harness(PairingRole::Review),
+            harness("Grilling"),
+            harness("Implementation"),
+            harness("Review"),
         ],
         "the harness this device knows is read, and the one it does not is no reason to say \
          the machine is unreachable",

@@ -13,6 +13,13 @@
 //! most expensive, and the build and the review are where the sessions run
 //! longest. Review takes the implementation model on every harness.
 //!
+//! **Read off the role's name**, which is what makes a role a Process declares
+//! for itself work here: `grilling` takes the frontier tier and every other
+//! name takes the value one, so a role nobody has used before has a default
+//! from the first Conversation it is picked on rather than an empty picker. A
+//! plugin harness names its own per role and falls back to its `default` the
+//! same way.
+//!
 //! **One candidate and no hunting.** A default is picked by rule — the first
 //! built-in harness with a Profile saved and its tick on, in the order
 //! [`crate::harness::every`] lists them — or, past them, the plugin harness
@@ -36,7 +43,7 @@ use crate::store::{self, AgentType, Picked, Profile, Role};
 /// and medium for the rest: read off `agy models` on agy 1.4.12 signed in to a
 /// Google account on its starter quota, which lists those three, two Claude
 /// models and GPT-OSS, and no Pro to grill on.
-fn model(harness: AgentType, role: Role) -> Option<&'static str> {
+fn model(harness: AgentType, role: &Role) -> Option<&'static str> {
     crate::harness::of(harness).map(|harness| harness.model(role))
 }
 
@@ -54,7 +61,7 @@ fn model(harness: AgentType, role: Role) -> Option<&'static str> {
 /// filesystem's question, and it is asked by whoever prefills with this.
 pub(crate) fn platform_default(
     profiles: &[Profile],
-    role: Role,
+    role: &Role,
     offered: &[AgentType],
     unticked: &[AgentType],
 ) -> Picked {

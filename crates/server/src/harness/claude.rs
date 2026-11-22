@@ -371,10 +371,10 @@ impl Harness for Claude {
         ))
     }
 
-    fn model(&self, role: store::Role) -> &str {
-        match role {
-            store::Role::Grilling => "claude-fable-5",
-            store::Role::Implementation | store::Role::Review => "claude-opus-5",
+    fn model(&self, role: &store::Role) -> &str {
+        match role.stored() {
+            store::Role::GRILLING => "claude-fable-5",
+            _ => "claude-opus-5",
         }
     }
 

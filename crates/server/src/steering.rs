@@ -619,12 +619,7 @@ pub(crate) async fn submit(
 
     let said = announced(&added, &opened, &branch, made_way.as_deref());
 
-    let settling = settling(
-        &conversation,
-        submission,
-        crate::conversations::narrows_the_wrap_up(state, &conversation.process),
-        marked.is_some_and(|mark| mark.grills),
-    );
+    let settling = settling(state, &conversation, submission);
 
     // And what every checkout the session may write in already holds, for the one
     // target whose ending has to put them back to it. Read here — after `make`,
@@ -1111,11 +1106,7 @@ async fn refusal(
         return Ok(Some(ConversationSteered::EmptyBrief));
     }
 
-    let roles = roles(
-        submission.target,
-        crate::conversations::narrows_the_wrap_up(state, &conversation.process),
-        declared_mark(state, conversation, submission).is_some_and(|mark| mark.grills),
-    );
+    let roles = roles(state, conversation, submission);
 
     if roles.is_empty() {
         return Ok(None);
@@ -1144,7 +1135,7 @@ async fn refusal(
     // session there, which is not a session that could not be started.
     Ok(roles
         .iter()
-        .any(|role| !fixed(conversation, *role).picked())
+        .any(|role| !fixed(conversation, role).picked())
         .then_some(ConversationSteered::NoPairing))
 }
 
@@ -1360,34 +1351,35 @@ fn directing(conversation: &Conversation, instruction: Option<&str>) -> Option<D
 /// what the sessions run under, and a role that runs none is not among them:
 /// writing a Pairing over it would turn a review back on that nobody asked for.
 ///
-/// **The review role is filled rather than rewritten**, which is the one role
-/// this treats differently and the reason is what the picker says. It is
-/// labelled for the state's own work and prefilled with what builds, so a human
-/// who steers a wrap-up and changes nothing has picked nothing about the
-/// review — and writing that prefill over an account they chose on the setup
-/// card to be a fresh set of eyes would undo the whole point of picking it
-/// apart. So it takes the pick only where nothing was picked for it, which is
-/// still what lets a Conversation that never fixed one — a steered Draft — be
-/// steered into a wrap-up at all.
+/// **The state's first role is settled and the rest are filled**, which is the
+/// difference the one picker on the form makes. It is labelled for the state's
+/// own work, so a human who steers a wrap-up and changes nothing has picked
+/// nothing about its review — and writing that over an account they chose on
+/// the setup card to be a fresh set of eyes would undo the whole point of
+/// picking it apart. So every role after the first takes the pick only where
+/// nothing was picked for it, which is still what lets a Conversation that
+/// never fixed one — a steered Draft — be steered into a wrap-up at all.
 fn settling<'a>(
+    state: &AppState,
     conversation: &Conversation,
     submission: &'a SteerSubmission,
-    narrowed: bool,
-    grills: bool,
 ) -> Vec<Settling<'a>> {
     let Some(choice) = submission.pairing.as_ref() else {
         return Vec::new();
     };
 
-    roles(submission.target, narrowed, grills)
-        .iter()
-        .copied()
-        .filter(|role| {
-            let fixed = fixed(conversation, *role);
+    let roles = roles(state, conversation, submission);
 
-            // Nothing picked or nothing at all: the review takes this pick only
-            // to fill a role that has none, never to replace one that has.
-            if *role == Role::Review {
+    roles
+        .iter()
+        .enumerate()
+        .filter(|(index, role)| {
+            let fixed = fixed(conversation, role);
+
+            // Nothing picked or nothing at all: a role the picker is not
+            // labelled for takes this pick only to fill one that has none,
+            // never to replace one that has.
+            if *index > 0 {
                 return !fixed.picked();
             }
 
@@ -1407,8 +1399,8 @@ fn settling<'a>(
                         && pairing.model.as_deref() == Some(&choice.model)
                 })
         })
-        .map(|role| Settling {
-            role,
+        .map(|(_, role)| Settling {
+            role: role.clone(),
             profile_id: &choice.profile_id,
             model: &choice.model,
         })
@@ -1569,47 +1561,66 @@ pub(crate) async fn standing(
 /// Which roles' Pairings a target's sessions run under, empty where nothing
 /// runs there.
 ///
-/// Implementing, Wrapping and Follow-up share the implementation Pairing,
-/// because they are one run seen at three moments: the task sessions build the
-/// work, the wrap-up's watchers dispatch the fix and comment sessions that see
-/// it through, and a follow-up session does whatever the human wants doing
-/// about it afterwards. Every one of those is the work itself, so all of them
-/// run under what builds. Investigating is under the same one for the same
-/// reason read the other way: what an investigation does is read, write and run
-/// the code, which is building in everything but what it leaves behind. A
-/// grilling is its own, which is what an interview runs under whatever else has
+/// **Read off the target state's own `roles`** (Set 1765, Q26), which is why
+/// the Process is asked about here at all: a state declares the roles its
+/// sessions run under, or none and runs under the building role, and that is
+/// what a steer into it settles. The five Verkstead ships declare exactly what
+/// this used to be a table of, and the table is gone.
+///
+/// Which is one role for most of them, because Implementing, Follow-up and
+/// Investigating are one run seen at three moments: the task sessions build the
+/// work, a follow-up session does whatever the human wants doing about it
+/// afterwards, and what an investigation does is read, write and run the code,
+/// which is building in everything but what it leaves behind. A grilling
+/// declares its own, which is what an interview runs under whatever else has
 /// happened since.
 ///
-/// Wrapping is the one target that names two, because a wrap-up both builds and
-/// reviews. What the human's one pick does to each of them is not the same
-/// thing, though — see [`settling`]: it settles what builds, and it fills the
-/// review role only where nothing was picked for it, which is what lets a
-/// Conversation that has never fixed a review Pairing — a steered draft — be
-/// steered into a wrap-up at all without replacing one that was chosen.
+/// Wrapping is the state that declares two, because a wrap-up both builds and
+/// reviews — unless its own `review` option is off, which is how **Fix Merge
+/// Issues** declares the one: that wrap-up never reads the branch, so waiting
+/// on a review Pairing here would refuse the steer on account of a role whose
+/// sessions this Conversation has none of. What the human's one pick does to
+/// each of the two is not the same thing — see [`settling`]: it settles what
+/// builds, and it fills the review role only where nothing was picked for it,
+/// which is what lets a Conversation that has never fixed a review Pairing — a
+/// steered draft — be steered into a wrap-up at all without replacing one that
+/// was chosen.
 ///
-/// **Unless the wrap-up is a narrowed one**, which is why the Process is asked
-/// about here at all. A **Fix Merge Issues** wraps up without ever reading the
-/// branch, so its Wrapping runs under the Implementation Pairing alone — the same
-/// reading its own Start press makes, where the Agent control is one picker and no
-/// Review Pairing is ever waited on. Waiting on one here would refuse the steer on
-/// account of a role whose sessions this Conversation has none of. See
-/// [`crate::conversations::narrows_the_wrap_up`].
+/// **Close is Verkstead's own and runs nothing**, as is Done, so neither has a
+/// state to read roles off.
 ///
-/// A declared state's sessions run under the grilling role where it runs the
-/// interview (`grills`), and under the implementation role otherwise, until the
-/// roles are the manifest's.
-fn roles(target: SteerTarget, narrowed: bool, grills: bool) -> &'static [Role] {
-    match target {
-        SteerTarget::Declared if grills => &[Role::Grilling],
-        SteerTarget::Declared => &[Role::Implementation],
-        SteerTarget::Close => &[],
-        SteerTarget::Grilling => &[Role::Grilling],
-        SteerTarget::Implementing | SteerTarget::FollowUp | SteerTarget::Investigating => {
-            &[Role::Implementation]
-        }
-        SteerTarget::Wrapping if narrowed => &[Role::Implementation],
-        SteerTarget::Wrapping => &[Role::Implementation, Role::Review],
-        SteerTarget::Done => &[],
+/// **And one of Verkstead's own targets its Process declares no state for**
+/// falls back to what that state has always run under. The five built-ins still
+/// steer by Verkstead's own targets and every one of those is on their form —
+/// so a **Tinker** can be steered into a Grilling its manifest declares no
+/// state for, and the round that opens runs an interview whether or not the
+/// Process has a word for one. Which is the last of the table, and it goes with
+/// the targets when the five are Processes a plugin provides like any other.
+fn roles(state: &AppState, conversation: &Conversation, submission: &SteerSubmission) -> Vec<Role> {
+    // A declared state is named by the form rather than by its target, every
+    // one of them arriving as [`SteerTarget::Declared`].
+    let standing = match submission.target {
+        SteerTarget::Close | SteerTarget::Done => return Vec::new(),
+        SteerTarget::Declared => match submission.state.as_deref() {
+            Some(id) => id,
+            None => return Vec::new(),
+        },
+        named => target(named).stored(),
+    };
+
+    let declared: Vec<Role> = crate::processes::roles_in(state, &conversation.process, standing)
+        .iter()
+        .map(|role| Role::named(&role.name))
+        .collect();
+
+    if !declared.is_empty() || submission.target == SteerTarget::Declared {
+        return declared;
+    }
+
+    match submission.target {
+        SteerTarget::Grilling => vec![Role::grilling()],
+        SteerTarget::Wrapping => vec![Role::implementation(), Role::review()],
+        _ => vec![Role::implementation()],
     }
 }
 
@@ -1622,24 +1633,13 @@ fn roles(target: SteerTarget, narrowed: bool, grills: bool) -> &'static [Role] {
 ///
 /// And whether the role was picked away rather than paired, which is settled
 /// too: a Conversation that will not be reviewed is not one with a Pairing
-/// missing, and the difference is what the two readers below turn on. The
-/// grilling role reads as a Pairing or as nothing — its own such row retired
-/// with *No grilling*, and a skip left on a record from before it did is read as
-/// nothing chosen, which is what lets a steer settle the role afresh.
-fn fixed(conversation: &Conversation, role: Role) -> store::Picked {
-    match role {
-        Role::Grilling => carried(conversation.grilling_pairing.as_ref()),
-        Role::Implementation => carried(conversation.implementation_pairing.as_ref()),
-        Role::Review => conversation.review_pairing.clone(),
-    }
-}
-
-/// A role that can only be paired or unpicked, read the same way as one that
-/// can be picked away.
-fn carried(pairing: Option<&store::Pairing>) -> store::Picked {
-    pairing
-        .cloned()
-        .map_or(store::Picked::Nothing, store::Picked::Under)
+/// missing, and the difference is what the readers below turn on. A skip stored
+/// for the grilling role is read as nothing chosen — *No grilling* retired —
+/// which is what lets a steer settle that role afresh; the reading is
+/// [`crate::conversations::picked_for`]'s, so the press and the pane cannot come
+/// to different answers about it.
+fn fixed(conversation: &Conversation, role: &Role) -> store::Picked {
+    crate::conversations::picked_for(conversation, role)
 }
 
 /// The line that goes under the Steer, naming every companion the steer put in
@@ -2974,13 +2974,11 @@ pub(crate) fn rows(state: &AppState, conversation: &Conversation) -> Vec<SteerRo
                     Brief::None => SteerBrief::None,
                 },
                 detour: mark.detour,
-                role: Some(
-                    match mark.grills {
-                        true => "grilling",
-                        false => "implementation",
-                    }
-                    .to_owned(),
-                ),
+                role: loaded
+                    .process
+                    .roles_in(&declared.id)
+                    .first()
+                    .map(|role| role.name.clone()),
             })
             .collect(),
         (None, true) => Vec::new(),
@@ -3050,19 +3048,30 @@ pub(crate) fn rows(state: &AppState, conversation: &Conversation) -> Vec<SteerRo
 }
 
 /// One of Verkstead's own rows for a built-in Process, worded by the state
-/// its manifest marks for that target where it marks one.
+/// its manifest marks for that target where it marks one — and run under the
+/// first of the roles that state declares, which is the role its one picker
+/// settles (see [`settling`]).
 fn worded(row: SteerRow, loaded: Option<&crate::processes::Loaded>) -> SteerRow {
-    let Some(declared) = loaded.and_then(|loaded| {
-        loaded
-            .process
-            .state(target(row.target).stored())
-            .filter(|declared| declared.steer.is_some())
-    }) else {
+    let Some(loaded) = loaded else {
+        return row;
+    };
+    let Some(declared) = loaded
+        .process
+        .state(target(row.target).stored())
+        .filter(|declared| declared.steer.is_some())
+    else {
         return row;
     };
 
     SteerRow {
         word: declared.word.clone(),
+        role: row.role.and(
+            loaded
+                .process
+                .roles_in(&declared.id)
+                .first()
+                .map(|role| role.name.clone()),
+        ),
         ..row
     }
 }
