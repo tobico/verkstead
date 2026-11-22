@@ -31,16 +31,58 @@ import { repoParent } from "./remembered";
 /// way to the new version within a second or so of the new server answering.
 const UPDATING = 1_000;
 
+/// The one OS word that is not a bare platform name — see the server's
+/// `platform::os_word`, which is where it is written.
+const WSL = "Linux (WSL)";
+
+/// The Windows four-pane glyph as a badge: Font Awesome's own `faWindows` path
+/// at half size, moved into the lower-right of the box [`faWsl`] draws in.
+///
+/// The glyph is straight lines and nothing else, so halving it and moving it is
+/// arithmetic on its numbers rather than a drawing of our own — which is what
+/// keeps this Microsoft's shape rather than an impression of it.
+const WSL_BADGE =
+  "M394 512.9l91.8-12.6 0 88.7-91.8 0 0-76zM394 675.2l91.8 12.7 0-87.6-91.8" +
+  " 0 0 75zm101.9 14l122.1 16.9 0-105.8-122.1 0 0 89zm0-190.3l0 90.1 122.1 0" +
+  " 0-106.9-122.1 16.9z";
+
+/// The mark a **Linux (WSL)** device wears: Tux with that badge in the corner.
+///
+/// The one mark here the app composes rather than imports, and the reason it
+/// has to: an **Annex** carries its Keeper's hostname, so on the device select
+/// the Keeper's row and its Annex's row read as one machine twice and the mark
+/// is the whole of what tells them apart. *Mainly the penguin*, which is what
+/// says the box is a Linux, with the Windows glyph small beside its foot saying
+/// which Linux.
+///
+/// **Drawn in one colour like every other mark**, so the badge has to stand
+/// clear of the penguin rather than sit on it: two paths of one `currentColor`
+/// that touched would be one shape. Which is what the box is for — Tux is
+/// `faLinux`'s path untouched and the box is grown around it, leaving the
+/// corner the badge stands in. The box keeps the Linux mark's proportions
+/// (624/712 against 448/512), so the row's mark takes up what it always did.
+const faWsl: IconDefinition = {
+  // Tux's own, because that is what this is: the penguin, said twice over.
+  ...faLinux,
+  icon: [
+    624,
+    712,
+    faLinux.icon[2],
+    faLinux.icon[3],
+    [faLinux.icon[4], WSL_BADGE].flat(),
+  ],
+};
+
 /// Which mark stands beside a device's name, off the word for its operating
 /// system.
 ///
 /// Font Awesome's brand set, drawn through `Icon` like every other icon in the
-/// app — so the bundle carries these three and nothing else of it.
+/// app — so the bundle carries these three and nothing else of it, and the
+/// fourth is the two of them composed (see [`faWsl`]).
 ///
 /// Matched on what the word *starts* with, because one of them is not a bare
-/// platform name: a WSL reads *Linux (WSL)* and wears the Linux mark, which is
-/// the whole point of the word — a Windows machine and the WSL on it share a
-/// hostname, and this is what tells the two rows apart.
+/// platform name: a WSL reads *Linux (WSL)*, and it is asked before the plain
+/// Linux arm because every WSL would answer that one too.
 ///
 /// A word this build has no mark for still draws a row, which is what the
 /// desktop is for: a device is worth naming whether or not its OS is one of the
@@ -48,6 +90,7 @@ const UPDATING = 1_000;
 export function osIcon(os: string): IconDefinition {
   if (os.startsWith("macOS")) return faApple;
   if (os.startsWith("Windows")) return faWindows;
+  if (os.startsWith(WSL)) return faWsl;
   if (os.startsWith("Linux")) return faLinux;
 
   return faDesktop;
@@ -56,7 +99,8 @@ export function osIcon(os: string): IconDefinition {
 /// Whether two OS words are drawn with the same mark, which is what *the same
 /// OS* means beside a device's name: a mark that is the mark of the machine the
 /// browser opened says nothing, so it is left off. *Linux (WSL)* seen from
-/// *Linux* is the same, and so are two words this build has no mark for.
+/// *Linux* is **not** the same — the WSL has a mark of its own, and that is the
+/// mark worth drawing. Two words this build has no mark for are the same.
 ///
 /// **The server's `platform::same_mark` stated a second time**, and the two
 /// must agree: the hub decides off that one whether a sidebar row carries its

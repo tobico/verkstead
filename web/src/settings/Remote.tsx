@@ -726,9 +726,9 @@ function TheKey(): JSX.Element {
 /// the same, and a list that went away on one would say this needed Tailscale.
 ///
 /// The name is the hostname the machine answers to and the mark beside it is
-/// the word for its OS — a WSL wears the Linux mark and reads *Linux (WSL)*,
-/// which is the one thing that tells it from the Windows it shares a hostname
-/// with, and the case a cluster of two rows is drawn for. *This device* is what
+/// the word for its OS — a WSL wears a mark of its own and reads *Linux (WSL)*,
+/// which is what tells it from the Windows it shares a hostname with, and the
+/// case a cluster of two rows is drawn for. *This device* is what
 /// marks which of them is this machine, and it is what stands where a member's
 /// row carries its **Unlink**: there is nothing to unlink this machine from
 /// itself.

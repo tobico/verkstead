@@ -657,8 +657,9 @@ linux`, `on macos` or `on windows` after its link is placed before every launch
 of that task, a **Resume** included: where the device the work is on is not of
 that platform, the Conversation is moved to the first permitted device of it —
 the drafting device and then the ticks, in that order — whose **Preflight**
-holds nothing, read by its member's OS word through the sidebar's own mark, so a
-*Linux (WSL)* member is a Linux device. Nothing is running at that moment, so
+holds nothing, read off its member's OS word as the platform that word names
+rather than as a string, so a *Linux (WSL)* member is a Linux device however it
+is drawn on a screen. Nothing is running at that moment, so
 the move runs where it stands and the far end's arrival launches the task. Both
 Timelines name the task and the platform it wants beside the device, and the
 agent never calls `verkstead transfer` for it. **The work stays where the move
@@ -1958,7 +1959,12 @@ names a machine by, and a machine that will not say what it is called reads
 under WSL, which reads ***Linux (WSL)*** and is detected from the kernel
 release. That case is the reason the reading exists at all: a Windows machine
 and the WSL on it share a hostname, so the OS is the only thing that tells the
-two rows apart.
+two rows apart. **And it is the only word with a mark of its own**: the mark
+beside a device's name is the platform's elsewhere, and a WSL's is Tux with a
+small Windows glyph in the corner, so the two rows differ to the eye as well as
+to a reader. Which mark a word is drawn with is a separate question from which
+platform it *is* — an **Annex** is a Linux to place work on and neither mark to
+look at.
 **The addresses are every one a peer could try, in the order to try them**: the
 tailnet name and its addresses first where Tailscale is up, then the LAN
 addresses, with the loopback and the link-local left out and the tailnet
@@ -2658,9 +2664,10 @@ branch on the sidebar row, beside the branch on the header of the pane that row
 opens, and in the sentence the row is read aloud by. A member's row's second
 line is its name and then the Repo, with the mark for its OS before the name
 where that mark differs from this device's; this device's own rows read the
-Repo alone. The mark is picked off what the OS word starts with, so a WSL wears
-the Linux mark as it does on the Devices section — and seen from a Linux, a WSL
-member is a name and no mark. The header looks its device up rather than being
+Repo alone. The mark is the one the OS word wears on the Devices section, and a
+WSL's is its own rather than the Linux one — so a WSL member seen from a Linux
+is a name *and* a mark, where one macOS seen from another is a name alone. The
+header looks its device up rather than being
 handed one — the URL says which machine and the **Devices** reading says its
 name — and applies the same rule, and the spoken row names the device only
 where the row draws one, because the mark is nothing to a screen reader.

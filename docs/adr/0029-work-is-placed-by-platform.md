@@ -80,9 +80,12 @@ inline run whose proposal wants one platform starts there.
 reachable**: the device the work was drafted on, and then the ticked ones — the
 same devices the agent's own call may move the work to. Where none of them is
 reachable, or none is ticked, the human is asked — see below. A device's operating system is its free-text OS word
-read through `platform::os_mark`, the one reading the sidebar's mark already
-uses, and never matched as a string: *Linux (WSL)* is a Linux device, so `on
-linux` may pick a Windows machine's WSL and `on windows` never does. A roadmap's
+read through `platform::os_platform`, and never matched as a string: *Linux
+(WSL)* is a Linux device, so `on
+linux` may pick a Windows machine's WSL and `on windows` never does. Which mark
+that word is *drawn* with is a separate question and a separate function —
+`platform::mark`, which the sidebar's rows read and which answers a WSL neither
+Linux nor Windows. A roadmap's
 stages inherit the roadmap Conversation's ticks
 through the one inheritance funnel that already carries its Pairings and
 companions.

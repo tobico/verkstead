@@ -166,33 +166,70 @@ pub fn os_word(platform: Platform, kernel_release: Option<&str>) -> String {
         && kernel_release.is_some_and(|release| release.to_lowercase().contains(MICROSOFT));
 
     match wsl {
-        true => format!("{LINUX} (WSL)"),
+        true => WSL.to_owned(),
         false => platform.word().to_owned(),
     }
 }
 
-/// Which mark a device's OS word is drawn with: the platform it starts with, or
-/// `None` for a word this build has no mark for — the viewer's generic desktop.
+/// Which platform a device's OS word *is*, or `None` for a word this build has
+/// never heard of.
+///
+/// **Identity rather than drawing**, and the two part company on exactly one
+/// word: a WSL is a Linux device here — `on linux` may place a stage onto one
+/// and `on windows` never does (see [`crate::placing`]) — and wears a mark of
+/// its own on a screen (see [`mark`]). So this is the question a stage's
+/// `wants` asks, and [`mark`] is the one a row asks; neither answers the other.
+///
+/// Matched on what the word *starts* with, for the reason [`os_word`] exists:
+/// *Linux (WSL)* is a Linux, and *macOS 15.1* a macOS.
+pub fn os_platform(word: &str) -> Option<Platform> {
+    [Platform::MacOs, Platform::Windows, Platform::Linux]
+        .into_iter()
+        .find(|platform| word.starts_with(platform.word()))
+}
+
+/// Which mark a device's OS word is drawn with.
 ///
 /// **The viewer's `osIcon` (`web/src/devices.ts`) stated a second time**, and
 /// the two must agree: the hub decides off this whether a sidebar row carries
 /// its device's OS at all (see [`same_mark`]), and the page draws whatever mark
-/// `osIcon` picks for the word it is handed. Matched on what the word *starts*
-/// with for the reason that one is — *Linux (WSL)* wears the Linux mark, and
-/// *macOS 15.1* the Apple one.
-pub fn os_mark(word: &str) -> Option<Platform> {
-    [Platform::MacOs, Platform::Windows, Platform::Linux]
-        .into_iter()
-        .find(|platform| word.starts_with(platform.word()))
+/// `osIcon` picks for the word it is handed.
+///
+/// Four marks and a fifth for everything else, where [`Platform`] is three: a
+/// WSL has a mark of its own — Tux with a Windows badge — because the **Annex**
+/// on a Windows machine carries that machine's hostname, so on a device select
+/// the two rows are one name drawn twice and the mark is the whole of what
+/// tells them apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mark {
+    /// What [`Platform::MacOs`], [`Platform::Windows`] and [`Platform::Linux`]
+    /// are drawn as, a WSL aside.
+    Platform(Platform),
+    /// *Linux (WSL)*, which is a Linux that is drawn as neither.
+    Wsl,
+    /// A word this build has never heard of: the viewer's generic desktop. A
+    /// device is worth naming whether or not its OS is one anybody here has
+    /// heard of.
+    Desktop,
+}
+
+/// The mark itself — see [`Mark`].
+pub fn mark(word: &str) -> Mark {
+    if word.starts_with(WSL) {
+        return Mark::Wsl;
+    }
+
+    os_platform(word).map_or(Mark::Desktop, Mark::Platform)
 }
 
 /// Whether two OS words are drawn with the same mark, which is what *the same
 /// OS* means on a sidebar row: a mark beside a row that is the mark of the
 /// machine the browser opened says nothing, so the hub leaves it off.
 ///
-/// Two words this build has no mark for are the same: both are the desktop.
+/// *Linux (WSL)* seen from *Linux* is **not** the same, the WSL having a mark
+/// of its own. Two words this build has no mark for are: both are the desktop.
 pub fn same_mark(one: &str, other: &str) -> bool {
-    os_mark(one) == os_mark(other)
+    mark(one) == mark(other)
 }
 
 /// What the kernel on this machine calls itself, where it is a machine that
@@ -216,10 +253,15 @@ pub fn kernel_release() -> Option<String> {
         .map(|release| release.trim().to_owned())
 }
 
-/// The word the two Linux readings share, said once so that *Linux (WSL)* is
-/// that same word with a parenthesis after it rather than a second spelling of
-/// it.
+/// What a plain Linux is called — [`Platform::word`]'s arm for it, and the word
+/// [`WSL`] below is that same word with a parenthesis after it.
 const LINUX: &str = "Linux";
+
+/// And the WSL reading itself, which is the one OS word that is not a
+/// platform's own name: written here, answered by [`os_word`] and matched by
+/// [`mark`], so the word the screen reads and the word a mark is picked off are
+/// the same string.
+const WSL: &str = "Linux (WSL)";
 
 /// Where Linux keeps the kernel release, which is the one file that says
 /// whether this is a WSL.
@@ -602,24 +644,50 @@ mod tests {
         assert_eq!(os_word(Platform::MacOs, Some(WSL2)), "macOS");
     }
 
-    /// The mark is the word's prefix, exactly as the viewer's `osIcon` picks
-    /// one: a WSL and a Linux are one mark, two macOS versions are one mark,
-    /// and two words nobody has a mark for are the one desktop.
+    /// The platform is the word's prefix: a WSL **is** a Linux, which is what
+    /// lets a stage saying `on linux` be placed onto one, and *macOS 15.1* is
+    /// a macOS whatever version it is on.
     #[test]
-    fn a_mark_is_what_the_word_starts_with() {
-        assert_eq!(os_mark("Linux"), Some(Platform::Linux));
-        assert_eq!(os_mark("Linux (WSL)"), Some(Platform::Linux));
-        assert_eq!(os_mark("macOS 15.1"), Some(Platform::MacOs));
-        assert_eq!(os_mark("Windows"), Some(Platform::Windows));
-        assert_eq!(os_mark("FreeBSD"), None);
-        assert_eq!(os_mark(""), None);
+    fn a_platform_is_what_the_word_starts_with() {
+        assert_eq!(os_platform("Linux"), Some(Platform::Linux));
+        assert_eq!(os_platform("Linux (WSL)"), Some(Platform::Linux));
+        assert_eq!(os_platform("macOS 15.1"), Some(Platform::MacOs));
+        assert_eq!(os_platform("Windows"), Some(Platform::Windows));
+        assert_eq!(os_platform("FreeBSD"), None);
+        assert_eq!(os_platform(""), None);
+    }
 
-        assert!(same_mark("Linux (WSL)", "Linux"));
+    /// And the mark is not the platform, exactly as the viewer's `osIcon` is
+    /// not: a WSL wears a mark of its own, two macOS versions are one mark, and
+    /// two words nobody has a mark for are the one desktop.
+    #[test]
+    fn a_wsl_is_drawn_as_neither_linux_nor_windows() {
+        assert_eq!(mark("Linux"), Mark::Platform(Platform::Linux));
+        assert_eq!(mark("Linux (WSL)"), Mark::Wsl);
+        assert_eq!(mark("macOS 15.1"), Mark::Platform(Platform::MacOs));
+        assert_eq!(mark("Windows"), Mark::Platform(Platform::Windows));
+        assert_eq!(mark("FreeBSD"), Mark::Desktop);
+        assert_eq!(mark(""), Mark::Desktop);
+
+        assert!(
+            !same_mark("Linux (WSL)", "Linux"),
+            "which is what puts the WSL mark on a row seen from a plain Linux",
+        );
         assert!(same_mark("macOS 14", "macOS 15.1"));
         assert!(same_mark("FreeBSD", "Haiku"));
         assert!(!same_mark("macOS 15.1", "Linux"));
         assert!(!same_mark("Windows", "Linux (WSL)"));
         assert!(!same_mark("FreeBSD", "Linux"));
+    }
+
+    /// And the two notions part company only there: a WSL answers *Linux* to
+    /// the question work placement asks and a mark of its own to the question
+    /// a row asks, which is the whole reason they are two functions.
+    #[test]
+    fn a_wsl_is_still_a_linux_to_place_work_on() {
+        assert_eq!(os_platform(WSL), Some(Platform::Linux));
+        assert_eq!(os_platform(WSL), os_platform(LINUX));
+        assert_ne!(mark(WSL), mark(LINUX));
     }
 
     /// An environment holding `home` and nothing else, which is what a Unix

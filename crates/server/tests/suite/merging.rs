@@ -1004,16 +1004,17 @@ async fn a_members_bad_rank_does_not_stop_a_start() {
     );
 }
 
-/// A member whose mark is the hub's own — a WSL seen from a Linux, one macOS
+/// A member whose mark is the hub's own — a Linux seen from a Linux, one macOS
 /// seen from another — is drawn by its name alone: the row carries no OS word.
 #[tokio::test]
 async fn a_member_on_the_hubs_own_mark_carries_no_os() {
     let (_, os) = this_machine();
-    let same = match platform::os_mark(&os) {
-        Some(Platform::Linux) => "Linux (WSL)".to_owned(),
-        Some(Platform::MacOs) => "macOS 14".to_owned(),
-        _ => os.clone(),
-    };
+
+    // The hub's own word. One macOS version seen from another would do as well,
+    // the mark being what is compared — but a Linux has no second word wearing
+    // its mark any more: *Linux (WSL)* used to be it and is its own mark now,
+    // which is the test below.
+    let same = os.clone();
 
     let a = Verkstead::answering(A).await;
     let b = Verkstead::member(B, &same).await;
@@ -1037,6 +1038,50 @@ async fn a_member_on_the_hubs_own_mark_carries_no_os() {
     assert_eq!(
         theirs.os, None,
         "and its OS left unsaid, {same:?} wearing {os:?}'s own mark",
+    );
+}
+
+/// And an **Annex** seen from a plain Linux is not one of those: *Linux (WSL)*
+/// wears a mark of its own, so the row carries the word and the sidebar draws
+/// the WSL mark beside the name (ADR-0024).
+///
+/// Which is the case the whole comparison exists for: an Annex answers to its
+/// Keeper's hostname, so a row saying only the name would be the Keeper's row
+/// said twice.
+#[tokio::test]
+async fn a_wsl_member_seen_from_a_linux_carries_its_os() {
+    let (_, os) = this_machine();
+    let wsl = "Linux (WSL)";
+
+    assert_eq!(
+        platform::os_platform(&os),
+        platform::os_platform(wsl),
+        "the two are the one platform, which is what places work on either",
+    );
+
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::member(B, wsl).await;
+
+    a.linked_to(&b.device, B_MACHINE, wsl, vec![b.at()]).await;
+    b.linked_to(&a.device, &this_machine().0, &os, vec![a.at()])
+        .await;
+
+    let _holding = a.holding();
+
+    let there = b.holding_a_repo().await;
+    b.starts(there, "the-annexs-own-mark").await;
+
+    let merged = a
+        .sidebar_saying(|rows| branches(rows) == ["the-annexs-own-mark"])
+        .await;
+
+    let theirs = merged[0].device.as_ref().expect("B's row says it is B's");
+
+    assert_eq!(theirs.name, B_MACHINE, "the member is named");
+    assert_eq!(
+        theirs.os.as_deref(),
+        Some(wsl),
+        "and its OS said, the WSL mark not being {os:?}'s",
     );
 }
 

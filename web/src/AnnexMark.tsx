@@ -1,10 +1,15 @@
 //! The mark an **Annex** wears beside its name: *annex of* its Keeper.
 //!
-//! Here rather than in either page because two draw it — the Devices list,
-//! where it is how an Annex's row says whose it is, and the compose page's
-//! device select, where an Annex carries its Keeper's hostname and would read
-//! exactly as its Keeper's row does without it. One mark drawn two ways would
-//! be two things to learn.
+//! The Devices list draws it and nothing else does. Whose a device is belongs
+//! on the page about the devices, which is where somebody looking for it goes;
+//! the device select, which is a page asking *which machine*, says a machine's
+//! name and the mark for its operating system and leaves it there (see
+//! `annexed` in [`./workbench/Setup.tsx`](./workbench/Setup.tsx)).
+//!
+//! Here rather than inside that page all the same, because [`keeperOf`] is the
+//! reading rather than the drawing: what an Annex's row says whose it is comes
+//! off the cluster, and the select reads it too to know an Annex when it sees
+//! one.
 
 import type { JSX } from "solid-js";
 
