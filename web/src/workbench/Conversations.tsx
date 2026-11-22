@@ -1024,9 +1024,11 @@ function ConversationRow(props: {
                 the same one.
 
                 The mark is the one a device wears wherever it is drawn — see
-                `devices.ts` — so a WSL wears the Linux mark here exactly as it
-                does on the Devices section, and is left off beside a Linux for
-                that reason; a word this build has no mark for still draws one.
+                `devices.ts` — so a WSL wears its own mark here exactly as it
+                does on the Devices section, and is drawn beside a Linux rather
+                than left off, that mark being another; one macOS seen from
+                another is what is left off, and a word this build has no mark
+                for still draws one.
                 Unlabelled, like the mark at the right edge: the label on the
                 card above has already said the whole sentence. */}
             <Show when={props.entry.device}>

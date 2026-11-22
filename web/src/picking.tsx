@@ -414,12 +414,21 @@ export function Listbox<T>(
 
     /// What follows a row's words on the same line, where a row has something
     /// quieter to add to its name — the device select's, where an **Annex**
-    /// carries its Keeper's hostname and so reads as its Keeper does until its
-    /// mark and its OS word are drawn after it.
+    /// carries its Keeper's hostname and tells itself from its Keeper by its
+    /// mark alone, so what is drawn after the name is its OS word out of the
+    /// layout, for whoever is listening rather than looking.
     ///
     /// **Outside the words**, in the rows and on the closed control alike: the
-    /// row is still called by its name, and the name is what the closed control
-    /// cuts where it runs long.
+    /// words are what the closed control cuts where it runs long, and a
+    /// sentence under them — see `says` — is what the row is named by on its
+    /// own, so nothing here is read for the name on such a row.
+    ///
+    /// **It *is* read for the name where there is no sentence**, though, which
+    /// is what the device select leans on: a row is given an
+    /// `aria-labelledby` only where a caller hands in `says`, and without one
+    /// its name comes off its contents — the hidden OS word with them. So a
+    /// caller that drew both would be taking that word back out of the name,
+    /// and the Annex's row would be read aloud as its Keeper's.
     after?: (option: T) => JSX.Element | undefined;
 
     /// The control's own label, drawn inside the handle rather than above it.
