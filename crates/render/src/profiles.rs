@@ -320,13 +320,49 @@ pub struct AccountFile {
 /// cases a local session's ending already tells apart, and the reason this is a
 /// press rather than a file kept in step.
 ///
-/// **Last write wins.** Two machines refreshing one login may sign one of them
-/// out; nothing is merged and nothing is locked, and the write that arrives later
-/// is the one the account keeps (ADR-0020, *Shared Profiles*).
+/// **Written only over the login it replaces.** It names the login the account
+/// held as far as the sending device knows — see [`AccountLogin::over`] — and the
+/// device the account is bound on writes it only where its own login is still
+/// that one. A login made or refreshed there since is newer than anything the
+/// session could have, and a session that signed out on a token rotated away
+/// under it would otherwise put that dead token over the live one (ADR-0020,
+/// *Shared Profiles*). Nothing is merged and nothing is locked.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountLogin {
     /// What the harness left in the login file, whole and as it wrote it.
     pub text: String,
+
+    /// The login this replaces: the one the account held when the sending
+    /// device last fetched it or last wrote into it.
+    ///
+    /// `None` from a Verkstead from before this was sent, whose login is written
+    /// as it always was — over whatever is there.
+    #[serde(default)]
+    pub over: Option<LoginOver>,
+}
+
+/// Which login a login sent back goes over — see [`AccountLogin::over`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LoginOver {
+    /// The login by its SHA-256, as lower-case hex — the spelling
+    /// [`AccountSignedOut::login`] names one in.
+    Login(String),
+
+    /// No login at all: the account had none, which is the case a Profile
+    /// nobody has logged in to starts in.
+    Nothing,
+}
+
+/// What the device an account is bound on did with an [`AccountLogin`].
+///
+/// An empty answer — a Verkstead from before this was answered — reads as
+/// written, that being the only thing such a device ever did with one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountLoginTaken {
+    /// Whether it went into the account. `false` is an account whose login has
+    /// been made or refreshed there since, which keeps it.
+    pub written: bool,
 }
 
 /// What a device running a Profile from a copy tells the device it fetched the
