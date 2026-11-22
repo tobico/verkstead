@@ -36969,22 +36969,19 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
 
     // And the world agrees with the record: the fix session the steer set going
     // was launched on the model the Pairing names.
-    fixture.until(|view| (fixes(view) > 2).then_some(())).await;
-
-    let dispatched = std::fs::read_to_string(&written).unwrap();
-
-    assert!(
-        dispatched.lines().rfind(|line| line.starts_with("model="))
-            == Some("model=claude-grilling-5"),
-        "the last fix session ran under what the steer settled: {dispatched:?}",
-    );
+    //
+    // **Waited for by the prompt it wrote rather than by a fix count.** The
+    // checks here are failing for good, so a fix session is always on its way:
+    // a count that has gone up says one of them landed, not that the one after
+    // the steer did, and the one that landed may be the session the steer
+    // interrupted. The model is written by the session that ran under it and by
+    // nothing else, so the prompt is the evidence and the count never was.
+    until_written_saying(&written, "model=claude-grilling-5").await;
 
     // And a second steer under the *same* Profile on another of its models,
     // which is a different pick rather than the same one made twice: the picker
     // offers one row per Profile-and-model, so a steer judged by the Profile
     // alone would answer Steered to this and change nothing.
-    let ran = fixes(&fixture.view().await);
-
     assert!(matches!(fixture.steer().await, SteerOpened::Opened));
     assert_eq!(
         fixture
@@ -37003,18 +37000,9 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
         "the model moved under a Profile that did not",
     );
 
-    fixture
-        .until(|view| (fixes(view) > ran).then_some(()))
-        .await;
-
-    let dispatched = std::fs::read_to_string(&written).unwrap();
-
-    assert!(
-        dispatched.lines().rfind(|line| line.starts_with("model="))
-            == Some("model=claude-grilling-4.8"),
-        "and the fix session after it ran on the model the steer settled rather \
-         than on the one the Profile was already paired with: {dispatched:?}",
-    );
+    // The same evidence again: a session ran on the model this steer settled,
+    // which no session before it could have written.
+    until_written_saying(&written, "model=claude-grilling-4.8").await;
 }
 
 /// And a steer whose Worktree has gone makes it again from the branch before any
