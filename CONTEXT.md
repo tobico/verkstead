@@ -3890,7 +3890,13 @@ to the human only once it can launch the real thing: one that cannot would be a
 lie in a picker, so the form offers Claude, Codex, Grok Build, OpenCode and the
 Antigravity CLI, and
 a Profile of a type whose stage has not landed is one saved over the API until
-it does. Picking a type on the form asks for that type's own account paths. The
+it does. Picking a type on the form asks for that type's own account paths.
+**A Claude account nobody has run yet is made by its save** — the directory,
+and the config file as an empty object, each where the directory it goes in is
+already there — because the login that would make them is made under a Profile,
+and a save that refused paths with nothing at them was a refusal of the one way
+to start a new account. A path a level further from anything that exists is
+refused as it always was. The
 models are a list and the list is the Profile's own, because different Profiles
 reach different accounts and each can launch different things; none of them is a
 default, so which one a session runs is always picked — as a Pairing, alongside
@@ -4169,7 +4175,28 @@ the devices bound on it with a login answered. Which is the backstop rather than
 the reading: a Profile with no such device reachable is **broken** on the row
 long before anybody presses anything, and the press is refused there — see
 **Agent Profile**. This is what catches a machine that went away between the
-two.
+two. **A device that has left the cluster is not asked at all**: only the device
+a binding names ever writes it, so one an unlinked device wrote stays in every
+database for good, and dialling it would be a refusal naming a machine nobody
+can reach, said in front of the gap that is really there. It is passed over, and
+a Profile bound on nothing but departed devices reads as bound on none.
+**A login whose refresh token has run out is no login.** Claude writes the day
+its refresh token stops beside the token, and a login past it is a file and
+nothing more, so a device bound on it reads its account as holding none: its card
+offers Log in, and its binding tells the members there is nothing to fetch.
+**And a sign-out found here is told there.** The device the login is made on is
+the one device that cannot see it — its file is still there and its harness may
+call it fine — so a session here that signs out tells it, at
+`/api/peer/v1/profiles/<uuid>/account/signed-out`, naming the login that came down
+by its hash; that device marks the Profile signed out, and its card offers Log in,
+only where its own login is still that one. A login made there since is the fix
+having already arrived.
+**And a Profile can be set up on this device instead** — *Set up on this
+device* on the pane of one not bound here, a press of its own rather than a side
+effect of a save, which writes this device's binding at paths typed for this
+machine. From then on it is this device's own account, its login made here; the
+other devices' bindings are theirs and stay. It is the way back for a Profile
+whose only devices are off for good.
 **And the login is written back as the session ends**, at
 `/api/peer/v1/profiles/<uuid>/account/login` on the same listener behind the same
 gate. It is the one file of a root a session genuinely changes — the harness

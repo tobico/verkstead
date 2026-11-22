@@ -414,6 +414,17 @@ impl Logins {
             .clone()
     }
 
+    /// A member's session, run from a copy of the account of `profile`, found
+    /// it signed out — see [`crate::peer::account::signed_out`], which has
+    /// checked the login here is still the one it was given.
+    ///
+    /// Marked the way a press here that found it signed out marks it, so the
+    /// card offers Log in; a login landing, or `auth status` before a press
+    /// saying otherwise, takes it off again.
+    pub(crate) fn signed_out_elsewhere(&self, state: &AppState, profile: &str) {
+        self.found(state, profile, false);
+    }
+
     /// Put down what the account of `profile` was found to be, and say so to
     /// every device where the Profile's row reads differently for it.
     fn found(&self, state: &AppState, profile: &str, logged_in: bool) {

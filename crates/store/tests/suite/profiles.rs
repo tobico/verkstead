@@ -13,12 +13,12 @@ use verkstead_store::replicated::{Record, merge, records};
 use verkstead_store::{
     Account, AgentType, Binding, Bindings, Chosen, Clash, Deleting, Event, Lifecycle, Linking,
     Pairing, PendingForm, PendingPairing, Picked, Profile, ProfileFacts, ProfileRecord, Profiles,
-    Saving, Settled, Unbound, binding_uuid, create_profile, create_profile_holding, delete_profile,
-    load_conversation, load_profile, logins_held, open_database, open_pending_steer,
-    profile_arrived, profiles, record_member, register_repo, save_pending_steer,
-    set_grilling_pairing, set_implementation_pairing, set_review_pairing, settle, skip_review,
-    stamp_the_profiles, start_capture, start_conversation, start_grilling, this_device_called,
-    timeline, update_profile, update_profile_holding,
+    Saving, Settled, Unbound, bind_profile_here, binding_uuid, create_profile,
+    create_profile_holding, delete_profile, load_conversation, load_profile, logins_held,
+    open_database, open_pending_steer, profile_arrived, profiles, record_member, register_repo,
+    save_pending_steer, set_grilling_pairing, set_implementation_pairing, set_review_pairing,
+    settle, skip_review, stamp_the_profiles, start_capture, start_conversation, start_grilling,
+    this_device_called, timeline, update_profile, update_profile_holding,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -1909,6 +1909,47 @@ async fn a_members_profile_is_listed_with_no_binding_here() {
             .unwrap(),
         Chosen::Chosen,
         "and it is picked like any other",
+    );
+}
+
+/// A member's Profile set up on this device is bound here from then on: its
+/// account this device's paths, and the member's binding left as it was.
+#[tokio::test]
+async fn a_members_profile_bound_here_runs_as_this_devices_account() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+
+    arrived(&pool, "theirs", None, 1, false).await;
+    bound_at_home(&pool, "theirs").await;
+
+    assert_eq!(
+        bind_profile_here(&pool, AT_HOME, &claude("ours"), true)
+            .await
+            .unwrap(),
+        Saving::Saved,
+    );
+
+    let held = load_profile(&pool, AT_HOME).await.unwrap().unwrap();
+    assert_eq!(held.unbound, None, "bound here now");
+    assert_eq!(held.account, claude("ours"), "at this device's paths");
+    assert_eq!(held.name.as_deref(), Some("theirs"), "the record untouched");
+
+    let bindings: Vec<_> = records::<Bindings>(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|binding| binding.uuid)
+        .collect();
+    assert!(
+        bindings.contains(&binding_uuid(AT_HOME, HOME)),
+        "and the member's binding is still the member's",
+    );
+
+    assert_eq!(
+        bind_profile_here(&pool, "no-such-profile", &claude("ours"), true)
+            .await
+            .unwrap(),
+        Saving::NoSuchProfile,
     );
 }
 

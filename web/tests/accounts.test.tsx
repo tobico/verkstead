@@ -306,7 +306,7 @@ describe("taking an account on", () => {
 
     await waitFor(() =>
       expect(container.textContent).toContain(
-        "There's nothing at the claude directory's path.",
+        "There's nothing at the claude directory's path, or at the directory it would go in.",
       ),
     );
     expect(next).not.toHaveBeenCalled();

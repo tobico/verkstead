@@ -83,6 +83,7 @@ import type {
   PrefillView,
   Process,
   ProcessPicked,
+  ProfileAccount,
   ProfileChoice,
   ProfileChosen,
   ProfileDeleted,
@@ -1956,6 +1957,15 @@ export function editProfile(
   profile: ProfileEdit,
 ): Promise<ProfileSaved> {
   return post<ProfileSaved>(`/api/ui/profiles/${id}`, profile);
+}
+
+/// Set a Profile bound on other devices up on this one, at the paths of this
+/// account. Answered as a save is, and refused in the same words.
+export function bindProfile(
+  id: string,
+  account: ProfileAccount,
+): Promise<ProfileSaved> {
+  return post<ProfileSaved>(`/api/ui/profiles/${id}/bind`, account);
 }
 
 /// Remove one nobody is running under. There is nothing to send but its own id,

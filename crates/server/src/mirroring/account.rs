@@ -55,10 +55,10 @@ use std::path::{Component, Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
-use verkstead_render::{AccountFile, AccountLogin};
+use verkstead_render::{AccountFile, AccountLogin, AccountSignedOut};
 
 use crate::device::Devices;
-use crate::peer::account::{ACCOUNT, LOGIN};
+use crate::peer::account::{ACCOUNT, LOGIN, SIGNED_OUT};
 use crate::relaying::{self, Call, Refusal, Streamed, as_json};
 use crate::sandbox::{Homes, kept_in, root};
 use crate::store;
@@ -172,7 +172,7 @@ pub async fn fetched(
     let mut refused = None;
     let mut fetched = None;
 
-    for at in &unbound.lending {
+    for at in &lending(devices, unbound).await {
         match relaying::word_from::<Vec<AccountFile>>(
             devices,
             at,
@@ -246,6 +246,45 @@ pub async fn fetched(
             came_down,
         },
     }))
+}
+
+/// The devices a launch here may fetch the account from: those of
+/// [`store::Unbound::lending`] that are still members.
+///
+/// **A binding outlives the link to the device that wrote it.** Only the device
+/// a binding names ever writes it, so one written by a device since unlinked
+/// stays in every database of the cluster for good — and dialling it is a
+/// refusal naming a machine nobody can reach any more, said in front of the
+/// gap that is actually there. So a device that has left is passed over before
+/// anything is asked of it, and a Profile bound on nothing but departed devices
+/// reads as bound on none.
+///
+/// A membership that cannot be read leaves the list as it is: the dial below
+/// refuses a departed device by name all the same, and a launch refused for a
+/// read that failed would be one refused for nothing about the Profile.
+async fn lending(devices: Option<&Devices>, unbound: &store::Unbound) -> Vec<String> {
+    let Some(devices) = devices else {
+        return unbound.lending.clone();
+    };
+
+    match devices.membership().rows().await {
+        Ok(members) => unbound
+            .lending
+            .iter()
+            .filter(|device| members.iter().any(|member| &member.device == *device))
+            .cloned()
+            .collect(),
+
+        Err(why) => {
+            tracing::warn!(
+                error = ?why,
+                "the membership could not be read, so every device a Profile is bound on is \
+                 tried for its account",
+            );
+
+            unbound.lending.clone()
+        }
+    }
 }
 
 /// Move each account mirror kept under a Profile's integer id to the uuid the
@@ -535,6 +574,80 @@ impl Lending {
             }
         }
     }
+}
+
+impl Lending {
+    /// Tell the device the account was fetched from that a session here found
+    /// it **signed out**, naming the login that came down.
+    ///
+    /// **That device is the only one that can offer the login, and the only one
+    /// that cannot see this.** Its login file is still there and its harness may
+    /// call it fine, so without word from here its card goes on saying the
+    /// account is logged in, with nothing to press — while every launch here
+    /// comes up signed out. See [`crate::peer::account::signed_out`], which is
+    /// the end that marks it, and only where its login is still the one that
+    /// came down.
+    ///
+    /// Said in the log where it does not get there, and nothing else: the stop
+    /// here has already said what happened and where to log in.
+    pub async fn signed_out(&self) {
+        let body = match serde_json::to_vec(&AccountSignedOut {
+            login: self.lent.came_down.map(|came_down| hex(&came_down)),
+        }) {
+            Ok(body) => body,
+
+            Err(why) => {
+                tracing::error!(
+                    error = ?why,
+                    "the word that an account signed out could not be composed for the \
+                     device it was fetched from",
+                );
+
+                return;
+            }
+        };
+
+        let call = Call {
+            method: reqwest::Method::POST,
+            onwards: SIGNED_OUT.replace("{profile}", &self.lent.profile),
+            headers: as_json(),
+            body: Streamed::saying(body),
+        };
+
+        match relaying::put_to(self.devices.as_ref(), &self.lent.at, call).await {
+            Ok(_) => tracing::info!(
+                device = %self.lent.at,
+                profile = %self.lent.profile,
+                "the device this account was fetched from has been told it signed out",
+            ),
+
+            Err(why) => tracing::warn!(
+                device = %self.lent.at,
+                profile = %self.lent.profile,
+                "the device this account was fetched from could not be told it signed out: {}",
+                why.saying,
+            ),
+        }
+    }
+}
+
+/// A login's SHA-256 as the word that names it across a link: lower-case hex.
+///
+/// What [`AccountSignedOut::login`] carries, and what the device the account is
+/// on hashes its own login into to compare — see [`login_named`].
+pub(crate) fn hex(fingerprint: &Fingerprint) -> String {
+    fingerprint
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// The login at `login` named as [`hex`] names one, or `None` where there is no
+/// login file there.
+pub(crate) fn login_named(login: &Path) -> Option<String> {
+    std::fs::read(login)
+        .ok()
+        .map(|bytes| hex(&fingerprint(&bytes)))
 }
 
 /// What the session left in the mirror's login, where that is something the
