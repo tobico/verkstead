@@ -1311,11 +1311,11 @@ than one green run. It takes about fifty minutes, which is why nothing runs it
 for you.
 
 **And the machine under a run is the host's own hardening, inherited.** A
-session is a sandbox inside whatever started the server, and two facts about
-that host have each failed a suite on a developer's machine while the runners
-stayed green. Both are fixed; they are written down because the *shape* of
-them recurs, and because what each one looks like from a test is nothing like
-its cause.
+session is a sandbox inside whatever started the server, and three facts about
+that host have each failed a suite of its own on a developer's machine while
+the runners stayed green — `sessions`, `sandbox` and `logins`, one apiece. All
+three are fixed; they are written down because the *shape* of them recurs, and
+because what each one looks like from a test is nothing like its cause.
 
 **A seccomp filter is inherited and it kills.** Everything the service starts
 runs under the unit's `SystemCallFilter`, bwrap and the session inside it
