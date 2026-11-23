@@ -222,9 +222,15 @@ fn homeward(timeline: &[store::TimelineEvent], standing: &State) -> Landing {
     }
 }
 
-/// Put every checkout this investigation could write in back to what the steer
-/// found, because the Conversation is going back into a state that will be worked
-/// in.
+/// Put every checkout this detour could write in back to what the steer found,
+/// because the Conversation is going back into a state that will be worked in.
+///
+/// **An investigation and a declared detour, by the one function.** The five
+/// Verkstead ships mark their Investigating as a detour and reach this through
+/// [`crate::activities::follow_up_rounds`]; a plugin's Process marks whichever of
+/// its own states it likes, and the engine reaches it beside the state it goes
+/// back to — see [`crate::processes`]. It is one question either way, *what was
+/// in these checkouts before the steer*, so it is answered in one place.
 ///
 /// **The scratch is the point while the investigation is running and in the way
 /// the moment it is over.** A session is told to write probes and commit none of

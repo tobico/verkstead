@@ -632,15 +632,27 @@ pub(crate) async fn submit(
 
     let settling = settling(state, &conversation, submission);
 
-    // And what every checkout the session may write in already holds, for the one
-    // target whose ending has to put them back to it. Read here — after `make`,
-    // so a checkout this steer cut or rebuilt reads clean, and before anything is
-    // started in any of them — and written down beside the Event, because by the
-    // time the ending wants it the investigation has been writing in there for
-    // hours. See [`crate::investigations::tidied`].
-    let scratch = match submission.target {
-        SteerTarget::Investigating => already_held(&conversation, &added, &opened).await,
-        _ => Vec::new(),
+    // And what every checkout the session may write in already holds, for the
+    // targets whose ending has to put them back to it: every state its Process
+    // marks as a **detour**, which is the mark that says the Conversation comes
+    // back to where it was steered from and so that whatever was written in
+    // there is in the way the moment it is over (ADR-0030, *Process*). The five
+    // Verkstead ships mark their Investigating, which is the target this used to
+    // name on its own; a plugin's Process marks its own.
+    //
+    // Read here — after `make`, so a checkout this steer cut or rebuilt reads
+    // clean, and before anything is started in any of them — and written down
+    // beside the Event, because by the time the ending wants it the detour has
+    // been writing in there for hours. See [`crate::investigations::tidied`],
+    // which is what reads it back, for a declared detour as for an
+    // investigation.
+    let detour = crate::processes::of(state, &conversation.process)
+        .and_then(|loaded| crate::processes::mark(&loaded, target.stored()))
+        .is_some_and(|mark| mark.detour);
+
+    let scratch = match detour {
+        true => already_held(&conversation, &added, &opened).await,
+        false => Vec::new(),
     };
 
     let scratch: Vec<store::Scratch<'_>> = scratch

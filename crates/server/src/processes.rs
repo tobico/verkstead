@@ -777,9 +777,20 @@ async fn steered_with(state: &AppState, conversation_id: i64, standing: &str) ->
 /// Activity ends: the state the steer into it found the Conversation in, or
 /// Done where that is one nothing returns to — Draft, Done, Closed, the
 /// detour itself — or a state the Process doesn't declare.
-async fn homeward(state: &AppState, conversation_id: i64, loaded: &Loaded, standing: &str) -> To {
-    let from = match store::latest_steer(&state.pool, conversation_id).await {
-        Ok(Some(steer)) if steer.into == standing => steer.from,
+///
+/// And, beside it, the Steer Event that brought the Conversation here, which is
+/// where what its checkouts already held is written down — the pair
+/// [`crate::investigations::Landing`] is for an investigation, read for the
+/// same reason by the same function. `None` where no steer put it here, which
+/// is a detour entered some other way and so one with no scratch recorded.
+async fn homeward(
+    state: &AppState,
+    conversation_id: i64,
+    loaded: &Loaded,
+    standing: &str,
+) -> (To, Option<i64>) {
+    let steer = match store::latest_steer(&state.pool, conversation_id).await {
+        Ok(Some(steer)) if steer.into == standing => Some(steer),
         Ok(_) => None,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading where a detour was steered from failed");
@@ -787,10 +798,14 @@ async fn homeward(state: &AppState, conversation_id: i64, loaded: &Loaded, stand
         }
     };
 
-    match from {
+    let steered = steer.as_ref().map(|steer| steer.event);
+
+    let to = match steer.and_then(|steer| steer.from) {
         Some(from) if from != standing && loaded.process.state(&from).is_some() => To::State(from),
         _ => To::Done,
-    }
+    };
+
+    (to, steered)
 }
 
 /// The heading a brief of kind `brief` goes under in a session's prompt.
@@ -938,10 +953,15 @@ async fn step(state: &AppState, conversation_id: i64, driving: &Driving) -> anyh
         return Ok(false);
     }
 
-    // A detour goes back where it was steered from, whatever it ended in.
+    // A detour goes back where it was steered from, whatever it ended in —
+    // and its scratch comes out of the checkouts on the way, which is what
+    // `detoured` is carried down to the move for.
     let back;
+    let mut detoured = None;
     let to = if declared.detour {
-        back = homeward(state, conversation_id, &loaded, &standing).await;
+        let (homeward, steered) = homeward(state, conversation_id, &loaded, &standing).await;
+        back = homeward;
+        detoured = steered;
         tracing::info!(
             conversation_id,
             state = standing,
@@ -978,17 +998,34 @@ async fn step(state: &AppState, conversation_id: i64, driving: &Driving) -> anyh
 
     match to {
         To::State(next) => {
-            moved(
+            let moved = moved(
                 state,
                 conversation_id,
                 &standing,
                 &store::State::named(next),
             )
-            .await
+            .await?;
+
+            // A detour hands the checkouts back to a state that will be worked
+            // in, so what it wrote in them comes out first — after the move,
+            // which is what says this detour is the one that ended, and before
+            // the loop below starts the next state's Activity, which is the
+            // first thing that would work in there. `detoured` is `None` for
+            // every other move, which is nothing to put back. See
+            // [`crate::investigations::tidied`].
+            if moved {
+                crate::investigations::tidied(state, conversation_id, detoured).await;
+            }
+
+            Ok(moved)
         }
         To::Done => {
             moved(state, conversation_id, &standing, &store::State::done()).await?;
             state.sessions.end(conversation_id).await;
+            // Nothing is put back for a detour that ended Done, as nothing is
+            // for an investigation that did: the Worktree goes with the close,
+            // and nothing is going to work in there before then — see
+            // [`crate::activities::follow_up_rounds`].
             Ok(false)
         }
         To::Closed => {

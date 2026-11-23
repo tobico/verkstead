@@ -44719,13 +44719,14 @@ async fn a_process_with_no_steerable_state_offers_close_alone() {
 }
 
 /// *Two steps* with a third state, `asking`, marked as a detour that takes a
-/// steer with the brief kind `brief`, over the One session Activity.
-fn asking(brief: &str) -> String {
+/// steer with the brief kind `brief`, over the One session Activity expecting
+/// the evidence `evidence` of its session.
+fn asking(brief: &str, evidence: &str) -> String {
     format!(
         "\x20     - id: asking\n\
          \x20       word: Asking\n\
          \x20       activity: one-session\n\
-         \x20       options: {{ skill: verkstead/instruction, prompt: Answer the question., evidence: nothing }}\n\
+         \x20       options: {{ skill: verkstead/instruction, prompt: Answer the question., evidence: {evidence} }}\n\
          \x20       steer: {{ brief: {brief} }}\n\
          \x20       detour: true\n"
     )
@@ -44763,7 +44764,7 @@ async fn a_steer_into_a_detour_returns_to_the_state_it_left() {
     let stub = asking_stub(spill.path());
     let ran = spill.path().join("ran");
     let asked = spill.path().join("asked");
-    let fixture = two_steps_with(spill, &stub, &asking("instruction")).await;
+    let fixture = two_steps_with(spill, &stub, &asking("instruction", "nothing")).await;
 
     let view = fixture
         .until(|view| (view.state == "drafting").then(|| view.clone()))
@@ -44846,6 +44847,156 @@ async fn a_steer_into_a_detour_returns_to_the_state_it_left() {
         notices(&view)
     );
 }
+/// *Two steps* with a third state, `probing`, marked as a detour over the
+/// **Follow-up rounds** Activity expecting an investigation's evidence.
+///
+/// Which is the one shape of detour whose session may leave scratch behind:
+/// an investigation's evidence is the only kind whose Done signal is given
+/// over uncommitted changes rather than refused by them, and it ends on the
+/// human's Nothing-else mark — see [`verkstead_server::done::Evidence`].
+fn probing() -> String {
+    "\x20     - id: probing\n\
+     \x20       word: Probing\n\
+     \x20       activity: follow-up-rounds\n\
+     \x20       options: { skill: verkstead/investigating, evidence: investigated }\n\
+     \x20       steer: { brief: question }\n\
+     \x20       detour: true\n"
+        .to_owned()
+}
+
+/// A stub for *Two steps* with `probing`: drafting waits on its marker, and
+/// the detour's session writes probes into the checkout and leaves every one
+/// of them where it wrote them — modified, staged and untracked — puts its
+/// round, and says it is done once the human has answered it.
+///
+/// Which is what a detour's session is for: find something out by writing and
+/// running whatever it takes, and commit none of it. Each appends which it is
+/// to `{spill}/ran`.
+fn probing_stub(spill: &Path) -> String {
+    format!(
+        r#"SAYING='finding it out'
+case "$2" in
+*'Draft the change.'*) echo drafting >> {ran}
+while [ ! -f /tmp/verkstead/drafted ]; do sleep 0.05; done
+: > /tmp/verkstead/done
+;;
+*'Check the change.'*) echo checking >> {ran}
+;;
+*) echo probing >> {ran}
+printf 'a probe\n' >> README.md
+printf 'staged\n' > probe.md
+git add probe.md
+printf 'stray\n' > scratch.md
+printf '%s\n' "$SAYING"
+{WHILE_NOBODY_HAS_ASKED}
+while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done
+: > /tmp/verkstead/done
+;;
+esac
+while :; do sleep 1; done"#,
+        ran = spill.join("ran").display(),
+    )
+}
+
+/// **A declared detour's scratch comes out of the checkout when it ends**, as
+/// an investigation's does — the same rule and the same function, reached from
+/// the engine rather than from the host's Follow-up rounds: what the steer
+/// found is read at the submit and written down beside its Event, and
+/// everything the detour's session left that the record does not name is taken
+/// back out after the move and before the state it goes back to is worked in.
+///
+/// The point is the state it returns to. `drafting` hands the checkout to
+/// sessions that commit and push, and each opens its commit step with
+/// `git add -A` — so a probe left lying there is a probe on a pull request, and
+/// a session that did not commit it would have its own Done signal refused over
+/// a file it never wrote.
+#[tokio::test]
+async fn a_declared_detour_leaves_its_scratch_out_of_the_checkout() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = probing_stub(spill.path());
+    let ran = spill.path().join("ran");
+    let fixture = two_steps_with(spill, &stub, &probing()).await;
+
+    let view = fixture
+        .until(|view| (view.state == "drafting").then(|| view.clone()))
+        .await;
+    let worktree = PathBuf::from(
+        view.worktree
+            .expect("a Conversation drafting is checked out")
+            .path,
+    );
+
+    let deadline = Instant::now() + *PATIENCE;
+    while std::fs::read_to_string(&ran).unwrap_or_default() != "drafting\n" {
+        assert!(Instant::now() < deadline, "the drafting session never ran");
+        pause(Duration::from_millis(25)).await;
+    }
+
+    // What the human had already left uncommitted when the question was asked,
+    // which is what the record names and what stays: a note of their own, and a
+    // tracked file they were part way through that the detour writes to as well.
+    std::fs::write(worktree.join("half-done.md"), "a note to self\n").unwrap();
+    let readme = worktree.join("README.md");
+    let mut already = std::fs::read_to_string(&readme).unwrap_or_default();
+    already.push_str("a line the human had already written\n");
+    std::fs::write(&readme, &already).unwrap();
+
+    fixture.steer().await;
+    let steered: ConversationSteered = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/steer/submit", fixture.id),
+        &serde_json::json!({
+            "target": "Declared",
+            "state": "probing",
+            "interrupt": true,
+            "investigation": "Where does the counter live?",
+        }),
+    )
+    .await;
+    assert_eq!(steered, ConversationSteered::Steered);
+
+    // The round the detour's session puts, and the human ending it: the mark is
+    // what an investigation's evidence waits on, so nothing is done until it
+    // is given.
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let deadline = Instant::now() + *PATIENCE;
+    while std::fs::read_to_string(&ran).unwrap_or_default() != "drafting\nprobing\ndrafting\n" {
+        if Instant::now() >= deadline {
+            let view = fixture.view().await;
+            panic!(
+                "the detour never went back to drafting: {:?} state={:?} notices={:?}",
+                std::fs::read_to_string(&ran),
+                view.state,
+                notices(&view),
+            );
+        }
+        pause(Duration::from_millis(25)).await;
+    }
+
+    // Waited for rather than read off the move: the tidying comes after it and
+    // is meant to, so a view reading `drafting` is not yet a checkout put back,
+    // and the probes go one path at a time.
+    let scratch = until_tidied(&worktree).await;
+
+    assert!(
+        !worktree.join("probe.md").exists() && !worktree.join("scratch.md").exists(),
+        "and gone off the disk rather than only out of the index: {scratch:?}",
+    );
+    assert!(
+        scratch.contains("half-done.md"),
+        "the note they had left themselves is still there: {scratch:?}",
+    );
+    assert!(
+        std::fs::read_to_string(&readme)
+            .unwrap()
+            .contains("a line the human had already written"),
+        "and the line they had written is still in the file the detour wrote to \
+         as well, the record holding paths rather than contents",
+    );
+}
 
 /// A declared state whose brief is a question takes the question in the
 /// field Investigating takes it in: refused without one, and with one its
@@ -44855,7 +45006,7 @@ async fn a_declared_question_is_required_and_reaches_the_activity() {
     let spill = tempfile::tempdir().unwrap();
     let stub = asking_stub(spill.path());
     let asked = spill.path().join("asked");
-    let fixture = two_steps_with(spill, &stub, &asking("question")).await;
+    let fixture = two_steps_with(spill, &stub, &asking("question", "nothing")).await;
 
     fixture
         .until(|view| (view.state == "drafting").then_some(()))
