@@ -60,6 +60,13 @@ const OWNED: [(&str, To); 3] = [
     ("stopped", To::Stopped),
 ];
 
+/// What `closed` was called while the press was Abort. The store reads it as
+/// Closed wherever a row still holds it — see [`crate::store::State::named`] —
+/// so a state declaring it would be a Conversation that read as Closed with
+/// its own word nowhere to be seen, which is why it is refused beside the four
+/// Verkstead owns.
+const ABORTED: &str = "aborted";
+
 /// The option that names a skill, which is checked as an Activity's skills are.
 const SKILL: &str = "skill";
 
@@ -657,6 +664,15 @@ fn states(
                 ),
             ));
         }
+        if id == ABORTED {
+            return Err(Refusal::of(
+                &id_field,
+                format!(
+                    "`{id_field}` is `{id}`, which is what Verkstead's `closed` was called \
+                     before and is still read as. Give the state a word of its own."
+                ),
+            ));
+        }
         if id == DRAFT || OWNED.iter().any(|(owned, _)| *owned == id) {
             return Err(Refusal::of(
                 &id_field,
@@ -1170,6 +1186,20 @@ mod tests {
         );
 
         assert_eq!(refusal.field.as_deref(), Some("provides[1].states[1].id"));
+    }
+
+    /// `aborted` is not one of the four, but the store reads it as Closed
+    /// wherever a row holds it, so a state declaring it would never be seen as
+    /// itself.
+    #[test]
+    fn a_state_is_not_closed_under_the_word_closed_used_to_have() {
+        let refusal = refused(
+            &tinkering(MAPPED).replace("id: wrapping", "id: aborted"),
+            &on_the_built_ins(),
+        );
+
+        assert_eq!(refusal.field.as_deref(), Some("provides[1].states[1].id"));
+        assert!(refusal.why.contains("`closed`"), "{refusal}");
     }
 
     /// Develop's shape: an interview offering Directions, then a state whose

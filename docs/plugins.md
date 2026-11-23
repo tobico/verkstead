@@ -425,7 +425,8 @@ provides:
   - **`id`** — what the Conversation's state is stored as: lowercase letters,
     digits, hyphens and underscores, like `follow_up`, unique among the
     Process's states. `draft`, `done`, `closed` and `stopped` are Verkstead's
-    own, and refused.
+    own, and refused — as is `aborted`, which is what `closed` was called
+    before and is still read as wherever a row holds it.
   - **`word`** — what the human reads wherever the state is named: the
     Conversation's card, the moves on its Timeline, the Steer row that goes
     there, and the sidebar row read aloud. The viewer keeps no words of its own
