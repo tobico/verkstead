@@ -6,6 +6,7 @@
     "github": null,
     "id": 2,
     "name": "askance",
+    "origin": null,
     "path": "/srv/repos/askance"
   },
   {
@@ -15,6 +16,7 @@
     "github": null,
     "id": 1,
     "name": "verkstead",
+    "origin": null,
     "path": "/srv/repos/verkstead"
   }
 ]

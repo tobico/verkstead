@@ -27,7 +27,12 @@ registration of its own. Two rows sit at the foot of that dropdown behind a rule
 wherever it is drawn — the compose page and a draft's composer both, it being one
 control. **Open repo** registers a repository that already exists, over a path
 field that browses, and a path already registered is the repository somebody
-named rather than a refusal.
+named rather than a refusal. On a Draft whose device is an **Annex** it first
+asks where the repository is — on the Annex, or on its **Keeper** — the two
+options labelled by the pair's platforms: the Annex's side browses there and
+opens on the box's own login user's home, and the Keeper's side registers the
+path on the Keeper and ends in a clone on the Annex, made the Draft's Repo
+(ADR-0024, *Open repo asks where the repository is*).
 **Create repo** makes one first: a directory under a parent that is browsed for,
 `git init` onto `main`, a `README.md` naming it and one commit by its **Author** — an empty repository has no commit for a Conversation to take a base
 from, which is why there is a README at all — and, where that Author has a token
@@ -170,7 +175,10 @@ and it is the draft's Repo from that moment, as a pick on a registered row
 is. A member's Repo that names no Author is the one Author's here, and is
 refused by name where there are several: a clone carries no picker. The **Transfer** dialog's **Preflight** offers the
 same where it finds no match on the device picked, reading *clone it there*
-rather than sending anybody to Open repo. Cluster-wide rather than an
+rather than sending anybody to Open repo. And the Keeper side of an Annex's
+**Open repo** ends in the same clone, driven by the origin the Keeper's
+registration reports — there a card carries the picker, it being a
+registration first (ADR-0024). Cluster-wide rather than an
 **Annex**'s: the problem is the same on any device that is not this one. A
 row taking a URL was rejected for this list — the cluster knows the origins,
 so nobody types one (ADR-0024).
@@ -2438,6 +2446,11 @@ Profiles, which arrive as records it runs from a copy of.
 `%LOCALAPPDATA%\Verkstead\wsl`, built from a flake its Keeper writes and
 pinned to the Keeper's own release; the wizard row that makes it reads
 *Linux development (WSL)*, and **Components** is where it is kept.
+**Its shell logs in as `verkstead`**, the service's own user, with a real
+home and wheel, the home bound into the box's `paths` beside `/srv/repos` —
+so a repository cloned by hand in that shell is one the service can open and
+work in, one user owning everything and git never seeing an owner it is not
+(ADR-0024, *Open repo asks where the repository is*).
 _Avoid_: guest, VM, WSL box, Linux box, managed device, sidecar device,
 container
 

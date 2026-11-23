@@ -89,8 +89,10 @@ import {
   Match,
   Show,
   Switch,
+  createEffect,
   createSignal,
   createUniqueId,
+  onCleanup,
   type JSX,
 } from "solid-js";
 
@@ -116,11 +118,11 @@ import type {
   RepoView,
   Repointed,
 } from "../api/types";
-import { useRepoParent } from "../devices";
+import { deviceShown, platformWord, useDevices, useRepoParent } from "../devices";
 import { setRepoParent } from "../remembered";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
-import { keyOf, useDevice, type Device } from "../reaching";
+import { Reaching, keyOf, useDevice, type Device } from "../reaching";
 import { Picker } from "../picking";
 import { rowPress } from "../rows";
 import { authorLabel, useAuthors } from "../authors";
@@ -725,7 +727,29 @@ export function RepoRegistration(props: {
   /// this to get *onto* a repository has to put a draft on the one it just
   /// named — and the path that was typed is not the resolved path the Repo is
   /// recorded under.
-  landed: (repo: RepoEntry) => void;
+  ///
+  /// **Where the registration is not the end of the press, it says so**: a
+  /// caller with more to do hands back a promise, and the sentence it was
+  /// refused with or nothing where it went through. The press is not over until
+  /// that is — the button stays down, the sentence is said under the field where
+  /// every other refusal is, and touching the field clears it — because all
+  /// three of those are the form's doing rather than a second card's. The
+  /// Windows side of **Open repo** clones on the Annex there (ADR-0024, *Open
+  /// repo asks where the repository is*).
+  landed: (repo: RepoEntry) => void | Promise<string | null>;
+
+  /// Said as a press goes out and again as it comes back, for a caller drawing
+  /// something of its own that has to be held while one is.
+  ///
+  /// The button holds itself, and nothing above the form could know to: the
+  /// press is this form's mutation, and where it has a second half that is in
+  /// there too. So the choice at the top of **Open repo** on an Annex's draft
+  /// is held off this, there being no moving the form out from under a clone
+  /// that is still running (ADR-0024, *Open repo asks where the repository is*).
+  ///
+  /// Said `false` as the form goes, so a caller is never left holding something
+  /// for a press that went with it.
+  pressing?: (out: boolean) => void;
 
   /// What else the form draws, under the button: the modal's way out.
   children?: JSX.Element;
@@ -743,25 +767,36 @@ export function RepoRegistration(props: {
   // The path typed into the field.
   const [path, setPath] = createSignal("");
 
-  // What the server said about the last path offered, or `null` while nothing
+  // The sentence the last path offered was refused with, or `null` while nothing
   // has been. Cleared as soon as the field is touched: a refusal is about the
   // path that was sent, and it stops being about the one being typed.
-  const [refused, setRefused] = createSignal<RepoRefused | null>(null);
+  //
+  // A sentence rather than the server's bare word, because the caller's own half
+  // of the press is refused in words of its own — see `landed`. One signal, so
+  // that whichever half was refused, the card says it in the one place.
+  const [refused, setRefused] = createSignal<string | null>(null);
 
   // Which Author it is recorded as, where there are several to pick between —
   // off that machine's one list, it being the one that records the pick.
   const author = useAuthorPick(device);
 
+  // One mutation over both halves of the press, the registration and whatever
+  // the caller does with the Repo: what comes back is the sentence it was
+  // refused with, or nothing where the whole press went through. So the button
+  // stays down for all of it, and a second press cannot start a second clone.
   const register = useMutation(() => ({
-    mutationFn: (asked: string) =>
-      registerRepo(device(), asked, author.sent()),
-    onSuccess: (outcome: Registered) => {
+    mutationFn: async (asked: string): Promise<string | null> => {
+      const outcome: Registered = await registerRepo(
+        device(),
+        asked,
+        author.sent(),
+      );
+
       // A refusal, which is a bare word on the wire — the two outcomes that
       // leave a Repo registered carry it. Said where the path was typed, which
       // stays up: the path that was refused is the one about to be corrected.
       if (typeof outcome === "string") {
-        setRefused(outcome);
-        return;
+        return REFUSAL[outcome];
       }
 
       // A path registered already is the repository somebody named rather than
@@ -779,11 +814,22 @@ export function RepoRegistration(props: {
       void queries.invalidateQueries({
         queryKey: keyOf(device(), "abandoned-roadmaps"),
       });
-      props.landed(
-        "Added" in outcome ? outcome.Added : outcome.AlreadyRegistered,
+
+      return (
+        (await props.landed(
+          "Added" in outcome ? outcome.Added : outcome.AlreadyRegistered,
+        )) ?? null
       );
     },
+    onSuccess: (said: string | null) => setRefused(said),
   }));
+
+  // And the caller told while that press is out, so that whatever it draws
+  // around this form is held for the whole of it — the registration and the
+  // caller's own half alike, one mutation covering both. Said `false` as the
+  // form goes, there being no further word about a press that went with it.
+  createEffect(() => props.pressing?.(register.isPending));
+  onCleanup(() => props.pressing?.(false));
 
   const add = (ev: SubmitEvent) => {
     ev.preventDefault();
@@ -827,9 +873,7 @@ export function RepoRegistration(props: {
       </div>
 
       <Show when={refused()}>
-        {(outcome) => (
-          <ErrorLine class={styles.failure}>{REFUSAL[outcome()]}</ErrorLine>
-        )}
+        {(said) => <ErrorLine class={styles.failure}>{said()}</ErrorLine>}
       </Show>
       {/* A server that could not answer at all, which is the one thing here
           that is an error rather than an outcome. */}
@@ -842,6 +886,40 @@ export function RepoRegistration(props: {
   );
 }
 
+/// Which machine of an **Annex**'s pair a repository is on: the Annex itself,
+/// or its **Keeper**.
+///
+/// The two sides of the choice at the top of **Open repo** on an Annex's draft
+/// (ADR-0024, *Open repo asks where the repository is*). Named for the devices
+/// rather than for the platforms, because the platforms are what the labels are
+/// read off rather than what the sides *are*: the Annex beside a Mac is the same
+/// two sides with two other words on them.
+type Side = "keeper" | "annex";
+
+/// What each side of that choice is: the device whose filesystem its field
+/// browses and whose registry its press lands on, and the platform it is
+/// labelled by.
+type Sides = Record<Side, { device: Device; platform: string }>;
+
+/// The order the two are drawn in, the Keeper's first: a repository cloned on
+/// Windows is the case the choice was added for, and the Annex's own side is
+/// what the card has always done.
+const SIDES: readonly Side[] = ["keeper", "annex"];
+
+/// What a repository on the Keeper with no `origin` is refused with: there is
+/// nothing for the Annex to clone it from, and the two ways round that are the
+/// human's.
+///
+/// Cloning the Keeper's own copy was rejected: on a Windows pair that means
+/// reading `/mnt/c`, which ADR-0024 refused and ADR-0014 before it. So the
+/// repository is pushed somewhere both machines can reach, or it is worked on
+/// where it already is.
+///
+/// Named by the Keeper's platform, like the choice above it, so the sentence
+/// says the machine the human is sitting at rather than a device id.
+const noOrigin = (pair: Sides): string =>
+  `This repo has no origin, so there's nothing to clone it from. Push it to a remote first, or work on it on ${pair.keeper.platform}.`;
+
 /// The registration as the Repo dropdown asks it: **Open repo**, on the modal
 /// every other card in front of the page is drawn on.
 ///
@@ -851,6 +929,21 @@ export function RepoRegistration(props: {
 ///
 /// A refusal keeps the modal up: a refused path is the one about to be
 /// corrected, and taking the card away would take the field with it.
+///
+/// **On an Annex's draft it asks where the repository is first** (ADR-0024), and
+/// on every other device it is the card it has always been. The field a draft on
+/// a genuinely remote member draws still browses that member and lands there,
+/// which is `RepoRegistration`'s own doing and needs no question: the human
+/// knows it is another computer, and a WSL beside the machine they are sitting at
+/// is the one pair where they would not.
+///
+/// **The Annex's side lands the Repo; the Keeper's registers and then clones.**
+/// One press on the Keeper's side does the whole of what the manual route did:
+/// the path is registered there — which is what makes the repository clonable
+/// everywhere else, and is the point rather than a side effect — and then it is
+/// cloned on the Annex from the origin that registration reported, registered
+/// there in turn, and *that* Repo is the draft's. What a repository with no
+/// origin and a clone that failed come to is `cloneOnTheAnnex` below.
 export function OpenRepo(props: {
   /// Said when the modal has closed itself — Escape, a press on the backdrop,
   /// or the Cancel beside the press.
@@ -864,11 +957,103 @@ export function OpenRepo(props: {
   // page and an id being the page's to keep unique.
   const id = createUniqueId();
 
-  return (
-    <Modal class={styles.openRepo!} open close={props.close} labelledBy={id}>
-      <h3 id={id}>Open a Repo</h3>
+  /// Which device the draft this was opened from is on, which is the Annex's
+  /// own wherever there is a choice to make at all.
+  const device = useDevice();
 
-      <RepoRegistration submit="Open" landed={props.landed}>
+  // This device's own reading of its cluster, which is where whose a device is
+  // comes from — see `useDevices`.
+  const devices = useDevices();
+
+  /// The two sides, where the draft's device is an **Annex** — and `null` on
+  /// every other device, which is what leaves the card unchanged there.
+  ///
+  /// Read off the member rows and nothing else: which device is kept, and by
+  /// which, is the cluster's own finding (see `keeperOf` in `../AnnexMark.tsx`),
+  /// and each label is that row's OS word put through [`platformWord`]. So a
+  /// Docker box beside a Mac labels itself with no new copy here.
+  ///
+  /// A cluster that has not answered yet, and a Keeper whose row has not
+  /// arrived, are both no pair to draw: the card browses the Annex as it always
+  /// did until the reading lands, rather than naming a device by its id.
+  const sides = (): Sides | null => {
+    const view = devices.data;
+    if (view === undefined) return null;
+
+    const annex = deviceShown(view, device());
+    const keeper = annex?.kept_by ?? null;
+    if (annex === null || keeper === null) return null;
+
+    // This device's own id back to `null`, so that the Keeper is the `Device`
+    // it is everywhere else — a browser opened on the Keeper is the ordinary
+    // case here, and its calls are the local ones.
+    const on = keeper === view.this.device ? null : keeper;
+    const kept = deviceShown(view, on);
+    if (kept === null) return null;
+
+    return {
+      keeper: { device: on, platform: platformWord(kept.os) },
+      annex: { device: device(), platform: platformWord(annex.os) },
+    };
+  };
+
+  // Which side the field is about. The Annex's own to begin with: it is the
+  // device the dropdown is for and the filesystem this card has always browsed,
+  // so the choice asks a question without changing an answer.
+  const [side, setSide] = createSignal<Side>("annex");
+
+  // Whether a press is out, said by the form the choice sits above — see
+  // `pressing` on `RepoRegistration`. The choice is held while one is: the
+  // Keeper's press ends in a clone that takes as long as the repository is big,
+  // and moving the form out from under it is the one gesture that would leave
+  // the press running with nothing drawing it.
+  const [out, setOut] = createSignal(false);
+
+  /// Which press the card is on, bumped as the Keeper's form goes — the choice
+  /// moving, or the card closing, both of which dispose it.
+  ///
+  /// What it is for is the landing of a press the human has walked away from:
+  /// the clone stands and the Repo is registered on the Annex either way, and
+  /// what is dropped is the *move of the draft onto it*, which would otherwise
+  /// arrive minutes later on top of whatever they did instead.
+  ///
+  /// A plain count rather than a signal: nothing is drawn off it, and what reads
+  /// it is the clone's own continuation (see `cloneOnTheAnnex`).
+  let press = 0;
+
+  // Where a clone on the Annex goes, and the clone itself. Both read the device
+  // the page around this card is about, which is the Annex's own wherever there
+  // is a side to pick: the clone is made there whichever machine the form in
+  // front of it is pointed at.
+  const parentOf = useRepoParent();
+  const cloning = useCloning();
+
+  /// The registration itself, pointed at one device: its field browses there,
+  /// its author picker reads that machine's list, and its press lands on that
+  /// registry — all of which `RepoRegistration` takes off the device the page
+  /// around it is about, so pointing it is providing that one value.
+  ///
+  /// `landed` is the caller's rather than fixed, because the two sides end
+  /// differently: a Repo on the Annex is the draft's from the moment it lands,
+  /// and one registered on the Keeper is a repository to clone from.
+  ///
+  /// And `submit` with it, for the side whose press has a second half: the words
+  /// on the button are what says which of the two is going.
+  ///
+  /// Whichever side is drawn says when its press is out, because the choice
+  /// above it is held for that — and it is one signal because only one of the
+  /// two forms is ever built.
+  const registration = (
+    on: () => Device,
+    landed: (repo: RepoEntry) => void | Promise<string | null>,
+    submit?: () => string,
+  ) => (
+    <Reaching.Provider value={on}>
+      <RepoRegistration
+        submit={submit?.() ?? "Open"}
+        landed={landed}
+        pressing={setOut}
+      >
         {/* Drawn as well as the ways out the modal already has: Escape and a
             press on the backdrop are for a keyboard and a cursor, and this is
             the one a thumb has. */}
@@ -880,6 +1065,152 @@ export function OpenRepo(props: {
           Cancel
         </button>
       </RepoRegistration>
+    </Reaching.Provider>
+  );
+
+  /// The second half of the Keeper's press: the repository that has just been
+  /// registered there, cloned on the Annex.
+  ///
+  /// From the origin that registration reported — the clone is git's, and the
+  /// Keeper's own copy is not something to reach — as the Author the Keeper's
+  /// Repo is recorded as, into the parent the Annex remembers, which is
+  /// `/srv/repos` on a box Verkstead made. The clone's own Repo is the draft's,
+  /// not the Keeper's: a Repo id is one machine's.
+  ///
+  /// **A refusal leaves the Keeper's registration standing**, which is true,
+  /// harmless and a shorter retry: the repository is registered there either
+  /// way, and that is what makes it clonable from the dropdown as well.
+  ///
+  /// **And a card left while the clone was out keeps the clone and loses the
+  /// move**: the choice is held while a press is out, so the only way to walk
+  /// away from one is to close the card — and a draft moved onto this Repo
+  /// minutes afterwards would land on top of whatever was done instead. The
+  /// Repo is registered on the Annex and the dropdown lists it, which is where
+  /// it is picked up from. See `press` above.
+  const cloneOnTheAnnex = async (
+    pair: Sides,
+    keeper: RepoEntry,
+  ): Promise<string | null> => {
+    const mine = press;
+    const origin = keeper.origin;
+    if (origin === null) {
+      return noOrigin(pair);
+    }
+
+    const landing = await cloning
+      .mutateAsync({
+        origin,
+        parent: parentOf(pair.annex.device),
+        author: keeper.author,
+      })
+      // The one answer `useCloning` does not carry: a server that could not be
+      // reached at all. Said as the clone's own failure rather than the
+      // registration's, the registration having just worked.
+      .catch((failed: Error) => ({
+        refused: `The repo couldn't be cloned on ${pair.annex.platform}. ${failed.message}`,
+      }));
+
+    if ("refused" in landing) {
+      return landing.refused;
+    }
+
+    if (press !== mine) {
+      return null;
+    }
+
+    props.landed(landing.repo);
+    return null;
+  };
+
+  return (
+    <Modal class={styles.openRepo!} open close={props.close} labelledBy={id}>
+      <h3 id={id}>Open a Repo</h3>
+
+      {/* Two Shows rather than one with a fallback, so that whichever card is
+          not drawn is not built either: a form that was built would read the
+          machine's Authors and hold a field of its own, and two fields with one
+          label is a card nothing could be found on. */}
+      <Show when={sides() === null}>
+        {registration(device, props.landed)}
+      </Show>
+
+      <Show when={sides()}>
+        {(pair) => (
+          <>
+            {/* A group of radios with the field under it, rather than two rows
+                in the dropdown: the dropdown's foot keeps its two rows, and the
+                question is about the one card. */}
+            <fieldset class={styles.where}>
+              <legend>Where the repository is</legend>
+              <For each={SIDES}>
+                {(which) => (
+                  /* The row answers its own press rather than the one a label
+                     would have forwarded to the radio, which a hand that slid a
+                     pixel never got — see `rowPress`.
+
+                     And it is held while a press is out, as the dropdown holds
+                     its clonable group for the same reason: a radio that will
+                     not take a press takes none from its row either, which is
+                     `rowPress`'s own rule. */
+                  <label onClick={rowPress(() => setSide(which))}>
+                    <input
+                      type="radio"
+                      name={`${id}-where`}
+                      value={which}
+                      checked={side() === which}
+                      disabled={out()}
+                      onChange={() => setSide(which)}
+                    />
+                    On {pair()[which].platform}
+                  </label>
+                )}
+              </For>
+            </fieldset>
+
+            {/* Keyed, so moving the choice draws the form afresh: a path on one
+                machine is nothing on the other, and a refusal about one says
+                nothing about the other either. */}
+            <Show when={side()} keyed>
+              {(side) => {
+                if (side === "annex") {
+                  return registration(
+                    () => pair().annex.device,
+                    props.landed,
+                  );
+                }
+
+                // The one place `press` is bumped, and it covers both ways the
+                // card is left: the choice moving disposes this branch, and the
+                // card closing disposes the whole of it. A clone still out when
+                // that happens lands with nothing to move — see
+                // `cloneOnTheAnnex`.
+                onCleanup(() => {
+                  press += 1;
+                });
+
+                return (
+                  <>
+                    {/* What the press is about to do on the other machine, and
+                        the one thing a clone from the origin leaves behind. Said
+                        above the field, which is where it is read before a path
+                        is typed rather than after one is sent. */}
+                    <Note class={styles.clones}>
+                      Verkstead clones it on {pair().annex.platform} from its
+                      origin. Branches you haven't pushed stay on{" "}
+                      {pair().keeper.platform}.
+                    </Note>
+                    {registration(
+                      () => pair().keeper.device,
+                      (repo) => cloneOnTheAnnex(pair(), repo),
+                      () => (cloning.isPending ? "Cloning…" : "Open"),
+                    )}
+                  </>
+                );
+              }}
+            </Show>
+          </>
+        )}
+      </Show>
     </Modal>
   );
 }

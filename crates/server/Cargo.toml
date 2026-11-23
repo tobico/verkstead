@@ -264,11 +264,11 @@ x509-parser = "0.18"
 # build carries none of it.
 [target.'cfg(unix)'.dependencies]
 # The passwd database, which is what says which shell a Conversation's terminal
-# comes up in — see `src/terminals/shell.rs`. rustix below has no answer for it
-# and could not: an account is what the name service says it is rather than what
-# a syscall returns, so `getpwuid_r` is the call and libc is where it lives. The
-# one thing this crate takes libc for, and it is already in the tree under
-# rustix.
+# comes up in and which home an Annex's browse opens on — see `src/passwd.rs`,
+# which is the one reading of it. rustix below has no answer for it and could
+# not: an account is what the name service says it is rather than what a syscall
+# returns, so `getpwuid_r` is the call and libc is where it lives. The one thing
+# this crate takes libc for, and it is already in the tree under rustix.
 libc = "0.2"
 # The pseudo-terminal a session runs on: opening the pair, sizing it, and giving
 # the sandbox a controlling terminal — see `src/terminal/pty.rs`. Everything it

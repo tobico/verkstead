@@ -96,6 +96,30 @@ export function osIcon(os: string): IconDefinition {
   return faDesktop;
 }
 
+/// The three platforms, spelled as the people whose machine it is spell them —
+/// the server's own `Platform::word` stated a second time, as [`sameMark`] below
+/// states `platform::same_mark`. In any order: no one of them is a prefix of
+/// another, so which is held against a word first decides nothing.
+const PLATFORMS = ["macOS", "Windows", "Linux"];
+
+/// What the platform a device is on is called where a person reads it, out of
+/// that device's OS word.
+///
+/// The platform's own name, which is the word itself everywhere but on a WSL:
+/// *Linux (WSL)* is a Linux, and the parenthesis is there to tell two rows of
+/// one hostname apart on the Devices list rather than to be read as a platform
+/// (see [`osIcon`], which is the mark drawn off that same difference). A word
+/// this build has never heard of is its own answer, for the reason a device
+/// with no mark still draws a row.
+///
+/// **What the two options on an Annex's Open repo card are labelled by**
+/// (ADR-0024): a repository is on Windows or on Linux, and which machine of the
+/// pair that is is the member row's own business — so a Docker box beside a Mac
+/// names itself here with no new copy.
+export function platformWord(os: string): string {
+  return PLATFORMS.find((platform) => os.startsWith(platform)) ?? os;
+}
+
 /// Whether two OS words are drawn with the same mark, which is what *the same
 /// OS* means beside a device's name: a mark that is the mark of the machine the
 /// browser opened says nothing, so it is left off. *Linux (WSL)* seen from

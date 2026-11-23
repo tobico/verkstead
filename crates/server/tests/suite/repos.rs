@@ -319,6 +319,47 @@ async fn a_repo_already_registered_is_refused_however_its_path_is_spelled() {
     assert_eq!(listed(&app).await.len(), 1);
 }
 
+/// And the answer says where the repository's `origin` is, which is what one
+/// machine's registration gives another machine to clone from: **Open repo** on
+/// an Annex's draft registers the path on the Keeper and clones on the Annex
+/// from this (ADR-0024, *Open repo asks where the repository is*).
+///
+/// Both outcomes that leave a Repo registered carry it, for the reason they both
+/// carry the Repo: a path registered already is the repository somebody named,
+/// and the press behind it has the same clone to make.
+///
+/// **Asked of git rather than stored**, as every other reading of a repository
+/// here is, so a remote added after the first registration is on the next
+/// answer rather than nowhere.
+#[tokio::test]
+async fn a_registrations_answer_says_where_the_repositorys_origin_is() {
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench().await;
+    let repo = repository(src.path().join("widgets"));
+
+    // Nothing to clone from, which is every repository `git init` made and
+    // nobody has pushed.
+    assert_eq!(added(register(&app, &repo).await).origin, None);
+
+    // Spelled the way git hands it back, which is after whatever `insteadOf` the
+    // machine running the test configures: what travels is the URL git would be
+    // given to clone, not the one the config file holds.
+    git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/you/widgets.git",
+        ],
+    );
+
+    assert_eq!(
+        already(register(&app, &repo).await).origin.as_deref(),
+        Some("https://github.com/you/widgets.git")
+    );
+}
+
 /// The standalone install: no unit, no flags, nothing configured anywhere. It
 /// registers a repository like any other, which is what a bare binary being
 /// usable out of the box means.

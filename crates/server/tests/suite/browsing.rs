@@ -24,8 +24,18 @@ use verkstead_server::{open_database, router};
 
 /// A router, plus the directory holding its database alive.
 ///
-/// Nothing is configured on it: a browse consults no boundary and no setting,
-/// so the plainest router there is answers everything asked here.
+/// A browse consults no boundary, so the plainest router there is answers
+/// everything asked here. It does consult one setting: whether this device is an
+/// **Annex**, which is what decides between the two homes a field standing empty
+/// may open on — the service's own, and the login user's (ADR-0024, *Open repo
+/// asks where the repository is*). Nothing configures it here, so every case
+/// below is the arm every other device takes.
+///
+/// **The other arm is judged where the rule is**, in `browsing::opening_on`'s own
+/// test in `src/browsing.rs`, rather than here: the two homes are the same
+/// directory on a runner, so a case through the endpoint could say that an
+/// Annex's empty browse still lists and nothing at all about which of them it
+/// picked.
 async fn app() -> (tempfile::TempDir, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))

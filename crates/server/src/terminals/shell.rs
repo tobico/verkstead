@@ -219,79 +219,11 @@ fn on_the_path(program: &str) -> Option<PathBuf> {
 }
 
 /// The login shell the passwd database gives the user this server runs as, or
-/// `None` where it holds no entry for it.
-///
-/// The database rather than the file: `getpwuid_r` is what asks whichever of
-/// them this machine keeps its accounts in — `/etc/passwd` on NixOS, the
-/// directory service on a Mac — and reading the file directly would find nothing
-/// on a Mac for every account a human actually has.
-///
-/// The reentrant call, with a buffer that grows until the entry fits, because
-/// the server is threaded and the plain `getpwuid` hands back a pointer into
-/// storage the next caller reuses.
-#[cfg(unix)]
+/// `None` where it holds no entry for it — see [`crate::passwd`], which is the
+/// one reading of that database and which the browse's own starting point is
+/// read off too.
 fn login_shell() -> Option<String> {
-    use std::ffi::CStr;
-
-    // Where the buffer starts and how far it is allowed to grow. glibc suggests
-    // a size of its own and this is comfortably past it; the ceiling is there so
-    // that a database answering `ERANGE` forever is a fallback rather than a
-    // server eating memory.
-    const ROOM: usize = 1024;
-    const MOST: usize = 64 * 1024;
-
-    let mut room = ROOM;
-
-    loop {
-        let mut buffer = vec![0u8; room];
-        let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
-        let mut found: *mut libc::passwd = std::ptr::null_mut();
-
-        // SAFETY: `entry` and `found` are ours to write into, and the buffer the
-        // strings are written into is the one whose length is passed beside it.
-        // Nothing read out of them outlives this iteration: the shell is copied
-        // into a `String` below, before the buffer goes.
-        let answered = unsafe {
-            libc::getpwuid_r(
-                libc::getuid(),
-                &mut entry,
-                buffer.as_mut_ptr().cast(),
-                buffer.len(),
-                &mut found,
-            )
-        };
-
-        if answered == libc::ERANGE && room < MOST {
-            room *= 2;
-            continue;
-        }
-
-        // A non-zero answer is the lookup failing and a null `found` is the
-        // database holding no such user — neither is a shell, and both are a
-        // machine that has nothing to say about the account the server runs as.
-        if answered != 0 || found.is_null() || entry.pw_shell.is_null() {
-            tracing::debug!(
-                answered,
-                "the passwd database named no login shell for this server's own user"
-            );
-
-            return None;
-        }
-
-        // SAFETY: the entry was filled in above and its strings point into the
-        // buffer, which is alive until this function returns.
-        let shell = unsafe { CStr::from_ptr(entry.pw_shell) };
-
-        return shell.to_str().ok().map(str::to_owned);
-    }
-}
-
-/// And where there is no passwd database to ask — which is Windows, whose
-/// accounts keep no login shell against them at all. What a terminal opens on
-/// there is [`installed`]'s answer rather than this one's.
-#[cfg(not(unix))]
-fn login_shell() -> Option<String> {
-    None
+    crate::passwd::login_shell()
 }
 
 #[cfg(test)]

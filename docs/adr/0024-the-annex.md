@@ -274,6 +274,59 @@ the same clone** rather than pointing at Open repo. A *Clone repo* row taking
 a URL was the recommendation and was rejected for a list: the cluster knows
 the origins, so nobody should type one.
 
+## Open repo asks where the repository is
+
+*Amended 2026-11-23, after the grilling of `open-repo-on-annex`.* On a Windows
+machine with a WSL Annex there was no obvious way to get a repository into the
+Annex. One cloned on Windows only became reachable through **Open repo** on
+the Keeper and then the clonable group — a route that works and that nothing
+on screen suggested — and one cloned in a WSL terminal landed as NixOS-WSL's
+default user `nixos`, which the service could neither read nor work as.
+
+**Open repo, on a Draft whose device is an Annex, first asks where the
+repository is** — a two-way choice at the top of the card, labelled by the
+pair's platforms read off the member rows (*On Windows* / *On Linux*), never
+hard-coded, so a Docker box beside a Mac later names itself with no new copy.
+The choice is an Annex Draft's alone: on a genuinely remote member the human
+knows it is another computer, and the clonable group already serves a
+repository registered there — which is also why the Keeper's own composer is
+unchanged. A cluster-wide choice with a device picker was rejected for that,
+and two rows in the dropdown were rejected for the foot of the dropdown,
+which keeps its two rows.
+
+**On Windows, the field browses the Keeper.** The pick registers the path on
+the Keeper — the author picker on the card as any registration has it — then
+clones on the Annex from the origin the registration reports, as that Repo's
+Author, into the parent the Annex remembers, registers the clone and makes it
+the Draft's Repo. The registration standing on the Keeper is the point rather
+than a side effect: it is what the manual route left behind, and it is what
+makes the repository clonable everywhere else. A clone that fails leaves it
+standing — true, harmless, and a shorter retry — with the refusal on the
+card. A repository with no origin is refused with a sentence saying what to
+do: cloning from the Keeper's copy would mean reading `/mnt/c`, rejected here
+and in ADR-0014, or a transport the cluster does not have. Branches not
+pushed to the origin are not carried, and a line on the card says so;
+carrying them was rejected for reopening `/mnt/c`. The Transfer Preflight
+needs nothing new: a path registered on the Keeper is the clonable reading's
+to offer already.
+
+**On Linux, the box logs in as the service's own user.** `wsl.defaultUser`
+becomes `verkstead`, with a real home and wheel, and the home joins
+`/srv/repos` in the box's `paths`; the *On Linux* side of the choice browses
+the Annex and opens on that home, read off the box's own user rather than a
+hard-coded path. One user owning everything is what dissolves the rest of the
+machinery: no shared group, no ACLs, no `safe.directory` — git never sees an
+owner it is not. The service keeps its own `HOME` under the state directory,
+so nothing about it as a service moves, and `gh auth login`, run once in the
+new shell, lands in a home that exists. Keeping the `nixos`/`verkstead`
+split — a shared group with setgid, default ACLs past the umask, and
+`safe.directory` for the browsed parents — was the recommendation and was
+rejected by the human: bubblewrap is the session boundary on WSL, and a user
+boundary inside the box is Windows' concern rather than the Annex's. Running
+the service as `nixos` was rejected with it, for the module option nobody
+else needs. Nothing migrates at the flip: `/home/nixos` stays on disk, and
+nothing logs in there any more.
+
 ## Consequences
 
 - A **Keeper** is a device with at least one Annex, and an **Annex** is a
@@ -307,3 +360,11 @@ the origins, so nobody should type one.
   Update are the pane, and a removed distro is noticed rather than offered.
 - **A *Clone repo* row taking a URL** — rejected for a list of what the
   cluster already knows.
+- **A cluster-wide *where is the repository* choice**, and **two rows in the
+  dropdown** — rejected: the question is the one machine's, and the
+  dropdown's foot keeps its two rows.
+- **Keeping the box's user split with ACLs**, and **running the service as
+  `nixos`** — rejected by the human: bubblewrap is the boundary on WSL, and
+  one user owning everything needs no machinery at all.
+- **Carrying unpushed branches**, and **cloning a repository with no origin
+  from the Keeper's copy** — rejected: both reopen `/mnt/c`.
