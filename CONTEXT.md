@@ -4495,11 +4495,13 @@ of them offer the row that runs no session — see
 [ADR-0030](docs/adr/0030-plugins.md), *Process*. These three are what the five
 Verkstead ships declare, and nothing but a plugin's Process names anything else;
 a role is a word from the store up, so a name nobody has used before is a role
-with a Pairing memory of its own the first time something is picked for it. The first line between them is planning
-against building: the grilling session's tail — writing the handoff, the backlog
-or the roadmap — is the Grilling Pairing's, and the Implementation Pairing
-drives what builds. Distinct accounts are why an inline implementation is a
-fresh session rather than the grilling session carrying on.
+with a Pairing memory of its own the first time something is picked for it.
+
+The first line between the three roles is planning against building: the
+grilling session's tail — writing the handoff, the backlog or the roadmap — is
+the Grilling Pairing's, and the Implementation Pairing drives what builds.
+Distinct accounts are why an inline implementation is a fresh session rather
+than the grilling session carrying on.
 
 The second line is reviewing against fixing. The Review Pairing reaches exactly
 one kind of session — the wrap-up's review, including the fresh one that runs
