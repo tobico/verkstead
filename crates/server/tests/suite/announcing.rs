@@ -69,15 +69,6 @@ const STRANGER: &str = "99887766554433221100ffeeddccbbaa";
 /// each reading's Tailscale is built with it and never runs.
 const PORT: u16 = 8422;
 
-/// How long a dial in this suite gives one address, rather than the two seconds
-/// a running server gives one.
-///
-/// Spent only where a dial is meant to reach nobody, which here is the member
-/// whose machine is not there: what is being asked is what an announcement does
-/// when it cannot be made, and a test that waited out the real deadline would
-/// be spending its time on the clock rather than on the question.
-const PATIENCE: Duration = Duration::from_millis(300);
-
 /// A machine with no Tailscale on it: `verkstead-no-such-tailscale` is a
 /// program that is not there, which is what having none *is*.
 fn no_tailscale() -> Tailscale {
@@ -183,18 +174,21 @@ impl Verkstead {
 
     /// The workbench its browser would be talking to, which is what the presses
     /// go through.
+    ///
+    /// **With a running server's deadlines, as [`Verkstead::peers`] has them,
+    /// and no press here in a hurry.** Two of them used to be, for the member
+    /// whose machine is not there — but the first telling an Allow leaves
+    /// running is the dial back to the asker, and the Keep below dials the
+    /// Annex it is linking, and both of those are meant to be answered. A
+    /// shorter patience is one span over every dial a press makes, so it cut
+    /// those two short as well; and it bought nothing in return, because the
+    /// machine that is not there is written down at `127.0.0.1:1`, which is
+    /// refused rather than waited out. What it cost is in
+    /// [`a_member_that_answers_nothing_is_dimmed_and_owed_the_telling`], where
+    /// a newcomer never told it was in reads exactly as a press that never told
+    /// it.
     fn workbench(&self) -> Router {
         router_answering_devices_telling(self.pool.clone(), self.devices(), self.nudges.clone())
-    }
-
-    /// And the same with every dial given [`PATIENCE`], for the press whose
-    /// announcement is meant to reach nobody.
-    fn workbench_in_a_hurry(&self) -> Router {
-        router_answering_devices_telling(
-            self.pool.clone(),
-            self.devices().waiting(PATIENCE),
-            self.nudges.clone(),
-        )
     }
 
     fn devices(&self) -> Devices {
@@ -213,12 +207,12 @@ impl Verkstead {
     /// How it dials, for the questions that are about a call rather than about
     /// a press.
     ///
-    /// **With a running server's deadlines rather than [`PATIENCE`]**, because
-    /// every call made through this one is meant to be answered — let in or
-    /// refused at the gate, but answered. Three hundred milliseconds for the
-    /// whole of an answer, a handshake and a write, is a dial a loaded runner
-    /// fails to finish, and that reads exactly as a member answering at none of
-    /// its addresses.
+    /// **With a running server's deadlines, as [`Verkstead::workbench`] has
+    /// them**, because every call made through this one is meant to be answered
+    /// — let in or refused at the gate, but answered. Three hundred
+    /// milliseconds for the whole of an answer, a handshake and a write, is a
+    /// dial a loaded runner fails to finish, and that reads exactly as a member
+    /// answering at none of its addresses.
     fn peers(&self) -> Peers {
         Peers::of(self.device.clone(), self.members.clone())
     }
@@ -657,7 +651,7 @@ async fn a_member_that_answers_nothing_is_dimmed_and_owed_the_telling() {
     let held = being_asked(&b.workbench()).await;
     let mut page = Listening::open(&b.workbench()).await;
 
-    allow(&b.workbench_in_a_hurry(), &held[0].request).await;
+    allow(&b.workbench(), &held[0].request).await;
     b.tellings.told().await;
 
     // The press answered before the dimming happened, so an open page holds a
@@ -905,7 +899,7 @@ async fn an_annex_announced_after_it_was_owed_carries_its_mark() {
         .await
         .unwrap();
 
-    kept(&a.workbench_in_a_hurry(), &b).await;
+    kept(&a.workbench(), &b).await;
 
     assert_eq!(
         verkstead_store::announcements_owed(&a.pool, B)
