@@ -57,6 +57,23 @@ pub struct RepoEntry {
     /// there being nothing there to pick.
     #[serde(default)]
     pub github: Option<String>,
+
+    /// And the URL of that `origin` remote itself, as git spelled it, where the
+    /// repository has one.
+    ///
+    /// **Only a registration's answer says it**, the way `github` is only the
+    /// list's: everywhere else a Repo is drawn it is `None`, a create's answer
+    /// and a clone's among them. It is there for the one press that registers on
+    /// one machine and clones on another — **Open repo** on an Annex's draft,
+    /// told the repository is on the Keeper (ADR-0024, *Open repo asks where the
+    /// repository is*). The clone is made from this, and it is read off the
+    /// repository the registration has just been over rather than asked for a
+    /// second time.
+    ///
+    /// `None` is a repository with no origin, which is one there is nothing to
+    /// clone from: refused on the card, with a sentence saying what to do.
+    #[serde(default)]
+    pub origin: Option<String>,
 }
 
 /// One registered Repo as a member across the link is told of it: the row, and

@@ -43,6 +43,7 @@
     "github": null,
     "id": 1,
     "name": "verkstead",
+    "origin": null,
     "path": "/srv/repos/verkstead"
   },
   "resets": null,

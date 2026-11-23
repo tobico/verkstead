@@ -54,6 +54,7 @@ import {
   type RepoRefused,
 } from "../src/repos/RepoList";
 import styles from "../src/repos/RepoList.module.css";
+import { ANNEX_REPOS } from "../src/remembered";
 import settingsCard from "../src/settings/SettingsCard.module.css";
 import head from "../src/workbench/PaneHead.module.css";
 import { drawn } from "./bench";
@@ -312,8 +313,8 @@ describe("the pane it opens", () => {
   /// would be a press somebody could only get right by luck.
   it("tells two repos of one name apart", async () => {
     const twins: RepoEntry[] = [
-      { id: 3, name: "api", path: "/srv/repos/api", default_branch: "main", author: null, author_unpicked: false, github: null },
-      { id: 4, name: "api", path: "/work/api", default_branch: "main", author: null, author_unpicked: false, github: null },
+      { id: 3, name: "api", path: "/srv/repos/api", default_branch: "main", author: null, author_unpicked: false, github: null, origin: null },
+      { id: 4, name: "api", path: "/work/api", default_branch: "main", author: null, author_unpicked: false, github: null, origin: null },
     ];
     serving(whenever("/api/ui/repos", json(twins)));
     const { container } = mountPane();
@@ -914,13 +915,16 @@ describe("browsing for one", () => {
 /// **Annex**: which machine of the pair the repository is on (ADR-0024, *Open
 /// repo asks where the repository is*).
 ///
-/// What is worth proving here is the three things the card decides for itself.
+/// What is worth proving here is the four things the card decides for itself.
 /// That the two options are labelled off the member rows rather than out of a
 /// constant, because a Docker box beside a Mac has to name itself with no new
 /// copy. That each side points the whole form at its own device — the browse,
 /// and the registration behind it — since that is the one thing the choice
-/// does. And that a draft on anything but an Annex is asked nothing at all,
-/// which is every other Open repo card in the app.
+/// does. That the Keeper's side does not stop at the registration: it clones on
+/// the Annex from the origin that registration reported, and what a repository
+/// with no origin and a clone that failed come to is this card's to say. And
+/// that a draft on anything but an Annex is asked nothing at all, which is
+/// every other Open repo card in the app.
 describe("the choice an Annex's draft asks first", () => {
   /// A Windows machine keeping a WSL box, which is the pair this was drawn for:
   /// this device's own row is the Keeper, and the member wearing `kept_by` is
@@ -982,8 +986,30 @@ describe("the choice an Annex's draft asks first", () => {
     },
   };
 
-  /// The Repo each side's press lands.
+  /// The Repo the Annex's own side lands.
   const OPENED: RepoEntry = { ...FIRST, id: 71, name: "widgets" };
+
+  /// What the Keeper's registration lands there: the Repo on that machine,
+  /// carrying the `origin` the server read off the repository, which is what the
+  /// clone is made from — and the Author it is recorded as, which the clone
+  /// follows.
+  const KEEPERS: RepoEntry = {
+    ...FIRST,
+    id: 12,
+    name: "widgets",
+    path: "C:\\Users\\ada\\src\\widgets",
+    author: "7a1f",
+    origin: "https://github.com/you/widgets.git",
+  };
+
+  /// And the Repo the clone leaves on the Annex, which is the draft's: a Repo id
+  /// is one machine's, and the one above is the Keeper's.
+  const CLONE: RepoEntry = {
+    ...FIRST,
+    id: 71,
+    name: "widgets",
+    path: "/srv/repos/widgets",
+  };
 
   /// The card as a draft on `device` draws it, with the cluster `view` says.
   function mountOn(device: Device, view: DevicesView, ...answers: Array<Answer>) {
@@ -1116,15 +1142,18 @@ describe("the choice an Annex's draft asks first", () => {
     );
   });
 
-  /// And the Windows side the other way: the field is the Keeper's filesystem
-  /// and the press registers there, which is what makes the repository one the
-  /// Annex's dropdown can clone. The draft is not moved onto it — a Repo id is
-  /// one Verkstead's own, and the one that landed is the Keeper's.
-  it("browses the Keeper and registers the path there", async () => {
-    const { fetching, close, landed } = mountOn(
+  /// And the Windows side the other way round, whole: the field is the Keeper's
+  /// filesystem, the press registers there — which is what makes the repository
+  /// clonable everywhere else, and is the point of that half rather than a side
+  /// effect — and then the Annex clones it from the origin that registration
+  /// reported, as that Repo's Author, into the parent an Annex remembers. One
+  /// press, no terminal.
+  it("registers on the Keeper and clones on the Annex in one press", async () => {
+    const { fetching, landed } = mountOn(
       BOX.device,
       PAIR,
-      whenever("/api/ui/repos", json({ Added: OPENED }), "POST"),
+      whenever("/api/ui/repos", json({ Added: KEEPERS }), "POST"),
+      whenever(onTheBox("/repos/clone"), json({ Cloned: CLONE }), "POST"),
     );
 
     await waitFor(() => expect(sides()).toHaveLength(2));
@@ -1139,16 +1168,114 @@ describe("the choice an Annex's draft asks first", () => {
 
     register("C:\\Users\\ada\\src\\widgets");
 
-    await waitFor(() => expect(close).toHaveBeenCalled());
-    expect(fetching).toHaveBeenCalledWith(
-      "/api/ui/repos",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ path: "C:\\Users\\ada\\src\\widgets" }),
-      }),
+    await waitFor(() =>
+      expect(fetching).toHaveBeenCalledWith(
+        "/api/ui/repos",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ path: "C:\\Users\\ada\\src\\widgets" }),
+        }),
+      ),
     );
-    expect(writes(fetching, onTheBox("/repos"))).toBe(0);
+
+    // The parent off the Annex's own memory rather than out of a constant here:
+    // nothing has been cloned on this box, and a box Verkstead made declares
+    // `/srv/repos` its one path.
+    await waitFor(() =>
+      expect(fetching).toHaveBeenCalledWith(
+        onTheBox("/repos/clone"),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            origin: KEEPERS.origin,
+            parent: ANNEX_REPOS,
+            author: KEEPERS.author,
+          }),
+        }),
+      ),
+    );
+
+    // And the draft goes onto the clone rather than onto the Keeper's Repo.
+    await waitFor(() => expect(landed).toHaveBeenCalledWith(CLONE));
+    expect(landed).toHaveBeenCalledTimes(1);
+  });
+
+  /// A repository with no origin is nothing the Annex can clone, so the press is
+  /// refused with the two ways round it. The registration on the Keeper stands:
+  /// it is true, it is harmless, and it makes the retry a shorter one.
+  it("refuses a repository with no origin and keeps the registration", async () => {
+    const { fetching, landed } = mountOn(
+      BOX.device,
+      PAIR,
+      whenever(
+        "/api/ui/repos",
+        json({ Added: { ...KEEPERS, origin: null } }),
+        "POST",
+      ),
+    );
+
+    await waitFor(() => expect(sides()).toHaveLength(2));
+    pick("On Windows");
+    await waitFor(() => expect(picked()).toBe("On Windows"));
+
+    register("C:\\Users\\ada\\src\\widgets");
+
+    const said = await waitFor(() => screen.getByText(/no origin/i));
+    // Named by the Keeper's own platform, as the choice above it is.
+    expect(said.textContent).toContain("work on it on Windows");
+
+    expect(writes(fetching, "/api/ui/repos")).toBe(1);
+    expect(writes(fetching, onTheBox("/repos/clone"))).toBe(0);
     expect(landed).not.toHaveBeenCalled();
+  });
+
+  /// And a clone that failed is said in git's own words, on the card, with the
+  /// registration standing for the same reason.
+  it("says why a clone failed and keeps the registration", async () => {
+    const { fetching, landed } = mountOn(
+      BOX.device,
+      PAIR,
+      whenever("/api/ui/repos", json({ Added: KEEPERS }), "POST"),
+      whenever(
+        onTheBox("/repos/clone"),
+        json({ Refused: "fatal: Authentication failed." }),
+        "POST",
+      ),
+    );
+
+    await waitFor(() => expect(sides()).toHaveLength(2));
+    pick("On Windows");
+    await waitFor(() => expect(picked()).toBe("On Windows"));
+
+    register("C:\\Users\\ada\\src\\widgets");
+
+    await waitFor(() => screen.getByText("fatal: Authentication failed."));
+
+    expect(writes(fetching, "/api/ui/repos")).toBe(1);
+    expect(landed).not.toHaveBeenCalled();
+  });
+
+  /// What the Windows side says above its field: the clone it is about to make,
+  /// and the one thing a clone from the origin leaves behind. Both machines
+  /// named by their own platforms, and neither said on the Annex's own side,
+  /// where nothing is cloned at all.
+  it("says branches that aren't pushed stay on the Keeper's machine", async () => {
+    mountOn(BOX.device, PAIR);
+
+    await waitFor(() => expect(sides()).toHaveLength(2));
+    expect(document.querySelector(`.${styles.clones}`)).toBeNull();
+
+    pick("On Windows");
+
+    const said = await waitFor(() => {
+      const note = document.querySelector(`.${styles.clones}`);
+      expect(note).toBeTruthy();
+      return note!;
+    });
+
+    expect(said.textContent!.replace(/\s+/g, " ")).toBe(
+      "Verkstead clones it on Linux from its origin. Branches you haven't pushed stay on Windows.",
+    );
   });
 
   /// Moving the choice draws the form afresh: a path on one machine is nothing

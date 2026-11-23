@@ -73,6 +73,7 @@
           "github": null,
           "id": 2,
           "name": "askance",
+          "origin": null,
           "path": ""
         },
         "worktree": null
@@ -104,6 +105,7 @@
       "github": null,
       "id": 1,
       "name": "verkstead",
+      "origin": null,
       "path": ""
     },
     "resets": null,

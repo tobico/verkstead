@@ -447,6 +447,7 @@ function repo(id: number, name: string): RepoEntry {
     author: "work",
     author_unpicked: false,
     github: null,
+    origin: null,
   };
 }
 

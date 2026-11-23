@@ -302,6 +302,14 @@
   margin-top: 0.4rem;
 }
 
+/* And what the Keeper's side of that choice says above its field: the clone the
+   press makes on the Annex, and the branches a clone from the origin leaves
+   behind. Outside the form, the question being about both halves of the press
+   rather than about the path. */
+.clones {
+  margin: 0 0 0.85rem;
+}
+
 /* The press that undoes rather than does, on both modals. What it looks like is
    `.secondary` in `styles/base.css`, which every quiet press in the app is
    painted by; the class is kept here so that the filled rule above knows which
