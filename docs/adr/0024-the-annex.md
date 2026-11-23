@@ -292,7 +292,7 @@ knows it is another computer, and the clonable group already serves a
 repository registered there — which is also why the Keeper's own composer is
 unchanged. A cluster-wide choice with a device picker was rejected for that,
 and two rows in the dropdown were rejected for the foot of the dropdown,
-which keeps its three kinds of row.
+which keeps its two rows.
 
 **On Windows, the field browses the Keeper.** The pick registers the path on
 the Keeper — the author picker on the card as any registration has it — then
