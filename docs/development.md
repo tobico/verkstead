@@ -1308,6 +1308,40 @@ every one of them passed alone — so the bar is ten in a row under load rather
 than one green run. It takes about fifty minutes, which is why nothing runs it
 for you.
 
+**And the machine under a run is the host's own hardening, inherited.** A
+session is a sandbox inside whatever started the server, and two facts about
+that host have each failed a suite on a developer's machine while the runners
+stayed green. Both are fixed; they are written down because the *shape* of
+them recurs, and because what each one looks like from a test is nothing like
+its cause.
+
+**A seccomp filter is inherited and it kills.** Everything the service starts
+runs under the unit's `SystemCallFilter`, bwrap and the session inside it
+alike, and a denied call does not return an error unless
+`SystemCallErrorNumber` says so — it raises SIGSYS, which is
+`Bad system call (core dumped)` and exit `159`. The NixOS module denied the
+`@chown` family that way, by way of `~@privileged`, which killed `sed -i` —
+it chowns its temporary file before renaming it — along with `deno` and
+`dotnet` outright. What that looked like from the suite was **151 `sessions`
+tests timing out identically**: the backlog stub ticks its task off with
+`sed -i`, sed died, the task stayed open, and the server re-prompted the
+session three times and filed the idle notice. So an in-place edit that
+silently does not happen, or a toolchain that exits `159` having printed
+nothing, is this shape — and `grep Seccomp /proc/self/status` says whether a
+filter is in force at all.
+
+**A NixOS shell rebuilds the environment, login shell or not.** `/etc/bashrc`
+and the wrapped `/bin/sh` that stands in for it each source
+`/etc/set-environment` unless `__NIXOS_SET_ENVIRONMENT_DONE` is already in the
+environment — and a sandbox hands over a composed environment, so it was not.
+That file prepends `/run/wrappers/bin` to the `PATH` the server composed and
+exports a `LANG`, which is why
+`sandbox::the_verkstead_a_session_asks_with_is_the_one_serving_it` read the
+wrong first entry, and why a listing compared byte for byte came back collated
+instead. Every sandbox now says that variable ([ADR
+0013](adr/0013-conversation-terminals.md), which met it at a terminal first),
+so what a session's shell starts with is what the description said.
+
 **Windows runs an arm of its own**, because that suite is `cfg(unix)`: it
 stands on a mount namespace, a `/bin/sh` probe and a `stty`, and a Windows
 session has none of the three.
