@@ -8741,8 +8741,20 @@ async fn unlink_device(State(state): State<AppState>, Path(device): Path<String>
         return unavailable("This server holds no device identity to answer for.");
     };
 
+    // Whether the press takes a member out, rather than one already gone: only
+    // a device that leaves now has what it kept handed on by this press.
+    let leaving = devices
+        .membership()
+        .rows()
+        .await
+        .is_ok_and(|members| members.iter().any(|member| member.device == device));
+
     match devices.unlink(&device).await {
-        Ok(()) => {}
+        Ok(()) => {
+            if leaving {
+                inherited(&state, &device).await;
+            }
+        }
 
         Err(Unlinkable::Annex { name, keeper }) => {
             return refused(
@@ -8768,6 +8780,31 @@ async fn unlink_device(State(state): State<AppState>, Path(device): Path<String>
     }
 
     moved(&state, &devices).await
+}
+
+/// Name this device the **Heir** of `left`, which the press has just unlinked
+/// (ADR-0029, *A roadmap's home outlives its device*): every roadmap stage born
+/// on it, wherever its live copy is, reports here from now on, and a finish
+/// over there asks here whether it may join.
+///
+/// The device that unlinks rather than any other, because the press is the one
+/// moment somebody is acting on the leaving, and one device naming one heir is
+/// one answer the whole cluster reads. Said in the log alone: a device that
+/// kept no roadmap leaves nothing anybody would notice inherited.
+async fn inherited(state: &AppState, left: &str) {
+    match store::name_heir(&state.pool, &state.device, left, &state.device).await {
+        Ok(_) => {
+            tracing::info!(
+                left,
+                "a device was unlinked, and this device keeps whatever roadmaps it kept",
+            );
+
+            state.nudges.announce(Nudge::Heirs);
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, left, "naming this device the heir of a device it unlinked failed");
+        }
+    }
 }
 
 /// `GET /api/ui/devices/asking` — every device asking to be let into this one's

@@ -728,6 +728,7 @@ async fn asked_before(state: &AppState, conversation_id: i64, work: &Work) -> Be
                 store::OwnAsking::Placing { work: placed, .. } => {
                     Work::from_placed(placed) == *work
                 }
+                store::OwnAsking::Heir { .. } => false,
             }
     });
 
@@ -735,7 +736,9 @@ async fn asked_before(state: &AppState, conversation_id: i64, work: &Work) -> Be
         return Before::Nothing;
     };
 
-    let store::OwnAsking::Placing { moves, .. } = &newest.asking;
+    let store::OwnAsking::Placing { moves, .. } = &newest.asking else {
+        return Before::Nothing;
+    };
 
     match (&newest.response, newest.locked) {
         (Some(response), _) if picked(response) == Some(moves.len() as u32 + 1) => Before::RunHere,
@@ -783,7 +786,7 @@ pub(crate) async fn stage_waiting(state: &AppState, conversation_id: i64) -> boo
             work: store::PlacedWork::Stage { label },
             ..
         } => Some(label),
-        store::OwnAsking::Placing { .. } => None,
+        _ => None,
     }) else {
         return false;
     };
@@ -837,7 +840,10 @@ pub(crate) async fn answered(
         wants,
         moves,
         waiting_on,
-    } = asking;
+    } = asking
+    else {
+        return;
+    };
     let work = Work::from_placed(work);
 
     let picked = picked(response).and_then(|n| usize::try_from(n).ok());
@@ -1215,7 +1221,10 @@ pub(crate) async fn woke(
         wants,
         waiting_on,
         ..
-    } = asking;
+    } = asking
+    else {
+        return true;
+    };
     let work = Work::from_placed(work);
 
     let Some(devices) = state.devices.as_ref() else {

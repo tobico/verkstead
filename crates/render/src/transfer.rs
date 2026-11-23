@@ -358,6 +358,36 @@ pub struct StageReport {
     /// has opened one: what puts it in home's chain.
     #[serde(default)]
     pub joined: Option<StageJoined>,
+
+    /// What the stage is, for a home that has never heard of it: sent where the
+    /// home is the **Heir** of the device the stage was born on (ADR-0029, *A
+    /// roadmap's home outlives its device*), which holds no tombstone until it
+    /// adopts one. Defaulted, so a home older than this reads the report it
+    /// always read.
+    #[serde(default)]
+    pub adopting: Option<StageAdopting>,
+}
+
+/// What an heir makes its tombstone of a stage from: the facts the device the
+/// stage was born on would have held.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageAdopting {
+    /// The Repo **on the heir** the stage is in, as the reporting device's
+    /// match against the heir's registry settled it.
+    pub repo: i64,
+
+    /// Which roadmap, and which stage of it.
+    pub roadmap: String,
+    pub stage: String,
+
+    /// The branch the stage is on, and the one it was cut from where that was
+    /// not the default branch.
+    pub branch: String,
+    pub stacks_on: Option<String>,
+
+    /// The id the live copy goes by on the reporting device, which the
+    /// tombstone's mark names.
+    pub live: i64,
 }
 
 /// The pull request a stage away from home opened as it joined its roadmap's

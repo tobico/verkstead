@@ -126,9 +126,9 @@ pub use transcript::{
 pub use transfer::{
     Arrived, BirthKey, CameFrom, ChainLink, CheckoutAcross, CompanionCheckoutAcross,
     ConversationAcross, HandedOn, HarnessThere, Lacking, MovedFor, PairingAcross, PairingRole,
-    Permitting, PickedAcross, Preflight, ProfileAcross, StageAhead, StageJoin, StageJoined,
-    StageJoining, StageReport, StageReported, StageWhereabouts, TipsThere, Transferring,
-    UntrackedFile,
+    Permitting, PickedAcross, Preflight, ProfileAcross, StageAdopting, StageAhead, StageJoin,
+    StageJoined, StageJoining, StageReport, StageReported, StageWhereabouts, TipsThere,
+    Transferring, UntrackedFile,
 };
 pub use update::UpdateNotice;
 pub use view::{

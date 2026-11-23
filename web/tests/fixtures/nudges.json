@@ -66,6 +66,9 @@
     "kind": "mcp_servers"
   },
   {
+    "kind": "heirs"
+  },
+  {
     "kind": "everything"
   }
 ]

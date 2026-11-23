@@ -651,6 +651,9 @@ comes home lands on its tombstone like any return and keeps the places home
 held for it, first in the queue to join and in the chain where it joined, so
 the round trip moves nothing; from there it reports to nobody, and its settle
 starts what stood on it right there.
+**A home that leaves the cluster leaves an Heir** (ADR-0029, *A roadmap's home
+outlives its device*) — see **Heir**, which is home from then on to every Stage
+born on the device that left.
 **And Verkstead asks for one itself, for a task that wants another platform**
 (ADR-0029, *Placing declared work*). A line of `.tasks/TODO.md` that says `on
 linux`, `on macos` or `on windows` after its link is placed before every launch
@@ -684,6 +687,20 @@ once, where it starts**, as an inline run is: a **Resume** never places it
 again, so a Stage moved home by hand stays home, and its declared tasks are
 still placed one by one as any task is.
 _Avoid_: migrate, hand off, sync, failover
+
+**Heir**:
+The device that keeps what a device that left the cluster kept — the home of
+every roadmap **Stage** born there (ADR-0029, *A roadmap's home outlives its
+device*). A Replicated record keyed by the device that left, so every member
+reads the same heir: a stage away from home reports to it and asks it before
+joining, and it drives the roadmaps as their home did. **The device that
+unlinks is the heir**; where a home left with no heir named, the Stage held on
+it asks the human with a Set of Verkstead's own whether its device keeps the
+roadmap. An heir is a device's, never one roadmap's, and one that leaves in
+turn is followed to its own. **The heir adopts** each Stage the first time its
+live copy reports — making the tombstone the device that left would have held —
+and a Stage that finished on that device and never moved is lost with it.
+_Avoid_: owner, keeper (that is an **Annex**'s), new home, successor, failover
 
 **Permitted Device**:
 A device of the cluster the agent doing a **Conversation**'s work may move it

@@ -36,7 +36,7 @@ pub(crate) async fn asked(
     ConnectInfo(caller): ConnectInfo<Caller>,
     Json(asking): Json<StageJoining>,
 ) -> Response {
-    let tombstone = match super::reports::tombstone_of(&state, &caller, &asking.born).await {
+    let tombstone = match super::reports::tombstone_of(&state, &caller, &asking.born, None).await {
         Ok(tombstone) => tombstone,
         Err(refusal) => return refusal,
     };

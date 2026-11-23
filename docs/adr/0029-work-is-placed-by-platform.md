@@ -203,6 +203,44 @@ for one stage; keeping every stage at home and letting only sessions roam was
 turned down because every stage would end with a move home and the agent would
 carry the rule.
 
+## A roadmap's home outlives its device
+
+Added 2026-11-23, when a stage of the `conversations` roadmap finished on one
+machine while the machine it was born on had left the cluster for good: its
+finish asked a home nobody would ever answer for, every ten seconds, for as long
+as the server stayed up. Home is the stage's birth device, a birth key is
+stamped once and never changes, and an unlink touched none of it.
+
+**A device that leaves has an Heir, which keeps what it kept.** A Replicated
+record (ADR-0028), keyed by the Device Id of the device that left, naming the
+device that keeps its roadmaps. Every reading of where a stage's home is reads
+through it — whether a stage is away from home, which roadmaps a device drives,
+and whether a report or a join is home's to answer — so the heir is home to
+every stage born on the device that left, and the birth key every copy and
+tombstone is named by stays as it was. An heir is a device's, never one
+roadmap's: one record answers for everything the device kept, and an heir that
+leaves in turn is followed to its own.
+
+**The device that unlinks is the heir**, named by the press itself, because the
+press is the one moment somebody is acting on the departure and one device
+naming one heir is one answer the whole cluster reads. **A home that left with
+no heir is asked about**: the held stage says on its Timeline that the device
+that kept its roadmap has left, and puts a Set of Verkstead's own — *Keep it
+here*, *Leave it waiting* — whose first answer names its own device the heir.
+Only a home no longer a member is asked about; one that is merely asleep is
+waited for as before, so a laptop coming back never finds a second home in its
+place.
+
+**The heir adopts what it hears of.** What the device that left knew went with
+it: its tombstones, the order its chain joined in, the places in its queue. The
+live copies elsewhere still hold their own stages, so each reports to the heir
+as it would have to home, telling it what the stage is — roadmap, label,
+branches, and which of the heir's Repos it is in — and the heir makes the
+tombstone the leaver would have held. The chain is read off those tombstones
+in the order the heir learned of each join, and a stage that has merged is out
+of it by git's reading as ever. A stage that finished on the device that left,
+and never moved, has no copy anywhere, so the heir never hears of it.
+
 ## What the skills say
 
 **CI confirms; it does not discover.** Where the build, the suite or the
@@ -224,3 +262,13 @@ reproduced there, never fixed from the log alone.
 - Coming home before the finish — the wrap-up must verify where it fixes.
 - Placing a fix session by the failing job's name.
 - Stage records replicated across the cluster; stages that never move.
+- A stage whose home has left joining on its own, off this device's reading
+  of the roadmap — nobody would be ordering the roadmap's joins any more, and
+  two stages could rebase onto each other's moving branches.
+- The heir chosen by a rule every device works out alone, or picked from a
+  list at every unlink — the first is two schedulers the moment two devices
+  disagree, and the second a question on every unlink of a device that kept
+  nothing.
+- Rebuilding a departed home's lost stages from GitHub's pull requests — a
+  guess at which branches were stages, where the copies that report are a
+  record of them.

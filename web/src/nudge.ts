@@ -500,6 +500,12 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
     case "mcp_servers":
       return [keyOf(device, "settings"), keyOf(device, "conversation")];
 
+    // An heir was named for a device that left the cluster. No page draws one:
+    // the stage that was waiting on the home that left moves with a Nudge of
+    // its own, so there is nothing here to read again.
+    case "heirs":
+      return [];
+
     // Where a Profile's login has got to moved — which is what shows a second
     // device's modal the address the first one's login printed. This device's
     // own: a login is only ever run where the account is at home.
