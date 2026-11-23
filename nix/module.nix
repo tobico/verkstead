@@ -636,6 +636,21 @@ in
           "capset"
           "pivot_root"
           "sethostname"
+          # And `@chown`, which is in `@privileged` and is not a privileged
+          # thing to do to a file one owns. Everything a session runs inherits
+          # this filter, nothing sets `SystemCallErrorNumber`, so a denied call
+          # does not fail — it **kills the process with SIGSYS**. What that
+          # costs is not hypothetical: `sed -i` chowns its temporary file before
+          # renaming it, and so dies on every in-place edit an agent makes;
+          # `deno` and `dotnet` cannot start at all. A coding agent that cannot
+          # run `sed -i` is the same kind of setting as the
+          # `MemoryDenyWriteExecute` above — one the product cannot have.
+          #
+          # The group rather than its four calls one at a time, unlike the three
+          # above: `chown`, `fchown`, `fchownat` and `lchown` are one thing
+          # asked four ways, and a session reaching for the one spelling left
+          # out would die for the same reason again.
+          "@chown"
         ];
         UMask = "0077";
 
