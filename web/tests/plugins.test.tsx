@@ -278,6 +278,39 @@ describe("Codex's row", () => {
   });
 });
 
+describe("a Process plugin's row", () => {
+  /// A built-in Process plugin: its process by name, ticked, and the tick is
+  /// the one switch for whether the picker offers Develop at all. The server
+  /// takes the press — `plugins::built_in::switched` counts a manifest's
+  /// processes — so the row has to draw it.
+  it("has a tick that presses, and says its process", async () => {
+    const develop = PLUGINS.built_in.find((row) => row.name === "Develop")!;
+    const fetching = serving(
+      whenever("/api/ui/plugins", json(PLUGINS)),
+      whenever(
+        `/api/ui/plugins/${develop.uuid}/enabled`,
+        json(PLUGINS),
+        "POST",
+      ),
+    );
+    pane();
+
+    const row = await theRow("Develop");
+    expect(row.textContent).toContain("Its process is Develop.");
+    const tick = row.querySelector("input[type=checkbox]") as HTMLInputElement;
+    expect(tick.checked).toBe(true);
+
+    fireEvent.click(tick);
+    await waitFor(() => {
+      const press = fetching.mock.calls.find(([asked]) =>
+        String(asked).endsWith(`/plugins/${develop.uuid}/enabled`),
+      );
+      expect(press).toBeDefined();
+      expect(JSON.parse(String(press![1]!.body))).toEqual({ enabled: false });
+    });
+  });
+});
+
 describe("an Agent plugin's row", () => {
   /// GitLab, as an Agent plugin whose harness two profiles use and whose
   /// binary isn't on this machine.
