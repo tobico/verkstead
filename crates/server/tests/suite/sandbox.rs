@@ -2036,6 +2036,10 @@ async fn the_open_rendering_hands_a_session_the_environment_it_was_described_wit
         "TMP",
         "GIT_CONFIG_COUNT",
         "GIT_TERMINAL_PROMPT",
+        // Every sandbox says this, rather than only one built to run a shell:
+        // a session runs shells of its own all day — see
+        // `a_sessions_shell_is_not_told_to_rebuild_the_environment`.
+        "__NIXOS_SET_ENVIRONMENT_DONE",
         // This fixture's Profile is a Claude one, and every Claude session is
         // told not to update the install it is running — see
         // `a_claude_session_is_told_not_to_update_the_install_it_is_running`.
@@ -2151,6 +2155,38 @@ async fn the_open_rendering_hands_a_session_the_environment_it_was_described_wit
         "a file a session throws away should land under its own profile, and \
          TEMP is {}",
         reported["TEMP"]
+    );
+}
+
+/// A session's own shells are told the environment has been set, which is what
+/// keeps the composed `PATH` composed.
+///
+/// **Every shell on a NixOS box rebuilds the environment as it starts, login
+/// shell or not** — `/etc/bashrc` and the wrapped `/bin/sh` that stands in for
+/// it each source `/etc/set-environment` unless `__NIXOS_SET_ENVIRONMENT_DONE`
+/// is already there, and that file prepends `/run/wrappers/bin` to the `PATH`
+/// and exports a `LANG`. ADR-0013 found this for a terminal and said it of a
+/// Sandbox built to run one.
+///
+/// **A session runs shells too**, which is the half that was missed: an agent's
+/// every command is a shell, and so is the `/bin/sh -c` the sessions suite
+/// drives one with. So the variable is said for every sandbox rather than for a
+/// shelled one, and the invariant it is there to keep — that the first
+/// `verkstead` a session finds is the build serving it, which
+/// `the_verkstead_a_session_asks_with_is_the_one_serving_it` reads off a shell
+/// inside — holds on this kind of host as well as on the runners.
+///
+/// Off NixOS it is a variable nothing reads, which is why the assertion is on
+/// the description rather than on an outcome only one kind of machine has.
+#[tokio::test]
+async fn a_sessions_shell_is_not_told_to_rebuild_the_environment() {
+    let fixture = grilling().await;
+
+    assert_eq!(
+        environment(&fixture.sandbox(vec![]))["__NIXOS_SET_ENVIRONMENT_DONE"],
+        "1",
+        "a session's sandbox says the environment was set here, by the \
+         description the sandbox is"
     );
 }
 
