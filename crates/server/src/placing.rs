@@ -1057,6 +1057,9 @@ async fn not_awake(state: &AppState, conversation_id: i64, device: &str) -> Opti
         &config,
         &conversation,
         &crate::processes::labels(state, &conversation.process),
+        crate::processes::of(state, &conversation.process)
+            .map(|loaded| loaded.process.name)
+            .as_deref(),
         device,
     )
     .await
@@ -1251,6 +1254,9 @@ pub(crate) async fn woke(
             &config,
             &conversation,
             &crate::processes::labels(state, &conversation.process),
+            crate::processes::of(state, &conversation.process)
+                .map(|loaded| loaded.process.name)
+                .as_deref(),
             device,
         )
         .await
@@ -1364,6 +1370,9 @@ async fn placing(
                 config,
                 conversation,
                 &crate::processes::labels(state, &conversation.process),
+                crate::processes::of(state, &conversation.process)
+                    .map(|loaded| loaded.process.name)
+                    .as_deref(),
                 &member.device,
             )
             .await

@@ -219,7 +219,7 @@ export function Adoption(props: {
         )}
       </Show>
 
-      <Show when={props.conversation.state === "Draft"}>
+      <Show when={props.conversation.state === "draft"}>
         <button
           type="button"
           class={styles.adopt}

@@ -2,7 +2,7 @@
 //! back by this one.
 //!
 //! Nothing writes one any more: what a human sets going by hand is a steer into
-//! Implementing, whose instruction rides the Steer Event. What is asked of the
+//! whose instruction rides the Steer Event. What is asked of the
 //! store here is ADR-0006's rule — *the record is kept and read rather than
 //! rewritten* — so the rows are written by hand, as a database from before holds
 //! them, and the tests are that a Timeline carrying one still reads back the

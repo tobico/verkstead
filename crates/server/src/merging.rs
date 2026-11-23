@@ -258,7 +258,7 @@ impl MemberLists {
         let held = self.held();
         let row = held.get(device)?.rows.iter().find(|row| row.id == id)?;
 
-        Some(match settled(row.branch_named, row.state, row.naming) {
+        Some(match settled(row.branch_named, &row.state, row.naming) {
             true => row.branch.clone(),
             false => "Draft".to_owned(),
         })
@@ -280,7 +280,7 @@ impl MemberLists {
             .flat_map(|held| &held.rows)
             .filter(|row| row.working)
         {
-            match settled(row.branch_named, row.state, row.naming) {
+            match settled(row.branch_named, &row.state, row.naming) {
                 true => named.push(row.branch.clone()),
                 false => drafts += 1,
             }
@@ -912,12 +912,8 @@ pub(crate) async fn anything_archived(state: &AppState, own: bool) -> bool {
 /// calls it (see `titled` in `web/src/workbench/naming.ts`): somebody typed it,
 /// or the work has started and the first session has finished naming it. It is
 /// a *Draft* otherwise, its branch Verkstead's own invention.
-pub(crate) fn settled(
-    branch_named: bool,
-    state: verkstead_render::Lifecycle,
-    naming: bool,
-) -> bool {
-    branch_named || (state != verkstead_render::Lifecycle::Draft && !naming)
+pub(crate) fn settled(branch_named: bool, state: &str, naming: bool) -> bool {
+    branch_named || (state != crate::store::State::DRAFT && !naming)
 }
 
 #[cfg(test)]

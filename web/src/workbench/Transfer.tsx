@@ -140,6 +140,16 @@ function lacking(
     );
   }
 
+  if ("Process" in said) {
+    return (
+      <>
+        No plugin on {device} provides the {said.Process.name} process, so
+        nothing there could drive this conversation. Install it there to move the
+        work.
+      </>
+    );
+  }
+
   if ("RepoAuthorUnpicked" in said) {
     return (
       <>

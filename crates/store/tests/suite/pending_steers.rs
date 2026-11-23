@@ -24,8 +24,8 @@ use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, Closing, CompanionMode, Lifecycle, Pending, PendingAddition, PendingForm,
-    PendingPairing, PendingUpgrade, ProfileFacts, Recorded, Steer, Steering, close_conversation,
+    Account, Closing, CompanionMode, Pending, PendingAddition, PendingForm, PendingPairing,
+    PendingUpgrade, ProfileFacts, Recorded, State, Steer, Steering, close_conversation,
     conversations, create_profile, discard_pending_steer, open_database, open_pending_steer,
     pending_steer, register_repo, save_brief, save_pending_steer, start_conversation,
     steer_conversation, timeline, waiting,
@@ -83,10 +83,14 @@ async fn profile(pool: &SqlitePool, name: &str, models: &[&str]) -> String {
 }
 
 /// The plainest steer there is: the move and nothing beside it.
-fn into(target: Lifecycle) -> Steer<'static> {
+fn into(target: State) -> Steer<'static> {
     Steer {
+        // As the server reads them off the target state's own manifest: the
+        // state running the Interview opens a round, and the one running the
+        // Wrap-up reads the branch afresh — see `steering::submit`.
+        opens_a_round: target == "grilling",
+        wraps_up: target == "wrapping",
         target,
-        declared: None,
         pairings: &[],
         brief: None,
         instruction: None,
@@ -203,7 +207,7 @@ async fn submitting_discards_it_with_the_record() {
     open_pending_steer(&pool, id).await.unwrap();
 
     assert_eq!(
-        steer_conversation(&pool, id, into(Lifecycle::Implementing))
+        steer_conversation(&pool, id, into(State::named("implementing")))
             .await
             .unwrap(),
         Steering::Steered
@@ -215,11 +219,7 @@ async fn submitting_discards_it_with_the_record() {
     assert!(
         kinds.iter().any(|event| matches!(
             event.event,
-            verkstead_store::Event::Steer(
-                verkstead_store::Steered::Built(Lifecycle::Implementing),
-                None,
-                _
-            )
+            verkstead_store::Event::Steer(ref target, None, _) if target == "implementing"
         )),
         "the record it became is on the Timeline",
     );
@@ -234,7 +234,7 @@ async fn submitting_without_one_is_an_ordinary_steer() {
     let id = drafting(&pool).await;
 
     assert_eq!(
-        steer_conversation(&pool, id, into(Lifecycle::Done))
+        steer_conversation(&pool, id, into(State::done()))
             .await
             .unwrap(),
         Steering::Steered
@@ -261,8 +261,7 @@ async fn a_save_writes_the_whole_form_and_reads_it_back() {
     open_pending_steer(&pool, id).await.unwrap();
 
     let filled = PendingForm {
-        target: Some(Lifecycle::Implementing),
-        declared: None,
+        target: Some(State::named("implementing")),
         brief: Some("# A second round\n".to_owned()),
         digest: true,
         instruction: Some("Take the modal out".to_owned()),
@@ -339,7 +338,7 @@ async fn a_pending_steer_waits_on_the_human() {
     // and the sidebar says so by drawing it as a draft — see the store's
     // `waits_on_the_human`.
     assert_eq!(
-        steer_conversation(&pool, id, into(Lifecycle::Grilling))
+        steer_conversation(&pool, id, into(State::named("grilling")))
             .await
             .unwrap(),
         Steering::Steered
@@ -397,7 +396,7 @@ async fn closing_discards_it_with_the_conversation() {
             &pool,
             id,
             &PendingForm {
-                target: Some(Lifecycle::Implementing),
+                target: Some(State::named("implementing")),
                 instruction: Some("Take the modal out".to_owned()),
                 ..PendingForm::default()
             },

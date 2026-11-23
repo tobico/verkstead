@@ -206,7 +206,7 @@ mod tests {
     /// cluster names one (ADR-0020, *Ranks*).
     const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
 
-    use crate::store::Lifecycle;
+    use crate::store::State;
 
     use crate::sandbox::granting::remembering::Remembered;
 
@@ -230,12 +230,7 @@ mod tests {
 
     /// A Conversation of `repo`'s in `state`, with a boundary of its own
     /// written down — which is what a sweep finds and decides about.
-    async fn conversation(
-        pool: &sqlx::SqlitePool,
-        data_dir: &Path,
-        repo: i64,
-        state: Lifecycle,
-    ) -> i64 {
+    async fn conversation(pool: &sqlx::SqlitePool, data_dir: &Path, repo: i64, state: &str) -> i64 {
         let id = store::start_conversation(pool, repo, "rate-limiting", THIS_DEVICE, None)
             .await
             .unwrap()
@@ -281,9 +276,9 @@ mod tests {
         let held = tempfile::tempdir().unwrap();
         let (pool, repo) = database(held.path()).await;
 
-        let grilling = conversation(&pool, held.path(), repo, Lifecycle::Grilling).await;
-        let done = conversation(&pool, held.path(), repo, Lifecycle::Done).await;
-        let closed = conversation(&pool, held.path(), repo, Lifecycle::Closed).await;
+        let grilling = conversation(&pool, held.path(), repo, "grilling").await;
+        let done = conversation(&pool, held.path(), repo, State::DONE).await;
+        let closed = conversation(&pool, held.path(), repo, State::CLOSED).await;
 
         swept(&pool, held.path()).await;
 
@@ -328,7 +323,7 @@ mod tests {
         let held = tempfile::tempdir().unwrap();
         let (pool, repo) = database(held.path()).await;
 
-        let grilling = conversation(&pool, held.path(), repo, Lifecycle::Grilling).await;
+        let grilling = conversation(&pool, held.path(), repo, "grilling").await;
 
         remembering::wrote(
             held.path(),
@@ -356,8 +351,8 @@ mod tests {
         let held = tempfile::tempdir().unwrap();
         let (pool, repo) = database(held.path()).await;
 
-        let grilling = conversation(&pool, held.path(), repo, Lifecycle::Grilling).await;
-        let done = conversation(&pool, held.path(), repo, Lifecycle::Done).await;
+        let grilling = conversation(&pool, held.path(), repo, "grilling").await;
+        let done = conversation(&pool, held.path(), repo, State::DONE).await;
 
         // The column the keep-set is read by, taken out from under it: any way
         // of failing would do, and this is the one a test can arrange without
@@ -384,8 +379,8 @@ mod tests {
         let held = tempfile::tempdir().unwrap();
         let (pool, repo) = database(held.path()).await;
 
-        let closing = conversation(&pool, held.path(), repo, Lifecycle::Grilling).await;
-        let working = conversation(&pool, held.path(), repo, Lifecycle::Grilling).await;
+        let closing = conversation(&pool, held.path(), repo, "grilling").await;
+        let working = conversation(&pool, held.path(), repo, "grilling").await;
 
         remove(held.path(), closing);
 

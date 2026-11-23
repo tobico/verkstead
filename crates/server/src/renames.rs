@@ -443,9 +443,16 @@ mod tests {
                 });
             }
 
-            store::start_grilling(&self.pool, id, &head_commit(&self.repo), &mine, &made)
-                .await
-                .unwrap();
+            store::start_in(
+                &self.pool,
+                id,
+                &store::State::named("grilling"),
+                &head_commit(&self.repo),
+                &mine,
+                &made,
+            )
+            .await
+            .unwrap();
 
             self.worktree = mine;
 

@@ -89,7 +89,8 @@
 use anyhow::{Context, Result, bail};
 use sqlx::SqlitePool;
 
-use super::{Lifecycle, stops::Decision};
+use super::conversations::State;
+use super::stops::Decision;
 
 /// Run whatever this database still needs, in the order it needs them.
 pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
@@ -2712,7 +2713,7 @@ const OLD_STATE: &str = "aborted";
 /// written is what a session said, which nothing here touches.
 ///
 /// Safe to run twice: after the first there are no rows left saying `aborted`.
-/// [`super::Lifecycle::read`] still knows the word regardless, for a database
+/// [`super::State::named`] folds it in regardless, for a database
 /// that never came through here.
 async fn conversations_that_were_aborted(pool: &SqlitePool) -> Result<()> {
     let mut tx = super::writing(
@@ -2722,7 +2723,7 @@ async fn conversations_that_were_aborted(pool: &SqlitePool) -> Result<()> {
     .await?;
 
     sqlx::query("UPDATE conversations SET state = ? WHERE state = ?")
-        .bind(Lifecycle::Closed.stored())
+        .bind(State::CLOSED)
         .bind(OLD_STATE)
         .execute(&mut *tx)
         .await
@@ -2731,7 +2732,7 @@ async fn conversations_that_were_aborted(pool: &SqlitePool) -> Result<()> {
     // `kind = 'moved'` and nothing wider: `aborted` was a lifecycle word, and a
     // Brief or a handoff that happens to hold it is prose somebody wrote.
     sqlx::query("UPDATE timeline_events SET body = ? WHERE kind = 'moved' AND body = ?")
-        .bind(Lifecycle::Closed.stored())
+        .bind(State::CLOSED)
         .bind(OLD_STATE)
         .execute(&mut *tx)
         .await

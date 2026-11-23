@@ -21,46 +21,6 @@ use ts_rs::TS;
 
 use crate::{DiffView, PairingView, PickedView, ProfileChoice, RepoEntry, Standing};
 
-/// Where a Conversation has got to.
-///
-/// The whole ladder, though only the first two are reachable yet: the states are
-/// the domain's, and the page says which one a Conversation is in rather than
-/// assuming the only one it can currently be.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum Lifecycle {
-    Draft,
-    Grilling,
-    Implementing,
-    Wrapping,
-
-    /// Beside the ladder rather than on it: the human following up on work that
-    /// is already on a pull request, in a session they steered into being.
-    /// Reachable from Done, from Wrapping and from Closed, and leading back
-    /// into the wrap-up.
-    FollowUp,
-
-    /// Beside the ladder rather than on it, the way Follow-up is: a question
-    /// about the code being answered in rounds, with nothing built and nothing
-    /// committed. Reachable from a Start on an **Investigate** draft and from a
-    /// steer out of anywhere, and leading back to wherever it was entered from.
-    Investigating,
-
-    /// One of the states a plugin's Process declares, which none of the words
-    /// above names: which one is the view's `declared_state`.
-    ///
-    /// Every state's word is its Process's — see [`ProcessEntry::states`] —
-    /// so this says only that the record's word is none of Verkstead's own,
-    /// never how the state is drawn.
-    Declared,
-
-    Done,
-
-    /// Off the ladder rather than on it: the work stopped wherever it had got
-    /// to. Reachable from every other state, and leading nowhere.
-    Closed,
-}
-
 /// Which Process: the uuid of the plugin providing it and the id its manifest
 /// gives the Process (Set 1877, Q6).
 ///
@@ -225,6 +185,15 @@ pub struct DeclaredStateEntry {
     /// What the `conversations.state` column holds.
     pub id: String,
     pub word: String,
+
+    /// Whether its Activity is the **Interview**, which is the one thing the
+    /// page has to know about a state besides its word.
+    ///
+    /// What a round is: a steer into it opens one on a Brief of its own, and
+    /// the digest tick on its form is what primes the interview that round
+    /// runs. Off the manifest rather than off the state's name, as everything
+    /// about a state is (Set 1765, Q29).
+    pub interviews: bool,
 }
 
 /// One row of the conversations sidebar.
@@ -274,15 +243,17 @@ pub struct ConversationEntry {
     /// What the Repo this Conversation is against is called.
     pub repo: String,
 
-    pub state: Lifecycle,
-
-    /// Its Process and the id of the state it declares, for the row's word to
-    /// be read off the Process list — see [`ProcessEntry::states`].
+    /// The word its `state` column holds, which the row.s word is read off its
+    /// Process by — see [`ProcessEntry::states`].
     ///
-    /// Filled for every state but the three Verkstead words itself. A row
-    /// whose Process this server holds nothing for carries the id, which the
-    /// sidebar reads aloud as the word it has.
-    pub declared: Option<DeclaredState>,
+    /// Verkstead.s own three — `draft`, `done` and `closed` — are the viewer.s
+    /// to word, no Process declaring them. Every other word is one its Process
+    /// declares, and a row whose Process this server holds nothing for is read
+    /// aloud as the word it has.
+    pub state: String,
+
+    /// And the Process to read it against.
+    pub process: ProvidedProcess,
 
     /// Whether a session is running on this Conversation right now.
     ///
@@ -728,16 +699,14 @@ pub struct ConversationView {
     /// while the Brief drafts, frozen when grilling starts.
     pub companions: Vec<CompanionView>,
 
-    pub state: Lifecycle,
-
-    /// The id of the state its Process declares, which is what the card's
-    /// word is read off — see [`ProcessEntry::states`].
+    /// The word its `state` column holds, which the card.s word is read off
+    /// its Process by — see [`ProcessEntry::states`].
     ///
-    /// Filled for every state but the three Verkstead words itself: Draft,
-    /// Done and Closed. All five of Verkstead's own Processes are plugins
-    /// whose states are named with the words the record holds, so a Grilling
-    /// carries `grilling` here and reads *Grilling* off Develop's manifest.
-    pub declared_state: Option<String>,
+    /// All five of Verkstead.s own Processes are plugins whose states are named
+    /// with the words the record holds, so a Grilling reads `grilling` here and
+    /// is worded *Grilling* off Develop.s manifest; Verkstead.s own three are
+    /// the viewer.s to word.
+    pub state: String,
 
     /// What each role its Process declares will run its sessions under, in the
     /// order the **Agent** control draws them — whole rather than by id: the
@@ -2740,19 +2709,9 @@ pub struct SteerEvent {
     /// When it was steered, RFC 3339.
     pub at: String,
 
-    /// The state the human moved it into.
-    pub target: Lifecycle,
-
-    /// The id of the state its Process declares, which is what the card's
-    /// word is read off — see [`ProcessEntry::states`].
-    ///
-    /// Every target but Done, whose word is Verkstead's: the five written as
-    /// data name their states with the words the record holds, so a steer
-    /// into Verkstead's own Wrapping carries `wrapping` here exactly as a
-    /// plugin's Process carries whatever it called its own.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "typescript", ts(optional))]
-    pub declared: Option<String>,
+    /// The state the human moved it into, by the word the record holds — which
+    /// is what the card.s word is read off its Process by.
+    pub target: String,
 
     /// The instruction they steered it with, rendered and sanitized on the way
     /// out as every piece of markdown on this wire is — and `None` for every
@@ -2889,25 +2848,8 @@ pub struct MovedEvent {
     /// When it moved, RFC 3339.
     pub at: String,
 
-    pub state: Lifecycle,
-
-    /// The id of the state its Process declares, which is what the line's
-    /// word is read off — see [`ProcessEntry::states`].
-    ///
-    /// Every move but the three Verkstead words itself: Draft, Done and
-    /// Closed. The five written as data name their states with the words the
-    /// record holds, so a move into Verkstead's own Wrapping carries
-    /// `wrapping` here exactly as a plugin's Process carries its own.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "typescript", ts(optional))]
-    pub declared: Option<String>,
-}
-
-/// A Conversation's declared state, named by its Process and its id there.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct DeclaredState {
-    pub process: ProvidedProcess,
+    /// The word the record holds for the state it moved to, which is what the
+    /// line.s word is read off its Process by.
     pub state: String,
 }
 
@@ -3472,30 +3414,11 @@ pub enum TerminalClosed {
 /// A move as an Event. Nothing to render — see [`MovedEvent`] — but built here
 /// beside the Brief so that one place knows how a Timeline is made.
 ///
-/// `declared` is the state's id in the Process, which is what the line's word
-/// is read off: the five Processes Verkstead ships name their states with the
-/// words the record holds, so a move into Grilling carries `grilling`. The
-/// three Verkstead words itself carry none.
-pub fn moved_event(id: i64, at: String, state: Lifecycle, declared: String) -> TimelineEvent {
-    TimelineEvent::Moved(MovedEvent {
-        id,
-        at,
-        state,
-        declared: match state {
-            Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => None,
-            _ => Some(declared),
-        },
-    })
-}
-
-/// And a move into a state a plugin's Process declares, `state` its id there.
-pub fn entered_event(id: i64, at: String, state: String) -> TimelineEvent {
-    TimelineEvent::Moved(MovedEvent {
-        id,
-        at,
-        state: Lifecycle::Declared,
-        declared: Some(state),
-    })
+/// `state` is the word the record holds, which is what the line.s word is read
+/// off its Process by: the five Processes Verkstead ships name their states
+/// with those words, so a move into Grilling carries `grilling`.
+pub fn moved_event(id: i64, at: String, state: String) -> TimelineEvent {
+    TimelineEvent::Moved(MovedEvent { id, at, state })
 }
 
 /// The grilling's proposal as the Set carrying it needs it, with the rationale
@@ -4115,9 +4038,9 @@ pub fn manual_task_event(id: i64, at: String, instruction: &str) -> TimelineEven
     })
 }
 
-/// A Steer as an Event: the state the human sent the Conversation into — by its
-/// id in the Process, which is what the card's word is read off — and the
-/// instruction they sent it with where they wrote one.
+/// A Steer as an Event: the state the human sent the Conversation into — by the
+/// word the record holds, which is what the card.s word is read off its Process
+/// by — and the instruction they sent it with where they wrote one.
 ///
 /// Rendered the way the Brief is, and for the same reason: it is what the human
 /// asked for, written for somebody to read back.
@@ -4127,8 +4050,7 @@ pub fn manual_task_event(id: i64, at: String, instruction: &str) -> TimelineEven
 pub fn steer_event(
     id: i64,
     at: String,
-    target: Lifecycle,
-    declared: Option<String>,
+    target: String,
     instruction: Option<&str>,
     record: Option<SteerRecordView>,
 ) -> TimelineEvent {
@@ -4136,7 +4058,6 @@ pub fn steer_event(
         id,
         at,
         target,
-        declared,
         html: instruction.map(crate::markdown::to_html),
         record,
     })
@@ -5965,7 +5886,7 @@ pub enum ConversationSteered {
 /// yet — or where it is already as open as a companion gets.
 ///
 /// A vocabulary of its own rather than more variants of the grill start's, for
-/// the reason [`SteerTarget`] is not [`crate::Lifecycle`]: what a grilling can
+/// the reason [`SteerTarget`] is not a state word: what a grilling can
 /// be refused for and what a steer can be refused for are different lists, and
 /// one list would say each press can be refused for things it never could.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

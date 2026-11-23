@@ -65,7 +65,7 @@ import {
 // The Processes the picker offers and the words they are said in, read off the
 // list the server actually sent rather than spelled out again: what the row
 // offers is that list and nothing else.
-import { declaredRow, named, OFFERED, whose } from "./processes";
+import { named, OFFERED, rowProcess, whose } from "./processes";
 import {
   CREATE_REFUSAL,
   REFUSAL as REPO_REFUSAL,
@@ -3062,8 +3062,8 @@ describe("starting the work on the picked device", () => {
         branch_named: false,
         rank: `Zz-${MEMBER.device}`,
         repo: THEIRS[0]!.name,
-        state: "Draft",
-        ...declaredRow("Draft"),
+        state: "draft",
+        ...rowProcess(),
         device: {
           id: MEMBER.device,
           name: MEMBER.name,

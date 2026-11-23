@@ -738,9 +738,16 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
         });
     }
 
-    store::start_grilling(&pool, id, &commit, &worktree, &checkouts)
-        .await
-        .unwrap();
+    store::start_in(
+        &pool,
+        id,
+        &store::State::named("grilling"),
+        &commit,
+        &worktree,
+        &checkouts,
+    )
+    .await
+    .unwrap();
 
     let conversation = store::load_conversation(&pool, id)
         .await

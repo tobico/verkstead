@@ -1076,15 +1076,17 @@ async fn where_the_ask_came_from_travels_with_it_and_nothing_does_when_there_is_
 #[tokio::test]
 async fn only_a_follow_ups_and_an_investigations_sets_carry_the_option() {
     for state in [
-        store::Lifecycle::Draft,
-        store::Lifecycle::Grilling,
-        store::Lifecycle::Implementing,
-        store::Lifecycle::Wrapping,
-        store::Lifecycle::Done,
-        store::Lifecycle::Closed,
+        store::State::draft(),
+        store::State::named("grilling"),
+        store::State::named("implementing"),
+        store::State::named("wrapping"),
+        store::State::done(),
+        store::State::closed(),
     ] {
         let (_dir, pool, app) = fresh_app().await;
-        store::set_state(&pool, ASKING_FROM, state).await.unwrap();
+        store::set_state(&pool, ASKING_FROM, state.clone())
+            .await
+            .unwrap();
 
         let (view, _) = set_json(&app, &pool, &full_grammar_set()).await;
         assert_eq!(
@@ -1095,16 +1097,18 @@ async fn only_a_follow_ups_and_an_investigations_sets_carry_the_option() {
 
     for (state, ending) in [
         (
-            store::Lifecycle::FollowUp,
+            store::State::named("follow-up"),
             verkstead_render::Ending::FollowUp,
         ),
         (
-            store::Lifecycle::Investigating,
+            store::State::named("investigating"),
             verkstead_render::Ending::Investigation,
         ),
     ] {
         let (_dir, pool, app) = fresh_app().await;
-        store::set_state(&pool, ASKING_FROM, state).await.unwrap();
+        store::set_state(&pool, ASKING_FROM, state.clone())
+            .await
+            .unwrap();
 
         let (view, _) = set_json(&app, &pool, &full_grammar_set()).await;
         assert_eq!(
@@ -1122,7 +1126,7 @@ async fn only_a_follow_ups_and_an_investigations_sets_carry_the_option() {
 #[tokio::test]
 async fn nothing_about_the_option_reaches_the_stored_set() {
     let (_dir, pool, app) = fresh_app().await;
-    store::set_state(&pool, ASKING_FROM, store::Lifecycle::FollowUp)
+    store::set_state(&pool, ASKING_FROM, store::State::named("follow-up"))
         .await
         .unwrap();
 
@@ -1871,7 +1875,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // while it is answered, which is why this one is asked from a steered
     // Conversation rather than built differently.
     let (_dir, pool, app) = fresh_app().await;
-    store::set_state(&pool, ASKING_FROM, store::Lifecycle::FollowUp)
+    store::set_state(&pool, ASKING_FROM, store::State::named("follow-up"))
         .await
         .unwrap();
     let (_, json) = set_json(&app, &pool, &follow_up_round()).await;
@@ -1881,7 +1885,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // other ending, so the page has both wordings to draw from the payload rather
     // than one of them and a guess.
     let (_dir, pool, app) = fresh_app().await;
-    store::set_state(&pool, ASKING_FROM, store::Lifecycle::Investigating)
+    store::set_state(&pool, ASKING_FROM, store::State::named("investigating"))
         .await
         .unwrap();
     let (_, json) = set_json(&app, &pool, &follow_up_round()).await;
@@ -2279,9 +2283,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap();
 
-    store::start_grilling(
+    store::start_in(
         &pool,
         grilling,
+        &store::State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-outbound-retries"),
         &[],
@@ -2459,9 +2464,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             .unwrap();
     }
 
-    store::start_grilling(
+    store::start_in(
         &pool,
         directing,
+        &store::State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-usage-limits"),
         &[store::CompanionWorktree {
@@ -2528,7 +2534,14 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .await
     .unwrap();
-    store::start_implementing(&pool, directing).await.unwrap();
+    store::transition(
+        &pool,
+        directing,
+        &store::State::named("grilling"),
+        &store::State::named("implementing"),
+    )
+    .await
+    .unwrap();
 
     // And the commits on its branch, which is what a session leaves behind
     // besides its output. Recorded here rather than made, exactly as the
@@ -2713,9 +2726,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         std::fs::write(backlog.join(still_to_do), "# a task\n").unwrap();
     }
 
-    store::start_grilling(
+    store::start_in(
         &pool,
         tasked,
+        &store::State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         &worktree,
         &[],
@@ -2757,7 +2771,14 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // handed over a second time.
     store::record_backlog(&pool, tasked).await.unwrap();
 
-    store::start_implementing(&pool, tasked).await.unwrap();
+    store::transition(
+        &pool,
+        tasked,
+        &store::State::named("grilling"),
+        &store::State::named("implementing"),
+    )
+    .await
+    .unwrap();
 
     write(
         "conversations.json",
@@ -2887,16 +2908,24 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     let worktree = _dir.path().join("worktrees/verkstead-deferred-asks");
     std::fs::create_dir_all(&worktree).unwrap();
 
-    store::start_grilling(
+    store::start_in(
         &pool,
         waiting,
+        &store::State::named("grilling"),
         "9e6cb584eeb157fd49f0c36e00bf87783fa2bfab",
         &worktree,
         &[],
     )
     .await
     .unwrap();
-    store::start_implementing(&pool, waiting).await.unwrap();
+    store::transition(
+        &pool,
+        waiting,
+        &store::State::named("grilling"),
+        &store::State::named("implementing"),
+    )
+    .await
+    .unwrap();
 
     let printed = "Usage limit reached · continuing automatically at 3pm · esc to cancel";
 
@@ -2977,9 +3006,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .await
     .unwrap();
-    store::start_grilling(
+    store::start_in(
         &pool,
         wrapping,
+        &store::State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-rate-limiting"),
         &[],
@@ -2989,7 +3019,14 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     store::pick_direction(&pool, wrapping, verkstead_schema::Direction::TaskList)
         .await
         .unwrap();
-    store::start_implementing(&pool, wrapping).await.unwrap();
+    store::transition(
+        &pool,
+        wrapping,
+        &store::State::named("grilling"),
+        &store::State::named("implementing"),
+    )
+    .await
+    .unwrap();
 
     store::record_commit(
         &pool,
@@ -3022,6 +3059,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             base: None,
             repo: None,
         },
+        &store::State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -3094,7 +3132,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             .await
             .unwrap();
     }
-    store::finish_wrap_up(&pool, wrapping).await.unwrap();
+    store::finish_wrap_up(&pool, wrapping, &store::State::named("wrapping"))
+        .await
+        .unwrap();
 
     // The suite went green on the way, which is what settling the checks above
     // means: the last thing the watcher wrote down before it stopped watching,
@@ -3107,8 +3147,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         &pool,
         wrapping,
         verkstead_store::Steer {
-            target: store::Lifecycle::Grilling,
-            declared: None,
+            target: store::State::named("grilling"),
+            opens_a_round: false,
+            wraps_up: false,
             pairings: &[],
             brief: Some("# Rate limiting, per account\n\n"),
             instruction: None,
@@ -3197,9 +3238,16 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // A roadmap pick records the direction and moves nothing: the grilling
     // session writes the roadmap itself, so the Conversation says it is grilling
     // until the pull request that follows the roadmap is recorded.
-    store::start_grilling(&pool, staged, &base, &worktree, &[])
-        .await
-        .unwrap();
+    store::start_in(
+        &pool,
+        staged,
+        &store::State::named("grilling"),
+        &base,
+        &worktree,
+        &[],
+    )
+    .await
+    .unwrap();
     store::pick_direction(&pool, staged, verkstead_schema::Direction::Roadmap)
         .await
         .unwrap();
@@ -5193,9 +5241,10 @@ async fn coded(pool: &SqlitePool, under: &Path) -> i64 {
         ],
     );
 
-    store::start_grilling(
+    store::start_in(
         pool,
         conversation,
+        &store::State::named("grilling"),
         &base,
         &worktree,
         &[store::CompanionWorktree {

@@ -26,7 +26,7 @@ use std::collections::BTreeSet;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Deletion, Lifecycle, Recorded, Steer, Steering, Summary, Trimming, append_capture,
+    Deletion, Recorded, State, Steer, Steering, Summary, Trimming, append_capture,
     archive_conversation, capture, deletable, delete_conversation, deleted_tables,
     load_conversation, load_response, reclaim, session_id, start_capture, steer_conversation,
     timeline, transcript, trim_conversation, trimmable, trimmed, unarchive_conversation,
@@ -198,10 +198,14 @@ async fn what_is_trimmable_is_what_has_been_archived_for_long_enough() {
 }
 
 /// A steer into `target` and nothing else with it.
-fn steer(target: Lifecycle) -> Steer<'static> {
+fn steer(target: State) -> Steer<'static> {
     Steer {
+        // As the server reads them off the target state's own manifest: the
+        // state running the Interview opens a round, and the one running the
+        // Wrap-up reads the branch afresh — see `steering::submit`.
+        opens_a_round: target == "grilling",
+        wraps_up: target == "wrapping",
         target,
-        declared: None,
         pairings: &[],
         brief: None,
         instruction: None,
@@ -229,7 +233,7 @@ async fn what_was_steered_back_into_the_work_is_neither_trimmed_nor_deleted() {
     archived_days_ago(&pool, worked.id, 4).await;
 
     assert_eq!(
-        steer_conversation(&pool, worked.id, steer(Lifecycle::Implementing))
+        steer_conversation(&pool, worked.id, steer(State::named("implementing")))
             .await
             .unwrap(),
         Steering::Steered,

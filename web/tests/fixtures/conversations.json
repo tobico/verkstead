@@ -3,21 +3,18 @@
     "born": "aa00bb11cc22dd33ee44ff5566778899/5",
     "branch": "task-runner",
     "branch_named": true,
-    "declared": {
-      "process": {
-        "id": "develop",
-        "plugin": "2bcf359e-071a-4237-8741-9897cf06ac15"
-      },
-      "state": "implementing"
-    },
     "device": null,
     "id": 5,
     "idle": false,
     "naming": false,
     "parked": null,
+    "process": {
+      "id": "develop",
+      "plugin": "2bcf359e-071a-4237-8741-9897cf06ac15"
+    },
     "rank": "Zw-aa00bb11cc22dd33ee44ff5566778899",
     "repo": "verkstead",
-    "state": "Implementing",
+    "state": "implementing",
     "terminal_busy": false,
     "transferred": false,
     "unseen": false,
@@ -30,21 +27,18 @@
     "born": "aa00bb11cc22dd33ee44ff5566778899/4",
     "branch": "usage-limits",
     "branch_named": true,
-    "declared": {
-      "process": {
-        "id": "develop",
-        "plugin": "2bcf359e-071a-4237-8741-9897cf06ac15"
-      },
-      "state": "implementing"
-    },
     "device": null,
     "id": 4,
     "idle": false,
     "naming": false,
     "parked": null,
+    "process": {
+      "id": "develop",
+      "plugin": "2bcf359e-071a-4237-8741-9897cf06ac15"
+    },
     "rank": "Zx-aa00bb11cc22dd33ee44ff5566778899",
     "repo": "verkstead",
-    "state": "Implementing",
+    "state": "implementing",
     "terminal_busy": false,
     "transferred": false,
     "unseen": false,
@@ -57,21 +51,18 @@
     "born": "aa00bb11cc22dd33ee44ff5566778899/3",
     "branch": "outbound-retries",
     "branch_named": true,
-    "declared": {
-      "process": {
-        "id": "develop",
-        "plugin": "2bcf359e-071a-4237-8741-9897cf06ac15"
-      },
-      "state": "grilling"
-    },
     "device": null,
     "id": 3,
     "idle": false,
     "naming": false,
     "parked": null,
+    "process": {
+      "id": "develop",
+      "plugin": "2bcf359e-071a-4237-8741-9897cf06ac15"
+    },
     "rank": "Zy-aa00bb11cc22dd33ee44ff5566778899",
     "repo": "verkstead",
-    "state": "Grilling",
+    "state": "grilling",
     "terminal_busy": false,
     "transferred": false,
     "unseen": false,
@@ -84,15 +75,18 @@
     "born": "aa00bb11cc22dd33ee44ff5566778899/2",
     "branch": "amber-kestrel",
     "branch_named": false,
-    "declared": null,
     "device": null,
     "id": 2,
     "idle": false,
     "naming": false,
     "parked": null,
+    "process": {
+      "id": "develop",
+      "plugin": "2bcf359e-071a-4237-8741-9897cf06ac15"
+    },
     "rank": "Zz-aa00bb11cc22dd33ee44ff5566778899",
     "repo": "askance",
-    "state": "Draft",
+    "state": "draft",
     "terminal_busy": false,
     "transferred": false,
     "unseen": false,
@@ -105,15 +99,18 @@
     "born": "aa00bb11cc22dd33ee44ff5566778899/1",
     "branch": "rate-limiting",
     "branch_named": true,
-    "declared": null,
     "device": null,
     "id": 1,
     "idle": false,
     "naming": false,
     "parked": null,
+    "process": {
+      "id": "develop",
+      "plugin": "2bcf359e-071a-4237-8741-9897cf06ac15"
+    },
     "rank": "a0-aa00bb11cc22dd33ee44ff5566778899",
     "repo": "verkstead",
-    "state": "Draft",
+    "state": "draft",
     "terminal_busy": false,
     "transferred": false,
     "unseen": false,

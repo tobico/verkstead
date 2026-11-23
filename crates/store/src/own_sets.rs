@@ -222,7 +222,9 @@ pub async fn own_sets(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Own
 /// *Run it here* answered about task 03 of the last one says nothing about task
 /// 03 of this one.
 pub async fn building_since(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
-    let moved = super::Event::Moved(super::Lifecycle::Implementing);
+    let moved = super::Event::Moved(super::conversations::State::named(
+        super::conversations::IMPLEMENTING,
+    ));
 
     let found: Option<(i64,)> = sqlx::query_as(
         "SELECT MAX(id) FROM timeline_events
@@ -231,7 +233,7 @@ pub async fn building_since(pool: &SqlitePool, conversation_id: i64) -> Result<O
     )
     .bind(conversation_id)
     .bind(moved.kind())
-    .bind(super::Lifecycle::Implementing.stored())
+    .bind(super::conversations::IMPLEMENTING)
     .fetch_optional(pool)
     .await
     .with_context(|| {

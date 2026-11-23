@@ -1413,9 +1413,16 @@ async fn nothing_saved_means_an_empty_list() {
 async fn grill(dir: &Path, id: i64) {
     let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
 
-    store::start_grilling(&pool, id, "deadbeef", &dir.join("worktree"), &[])
-        .await
-        .unwrap();
+    store::start_in(
+        &pool,
+        id,
+        &store::State::named("grilling"),
+        "deadbeef",
+        &dir.join("worktree"),
+        &[],
+    )
+    .await
+    .unwrap();
 }
 
 /// A second Conversation on the same Repo as the first, started the way the

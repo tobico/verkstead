@@ -979,8 +979,8 @@ function actions(): {
           <Show
             when={
               (devices.data?.members.length ?? 0) > 0 &&
-              conversation().state !== "Draft" &&
-              conversation().state !== "Closed"
+              conversation().state !== "draft" &&
+              conversation().state !== "closed"
             }
           >
             <Action
@@ -1001,7 +1001,7 @@ function actions(): {
               them takes itself: the outcome is on the page before the request
               goes out, so there is nothing left here to wait for. */}
           <Show
-            when={conversation().state !== "Closed"}
+            when={conversation().state !== "closed"}
             fallback={
               <Show
                 when={conversation().archived}

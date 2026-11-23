@@ -8,23 +8,28 @@
     "states": [
       {
         "id": "grilling",
-        "word": "Grilling"
+        "word": "Grilling",
+        "interviews": true
       },
       {
         "id": "implementing",
-        "word": "Implementing"
+        "word": "Implementing",
+        "interviews": false
       },
       {
         "id": "wrapping",
-        "word": "Wrapping"
+        "word": "Wrapping",
+        "interviews": false
       },
       {
         "id": "follow-up",
-        "word": "Follow-up"
+        "word": "Follow-up",
+        "interviews": false
       },
       {
         "id": "investigating",
-        "word": "Investigating"
+        "word": "Investigating",
+        "interviews": false
       }
     ],
     "roles": [
@@ -60,15 +65,18 @@
     "states": [
       {
         "id": "follow-up",
-        "word": "Follow-up"
+        "word": "Follow-up",
+        "interviews": false
       },
       {
         "id": "wrapping",
-        "word": "Wrapping"
+        "word": "Wrapping",
+        "interviews": false
       },
       {
         "id": "investigating",
-        "word": "Investigating"
+        "word": "Investigating",
+        "interviews": false
       }
     ],
     "roles": [
@@ -98,7 +106,8 @@
     "states": [
       {
         "id": "investigating",
-        "word": "Investigating"
+        "word": "Investigating",
+        "interviews": false
       }
     ],
     "roles": [
@@ -122,15 +131,18 @@
     "states": [
       {
         "id": "wrapping",
-        "word": "Wrapping"
+        "word": "Wrapping",
+        "interviews": false
       },
       {
         "id": "follow-up",
-        "word": "Follow-up"
+        "word": "Follow-up",
+        "interviews": false
       },
       {
         "id": "investigating",
-        "word": "Investigating"
+        "word": "Investigating",
+        "interviews": false
       }
     ],
     "roles": [
@@ -160,15 +172,18 @@
     "states": [
       {
         "id": "wrapping",
-        "word": "Wrapping"
+        "word": "Wrapping",
+        "interviews": false
       },
       {
         "id": "follow-up",
-        "word": "Follow-up"
+        "word": "Follow-up",
+        "interviews": false
       },
       {
         "id": "investigating",
-        "word": "Investigating"
+        "word": "Investigating",
+        "interviews": false
       }
     ],
     "roles": [

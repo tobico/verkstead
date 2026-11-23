@@ -16,8 +16,6 @@
 //! list, so no uuid is written into a test.
 
 import type {
-  DeclaredState,
-  Lifecycle,
   ProcessChoice,
   ProcessEntry,
   ProvidedProcess,
@@ -86,61 +84,24 @@ export function described(process: string): string {
   return processEntry(process).description;
 }
 
-/// The word the `conversations.state` column holds for each of Verkstead's own
-/// states, which is the id the five give that state in their manifests — and
-/// nothing at all for the three Verkstead words itself, which no Process
-/// declares.
-const STORED: Record<Lifecycle, string | null> = {
-  Draft: null,
-  Grilling: "grilling",
-  Implementing: "implementing",
-  Wrapping: "wrapping",
-  FollowUp: "follow-up",
-  Investigating: "investigating",
-  Declared: null,
-  Done: null,
-  Closed: null,
-};
-
-/// What one of Verkstead's own states is drawn as, read the way the page reads
-/// it: off Develop's manifest for the states it declares, and Verkstead's own
-/// word for the three nothing returns to.
-export function stateOf(state: Lifecycle): string {
-  return stateWord(whose("develop"), state, STORED[state]);
-}
-
-/// The id a Conversation in `state` carries beside it, as the server sends the
-/// two together — a Conversation's view and a Timeline move alike.
+/// What a state is drawn as, read the way the page reads it: off Develop's
+/// manifest for the states it declares, and Verkstead's own word for the three
+/// nothing returns to.
 ///
-/// Derived here so that a test moving a Conversation's state moves the id with
-/// it: the word is read off the id, so a case that overrode one and not the
-/// other would be drawing a state nothing named.
-export function declaredOn(state: Lifecycle): {
-  declared_state: string | null;
-} {
-  return { declared_state: STORED[state] };
+/// `state` is the word the `conversations.state` column holds, which is every
+/// state there is now that a state *is* a word — `grilling`, `wrapping`,
+/// `done` (Set 1765, Q29).
+export function stateOf(state: string): string {
+  return stateWord(whose("develop"), state);
 }
 
-/// And what a Timeline move or a past steer carries beside its state: the id
-/// its Process gives that state, which is what the line's word is read off —
-/// and nothing at all for the three Verkstead words itself.
-export function declaredAt(state: Lifecycle): { declared?: string } {
-  const stored = STORED[state];
-
-  return stored === null ? {} : { declared: stored };
-}
-
-/// And the same for a sidebar row, which names the plugin providing its
-/// Process — Develop's, every fixture here being a Conversation on the ladder.
-export function declaredRow(state: Lifecycle): {
-  declared: DeclaredState | null;
-} {
-  const stored = STORED[state];
-
-  return {
-    declared:
-      stored === null ? null : { process: whose("develop"), state: stored },
-  };
+/// The Process a sidebar row reads its state word against — Develop's, every
+/// fixture here being a Conversation on the ladder.
+///
+/// A row carries the Process rather than the word, having no Process field of
+/// its own, so a test factory spreads this beside the state it sets.
+export function rowProcess(): { process: ProvidedProcess } {
+  return { process: whose("develop") };
 }
 
 /// The five with only the ones `offered` names offered, for a test about a

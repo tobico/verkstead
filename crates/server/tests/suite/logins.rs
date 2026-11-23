@@ -473,7 +473,16 @@ impl Workbench {
                     "pairing": { "profile_id": profile, "model": model },
                 }),
             ),
-            ("process", serde_json::json!({ "process": "Investigate" })),
+            // The Process by the plugin providing it and the id its manifest
+            // gives it there, which is what every Process is named by
+            // (ADR-0030, *Process*).
+            (
+                "process",
+                serde_json::json!({ "process": {
+                    "plugin": verkstead_server::plugins::built_in::INVESTIGATE,
+                    "id": "investigate",
+                } }),
+            ),
             (
                 "brief",
                 serde_json::json!({ "markdown": "Find out why it is slow." }),
@@ -1017,11 +1026,7 @@ async fn a_press_under_a_signed_out_account_is_refused_until_it_logs_in() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(
-        refused.state,
-        store::Lifecycle::Draft,
-        "nothing was started"
-    );
+    assert_eq!(refused.state, store::State::draft(), "nothing was started");
     assert_eq!(refused.worktree, None, "and nothing was checked out");
 
     workbench.opened(&profile, "laptop").await;

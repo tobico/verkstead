@@ -1112,9 +1112,14 @@ async fn start(
         }
     };
 
+    // Where a stage lands is its Process.s to say: the state its manifest maps
+    // the task-list Direction to, a stage being worked as a backlog.
+    let building = crate::processes::staging(state, id).await;
+
     match store::start_stage(
         &state.pool,
         id,
+        &building,
         store::Base {
             commit: &commit,
             named: Some(&from),

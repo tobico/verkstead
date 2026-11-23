@@ -315,7 +315,7 @@ pub enum Repointing {
 /// **Live work beside it refuses too**, not only work on it: a Companion Repo
 /// is committed in by the Conversation that admitted it, and that admission was
 /// made against the Author it had. What counts as live is
-/// [`super::work_on_repo`]'s reading, by way of [`super::Lifecycle::read`] —
+/// [`super::work_on_repo`]'s reading, by way of [`super::State::named`] —
 /// **but for a Draft with no Worktree**, which has committed nothing as anybody
 /// and whose cut asks every companion's Author again. Otherwise the draft a
 /// start was refused on for its Repo's Author being gone would be what stops
@@ -360,11 +360,11 @@ pub async fn repoint_repo(pool: &SqlitePool, id: i64, author: &str) -> Result<Re
     let (mut on, mut beside) = (Vec::new(), Vec::new());
 
     for (branch, state, own, worktree) in rows {
-        match super::Lifecycle::read(&state)? {
-            super::Lifecycle::Done | super::Lifecycle::Closed => {}
+        match super::State::named(&state) {
+            state if state.shut() => {}
             // A draft with nowhere to work has committed nothing as anybody,
             // and every cut asks its companions' Authors again.
-            super::Lifecycle::Draft if !worktree => {}
+            state if state == super::State::DRAFT && !worktree => {}
             _ if own => on.push(branch),
             _ => beside.push(branch),
         }

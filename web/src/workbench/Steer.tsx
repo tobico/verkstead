@@ -117,7 +117,6 @@ import type {
   CompanionView,
   ConversationSteered,
   ConversationView,
-  Lifecycle,
   PairingView,
   ProvidedProcess,
   RepoEntry,
@@ -145,7 +144,7 @@ import { Switch as Toggle } from "../Switch";
 import { chosen } from "./naming";
 import { pathOf } from "./openings";
 import { PaneHead } from "./PaneHead";
-import { narrowed, stateWord } from "./provided";
+import { interviews, narrowed, stateWord } from "./provided";
 import { settledFor } from "./roles";
 import { keeping, type Keeping } from "./settling";
 import { BasePicker, RULE } from "./Setup";
@@ -1024,9 +1023,9 @@ export function Steer(props: {
         case "FollowUp":
           return (
             onAPullRequest(props.conversation) &&
-            (props.conversation.state === "Done" ||
-              props.conversation.state === "Wrapping" ||
-              props.conversation.state === "Closed")
+            (props.conversation.state === "done" ||
+              props.conversation.state === "wrapping" ||
+              props.conversation.state === "closed")
           );
         default:
           return true;
@@ -1849,10 +1848,14 @@ export function Steer(props: {
 /// to do first*, and reading it back under any other name would be the record
 /// answering a question they were never asked. Only the targets that carry a
 /// body are here — the rest say nothing but the state.
-const WROTE: Partial<Record<Lifecycle, string>> = {
-  Implementing: "What to do first",
-  FollowUp: "What to follow up on",
-  Investigating: "What to find out",
+///
+/// Keyed by the word the record holds, which is the state's id in its Process:
+/// the five Verkstead ships name their states with those words. A state a
+/// plugin named itself reads the plain label.
+const WROTE: Record<string, string> = {
+  implementing: "What to do first",
+  "follow-up": "What to follow up on",
+  investigating: "What to find out",
 };
 
 /// Whether the steer at `at` on this record wrote the brief its round opened
@@ -1927,7 +1930,7 @@ export function Frozen(props: {
   /// beside the event.
   const opened = createMemo(
     () =>
-      props.steer.target === "Grilling" &&
+      interviews(props.conversation.process, props.steer.target) &&
       at() !== -1 &&
       wroteABrief(props.conversation.timeline, at()),
   );
@@ -1941,11 +1944,7 @@ export function Frozen(props: {
       <div class={styles.steered}>
         <p class={styles.steeredInto}>
           You steered this into{" "}
-          {stateWord(
-            props.conversation.process,
-            props.steer.target,
-            props.steer.declared,
-          )}
+          {stateWord(props.conversation.process, props.steer.target)}
           .
         </p>
 
@@ -1980,7 +1979,13 @@ export function Frozen(props: {
             above and nothing after them. */}
         <Show when={props.steer.record}>
           {(record) => (
-            <Recorded target={props.steer.target} record={record()} />
+            <Recorded
+              interviews={interviews(
+                props.conversation.process,
+                props.steer.target,
+              )}
+              record={record()}
+            />
           )}
         </Show>
       </div>
@@ -2004,15 +2009,15 @@ function ran(pairing: SteerPairingView): PairingView | null {
 /// without it is not a record with the boxes unticked: what it means is a steer
 /// from before any of this was written down.
 function Recorded(props: {
-  target: Lifecycle;
+  interviews: boolean;
   record: SteerRecordView;
 }): JSX.Element {
   return (
     <>
-      {/* The digest under grilling alone, the tick meaning nothing anywhere
-          else — it is what primes an interview, and there is no interview
-          under another target. */}
-      <Show when={props.target === "Grilling"}>
+      {/* The digest under the state that runs the interview alone, the tick
+          meaning nothing anywhere else — it is what primes an interview, and
+          there is no interview under another target. */}
+      <Show when={props.interviews}>
         <Ticked on={props.record.digest}>
           Prime it with everything you have already answered
         </Ticked>

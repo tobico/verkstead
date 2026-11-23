@@ -42,7 +42,7 @@ use anyhow::{Context, Result};
 use sqlx::SqlitePool;
 
 use super::Birth;
-use super::conversations::{Lifecycle, Role};
+use super::conversations::{Role, State};
 
 /// A Conversation as it arrives from the device that was doing the work.
 ///
@@ -71,8 +71,19 @@ pub struct Arrival {
     /// [`super::Conversation::naming`].
     pub naming: bool,
 
-    /// The state the work is in, which is where it goes on from here.
-    pub state: Lifecycle,
+    /// The state the work is in, which is where it goes on from here — the word
+    /// its column holds, read against the Process below (ADR-0030, *Process*).
+    pub state: State,
+
+    /// And which Process that is: the plugin providing it and the id its
+    /// manifest gives it there, which mean the same on every device.
+    ///
+    /// Written rather than left to this device's own default, because what the
+    /// state word means is that manifest's: a copy that landed on Develop's
+    /// reading would be a Conversation drawn and driven as something it is not.
+    /// `None` is a copy from a release that sent none, which keeps whatever
+    /// this device's row already said.
+    pub process: Option<super::Process>,
 
     /// Its **Rank**, verbatim: the key and the Device Id that issued it,
     /// unchanged, so the row sits where it sat in the merged list.
@@ -168,6 +179,7 @@ pub async fn arrive(pool: &SqlitePool, arriving: &Arrival) -> Result<Option<i64>
     // transaction.
     super::births::stamp(&mut tx, id, &arriving.born).await?;
 
+    running(&mut tx, id, arriving).await?;
     settled(&mut tx, id, arriving).await?;
 
     tx.commit().await.context("taking a Conversation in")?;
@@ -301,11 +313,40 @@ pub async fn replace(pool: &SqlitePool, id: i64, arriving: &Arrival) -> Result<R
             .with_context(|| format!("letting go of the {table} of Conversation {id}"))?;
     }
 
+    running(&mut tx, id, arriving).await?;
     settled(&mut tx, id, arriving).await?;
 
     tx.commit().await.context("taking a Conversation back in")?;
 
     Ok(Replacing::Replaced)
+}
+
+/// Which Process it arrived on, written against the row — the other thing
+/// [`arrive`] and [`replace`] do the same way, and for [`settled`]'s reason: a
+/// copy that landed without it would read its state against a Process it is not
+/// on, and be drawn and driven as something it is not.
+///
+/// Nothing where it arrived without one, which is a copy from a release that
+/// sent none: the row keeps what it said, and a fresh one keeps the store's own
+/// default.
+async fn running(tx: &mut sqlx::SqliteConnection, id: i64, arriving: &Arrival) -> Result<()> {
+    let Some(process) = &arriving.process else {
+        return Ok(());
+    };
+
+    sqlx::query(
+        "INSERT INTO processes (conversation_id, process, plugin) VALUES (?, ?, ?)
+         ON CONFLICT (conversation_id)
+             DO UPDATE SET process = excluded.process, plugin = excluded.plugin",
+    )
+    .bind(id)
+    .bind(process.stored())
+    .bind(process.plugin())
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("recording the Process Conversation {id} arrived on"))?;
+
+    Ok(())
 }
 
 /// What each role arrived having settled, written against the row.

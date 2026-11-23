@@ -88,6 +88,7 @@ pub mod mcp_servers;
 pub mod memory;
 pub mod news;
 pub mod plugins;
+pub mod processes;
 pub mod renewing;
 pub mod reports;
 pub mod repos;

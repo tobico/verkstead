@@ -18,7 +18,6 @@ import { describe, expect, it } from "vitest";
 import type { AgentOutputEvent, ConversationView } from "../src/api/types";
 import { status } from "../src/workbench/StatusButton";
 import { knowProvidedProcesses } from "../src/workbench/provided";
-import { declaredOn } from "./processes";
 
 import building from "./fixtures/conversation-building.json" with {
   type: "json",
@@ -29,9 +28,8 @@ import building from "./fixtures/conversation-building.json" with {
 /// from.
 const QUIET: ConversationView = {
   ...(building as ConversationView),
-  state: "Implementing",
-  declared_state: "implementing",
-  waiting: false,
+  state: "implementing",
+    waiting: false,
   blocked_on: null,
   stopped_by_hand: false,
   ready_to_resume: false,
@@ -43,12 +41,8 @@ const QUIET: ConversationView = {
 };
 
 /// That Conversation with something else true about it.
-///
-/// The state's own id travels with the state, as the server sends the two
-/// together — the word is read off the id, so a case that moved one and not
-/// the other would be asking about a state nothing named.
 function like(over: Partial<ConversationView>): ConversationView {
-  return { ...QUIET, ...declaredOn(over.state ?? QUIET.state), ...over };
+  return { ...QUIET, ...over };
 }
 
 /// A session on its record, running or finished.
@@ -141,7 +135,7 @@ describe("the status word", () => {
   /// GitHub, which is nobody here.
   it("says a wrap-up is waiting on its checks", () => {
     expect(
-      status(like({ state: "Wrapping", waiting_on_checks: true })),
+      status(like({ state: "wrapping", waiting_on_checks: true })),
     ).toEqual({
       word: "Waiting on checks",
       state: "Wrapping",
@@ -174,7 +168,7 @@ describe("the status word", () => {
     expect(
       status(
         like({
-          state: "Wrapping",
+          state: "wrapping",
           waiting_on_checks: true,
           ready_to_resume: true,
         }),
@@ -261,10 +255,14 @@ describe("the status word", () => {
   /// The three states no status applies to: nothing is supposed to be driving
   /// one, and for two of them the word for where it got to *is* the state.
   it("says the bare state on a Draft, a Done and a Closed conversation", () => {
-    for (const state of ["Draft", "Done", "Closed"] as const) {
+    for (const [state, word] of [
+      ["draft", "Draft"],
+      ["done", "Done"],
+      ["closed", "Closed"],
+    ] as const) {
       expect(
         status(like({ state, waiting: true, blocked_on: 12, working: true })),
-      ).toEqual({ word: null, state, attention: false });
+      ).toEqual({ word: null, state: word, attention: false });
     }
   });
 
@@ -308,7 +306,7 @@ describe("the status word", () => {
       ).word,
     ).toBe("Transferring to the-laptop");
 
-    expect(status(like({ state: "Done", transferring: "the-laptop" }))).toEqual(
+    expect(status(like({ state: "done", transferring: "the-laptop" }))).toEqual(
       {
         word: "Transferring to the-laptop",
         state: "Done",
@@ -328,9 +326,8 @@ describe("a declared state", () => {
       id: "two-steps",
     };
     const declared = like({
-      state: "Declared",
+      state: "checking",
       process: provided,
-      declared_state: "checking",
       waiting: true,
     });
 
@@ -343,8 +340,8 @@ describe("a declared state", () => {
         description: "Draft the change, then check it.",
         offered: true,
         states: [
-          { id: "drafting", word: "Drafting" },
-          { id: "checking", word: "Checking" },
+          { id: "drafting", word: "Drafting", interviews: false },
+          { id: "checking", word: "Checking", interviews: false },
         ],
         roles: [
           { role: "sketching", label: "Sketching", building: true, away: false },

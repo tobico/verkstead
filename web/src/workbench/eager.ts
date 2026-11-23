@@ -323,10 +323,7 @@ export function rowFor(view: ConversationView): ConversationEntry {
     naming: view.naming,
     repo: view.repo.name,
     state: view.state,
-    declared:
-      view.declared_state === null
-        ? null
-        : { process: view.process, state: view.declared_state },
+    process: view.process,
     working: false,
     idle: false,
     waiting: false,

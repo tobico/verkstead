@@ -29,7 +29,7 @@ use super::wrap_up::{WaitingOn, settled_when};
 /// The wire spelling, so the column reads as what an agent wrote and a database
 /// opened by hand says something. Its own pair of functions rather than serde,
 /// because what goes in a `TEXT` column is this module's business either way —
-/// exactly as [`Lifecycle::stored`] is.
+/// exactly as [`State::stored`] is.
 fn direction_stored(direction: Direction) -> &'static str {
     match direction {
         Direction::Inline => "inline",
@@ -49,201 +49,158 @@ fn direction_read(word: &str) -> Result<Direction> {
     })
 }
 
-/// Where a Conversation has got to.
+/// Where a Conversation has got to: the word its `state` column holds.
 ///
-/// The ladder is the domain's rather than any one stage's invention, so the
-/// states beyond the two this one reaches are here too: the rules written
-/// against them — a Brief and a branch name are the human's to change only while
-/// the Conversation is still drafting — need the states they refuse on behalf of
-/// to exist before the stage that reaches them does.
+/// **A word read against a manifest rather than a variant** (ADR-0030,
+/// *Process*). Which states there are, what each of them runs and which one
+/// an Outcome leads to is the Conversation's Process's to declare, and a
+/// Process is data in a plugin — so a shared list of states here would be a
+/// second opinion about something this crate cannot see. What the record holds
+/// is the word, and everything anybody wants to know about it is read off the
+/// manifest above the store.
 ///
-/// [`Lifecycle::Closed`] is off the ladder rather than on it: closing is the
-/// work stopping wherever it was, which is why it is reachable from all of them
-/// and leads nowhere. [`Lifecycle::FollowUp`] is beside it rather than on it
-/// too, being somewhere the human puts a Conversation whose work is already
-/// pushed — and it leads back into the wrap-up it came off.
-/// [`Lifecycle::Investigating`] is beside it the same way: a question about the
-/// code being answered rather than a rung the work climbs, and it leads back to
-/// wherever it was entered from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Lifecycle {
+/// **Three of them are Verkstead's**, named here because nothing declares them
+/// and nothing returns to them: [`Self::DRAFT`], where every Conversation
+/// starts and which a second round opens past; [`Self::DONE`]; and
+/// [`Self::CLOSED`], off the ladder rather than on it, which is the work
+/// stopping wherever it was and so reachable from everywhere. Every other word
+/// is one of the states the Process declares — the five Verkstead ships
+/// included, whose manifests name their states with the words this column has
+/// always held.
+///
+/// A word nothing declares is not an error here. It is a plugin removed from
+/// under a Conversation, or a database written by a Verkstead that knows a
+/// Process this one does not, and what it draws as is the word itself with the
+/// Process's trouble beside it — see the server's `processes` module.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct State(String);
+
+/// What [`State::CLOSED`] was called while the press was Abort.
+///
+/// A migration rewrites every row it can reach — see [`super::migrations`] — so
+/// this is the word in the ones it never did: a database restored from a backup
+/// taken before it ran, or a row somebody wrote by hand. Read beside `closed`
+/// by [`State::named`], so nothing above this module ever sees it: a query that
+/// knew one spelling of Closed and not the other would answer about a
+/// Conversation it had taken for open.
+pub(crate) const ABORTED: &str = "aborted";
+
+impl State {
     /// The Brief is being written, and with it everything else about the
     /// Conversation: the branch name and the base commit alike. Where every
     /// Conversation starts, and the one state nothing comes back to — a second
     /// round opens where it is steered, past drafting already.
-    Draft,
+    pub const DRAFT: &'static str = "draft";
 
-    /// A grilling session is running against it.
-    Grilling,
-
-    /// The work is being done.
-    Implementing,
-
-    /// The work is on a PR and the wrap-up loop has it.
-    Wrapping,
-
-    /// The human is following that pull request up: a session of their own,
-    /// asking and doing whatever they want taken up about work already pushed.
-    ///
-    /// The one state with no way in but a steer, and the one that is not a rung
-    /// of the ladder: it hangs off the wrap-up rather than following it, and
-    /// where it leads back to is Wrapping.
-    FollowUp,
-
-    /// A question about the code is being answered: one session reading,
-    /// writing and running whatever it needs to find things out, in rounds of
-    /// Question Sets, and committing none of it.
-    ///
-    /// Off the ladder the way [`Self::FollowUp`] is, and for the same reason —
-    /// nothing is being built here, so there is no rung below it and none
-    /// above. Two ways in, a Start on an **Investigate** draft and a steer from
-    /// anywhere, and where it leads back to is where it came from: Done for an
-    /// Investigate Conversation of its own, and the state it was steered from
-    /// for one steered into it — Done again where that state is one nothing
-    /// returns to.
-    ///
-    /// See ADR-0020.
-    Investigating,
-
-    /// In one of the states a plugin's Process declares: its word is
-    /// [`Conversation::declared_state`], and what runs there is the Process's
-    /// manifest's to say (ADR-0030, *Process*). Nothing built in drives it.
-    ///
-    /// Read only for a Conversation on a a plugin's Process, and for every
-    /// word of such a Conversation's but Draft, Done and Closed, which are
-    /// Verkstead's whatever the Process — see [`Lifecycle::read_under`].
-    Declared,
-
-    /// Finished. A steer is the way back in: one into [`Lifecycle::Grilling`]
-    /// opens a second round with a Brief of its own — see
-    /// [`steer_conversation`].
-    Done,
+    /// Finished. A steer is the way back in, into whichever state the Process
+    /// marks as taking one — see [`steer_conversation`].
+    pub const DONE: &'static str = "done";
 
     /// Closed, from wherever it had got to. The worktree is gone; the branch is
     /// not, because a branch is cheap and may hold work worth reading.
-    Closed,
-}
+    pub const CLOSED: &'static str = "closed";
 
-/// What [`Lifecycle::Closed`] was called while the press was Abort.
-///
-/// A migration rewrites every row it can reach — see [`super::migrations`] — so
-/// this is the word in the ones it never did: a database restored from a backup
-/// taken before it ran, or a row somebody wrote by hand. Named once here because
-/// two places read it, and a query that knew one spelling of Closed and not the
-/// other would answer about a Conversation it had taken for open.
-pub(crate) const ABORTED: &str = "aborted";
+    /// The state a stored word names, which is the word itself — with
+    /// [`ABORTED`] read as [`Self::CLOSED`], that being what Closed was called
+    /// while the press was Abort.
+    pub fn named(word: &str) -> Self {
+        match word == ABORTED {
+            true => Self::closed(),
+            false => Self(word.to_owned()),
+        }
+    }
 
-impl Lifecycle {
-    /// Both words a shut Conversation's column may hold: Done and Closed, and
-    /// Closed's own older spelling.
+    pub fn draft() -> Self {
+        Self(Self::DRAFT.to_owned())
+    }
+
+    pub fn done() -> Self {
+        Self(Self::DONE.to_owned())
+    }
+
+    pub fn closed() -> Self {
+        Self(Self::CLOSED.to_owned())
+    }
+
+    /// The word the column holds, which is the state itself.
+    pub fn stored(&self) -> &str {
+        &self.0
+    }
+
+    /// Whether it is one of the three Verkstead words itself, which no Process
+    /// declares and none returns to.
+    pub fn verksteads(&self) -> bool {
+        matches!(self.0.as_str(), Self::DRAFT | Self::DONE | Self::CLOSED)
+    }
+
+    /// And the id its Process gives it, where it is one of the states a
+    /// Process declares — every word but Verkstead's own three.
     ///
-    /// What a query orders by rather than reads. [`Self::read`] turns a word into
-    /// a state and SQL cannot, so anywhere SQL has to know whether a row is still
-    /// at work it compares against these — see
+    /// What a state's word, its Activity and its options are all read off:
+    /// the five Verkstead ships name their states with the words this column
+    /// has always held, so a Grilling answers `grilling` here and is worded
+    /// off Develop's manifest.
+    pub fn declared(&self) -> Option<&str> {
+        (!self.verksteads()).then_some(self.0.as_str())
+    }
+
+    /// Whether the work has stopped: Done, or Closed.
+    pub fn shut(&self) -> bool {
+        matches!(self.0.as_str(), Self::DONE | Self::CLOSED)
+    }
+
+    /// Both words a shut Conversation's column may hold, and Closed's own older
+    /// spelling with them.
+    ///
+    /// What a query orders by rather than reads. [`Self::named`] folds the old
+    /// spelling into the new and SQL cannot, so anywhere SQL has to know whether
+    /// a row is still at work it compares against these — see
     /// [`super::pull_requests::conversation_on_pull_request`], where a word left
     /// out of the list would sort as though the Conversation were open.
-    pub(crate) fn shut() -> [&'static str; 3] {
-        [Self::Done.stored(), Self::Closed.stored(), ABORTED]
+    pub(crate) fn shut_words() -> [&'static str; 3] {
+        [Self::DONE, Self::CLOSED, ABORTED]
     }
+}
 
-    /// The word the column holds. Lowercase and spelled out, so the table reads
-    /// as something rather than as a number nobody can look up.
-    pub fn stored(self) -> &'static str {
-        match self {
-            Self::Draft => "draft",
-            Self::Grilling => "grilling",
-            Self::Implementing => "implementing",
-            Self::Wrapping => "wrapping",
-            Self::FollowUp => "follow-up",
-            Self::Investigating => "investigating",
-            // Never written by this word: a declared state is entered by its
-            // own — see [`enter_declared`]. The column holding it is a row
-            // somebody wrote by hand, and reads as unknown.
-            Self::Declared => "declared",
-            Self::Done => "done",
-            Self::Closed => "closed",
-        }
+impl From<&str> for State {
+    fn from(word: &str) -> Self {
+        Self::named(word)
     }
+}
 
-    /// The state of Verkstead's a stored word names, where it names one.
-    pub fn named(word: &str) -> Option<Self> {
-        Self::read_strict(word).ok()
+impl From<&State> for State {
+    fn from(state: &State) -> Self {
+        state.clone()
     }
+}
 
-    /// The state a stored word names on a Conversation whose Process is
-    /// `process`: where it is a plugin's, every word but Draft, Done and
-    /// Closed is one of its declared states, whatever it is spelled — so a
-    /// Process naming a state `wrapping` is never driven as Verkstead's own
-    /// wrap-up. Otherwise [`Self::read`].
-    pub(crate) fn read_under(word: &str, process: &Process) -> Result<Self> {
-        if process.built_in() {
-            return Self::read_strict(word);
-        }
-
-        Ok(match Self::read_strict(word) {
-            Ok(state @ (Self::Draft | Self::Done | Self::Closed)) => state,
-            _ => Self::Declared,
-        })
+impl From<String> for State {
+    fn from(word: String) -> Self {
+        Self::named(&word)
     }
+}
 
-    /// The state a stored word names. A word this does not know is a database
-    /// written by a Verkstead this one does not understand, which is worth
-    /// saying rather than guessing past.
-    ///
-    /// `aborted` is read beside `closed`, because that is what the state was
-    /// called while the press was Abort. A migration rewrites the rows it can
-    /// reach — see [`super::migrations`] — and this reads the ones it never
-    /// did: a database restored from a backup taken before it ran, or a row
-    /// somebody wrote by hand.
-    ///
-    /// What a Conversation's own load and the sidebar read by, for a
-    /// Conversation on one of the five Processes Verkstead runs itself — see
-    /// [`Self::read_under`]. Every other read is [`Self::read`].
-    pub(crate) fn read_strict(word: &str) -> Result<Self> {
-        Ok(match word {
-            "draft" => Self::Draft,
-            "grilling" => Self::Grilling,
-            "implementing" => Self::Implementing,
-            "wrapping" => Self::Wrapping,
-            "follow-up" => Self::FollowUp,
-            "investigating" => Self::Investigating,
-            "done" => Self::Done,
-            "closed" => Self::Closed,
-            word if word == ABORTED => Self::Closed,
-            other => bail!("a Conversation is in the unknown state {other:?}"),
-        })
+impl PartialEq<str> for State {
+    fn eq(&self, word: &str) -> bool {
+        self.0 == word
     }
+}
 
-    /// The state a stored word names, read without the Conversation's
-    /// Process to hand: a word this Verkstead doesn't know is one of the
-    /// states a plugin's Process declares, [`Self::Declared`].
-    ///
-    /// What every read but a Conversation's own load and the sidebar's is:
-    /// each of them asks whether the Conversation is in one of Verkstead's
-    /// states, and a declared one is none of them. A plugin's Process naming a
-    /// state as one of Verkstead's words reads as that word here; its own load
-    /// reads it as declared — see [`Self::read_under`].
-    pub(crate) fn read(word: &str) -> Result<Self> {
-        Ok(Self::read_strict(word).unwrap_or(Self::Declared))
+impl PartialEq<&str> for State {
+    fn eq(&self, word: &&str) -> bool {
+        self.0 == *word
     }
+}
 
-    /// Whether a stored word reads as this state, tolerating one this Verkstead
-    /// does not understand.
-    ///
-    /// The compare for the two presses that have to work on a row whose state
-    /// word has gone bad — closing it, and refusing to archive it — where
-    /// [`Self::read`]'s error would be the whole conversation locked away
-    /// behind the one column nothing can get past. A word that will not parse
-    /// is not the state being asked about, which is the answer both of them
-    /// want: it is not Closed, so the close goes ahead and heals the row, and
-    /// it is not Closed, so an archive on its own says `NotClosed` rather than
-    /// putting a possibly-live worktree out of sight.
-    ///
-    /// Nowhere else. Everything that needs to *know* the state still reads it,
-    /// because a reader told Draft about a word nobody can parse would act on a
-    /// guess — see [`load_conversation`], which still refuses.
-    pub(crate) fn reads_as(word: &str, state: Self) -> bool {
-        Self::read(word).is_ok_and(|read| read == state)
+impl PartialEq<State> for &str {
+    fn eq(&self, state: &State) -> bool {
+        state.0 == *self
+    }
+}
+
+impl std::fmt::Display for State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
 }
 
@@ -258,7 +215,7 @@ impl Lifecycle {
 /// it is read off that manifest above the store. The five Verkstead ships are
 /// bundled plugins of their own, so there is no second kind.
 ///
-/// [`Lifecycle`]'s pair rather than [`Direction`]'s: a fact of the
+/// [`State`]'s pair rather than [`Direction`]'s: a fact of the
 /// Conversation's, picked before anything runs and frozen when the work starts,
 /// where a Direction rides a Question Set as a field of `Proposal` and so lives
 /// in the schema crate the agents write against. A Process is on no Set.
@@ -380,9 +337,9 @@ impl Process {
     /// Whether it is one of the five: the plugin providing it is one Verkstead
     /// ships, under the word it has always been stored as.
     ///
-    /// What says a Conversation's states are the ones Verkstead words itself —
-    /// see [`Lifecycle::read_under`] — rather than anything about how it is
-    /// drawn, which is the manifest's either way.
+    /// What says the host's own drivers run a Conversation rather than the
+    /// Process engine — see the server's `processes` module — and nothing about
+    /// how it is drawn, which is the manifest's either way.
     pub fn built_in(&self) -> bool {
         BUILT_IN_PROCESSES
             .iter()
@@ -392,8 +349,8 @@ impl Process {
     /// The word the `process` column holds, which is the Process's id in the
     /// manifest that declares it.
     ///
-    /// Its own pair of functions rather than serde, as [`Lifecycle::stored`]
-    /// is: what goes in a `TEXT` column is this module's business.
+    /// Its own pair of functions rather than serde, as [`State::stored`] is:
+    /// what goes in a `TEXT` column is this module's business.
     pub(crate) fn stored(&self) -> &str {
         &self.id
     }
@@ -495,16 +452,14 @@ pub struct Conversation {
     /// under.
     pub base_ref: Option<String>,
 
-    pub state: Lifecycle,
-
-    /// The id its Process's manifest gives the state it stands in, as the
-    /// column holds it — which is what the state's word is read off.
+    /// The word the `state` column holds, which is the state itself: the id
+    /// its Process gives the state it stands in, or one of the three Verkstead
+    /// words itself (see [`State`]).
     ///
-    /// Filled for every state but the three Verkstead words itself: Draft,
-    /// Done and Closed. All five of Verkstead's own are plugins whose states
-    /// are named with the words this column already held, so a Grilling
-    /// carries `grilling` here and is worded off Develop's manifest.
-    pub declared_state: Option<String>,
+    /// All five of Verkstead's own Processes are plugins whose states are named
+    /// with the words this column already held, so a Grilling reads `grilling`
+    /// here and is worded off Develop's manifest.
+    pub state: State,
 
     /// The Profile and model each of its roles' sessions run under, once they
     /// are chosen — by the name the role is declared under (see [`Role`]).
@@ -609,42 +564,6 @@ pub struct Conversation {
     pub transferred: Option<super::Transferred>,
 }
 
-/// Where a sidebar row's state word got to: the state it names, or the word
-/// itself where this Verkstead has never heard of it.
-///
-/// The one read of that column that does not fail on a word it cannot parse.
-/// Everything else refuses, because everything else acts on the answer — but
-/// the sidebar is the way to every Conversation there is, so one row written by
-/// a Verkstead from the future, or by hand, used to take the whole list with
-/// it and leave the human with no route to any of them but a URL out of their
-/// own history.
-///
-/// The word travels rather than being swallowed here: what to draw for it is
-/// the wire's business, and the store has no log to put it in.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RowState {
-    /// A word this Verkstead knows.
-    Known(Lifecycle),
-
-    /// And one it does not, kept as it was stored so that whoever draws the row
-    /// can say what it found.
-    Unknown(String),
-}
-
-impl RowState {
-    /// The state where the word named one, and nothing where it did not.
-    ///
-    /// What every reader of this list but the sidebar wants: the sweeps decide
-    /// whether to drive or to look for a stall, and a row whose state nobody
-    /// can read is one neither should touch.
-    pub fn known(&self) -> Option<Lifecycle> {
-        match self {
-            Self::Known(state) => Some(*state),
-            Self::Unknown(_) => None,
-        }
-    }
-}
-
 /// One row of the conversations sidebar, drawn without reading a Timeline.
 ///
 /// The branch is the row's name where somebody has settled on one. A
@@ -674,7 +593,20 @@ pub struct ConversationRow {
     /// What the Repo is called, which is the only thing about it a row shows.
     pub repo: String,
 
-    pub state: RowState,
+    /// The word it stands in, which is what the row's word is read off its
+    /// Process by — see [`State`].
+    pub state: State,
+
+    /// And the Process to read it against: a plugin's by its uuid and the id
+    /// its manifest gives the Process there.
+    ///
+    /// **Read off the `processes` row alone**, Develop where the Conversation
+    /// has none — unlike [`super::process`], which reads an adopted pull
+    /// request as a Review. What this is for is the state's word, and the five
+    /// Processes Verkstead ships name every state they share alike, so the
+    /// nearer reading would word nothing differently and would cost the list a
+    /// join.
+    pub process: Process,
 
     /// Whether anything about this Conversation is waiting on the human.
     ///
@@ -743,26 +675,6 @@ pub struct ConversationRow {
     /// is doing the work — see `server::merging`, and [`super::transferred`],
     /// which is where the device holding that record is read.
     pub transferred: bool,
-
-    /// The state it stands in as its Process declares it, which is what the
-    /// row's word is read off — every state but the three Verkstead words
-    /// itself, Draft, Done and Closed.
-    pub declared: Option<Declared>,
-}
-
-/// A declared state, named by everything it takes to find its word: the
-/// Process that declares it, and the state's id in that Process's manifest.
-///
-/// **Its Process is read off the `processes` row alone**, Develop where the
-/// Conversation has none — unlike [`super::process`], which reads an adopted
-/// pull request as a Review. What this is for is the state's word, and the
-/// five Processes Verkstead ships name every state they share alike, so the
-/// nearer reading would word nothing differently and would cost the list a
-/// join.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Declared {
-    pub process: Process,
-    pub state: String,
 }
 
 /// The word the `kind` column holds for a Question Set.
@@ -772,6 +684,31 @@ pub struct Declared {
 /// one transaction, and the Set is not yet a [`SetOnTimeline`] at the moment the
 /// row is written.
 const QUESTION_SET: &str = "question-set";
+
+/// And the word it holds for a move. A constant for the same reason again:
+/// several queries look for the move into a particular state, and an Event
+/// built to be thrown away for its kind reads worse than the word.
+pub(crate) const MOVED: &str = "moved";
+
+/// The words the five Processes Verkstead ships give the two states a query
+/// here has to name: the one that wraps up, and the one that builds.
+///
+/// **The only state words this crate holds**, and they are here because SQL
+/// cannot read a manifest: what asks is a query over every Conversation of a
+/// Repo at once — which roadmap stages have settled, when this wrap's
+/// proposals began, which round of building a placing Set belongs to — and a
+/// query cannot ask each row's Process what its states are called. Everything
+/// that reads one Conversation takes the word from its caller, who has the
+/// manifest; see [`transition`].
+///
+/// So a third-party Process whose wrap-up state is called something else is
+/// not counted by those reads. Nothing is wrong with the Conversation — it
+/// runs on its own manifest like any other — and what it misses is a roadmap
+/// register and two windows, which are Verkstead's own ladder's bookkeeping.
+pub(crate) const WRAPPING: &str = "wrapping";
+
+/// And the one that builds — see [`WRAPPING`], whose reasons are its own.
+pub(crate) const IMPLEMENTING: &str = "implementing";
 
 /// And the word it holds for the pull request the finish step opened. A
 /// constant for the same kind of reason, one module along: the row it hangs off
@@ -812,14 +749,13 @@ pub enum Event {
     /// One kind for every move rather than one per destination: what the
     /// Timeline is recording is that the work changed hands, and the state it
     /// changed to is the only thing that differs between one move and the next.
-    /// Starting to grill and closing both land here.
-    Moved(Lifecycle),
-
-    /// It moved into one of the states its Process's manifest declares, and
-    /// this is that state's id — see [`Lifecycle::Declared`]. A kind of its
-    /// own rather than a [`Self::Moved`] with a word, so a declared state that
-    /// happens to be spelled like one of Verkstead's is never read as it.
-    Entered(String),
+    /// Starting the work and closing both land here.
+    ///
+    /// A row of the older `entered` kind reads as one of these too. That kind
+    /// was a move into a state a plugin declared, written apart so a word
+    /// spelled like one of Verkstead's own states was never read as it — and
+    /// now that a state **is** a word there is nothing to tell apart.
+    Moved(State),
 
     /// A session's output, summarised. The whole of it is the Capture beside
     /// it — see [`super::captures`] — which is what the details pane shows
@@ -954,7 +890,7 @@ pub enum Event {
     ///
     /// `None` is a steer recorded before this was written down, which draws
     /// with the fields it has and is no error anywhere.
-    Steer(Steered, Option<String>, Option<Box<super::SteerRecord>>),
+    Steer(State, Option<String>, Option<Box<super::SteerRecord>>),
 
     /// The human pressed **Resolve conflicts** on a finished Conversation's pull
     /// request, and this is where they did it.
@@ -1029,8 +965,7 @@ impl Event {
     pub(crate) fn kind(&self) -> &'static str {
         match self {
             Self::Brief(_) => "brief",
-            Self::Moved(_) => "moved",
-            Self::Entered(_) => "entered",
+            Self::Moved(_) => MOVED,
             Self::AgentOutput(..) => "agent-output",
             Self::QuestionSet(_) => QUESTION_SET,
             Self::Handoff(_) => "handoff",
@@ -1056,7 +991,6 @@ impl Event {
         match self {
             Self::Brief(markdown) => Cow::Borrowed(markdown),
             Self::Moved(state) => Cow::Borrowed(state.stored()),
-            Self::Entered(state) => Cow::Borrowed(state),
             // Nothing: what a session printed is in the Capture tables, and
             // what the Timeline shows of it is read back from there too.
             Self::AgentOutput(..) => Cow::Borrowed(""),
@@ -1119,8 +1053,7 @@ impl Event {
     ) -> Result<Self> {
         Ok(match kind {
             "brief" => Self::Brief(body),
-            "moved" => Self::Moved(Lifecycle::read(&body)?),
-            "entered" => Self::Entered(body),
+            MOVED | "entered" => Self::Moved(State::named(&body)),
             "agent-output" => Self::AgentOutput(
                 summary.ok_or_else(|| anyhow!("a session's output has no Capture beside it"))?,
                 // Not asked for the same way: a Capture is written in the same
@@ -1161,12 +1094,10 @@ impl Event {
                 let recorded = steer.map(Box::new);
 
                 match body.split_once('\n') {
-                    Some((target, instruction)) => Self::Steer(
-                        Steered::read(target),
-                        Some(instruction.to_owned()),
-                        recorded,
-                    ),
-                    None => Self::Steer(Steered::read(&body), None, recorded),
+                    Some((target, instruction)) => {
+                        Self::Steer(State::named(target), Some(instruction.to_owned()), recorded)
+                    }
+                    None => Self::Steer(State::named(&body), None, recorded),
                 }
             }
             "resolve-conflicts" => Self::ResolveConflicts,
@@ -1236,8 +1167,8 @@ pub enum Chosen {
 /// Investigating.
 ///
 /// One answer for all three landings, because they are the same record written
-/// with one word different: see [`start_grilling`], [`start_tinkering`] and
-/// [`start_investigating`].
+/// with one word different: see [`start_in`], [`start_in`] and
+/// [`start_in`].
 ///
 /// Only the two refusals the store is in a position to make. Everything else
 /// starting is refused for — an unchosen Profile, an empty Brief, a base commit
@@ -1301,14 +1232,15 @@ pub enum Taking {
 /// nothing else would ever move it, so the move is made here, inside the same
 /// transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Landing {
+pub enum Landing<'a> {
     /// Drafting still, because recording the pull request is the move — which is
     /// the very next thing the caller does.
     Drafting,
 
-    /// Wrapping, with the move on the Timeline: there is no pull request to come
-    /// through the other door.
-    Wrapping,
+    /// In the state its Process wraps up in, with the move on the Timeline:
+    /// there is no pull request to come through the other door. The word is the
+    /// caller's, read off the manifest.
+    In(&'a State),
 }
 
 /// How a take-up enters the wrap-up that follows it.
@@ -1318,7 +1250,7 @@ pub enum Landing {
 /// already settled.
 pub struct Entering<'a> {
     /// Which door this is — see [`Landing`].
-    pub landing: Landing,
+    pub landing: Landing<'a>,
 
     /// And what that wrap-up has settled before it looks, which is empty for
     /// every Process but one — see [`take_up`].
@@ -1346,28 +1278,6 @@ pub enum Directing {
     NoSuchConversation,
 }
 
-/// What became of the work starting once a grilling's own tail has landed.
-///
-/// The other half of a [`Directing::Writing`] pick: the pick recorded the
-/// direction and left the Conversation grilling, and this is the move that
-/// follows the backlog a task list writes, or the handoff an inline tail writes.
-/// A roadmap tail is the same shape one rung further along — the roadmap goes
-/// for review as it lands, so what follows it is [`super::record_pull_request`]
-/// rather than this.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Implementing {
-    /// Recorded: the Conversation is being built, and the move is on its
-    /// Timeline.
-    Started,
-
-    /// It was not grilling, so there was no grilling for this to end. Nothing
-    /// recorded and nothing wrong.
-    NotGrilling,
-
-    /// There is no Conversation with that id.
-    NoSuchConversation,
-}
-
 /// What became of sending a wrapping Conversation back to be built.
 ///
 /// The one way back down the ladder, and the only thing that takes it: a review
@@ -1388,23 +1298,19 @@ pub enum Rebuilding {
     NoSuchConversation,
 }
 
-/// What became of landing a follow-up, which is one of two places.
+/// What became of landing a follow-up, wherever its manifest sent it.
 ///
-/// Two of them because a follow-up is reached two ways. One steered into is
-/// something taken up about work that is already on a pull request, and it goes
-/// back to the wrap-up it was opened over; a **Tinker** starts straight into one
-/// on a branch nobody has opened anything on, and there what the branch holds is
-/// what decides. See [`follow_up_over`] and [`follow_up_done`].
+/// One variant for the landing rather than one apiece: a follow-up is reached
+/// two ways and lands wherever the transition for the Outcome its rounds ended
+/// in leads — Develop sends either ending back to its wrap-up, and a Tinker
+/// that committed nothing goes straight to Done. So the landing is the
+/// caller.s word, read off the manifest. See [`follow_up_over`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ending {
-    /// Landed: the Conversation is wrapping up again and the move is on its
+    /// Landed: the Conversation is where it was sent and the move is on its
     /// Timeline, with the checks put back to waiting where the follow-up
     /// pushed anything.
-    Wrapped,
-
-    /// Landed the other way: the Conversation is Done and the move is on its
-    /// Timeline, nothing having been built for a wrap-up to be about.
-    Finished,
+    Landed,
 
     /// It is not following anything up, so there is no follow-up here to end —
     /// closed out from under the session, or steered somewhere else while this
@@ -1492,7 +1398,7 @@ pub enum Steering {
 /// human asked for holds either way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Closing {
-    /// Closed: the worktree is forgotten, the state is [`Lifecycle::Closed`],
+    /// Closed: the worktree is forgotten, the state is [`State::CLOSED`],
     /// and the move is on the Timeline.
     Closed,
 
@@ -1965,7 +1871,7 @@ async fn collapse_the_direction_state(pool: &SqlitePool) -> Result<()> {
          SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'moved', ?
          FROM conversations WHERE state = 'direction'",
     )
-    .bind(Lifecycle::Closed.stored())
+    .bind(State::CLOSED)
     .execute(pool)
     .await
     .context("recording the closing of every Conversation caught choosing a direction")?;
@@ -1982,7 +1888,7 @@ async fn collapse_the_direction_state(pool: &SqlitePool) -> Result<()> {
     .context("forgetting the worktrees of the Conversations caught choosing a direction")?;
 
     sqlx::query("UPDATE conversations SET state = ? WHERE state = 'direction'")
-        .bind(Lifecycle::Closed.stored())
+        .bind(State::CLOSED)
         .execute(pool)
         .await
         .context("closing every Conversation caught choosing a direction")?;
@@ -2230,7 +2136,7 @@ async fn started(
     )
     .bind(branch)
     .bind((named == Named::Settled).then_some(branch))
-    .bind(Lifecycle::Draft.stored())
+    .bind(State::DRAFT)
     .bind(&rank)
     .bind(repo_id)
     .fetch_optional(&mut *tx)
@@ -2361,8 +2267,8 @@ fn waits_on_the_human() -> String {
              OR ({escalated})
              OR ({steering})
          )",
-        draft = Lifecycle::Draft.stored(),
-        closed = Lifecycle::Closed.stored(),
+        draft = State::DRAFT,
+        closed = State::CLOSED,
         stopped = super::stops::waited_on(),
         escalated = super::escalations::waited_on(),
         steering = super::pending_steers::waited_on(),
@@ -2462,11 +2368,10 @@ pub async fn waiting(pool: &SqlitePool, conversation_id: i64) -> Result<bool> {
 /// sweep — ask for the lot: an archived Conversation is a Closed one, and
 /// neither sweep has anything to say about one either way.
 ///
-/// A row whose state word this Verkstead does not know is still on the list,
-/// carrying the word — see [`RowState`]. Every other read of that column
-/// refuses one, and this one cannot afford to: the list is the only route to a
-/// Conversation's own page, so one bad row failing it would leave the human
-/// with nothing to press on any of them.
+/// A row whose state nothing declares is still on the list, carrying the word:
+/// a state is a word, so there is no reading of that column to fail at all —
+/// what the sidebar draws for a word its Process says nothing about is the
+/// word itself, see [`State`].
 pub async fn conversations(
     pool: &SqlitePool,
     showing_archived: bool,
@@ -2496,7 +2401,7 @@ pub async fn conversations(
                 c.naming,
                 r.name, c.state,
                 ({waiting}) AS waiting,
-                c.state = 'wrapping'
+                c.state = ?
                   AND EXISTS (
                       SELECT 1 FROM wrap_up_settled w
                       WHERE w.conversation_id = c.id AND w.waiting_on = 'review'
@@ -2530,6 +2435,7 @@ pub async fn conversations(
          ORDER BY c.rank, c.id DESC",
         waiting = waits_on_the_human(),
     ))
+    .bind(WRAPPING)
     .bind(showing_archived)
     .fetch_all(pool)
     .await
@@ -2562,7 +2468,7 @@ pub async fn conversations(
                 // covers every Conversation from before there were Processes.
                 // What a word means is the Process's, so a plugin naming a
                 // state `wrapping` is never read as Verkstead's wrap-up — see
-                // [`Lifecycle::read_under`].
+                // the server's `processes` module.
                 let running = match (plugin, process) {
                     (Some(plugin), Some(id)) => Process { plugin, id },
                     (None, Some(word)) => {
@@ -2570,33 +2476,14 @@ pub async fn conversations(
                     }
                     _ => Process::develop(),
                 };
-                let read = Lifecycle::read_under(&state, &running);
-                // Every state but the three Verkstead words itself carries
-                // the state's own id, for the row's word to be read off the
-                // Process — the five written as data included, their states
-                // being named with the words this column holds.
-                let declared = match &read {
-                    Ok(Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed) | Err(_) => None,
-                    Ok(_) => Some(Declared {
-                        process: running,
-                        state: state.clone(),
-                    }),
-                };
                 ConversationRow {
                     id,
                     branch,
                     branch_named,
                     naming,
                     repo,
-                    // The one place a state word that will not parse is carried
-                    // rather than refused. This list is the way to every
-                    // Conversation there is, so one bad row used to take all of
-                    // them off the page — see [`RowState`].
-                    state: match read {
-                        Ok(state) => RowState::Known(state),
-                        Err(_) => RowState::Unknown(state),
-                    },
-                    declared,
+                    state: State::named(&state),
+                    process: running,
                     waiting,
                     narrowed_to_checks,
                     unseen,
@@ -2704,9 +2591,9 @@ pub async fn conversation_rank(pool: &SqlitePool, id: i64) -> Result<Option<Stri
 /// twenty Conversations carried twenty whatever is being shown at the moment.
 ///
 /// Counted by reading the states back rather than by asking SQL which of them
-/// are over: the words in the column are [`Lifecycle`]'s, one of them is a
-/// spelling only [`Lifecycle::read`] knows about, and a list of words in a query
-/// would be a second opinion about what "finished" means.
+/// are over: one of the words in the column is a spelling only [`State::named`]
+/// knows about, and a list of words in a query would be a second opinion about
+/// what "finished" means.
 pub async fn work_on_repo(pool: &SqlitePool, repo_id: i64) -> Result<Work> {
     let mut connection = pool
         .acquire()
@@ -2736,9 +2623,9 @@ pub(crate) async fn work_on(tx: &mut sqlx::SqliteConnection, repo_id: i64) -> Re
     };
 
     for (state, count) in rows {
-        match Lifecycle::read(&state)? {
-            Lifecycle::Done | Lifecycle::Closed => work.finished += count,
-            _ => work.live += count,
+        match State::named(&state).shut() {
+            true => work.finished += count,
+            false => work.live += count,
         }
     }
 
@@ -2815,10 +2702,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         return Ok(None);
     };
 
-    // Read first, since which states the column's word can name is the
-    // Process's to say — see [`Lifecycle::read_under`].
     let process = process(pool, id).await?;
-    let lifecycle = Lifecycle::read_under(&state, &process)?;
 
     Ok(Some(Conversation {
         id,
@@ -2835,12 +2719,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         naming,
         base_commit: base_commit.filter(|commit| !commit.is_empty()),
         base_ref: base_ref.filter(|named| !named.is_empty()),
-        state: lifecycle,
-        declared_state: (!matches!(
-            lifecycle,
-            Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed
-        ))
-        .then_some(state),
+        state: State::named(&state),
         pairings: pairings(pool, id).await?,
         worktree: worktree(pool, id).await?,
         direction: direction(pool, id).await?,
@@ -3047,8 +2926,8 @@ pub async fn conversation_at_worktree(
 pub async fn unfinished_conversations(pool: &SqlitePool) -> Result<Vec<i64>> {
     let rows: Vec<(i64,)> =
         sqlx::query_as("SELECT id FROM conversations WHERE state NOT IN (?, ?)")
-            .bind(Lifecycle::Done.stored())
-            .bind(Lifecycle::Closed.stored())
+            .bind(State::DONE)
+            .bind(State::CLOSED)
             .fetch_all(pool)
             .await
             .context("listing the Conversations whose work has not stopped")?;
@@ -4583,8 +4462,8 @@ async fn proposals(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Propos
     )
     .bind(conversation_id)
     .bind(conversation_id)
-    .bind(Event::Moved(Lifecycle::Wrapping).kind())
-    .bind(Lifecycle::Wrapping.stored())
+    .bind(MOVED)
+    .bind(WRAPPING)
     .fetch_all(pool)
     .await
     .with_context(|| format!("looking for Conversation {conversation_id}'s proposals"))?;
@@ -4744,14 +4623,14 @@ pub async fn state_under(pool: &SqlitePool, id: i64) -> Result<Option<(String, P
 /// For the readers whose whole question is the state. The whole
 /// [`Conversation`] is a join across the Repo and every Pairing, which is more
 /// of the store read than one word is worth.
-pub async fn state(pool: &SqlitePool, id: i64) -> Result<Option<Lifecycle>> {
+pub async fn state(pool: &SqlitePool, id: i64) -> Result<Option<State>> {
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(id)
         .fetch_optional(pool)
         .await
         .with_context(|| format!("reading the state of Conversation {id}"))?;
 
-    row.map(|(state,)| Lifecycle::read(&state)).transpose()
+    Ok(row.map(|(state,)| State::named(&state)))
 }
 
 /// Rewrite the Brief of the round a drafting Conversation is in.
@@ -5143,9 +5022,9 @@ pub(crate) async fn not_drafting(
         return Ok(Some(Edited::NoSuchConversation));
     };
 
-    Ok(match Lifecycle::read(&state)? {
-        Lifecycle::Draft => None,
-        _ => Some(Edited::NotDrafting),
+    Ok(match State::named(&state) == State::DRAFT {
+        true => None,
+        false => Some(Edited::NotDrafting),
     })
 }
 
@@ -5203,8 +5082,9 @@ impl<'a> From<&'a String> for Base<'a> {
     }
 }
 
-/// Record that a Conversation has started grilling: what it branched from, where
-/// its worktree is, and that it has moved.
+/// Record that a Conversation's work has started: what it branched from, where
+/// its worktree is, and that it has moved into `landing`, the first state its
+/// Process's manifest declares (ADR-0030, *Process*).
 ///
 /// The branch and the worktree are already made by the time this is called —
 /// the server does that, against git — so what is written here is the record of
@@ -5213,239 +5093,38 @@ impl<'a> From<&'a String> for Base<'a> {
 /// would be one nothing could start again and nothing would clean up.
 ///
 /// `base` is written whether or not the human overrode one. Where they did not,
-/// the rule was the default branch's tip *at grill start* — so this is the
-/// moment that rule resolves to a commit, and after it there is a fact about
-/// what the work branched from rather than a rule about what it would have.
-/// The branch it resolved *through* is written with it, for the reason
+/// the rule was the default branch's tip *at start* — so this is the moment
+/// that rule resolves to a commit, and after it there is a fact about what the
+/// work branched from rather than a rule about what it would have. The branch
+/// it resolved *through* is written with it, for the reason
 /// [`Conversation::base_ref`] is kept at all.
 ///
 /// It is also where the Repo remembers what it was started with — see
-/// [`super::pairings::remember`] — because this is the moment the three roles
+/// [`super::pairings::remember`] — because this is the moment the Pairings
 /// stop being changeable and become what the work is actually running under.
 ///
 /// `companions` is where each of the Conversation's companion repos was checked
 /// out, in the same transaction and for the same reason: they were made against
-/// git before this was called, and a Conversation saying it is grilling without
+/// git before this was called, and a Conversation saying it has started without
 /// saying where they went would be one nothing could bind into a sandbox and
 /// nothing would come back and remove. Empty is the ordinary Conversation, which
 /// has none.
 ///
-/// **Three landings, and which of them is the Conversation's Process's** — see
-/// [`start_tinkering`] and [`start_investigating`] below, which write this same
-/// transaction and leave the Conversation in Follow-up and in Investigating.
-/// Everything the server did against git before calling any of them is the same
-/// work, so the record of it is the same record.
-pub async fn start_grilling<'a>(
-    pool: &SqlitePool,
-    id: i64,
-    base: impl Into<Base<'a>>,
-    worktree: &Path,
-    companions: &[super::CompanionWorktree],
-) -> Result<Grilling> {
-    start(
-        pool,
-        id,
-        Destination::Built(Lifecycle::Grilling),
-        base.into(),
-        worktree,
-        companions,
-    )
-    .await
-}
-
-/// And the same start on a **Tinker** Conversation, which lands in Follow-up.
-///
-/// One press, two landings, and which of them is a fact about the Process
-/// rather than a second kind of start: the base commit, the worktree, the
-/// companions, the naming and the Repo's memory are written exactly as they are
-/// above. What differs is the state it comes out in — a Tinker is never
-/// interviewed, so there is no grilling for it to land in — and the session the
-/// server starts once this has been written.
-pub async fn start_tinkering<'a>(
-    pool: &SqlitePool,
-    id: i64,
-    base: impl Into<Base<'a>>,
-    worktree: &Path,
-    companions: &[super::CompanionWorktree],
-) -> Result<Grilling> {
-    start(
-        pool,
-        id,
-        Destination::Built(Lifecycle::FollowUp),
-        base.into(),
-        worktree,
-        companions,
-    )
-    .await
-}
-
-/// And the same start on an **Investigate** Conversation, which lands in
-/// Investigating.
-///
-/// The third landing of the one press, and written for [`start_tinkering`]'s
-/// reason: everything the server did against git before calling it is the same
-/// work, so the record of it is the same record. What differs is the state it
-/// comes out in — an investigation answers a question about the code rather
-/// than building anything, so there is neither a grilling nor a follow-up for it
-/// to land in — and the session the server starts once this has been written.
-pub async fn start_investigating<'a>(
-    pool: &SqlitePool,
-    id: i64,
-    base: impl Into<Base<'a>>,
-    worktree: &Path,
-    companions: &[super::CompanionWorktree],
-) -> Result<Grilling> {
-    start(
-        pool,
-        id,
-        Destination::Built(Lifecycle::Investigating),
-        base.into(),
-        worktree,
-        companions,
-    )
-    .await
-}
-
-/// And the same start on a Conversation whose Process a plugin provides, which
-/// lands in `state`, the first its manifest declares (ADR-0030, *Process*).
-///
-/// The fourth landing of the one press, for [`start_tinkering`]'s reason: what
-/// differs is only the state it comes out in, here a word the manifest gives,
-/// and the move is an [`Event::Entered`] naming it.
-pub async fn start_declared<'a>(
-    pool: &SqlitePool,
-    id: i64,
-    state: &str,
-    base: impl Into<Base<'a>>,
-    worktree: &Path,
-    companions: &[super::CompanionWorktree],
-) -> Result<Grilling> {
-    start(
-        pool,
-        id,
-        Destination::Declared(state),
-        base.into(),
-        worktree,
-        companions,
-    )
-    .await
-}
-
-/// The same start, landing wherever `landing` says: the first state a
-/// Process's manifest declares, read as one of Verkstead's own where it is
-/// one of the five Processes Verkstead runs, as a declared one where it is a
-/// plugin's.
+/// **One start, and where it lands is the whole of what the Process decides.**
+/// A Develop lands in its interview, a Tinker in its rounds, an Investigate in
+/// its question and a plugin's Process in whatever its manifest declares first
+/// — and the base commit, the worktree, the companions, the naming and the
+/// Repo's memory are the same record written the same way, because everything
+/// the server did against git before calling this is the same work.
 pub async fn start_in<'a>(
     pool: &SqlitePool,
     id: i64,
-    landing: Destination<'_>,
+    landing: &State,
     base: impl Into<Base<'a>>,
     worktree: &Path,
     companions: &[super::CompanionWorktree],
 ) -> Result<Grilling> {
     start(pool, id, landing, base.into(), worktree, companions).await
-}
-
-/// Where a move leaves a Conversation: one of Verkstead's states, or one its
-/// Process's manifest declares.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Destination<'a> {
-    Built(Lifecycle),
-    Declared(&'a str),
-}
-
-/// Where a steer sent the work, as its Event holds it: one of Verkstead's own
-/// states, or the id of one the Conversation's Process declares.
-///
-/// [`Destination`]'s owned pair, and the reason the Event keeps the word
-/// rather than only the [`Lifecycle`] it reads as: a steer into a state a
-/// plugin named is drawn under that state's word, and the word is read off
-/// the manifest by the id — which [`Lifecycle::Declared`] on its own has
-/// thrown away.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Steered {
-    /// One of Verkstead's own, by the word the body holds.
-    Built(Lifecycle),
-
-    /// One a Process declares, by its own id there — every word this build
-    /// does not know.
-    Declared(String),
-}
-
-impl Steered {
-    /// The word the body's first line holds for it.
-    pub fn stored(&self) -> &str {
-        match self {
-            Self::Built(state) => state.stored(),
-            Self::Declared(state) => state,
-        }
-    }
-
-    /// Which of Verkstead's states it reads as — [`Lifecycle::Declared`] for
-    /// one a Process named itself.
-    pub fn target(&self) -> Lifecycle {
-        match self {
-            Self::Built(state) => *state,
-            Self::Declared(_) => Lifecycle::Declared,
-        }
-    }
-
-    /// And the state's own id, where the Process is the one that named it.
-    pub fn declared(&self) -> Option<&str> {
-        match self {
-            Self::Built(_) => None,
-            Self::Declared(state) => Some(state),
-        }
-    }
-
-    /// The target a stored word names, the way [`Lifecycle::read`] does and
-    /// keeping the word: one this build does not know is a state some
-    /// Process declares.
-    fn read(word: &str) -> Self {
-        match Lifecycle::read_strict(word) {
-            Ok(state) => Self::Built(state),
-            Err(_) => Self::Declared(word.to_owned()),
-        }
-    }
-}
-
-impl From<Lifecycle> for Destination<'_> {
-    fn from(state: Lifecycle) -> Self {
-        Self::Built(state)
-    }
-}
-
-impl<'a> From<&'a str> for Destination<'a> {
-    fn from(state: &'a str) -> Self {
-        Self::Declared(state)
-    }
-}
-
-impl From<Destination<'_>> for Steered {
-    fn from(landing: Destination<'_>) -> Self {
-        match landing {
-            Destination::Built(state) => Self::Built(state),
-            Destination::Declared(state) => Self::Declared(state.to_owned()),
-        }
-    }
-}
-
-impl Destination<'_> {
-    /// The word the column holds for it.
-    fn stored(&self) -> &str {
-        match self {
-            Destination::Built(state) => state.stored(),
-            Destination::Declared(state) => state,
-        }
-    }
-
-    /// Its move written on the Timeline.
-    async fn moved(&self, tx: &mut sqlx::SqliteConnection, id: i64) -> Result<()> {
-        match self {
-            Destination::Built(state) => moved(tx, id, *state).await,
-            Destination::Declared(state) => entered(tx, id, state).await,
-        }
-    }
 }
 
 /// What became of moving a Conversation on from one of its declared states.
@@ -5461,9 +5140,14 @@ pub enum Transitioned {
     NoSuchConversation,
 }
 
-/// Move a Conversation on from its declared state `from` to `to` — the
-/// manifest's transition for the Outcome its Activity ended in — writing the
-/// move on its Timeline in the same transaction.
+/// Move a Conversation on from the state `from` to `to` — the manifest's
+/// transition for the Outcome its Activity ended in — writing the move on its
+/// Timeline in the same transaction.
+///
+/// **Every move between two states a Process declares comes through here**, the
+/// five Verkstead ships included: what a state is called and where an Outcome
+/// leads is the manifest's, so the two words are the caller's to have read off
+/// it (ADR-0030, *Process*).
 ///
 /// Refused where the column no longer holds `from`, which is the human having
 /// closed it, or steered it, while the Activity was ending: the move is about
@@ -5471,8 +5155,8 @@ pub enum Transitioned {
 pub async fn transition(
     pool: &SqlitePool,
     id: i64,
-    from: &str,
-    to: Destination<'_>,
+    from: &State,
+    to: &State,
 ) -> Result<Transitioned> {
     let mut tx = super::writing(pool, "moving a Conversation between its declared states").await?;
 
@@ -5486,7 +5170,7 @@ pub async fn transition(
         return Ok(Transitioned::NoSuchConversation);
     };
 
-    if state != from {
+    if State::named(&state) != *from {
         return Ok(Transitioned::Elsewhere);
     }
 
@@ -5497,7 +5181,7 @@ pub async fn transition(
         .await
         .with_context(|| format!("moving Conversation {id} to {}", to.stored()))?;
 
-    to.moved(&mut tx, id).await?;
+    moved(&mut tx, id, to).await?;
 
     tx.commit()
         .await
@@ -5506,16 +5190,11 @@ pub async fn transition(
     Ok(Transitioned::Moved)
 }
 
-/// What the three of them do, which is the same thing but for where it leaves
-/// the Conversation.
-///
-/// `landing` is the whole of what the Process decides here. Everything else is
-/// written the same way whichever press asked, because it is the same work being
-/// recorded.
+/// What [`start_in`] does, with the landing already read off the manifest.
 async fn start(
     pool: &SqlitePool,
     id: i64,
-    landing: Destination<'_>,
+    landing: &State,
     base: Base<'_>,
     worktree: &Path,
     companions: &[super::CompanionWorktree],
@@ -5534,7 +5213,7 @@ async fn start(
         return Ok(Grilling::NoSuchConversation);
     };
 
-    if Lifecycle::read(&state)? != Lifecycle::Draft {
+    if State::named(&state) != State::DRAFT {
         return Ok(Grilling::NotDrafting);
     }
 
@@ -5571,7 +5250,7 @@ async fn start(
 
     super::companions::record_worktrees(&mut tx, id, companions).await?;
 
-    landing.moved(&mut tx, id).await?;
+    moved(&mut tx, id, landing).await?;
 
     // And what it is being started with, against its Repo, so the next
     // Conversation started on that Repo arrives with every picker filled. In
@@ -5593,7 +5272,7 @@ async fn start(
 /// nothing left to point at — the branch it was checked out on is still there,
 /// and that is the thing worth keeping. The directory itself is removed by the
 /// server before this is called, for the reason the branch is created before
-/// [`start_grilling`] is: the record follows the work rather than promising it.
+/// [`start_in`] is: the record follows the work rather than promising it.
 ///
 /// A pending steer goes with it, the way the open Question Sets do: a form
 /// asking where the work goes next is about work that is over — see
@@ -5602,11 +5281,10 @@ async fn start(
 /// Closing one that is closed already records nothing and is not an error. The
 /// human asked for it to be closed, and it is.
 ///
-/// And closing one whose state word this Verkstead cannot read works, which is
-/// the one read of that column written to tolerate a bad word — see
-/// [`Lifecycle::reads_as`]. The write below is unconditional, so the row comes
-/// out of it holding `closed`: closing a Conversation nobody could read is also
-/// what repairs it.
+/// And closing one standing in a state nothing declares works: a state is a
+/// word, so there is nothing to refuse on. The write below is unconditional, so
+/// the row comes out of it holding `closed` — closing a Conversation whose
+/// Process had gone is also what tidies it away.
 pub async fn close_conversation(pool: &SqlitePool, id: i64) -> Result<Closing> {
     let mut tx = super::writing(pool, "closing a Conversation").await?;
 
@@ -5627,12 +5305,12 @@ pub async fn close_conversation(pool: &SqlitePool, id: i64) -> Result<Closing> {
     // Conversation whose state column has gone bad is exactly the one a human
     // most needs to be able to end, and refusing here would be the one column
     // nothing could get past.
-    if Lifecycle::reads_as(&state, Lifecycle::Closed) {
+    if State::named(&state) == State::CLOSED {
         return Ok(Closing::AlreadyClosed);
     }
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
-        .bind(Lifecycle::Closed.stored())
+        .bind(State::CLOSED)
         .bind(id)
         .execute(&mut *tx)
         .await
@@ -5661,7 +5339,7 @@ pub async fn close_conversation(pool: &SqlitePool, id: i64) -> Result<Closing> {
     // with nobody part-way through steering them.
     super::pending_steers::discard(&mut tx, id).await?;
 
-    moved(&mut tx, id, Lifecycle::Closed).await?;
+    moved(&mut tx, id, &State::closed()).await?;
 
     tx.commit().await.context("closing a Conversation")?;
 
@@ -5676,7 +5354,8 @@ pub async fn close_conversation(pool: &SqlitePool, id: i64) -> Result<Closing> {
 /// roadmap, or the handoff an inline build is primed from — so the Conversation
 /// stays Grilling until that session has: the pick informs the agent and the
 /// artifact moves the machine. What follows a backlog or a handoff is
-/// [`start_implementing`]; what follows the roadmap commit is the pull request
+/// the [`transition`] its manifest maps the Direction to; what follows the
+/// roadmap commit is the pull request
 /// the same session opens, which is [`super::record_pull_request`]'s to record.
 ///
 /// Called off the back of a Response landing rather than off anything the human
@@ -5684,13 +5363,12 @@ pub async fn close_conversation(pool: &SqlitePool, id: i64) -> Result<Closing> {
 /// not interviewing is [`Directing::NotGrilling`] rather than an error. A pick
 /// that arrives after the interview has ended has nothing left to inform.
 ///
-/// **What counts as interviewing is read as far as a word can read it**: one of
-/// Verkstead's own five is grilling, and a Conversation on a plugin's Process is
-/// in one of the states that Process declares. Which of *those* runs the
-/// Interview is its manifest's to say and no column holds it, so the state is
-/// taken as far as the record goes here and the server asks the manifest before
-/// it acts on the pick — see `conversations::settle_a_proposal`, which is what
-/// tells the session waiting.
+/// **What counts as interviewing is read as far as a word can read it**: any
+/// state its Process declares, which is every word but Verkstead's own three.
+/// Which of them runs the Interview is the manifest's to say and no column holds
+/// it, so the state is taken as far as the record goes here and the server asks
+/// the manifest before it acts on the pick — see
+/// `conversations::settle_a_proposal`, which is what tells the session waiting.
 ///
 /// The pick is recorded as the row alone. What says on the Timeline that the
 /// human chose is the answered proposal Set sitting on it, with the direction
@@ -5702,33 +5380,17 @@ pub async fn close_conversation(pool: &SqlitePool, id: i64) -> Result<Closing> {
 pub async fn pick_direction(pool: &SqlitePool, id: i64, direction: Direction) -> Result<Directing> {
     let mut tx = super::writing(pool, "acting on a picked direction").await?;
 
-    // The Process beside the state, because what a word means is the Process's
-    // — see [`Lifecycle::read_under`], which is what keeps a plugin's own
-    // `wrapping` from being read as Verkstead's wrap-up.
-    let row: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
-        "SELECT conversations.state, processes.process, processes.plugin
-           FROM conversations
-           LEFT JOIN processes ON processes.conversation_id = conversations.id
-          WHERE conversations.id = ?",
-    )
-    .bind(id)
-    .fetch_optional(&mut *tx)
-    .await
-    .with_context(|| format!("reading the state of Conversation {id}"))?;
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
 
-    let Some((state, word, plugin)) = row else {
+    let Some((state,)) = row else {
         return Ok(Directing::NoSuchConversation);
     };
 
-    let running = match word {
-        Some(word) => Process::read_row(&word, plugin)?,
-        None => Process::develop(),
-    };
-
-    if !matches!(
-        Lifecycle::read_under(&state, &running)?,
-        Lifecycle::Grilling | Lifecycle::Declared
-    ) {
+    if State::named(&state).declared().is_none() {
         return Ok(Directing::NotGrilling);
     }
 
@@ -5750,53 +5412,9 @@ pub async fn pick_direction(pool: &SqlitePool, id: i64, direction: Direction) ->
     Ok(Directing::Writing)
 }
 
-/// Record that a grilling's own tail has landed and the work is being built: the
-/// Conversation is implementing, and the move is on its Timeline.
-///
-/// What the grilling session wrote is already in hand by the time this runs —
-/// the plan commit, or the handoff document taken onto the Timeline — so this is
-/// the record catching up with what the session left behind rather than a
-/// decision of its own.
-///
-/// Refused for anything but Grilling, which is the only place a tail can be
-/// running. That refusal is what keeps a run that was closed, or one whose pick
-/// was superseded, from moving a Conversation that has gone somewhere else since.
-///
-/// One transaction, as every move is: a Conversation that says Implementing
-/// always has the move on its Timeline to say when it got there.
-pub async fn start_implementing(pool: &SqlitePool, id: i64) -> Result<Implementing> {
-    let mut tx = super::writing(pool, "starting the implementation").await?;
-
-    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await
-        .with_context(|| format!("reading the state of Conversation {id}"))?;
-
-    let Some((state,)) = row else {
-        return Ok(Implementing::NoSuchConversation);
-    };
-
-    if Lifecycle::read(&state)? != Lifecycle::Grilling {
-        return Ok(Implementing::NotGrilling);
-    }
-
-    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
-        .bind(Lifecycle::Implementing.stored())
-        .bind(id)
-        .execute(&mut *tx)
-        .await
-        .with_context(|| format!("moving Conversation {id} to implementing"))?;
-
-    moved(&mut tx, id, Lifecycle::Implementing).await?;
-
-    tx.commit().await.context("starting the implementation")?;
-
-    Ok(Implementing::Started)
-}
-
 /// Send a wrapping Conversation back to be built, because its review split work
-/// out into a backlog.
+/// out into a backlog: out of `from`, the state it is wrapping up in, and into
+/// `to`, the state its manifest maps the task-list Direction to.
 ///
 /// The one move down the ladder there is. A review that judged its findings too
 /// big to fix where it stood wrote them as `.tasks/`, and a backlog is something
@@ -5830,7 +5448,12 @@ pub async fn start_implementing(pool: &SqlitePool, id: i64) -> Result<Implementi
 ///
 /// One transaction, as every move is: a Conversation that says Implementing
 /// always has the move on its Timeline to say when it got there.
-pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
+pub async fn implement_again(
+    pool: &SqlitePool,
+    id: i64,
+    from: &State,
+    to: &State,
+) -> Result<Rebuilding> {
     let mut tx = super::writing(pool, "building the split-out work").await?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
@@ -5843,7 +5466,7 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
         return Ok(Rebuilding::NoSuchConversation);
     };
 
-    if Lifecycle::read(&state)? != Lifecycle::Wrapping {
+    if State::named(&state) != *from {
         return Ok(Rebuilding::NotWrapping);
     }
 
@@ -5860,13 +5483,13 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
     .with_context(|| format!("recording how Conversation {id}'s split-out work is built"))?;
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
-        .bind(Lifecycle::Implementing.stored())
+        .bind(to.stored())
         .bind(id)
         .execute(&mut *tx)
         .await
-        .with_context(|| format!("moving Conversation {id} back to implementing"))?;
+        .with_context(|| format!("moving Conversation {id} back to {to}"))?;
 
-    moved(&mut tx, id, Lifecycle::Implementing).await?;
+    moved(&mut tx, id, to).await?;
 
     tx.commit().await.context("building the split-out work")?;
 
@@ -5881,11 +5504,13 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
 /// already on a pull request, so where it ends is where it started: the wrap-up
 /// carries on over whatever the branch now holds, and *back to Done* is that
 /// wrap-up's own settling rule rather than anything decided here — see
-/// [`finish_wrap_up`]. The other way is [`follow_up_done`].
+/// [`finish_wrap_up`]. A Tinker whose rounds built nothing goes straight to
+/// Done instead, which is its manifest's transition for the same ending — so
+/// `to` is the whole of what differs.
 ///
-/// Refused for anything but Follow-up, as every move here is refused outside the
-/// state it leaves: a Conversation closed or steered out from under the session
-/// is not one to wrap up.
+/// Refused where the column no longer holds `from`, as every move here is
+/// refused outside the state it leaves: a Conversation closed or steered out
+/// from under the session is not one to wrap up.
 ///
 /// **The checks go back to waiting where the follow-up pushed**, in the same
 /// transaction as the move. A follow-up that committed has given GitHub a new
@@ -5905,41 +5530,11 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
 ///
 /// One transaction, as every move is: a Conversation that says Wrapping always
 /// has the move on its Timeline to say when it got there.
-pub async fn follow_up_over(pool: &SqlitePool, id: i64, pushed: bool) -> Result<Ending> {
-    out_of_follow_up(pool, id, Lifecycle::Wrapping, pushed).await
-}
-
-/// And land one in Done, because the branch it was following up on holds nothing.
-///
-/// The second way out of Follow-up, and a **Tinker**'s where its rounds built
-/// nothing at all: there is no pull request to carry the work to and no work to
-/// carry, so there is nothing for a wrap-up to be about. The Worktree stays as it
-/// is, as it does for any Done Conversation.
-///
-/// Which of the two a Tinker takes is read off its branch at the ending rather
-/// than off anything in the record — see `crate::runner`, which asks git once and
-/// calls the one that fits. Nothing here decides it, exactly as nothing here
-/// decides which state a start lands in.
-///
-/// No `pushed`, because there is nothing to have pushed to: a Conversation that
-/// gets here is on no pull request, so there are no checks to put back to
-/// waiting.
-///
-/// Refused for anything but Follow-up, and one transaction, for
-/// [`follow_up_over`]'s reasons.
-pub async fn follow_up_done(pool: &SqlitePool, id: i64) -> Result<Ending> {
-    out_of_follow_up(pool, id, Lifecycle::Done, false).await
-}
-
-/// What the two of them do, which is the same move to different states.
-///
-/// `landing` is the whole of what the caller decides here, as it is for a start
-/// — see [`start`]. `pushed` only ever means anything on the way to Wrapping,
-/// there being no settle to unsettle anywhere else.
-async fn out_of_follow_up(
+pub async fn follow_up_over(
     pool: &SqlitePool,
     id: i64,
-    landing: Lifecycle,
+    from: &State,
+    to: &State,
     pushed: bool,
 ) -> Result<Ending> {
     let mut tx = super::writing(pool, "ending a follow-up").await?;
@@ -5954,7 +5549,7 @@ async fn out_of_follow_up(
         return Ok(Ending::NoSuchConversation);
     };
 
-    if Lifecycle::read(&state)? != Lifecycle::FollowUp {
+    if State::named(&state) != *from {
         return Ok(Ending::NotFollowingUp);
     }
 
@@ -5979,20 +5574,17 @@ async fn out_of_follow_up(
     }
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
-        .bind(landing.stored())
+        .bind(to.stored())
         .bind(id)
         .execute(&mut *tx)
         .await
         .with_context(|| format!("moving Conversation {id} out of following up"))?;
 
-    moved(&mut tx, id, landing).await?;
+    moved(&mut tx, id, to).await?;
 
     tx.commit().await.context("ending a follow-up")?;
 
-    Ok(match landing {
-        Lifecycle::Wrapping => Ending::Wrapped,
-        _ => Ending::Finished,
-    })
+    Ok(Ending::Landed)
 }
 
 /// End an investigation, because the human has said there is nothing else they
@@ -6004,18 +5596,16 @@ async fn out_of_follow_up(
 /// about — and its Worktree stays as it is, whatever scratch the session left in
 /// it being the scratch every Set's Diff has already shown.
 ///
-/// **`landing` is the whole of what the caller decides here**, the way it is for
-/// a start and for the two ways out of a follow-up — see [`follow_up_over`] and
-/// [`follow_up_done`], which share one move with the state as the word that
-/// differs.
+/// **`landing` is the whole of what the caller decides here**, the way it is
+/// for a start and for the way out of a follow-up — see [`follow_up_over`].
 /// Where an investigation goes is where it came from: the state the steer that
 /// opened it found the Conversation in, or Done for one that no steer opened.
 /// Nothing here works that out, and nothing here is in a position to: it is a
 /// fact recorded beside the Steer Event — see [`super::SteerRecord::source`].
 ///
-/// Refused for anything but Investigating, as every move here is refused outside
-/// the state it leaves: a Conversation closed or steered out from under the
-/// session is not one to finish.
+/// Refused where the column no longer holds `from`, as every move here is
+/// refused outside the state it leaves: a Conversation closed or steered out
+/// from under the session is not one to finish.
 ///
 /// No `pushed`, and **no settles put back to waiting on the way to Wrapping**,
 /// which is where this parts from a follow-up landing in one: an investigation
@@ -6027,7 +5617,8 @@ async fn out_of_follow_up(
 pub async fn investigation_over(
     pool: &SqlitePool,
     id: i64,
-    landing: Lifecycle,
+    from: &State,
+    landing: &State,
 ) -> Result<Investigated> {
     let mut tx = super::writing(pool, "ending an investigation").await?;
 
@@ -6041,7 +5632,7 @@ pub async fn investigation_over(
         return Ok(Investigated::NoSuchConversation);
     };
 
-    if Lifecycle::read(&state)? != Lifecycle::Investigating {
+    if State::named(&state) != *from {
         return Ok(Investigated::NotInvestigating);
     }
 
@@ -6124,7 +5715,7 @@ pub async fn resolve_conflicts(pool: &SqlitePool, id: i64) -> Result<Resolving> 
         return Ok(Resolving::NoSuchConversation);
     };
 
-    if Lifecycle::read(&state)? != Lifecycle::Done {
+    if State::named(&state) != State::DONE {
         return Ok(Resolving::NotDone);
     }
 
@@ -6153,13 +5744,13 @@ pub async fn resolve_conflicts(pool: &SqlitePool, id: i64) -> Result<Resolving> 
     .with_context(|| format!("putting a resolve press on the Timeline of Conversation {id}"))?;
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
-        .bind(Lifecycle::Wrapping.stored())
+        .bind(WRAPPING)
         .bind(id)
         .execute(&mut *tx)
         .await
         .with_context(|| format!("moving Conversation {id} back to wrapping up"))?;
 
-    moved(&mut tx, id, Lifecycle::Wrapping).await?;
+    moved(&mut tx, id, &State::named(WRAPPING)).await?;
 
     tx.commit()
         .await
@@ -6254,7 +5845,8 @@ pub async fn resolve_conflicts(pool: &SqlitePool, id: i64) -> Result<Resolving> 
 pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) -> Result<Steering> {
     let Steer {
         target,
-        declared,
+        opens_a_round,
+        wraps_up,
         pairings,
         brief,
         instruction,
@@ -6271,24 +5863,14 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
 
     let mut tx = super::writing(pool, "steering a Conversation").await?;
 
-    // Where it goes, as the column holds it: a declared state by its own id.
-    let destination = match declared {
-        Some(declared) if target == Lifecycle::Declared => Destination::Declared(declared),
-        _ => Destination::Built(target),
-    };
-
     // No record beside it on the way in: what a row in `steers` holds is
     // written a few lines down, out of the same press. The Event is built here
     // for its kind and its body, which is the target and whatever was written
     // under it.
-    let steer = Event::Steer(
-        Steered::from(destination),
-        instruction.map(str::to_owned),
-        None,
-    );
+    let steer = Event::Steer(target.clone(), instruction.map(str::to_owned), None);
     let body = match instruction {
-        None => destination.stored().to_owned(),
-        Some(instruction) => format!("{}\n{instruction}", destination.stored()),
+        None => target.stored().to_owned(),
+        Some(instruction) => format!("{target}\n{instruction}"),
     };
 
     // Selected from `conversations` rather than trusting the id, as every other
@@ -6355,24 +5937,24 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
     // would ever be along to answer it and the Conversation would read *Draft*
     // for the rest of its life. What it is called is the name its branch was cut
     // on, which is the only name it is ever going to have.
-    if target != Lifecycle::Done {
+    if target != State::DONE {
         sqlx::query(
             "UPDATE conversations SET naming = (named_branch IS NULL)
              WHERE id = ? AND state = ?",
         )
         .bind(id)
-        .bind(Lifecycle::Draft.stored())
+        .bind(State::DRAFT)
         .execute(&mut *tx)
         .await
         .with_context(|| format!("leaving the branch of Conversation {id} to be named"))?;
     }
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
-        .bind(destination.stored())
+        .bind(target.stored())
         .bind(id)
         .execute(&mut *tx)
         .await
-        .with_context(|| format!("steering Conversation {id} into {}", destination.stored()))?;
+        .with_context(|| format!("steering Conversation {id} into {target}"))?;
 
     // And off the archive, whatever the target: only a Closed Conversation is
     // ever archived, and a steer is the one move out of Closed, so an archived
@@ -6392,7 +5974,7 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
     // What the branch was cut from, for the one source that had no branch: a
     // Draft's column holds the base the human picked while drafting, which is a
     // *branch* until the moment something resolves it. This is that moment, as
-    // [`start_grilling`] is for a Conversation that reached grilling the
+    // [`start_in`] is for a Conversation that reached grilling the
     // ordinary way — and after it there is a fact about what the work branched
     // from rather than a rule about what it would have.
     if let Some(base) = base {
@@ -6463,32 +6045,27 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         .with_context(|| format!("recording how Conversation {id} is being built"))?;
     }
 
-    // A steer into Grilling opens a round, so the round before it is over and
-    // its wrap-up bookkeeping goes with it: a round that inherited the one before
-    // it would reach Wrapping with everything wrap-up waits on already settled,
-    // and would be over the moment it arrived. See
-    // [`super::wrap_up::forget_the_round`].
-    if target == Lifecycle::Grilling {
+    // A steer into a state that runs the interview opens a round, so the round
+    // before it is over and its wrap-up bookkeeping goes with it — see
+    // [`Steer::opens_a_round`] and [`super::wrap_up::forget_the_round`].
+    if opens_a_round {
         super::wrap_up::forget_the_round(&mut tx, id).await?;
     }
 
-    // And a steer into Wrapping reads the branch afresh, so the review goes back
-    // to being something the wrap-up waits on. *Settled once and stays settled*
-    // is a rule about one look at the branch — see [`super::WaitingOn::Review`] —
-    // and a steer is the human saying look at it again: without this a Done
-    // Conversation steered back into Wrapping would arrive carrying the settle it
-    // was carried to Done on, and nothing would read the branch at all.
+    // And a steer into one that wraps up reads the branch afresh, so the review
+    // goes back to being something the wrap-up waits on — see
+    // [`Steer::wraps_up`].
     //
     // Which is the whole difference between this and [`resolve_conflicts`], the
-    // one press that lands in Wrapping and deliberately leaves the settle
+    // one press that lands in a wrap-up and deliberately leaves the settle
     // standing. The review alone: the checks, what has been said and the merge
     // are asked of GitHub on every poll, so they settle themselves from the
     // answers this wrap-up's own watchers get.
-    if target == Lifecycle::Wrapping {
+    if wraps_up {
         super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Review).await?;
     }
 
-    destination.moved(&mut tx, id).await?;
+    moved(&mut tx, id, &target).await?;
 
     // The new round's Brief under the move, because the move is where the round
     // boundary falls and the Brief under it belongs to the round that starts
@@ -6559,14 +6136,30 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
 /// already had, no direction is a Conversation that has already said how its
 /// work is built, and no Worktree or base commit is a target nothing runs in or
 /// a Conversation that had both already.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Steer<'a> {
-    /// Which state the human moved it into.
-    pub target: Lifecycle,
+    /// Which state the human moved it into, by the word its Process gives it —
+    /// or [`State::DONE`] or [`State::CLOSED`], the two of Verkstead's own a
+    /// steer can name.
+    pub target: State,
 
-    /// The declared state's id, where [`Self::target`] is
-    /// [`Lifecycle::Declared`]: what the state column and the Steer Event hold.
-    pub declared: Option<&'a str>,
+    /// Whether that state runs the interview, so this steer opens a round.
+    ///
+    /// The manifest's to say and the caller's to have read — see
+    /// `processes::interviewing`. What it decides here is the wrap-up
+    /// bookkeeping of the round before: a round that inherited the one before
+    /// it would reach its wrap-up with everything that wrap-up waits on
+    /// already settled, and would be over the moment it arrived.
+    pub opens_a_round: bool,
+
+    /// And whether it wraps up, so the branch is read afresh.
+    ///
+    /// The manifest's again. *Settled once and stays settled* is a rule about
+    /// one look at the branch — see [`super::WaitingOn::Review`] — and a steer
+    /// is the human saying look at it again: without this a Done Conversation
+    /// steered back into its wrap-up would arrive carrying the settle it was
+    /// carried to Done on, and nothing would read the branch at all.
+    pub wraps_up: bool,
 
     /// What the work runs under from here, where they picked something new —
     /// one entry per role the state steered into runs its sessions under, so a
@@ -6903,7 +6496,7 @@ pub struct RoadmapStage<'a> {
 /// it, because there was no proposal here to pick one on.
 ///
 /// One transaction, as every move is, and the branch and the worktree exist
-/// before it for the reason they do at [`start_grilling`]: the record follows the
+/// before it for the reason they do at [`start_in`]: the record follows the
 /// work rather than promising it.
 ///
 /// `stacks_on` is the branch this stage's branch was made on top of, and `None`
@@ -6926,13 +6519,15 @@ pub struct RoadmapStage<'a> {
 /// `stage_roadmaps` statement in `apply_schema` is where that is written down.
 ///
 /// `companions` is where the stage's inherited companion repos were checked
-/// out, written in this transaction for [`start_grilling`]'s reason: a stage
+/// out, written in this transaction for [`start_in`]'s reason: a stage
 /// that said it was implementing with companions nothing had checked out would
 /// be one nothing could bind into a sandbox and nothing would come back and
 /// remove.
+#[allow(clippy::too_many_arguments)]
 pub async fn start_stage<'a>(
     pool: &SqlitePool,
     id: i64,
+    landing: &State,
     base: impl Into<Base<'a>>,
     worktree: &Path,
     stacks_on: Option<&str>,
@@ -6954,18 +6549,18 @@ pub async fn start_stage<'a>(
         return Ok(Staged::NoSuchConversation);
     };
 
-    if Lifecycle::read(&state)? != Lifecycle::Draft {
+    if State::named(&state) != State::DRAFT {
         return Ok(Staged::NotDrafting);
     }
 
     sqlx::query("UPDATE conversations SET base_commit = ?, base_ref = ?, state = ? WHERE id = ?")
         .bind(base.commit)
         .bind(base.named)
-        .bind(Lifecycle::Implementing.stored())
+        .bind(landing.stored())
         .bind(id)
         .execute(&mut *tx)
         .await
-        .with_context(|| format!("moving Conversation {id} to implementing a stage"))?;
+        .with_context(|| format!("moving Conversation {id} to {landing} a stage"))?;
 
     sqlx::query("INSERT INTO worktrees (conversation_id, path) VALUES (?, ?)")
         .bind(id)
@@ -7001,7 +6596,7 @@ pub async fn start_stage<'a>(
 
     super::companions::record_worktrees(&mut tx, id, companions).await?;
 
-    moved(&mut tx, id, Lifecycle::Implementing).await?;
+    moved(&mut tx, id, landing).await?;
 
     tx.commit().await.context("starting a stage")?;
 
@@ -7073,7 +6668,7 @@ pub async fn take_up<'a>(
         return Ok(Taking::NoSuchConversation);
     };
 
-    if Lifecycle::read(&state)? != Lifecycle::Draft {
+    if State::named(&state) != State::DRAFT {
         return Ok(Taking::NotDrafting);
     }
 
@@ -7112,15 +6707,15 @@ pub async fn take_up<'a>(
 
     // And the move, where there is no pull request coming to make it — see
     // [`Landing`]. The state and the Timeline together, as every move is written.
-    if landing == Landing::Wrapping {
+    if let Landing::In(landing) = landing {
         sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
-            .bind(Lifecycle::Wrapping.stored())
+            .bind(landing.stored())
             .bind(id)
             .execute(&mut *tx)
             .await
-            .with_context(|| format!("moving Conversation {id} to wrapping a branch up"))?;
+            .with_context(|| format!("moving Conversation {id} to {landing} a branch up"))?;
 
-        moved(&mut tx, id, Lifecycle::Wrapping).await?;
+        moved(&mut tx, id, landing).await?;
     }
 
     tx.commit().await.context("taking a branch up")?;
@@ -7561,11 +7156,11 @@ pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageSta
          WHERE c.repo_id = ? AND (r.stage IS NOT NULL OR d.direction = ?)
          ORDER BY r.conversation_id",
     )
-    .bind(Event::Moved(Lifecycle::Done).kind())
-    .bind(Lifecycle::Done.stored())
-    .bind(Event::Moved(Lifecycle::Wrapping).kind())
-    .bind(Lifecycle::Wrapping.stored())
-    .bind(Lifecycle::Done.stored())
+    .bind(MOVED)
+    .bind(State::DONE)
+    .bind(MOVED)
+    .bind(WRAPPING)
+    .bind(State::DONE)
     .bind(repo_id)
     .bind(direction_stored(Direction::Roadmap))
     .fetch_all(pool)
@@ -7575,7 +7170,7 @@ pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageSta
     let mut standings = StageStandings::default();
 
     for (roadmap, label, state, finished, wrapped, stopped, conversation_id) in rows {
-        let standing = standing(Lifecycle::read(&state)?, finished, wrapped);
+        let standing = standing(&State::named(&state), finished, wrapped);
 
         match label {
             Some(label) => standings.record(&roadmap, &label, standing, stopped, conversation_id),
@@ -7605,13 +7200,13 @@ pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageSta
 
 /// What a Conversation in `state` stands at, having reached Done at some point
 /// where `finished` and Wrapping where `wrapped`.
-fn standing(state: Lifecycle, finished: bool, wrapped: bool) -> StageStanding {
-    match (state, finished, wrapped) {
+fn standing(state: &State, finished: bool, wrapped: bool) -> StageStanding {
+    match (state.stored(), finished, wrapped) {
         // In Done, however it got there — including a database in which the
         // move was never written.
-        (Lifecycle::Done, ..) => StageStanding::Settled,
-        (Lifecycle::Closed, _, true) => StageStanding::Settled,
-        (Lifecycle::Closed, _, false) => StageStanding::Abandoned,
+        (State::DONE, ..) => StageStanding::Settled,
+        (State::CLOSED, _, true) => StageStanding::Settled,
+        (State::CLOSED, _, false) => StageStanding::Abandoned,
         // Somewhere else, having been in Done before: the work finished and
         // something was taken up about it afterwards. Which is a stage done —
         // see [`StageStanding::Settled`], where *once rather than now* is.
@@ -7627,7 +7222,7 @@ pub async fn conversation_standing(
     pool: &SqlitePool,
     repo_id: i64,
     conversation_id: i64,
-) -> Result<Option<(Lifecycle, StageStanding)>> {
+) -> Result<Option<(State, StageStanding)>> {
     let row: Option<(String, bool, bool)> = sqlx::query_as(
         "SELECT c.state,
                 EXISTS (
@@ -7641,11 +7236,11 @@ pub async fn conversation_standing(
          FROM conversations c
          WHERE c.id = ? AND c.repo_id = ?",
     )
-    .bind(Event::Moved(Lifecycle::Done).kind())
-    .bind(Lifecycle::Done.stored())
-    .bind(Event::Moved(Lifecycle::Wrapping).kind())
-    .bind(Lifecycle::Wrapping.stored())
-    .bind(Lifecycle::Done.stored())
+    .bind(MOVED)
+    .bind(State::DONE)
+    .bind(MOVED)
+    .bind(WRAPPING)
+    .bind(State::DONE)
     .bind(conversation_id)
     .bind(repo_id)
     .fetch_optional(pool)
@@ -7656,9 +7251,10 @@ pub async fn conversation_standing(
         return Ok(None);
     };
 
-    let state = Lifecycle::read(&state)?;
+    let state = State::named(&state);
+    let standing = standing(&state, finished, wrapped);
 
-    Ok(Some((state, standing(state, finished, wrapped))))
+    Ok(Some((state, standing)))
 }
 
 /// One stage that has **joined** its roadmap's chain: the Conversation it is,
@@ -8005,12 +7601,8 @@ pub async fn join_queue(pool: &SqlitePool, repo_id: i64, roadmap: &str) -> Resul
 /// Shared with [`super::pull_requests`], which moves a Conversation into
 /// Wrapping in the same transaction that records what it is wrapping up: a move
 /// is a move whichever module has the reason for it.
-pub(crate) async fn moved(
-    tx: &mut sqlx::SqliteConnection,
-    id: i64,
-    state: Lifecycle,
-) -> Result<()> {
-    let event = Event::Moved(state);
+pub(crate) async fn moved(tx: &mut sqlx::SqliteConnection, id: i64, state: &State) -> Result<()> {
+    let event = Event::Moved(state.clone());
 
     sqlx::query(
         "INSERT INTO timeline_events (conversation_id, at, kind, body)
@@ -8031,36 +7623,13 @@ pub(crate) async fn moved(
     Ok(())
 }
 
-/// Write on a Conversation's Timeline that it entered its declared state
-/// `state` — [`moved`]'s pair for a state a Process's manifest declares.
-pub(crate) async fn entered(tx: &mut sqlx::SqliteConnection, id: i64, state: &str) -> Result<()> {
-    let event = Event::Entered(state.to_owned());
-
-    sqlx::query(
-        "INSERT INTO timeline_events (conversation_id, at, kind, body)
-         VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?)",
-    )
-    .bind(id)
-    .bind(event.kind())
-    .bind(event.body().into_owned())
-    .execute(&mut *tx)
-    .await
-    .with_context(|| format!("recording that Conversation {id} entered {state}"))?;
-
-    Ok(())
-}
-
-/// Move a Conversation on to another state: one of Verkstead's own, or a state
-/// a Process declares by its own id.
+/// Move a Conversation on to another state, by the word its Process gives it.
 ///
-/// The blunt instrument, for the states no stage has arrived at yet. Starting to
-/// grill and closing have their own calls, because each of them is a move plus
-/// everything else that has to be true at the same moment.
-pub async fn set_state<'a>(
-    pool: &SqlitePool,
-    id: i64,
-    state: impl Into<Destination<'a>>,
-) -> Result<()> {
+/// The blunt instrument, and the column alone: nothing goes on the Timeline.
+/// Starting, closing and every transition a Process declares have their own
+/// calls, because each of them is a move plus everything else that has to be
+/// true at the same moment.
+pub async fn set_state(pool: &SqlitePool, id: i64, state: impl Into<State>) -> Result<()> {
     let state = state.into();
     let changed = sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
         .bind(state.stored())

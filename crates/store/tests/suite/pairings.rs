@@ -9,10 +9,10 @@ use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, Deleting, Picked, Profile, ProfileFacts, Repo, close_conversation, create_profile,
-    delete_profile, last_started_pairings, open_database, register_repo, remembered_pairings,
-    set_grilling_pairing, set_implementation_pairing, set_review_pairing, skip_review,
-    start_conversation, start_grilling, update_profile,
+    Account, Deleting, Picked, Profile, ProfileFacts, Repo, State, close_conversation,
+    create_profile, delete_profile, last_started_pairings, open_database, register_repo,
+    remembered_pairings, set_grilling_pairing, set_implementation_pairing, set_review_pairing,
+    skip_review, start_conversation, start_in, update_profile,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -86,9 +86,16 @@ async fn grilled(
         .await
         .unwrap();
 
-    start_grilling(pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
-        .await
-        .unwrap();
+    start_in(
+        pool,
+        id,
+        &State::named("grilling"),
+        "deadbeef",
+        Path::new("/state/worktrees/x"),
+        &[],
+    )
+    .await
+    .unwrap();
 }
 
 /// And one grilled with the Review picker on the row that runs nothing.
@@ -106,9 +113,16 @@ async fn unreviewed(pool: &SqlitePool, repo: &Repo, grilling: &Profile, implemen
         .unwrap();
     skip_review(pool, id).await.unwrap();
 
-    start_grilling(pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
-        .await
-        .unwrap();
+    start_in(
+        pool,
+        id,
+        &State::named("grilling"),
+        "deadbeef",
+        Path::new("/state/worktrees/x"),
+        &[],
+    )
+    .await
+    .unwrap();
 }
 
 /// The whole of it: grilling one Conversation is what fills the next one's
@@ -442,9 +456,16 @@ async fn drafted(
 }
 
 async fn press(pool: &SqlitePool, id: i64) {
-    start_grilling(pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
-        .await
-        .unwrap();
+    start_in(
+        pool,
+        id,
+        &State::named("grilling"),
+        "deadbeef",
+        Path::new("/state/worktrees/x"),
+        &[],
+    )
+    .await
+    .unwrap();
 }
 
 /// A workbench where nothing has started has no last start to copy, whatever

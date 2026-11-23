@@ -120,7 +120,14 @@ pub(crate) async fn take(
         branch: arriving.branch.clone(),
         branch_named: arriving.branch_named,
         naming: arriving.naming,
-        state: crate::ui::state_of(arriving.state),
+        state: store::State::named(&arriving.state),
+        // And the Process the word is read against, where the sending device
+        // said one: a release that sent none leaves this device's own reading
+        // standing — see [`store::Arrival::process`].
+        process: arriving.process.as_ref().map(|process| store::Process {
+            plugin: process.plugin.clone(),
+            id: process.id.clone(),
+        }),
         rank: arriving.rank.clone(),
         pairings,
     };

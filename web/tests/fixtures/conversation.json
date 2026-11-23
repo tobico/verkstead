@@ -41,7 +41,6 @@
     }
   ],
   "compiles_uncached": false,
-  "declared_state": null,
   "direction": null,
   "drafted_on": "aa00bb11cc22dd33ee44ff5566778899",
   "driven": false,
@@ -178,7 +177,7 @@
   "resets": null,
   "shared": null,
   "skill_packs": [],
-  "state": "Draft",
+  "state": "draft",
   "steer_rows": [
     {
       "brief": "Round",

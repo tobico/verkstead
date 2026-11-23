@@ -176,7 +176,7 @@ use verkstead_schema::{Direction, Nudge};
 use crate::AppState;
 use crate::grillings::Digest;
 use crate::profiles::Unlisted;
-use crate::store::{self, Conversation, Lifecycle, Role, Settling};
+use crate::store::{self, Conversation, Role, Settling, State};
 
 /// Press Steer: stop the drive and open the pending steer the form is written
 /// on.
@@ -270,11 +270,9 @@ pub(crate) async fn save(
 /// companion the work reaches.
 fn held(form: &SteerForm) -> store::PendingForm {
     store::PendingForm {
-        target: form.target.map(target),
-        declared: form
-            .state
-            .clone()
-            .filter(|_| form.target == Some(SteerTarget::Declared)),
+        target: form
+            .target
+            .and_then(|picked| target(picked, form.state.as_deref())),
         brief: form.brief.clone(),
         digest: form.digest,
         instruction: form.instruction.clone(),
@@ -314,8 +312,15 @@ fn held(form: &SteerForm) -> store::PendingForm {
 /// place — which is what a form nobody has answered yet holds anyway.
 pub(crate) fn filled(form: store::PendingForm) -> SteerForm {
     SteerForm {
-        target: form.target.and_then(steered),
-        state: form.declared,
+        // The state's own id where the target is one a Process declared
+        // itself, and nothing for Verkstead's own rows — which is the field's
+        // own rule, read the way [`held`] wrote it.
+        state: form
+            .target
+            .as_ref()
+            .filter(|state| steered(state) == Some(SteerTarget::Declared))
+            .map(|state| state.stored().to_owned()),
+        target: form.target.as_ref().and_then(steered),
         brief: form.brief,
         digest: form.digest,
         instruction: form.instruction,
@@ -431,7 +436,13 @@ pub(crate) async fn submit(
         return Ok(ConversationSteered::NoSuchConversation);
     };
 
-    let target = target(submission.target);
+    // A Declared row with no state named is a body no form could have sent —
+    // see [`target`] — so it is the refusal every unsteerable target gets.
+    let Some(target) = target(submission.target, submission.state.as_deref()) else {
+        return Ok(ConversationSteered::NotSteerable {
+            state: submission.state.clone().unwrap_or_default(),
+        });
+    };
 
     if let Some(refusal) = refusal(state, &conversation, submission).await? {
         return Ok(refusal);
@@ -640,12 +651,27 @@ pub(crate) async fn submit(
         })
         .collect();
 
+    // Both read off the target's own manifest, which is where what a state does
+    // is written (ADR-0030, *Process*): a steer into the state that runs the
+    // Interview opens a round, and one into the state that wraps up reads the
+    // branch afresh.
+    let opens_a_round = crate::processes::runs(
+        state,
+        &conversation.process,
+        target.stored(),
+        crate::processes::INTERVIEW,
+    );
+    let wraps_up = crate::processes::runs(
+        state,
+        &conversation.process,
+        target.stored(),
+        crate::processes::WRAP_UP,
+    );
+
     let steer = store::Steer {
-        target,
-        declared: submission
-            .state
-            .as_deref()
-            .filter(|_| submission.target == SteerTarget::Declared),
+        target: target.clone(),
+        opens_a_round,
+        wraps_up,
         pairings: &settling,
         brief: brief(submission).or(round),
         // Whichever of the three the target takes, all of them landing in the
@@ -858,8 +884,8 @@ pub(crate) async fn submit(
 
     tracing::info!(
         conversation_id,
-        was = ?conversation.state,
-        ?target,
+        was = conversation.state.stored(),
+        target = target.stored(),
         interrupted = submission.interrupt,
         "the human steered a Conversation",
     );
@@ -1599,19 +1625,17 @@ pub(crate) async fn standing(
 fn roles(state: &AppState, conversation: &Conversation, submission: &SteerSubmission) -> Vec<Role> {
     // A declared state is named by the form rather than by its target, every
     // one of them arriving as [`SteerTarget::Declared`].
-    let standing = match submission.target {
-        SteerTarget::Close | SteerTarget::Done => return Vec::new(),
-        SteerTarget::Declared => match submission.state.as_deref() {
-            Some(id) => id,
-            None => return Vec::new(),
-        },
-        named => target(named).stored(),
+    let Some(standing) = target(submission.target, submission.state.as_deref())
+        .filter(|state| state.declared().is_some())
+    else {
+        return Vec::new();
     };
 
-    let declared: Vec<Role> = crate::processes::roles_in(state, &conversation.process, standing)
-        .iter()
-        .map(|role| Role::named(&role.name))
-        .collect();
+    let declared: Vec<Role> =
+        crate::processes::roles_in(state, &conversation.process, standing.stored())
+            .iter()
+            .map(|role| Role::named(&role.name))
+            .collect();
 
     if !declared.is_empty() || submission.target == SteerTarget::Declared {
         return declared;
@@ -2133,7 +2157,7 @@ async fn plan(
     // Everything else steered through here has worked before: picking its own
     // branch back up is the whole point of this path, and the name on it is
     // either the human's or the one a session settled.
-    let prefill = conversation.state == Lifecycle::Draft && !conversation.branch_named;
+    let prefill = conversation.state == State::DRAFT && !conversation.branch_named;
 
     // What a branch that has never been cut comes off, named rather than
     // resolved: a drafting Conversation's column holds the *branch* the human
@@ -2792,23 +2816,29 @@ struct Made {
     checkouts: Vec<store::CompanionWorktree>,
 }
 
-/// The state a target names.
+/// The state a target names, by the word the record holds for it.
 ///
 /// The one place the form's vocabulary and the record's are held to each other,
-/// the way [`crate::ui`] holds the lifecycle's two spellings together — and the
-/// reason the two are separate lists at all: every state is somewhere to steer
-/// *from*, and only some of them are somewhere to steer *to*.
-fn target(target: SteerTarget) -> Lifecycle {
-    match target {
-        SteerTarget::Grilling => Lifecycle::Grilling,
-        SteerTarget::Implementing => Lifecycle::Implementing,
-        SteerTarget::Wrapping => Lifecycle::Wrapping,
-        SteerTarget::FollowUp => Lifecycle::FollowUp,
-        SteerTarget::Investigating => Lifecycle::Investigating,
-        SteerTarget::Done => Lifecycle::Done,
-        SteerTarget::Declared => Lifecycle::Declared,
-        SteerTarget::Close => Lifecycle::Closed,
-    }
+/// and the reason the two are separate lists at all: every state is somewhere to
+/// steer *from*, and only some of them are somewhere to steer *to*.
+///
+/// **Verkstead's own five targets carry the words the column has always held**,
+/// which is what the five Processes it ships name their states — see
+/// [`rows`], which words those rows off the manifest all the same. A
+/// [`SteerTarget::Declared`] carries the state's own id, which the form sends
+/// beside the target. `None` is a Declared row with no state named, which is a
+/// body no form could have sent.
+fn target(target: SteerTarget, declared: Option<&str>) -> Option<State> {
+    Some(match target {
+        SteerTarget::Grilling => State::named("grilling"),
+        SteerTarget::Implementing => State::named("implementing"),
+        SteerTarget::Wrapping => State::named(crate::processes::WRAPPING),
+        SteerTarget::FollowUp => State::named("follow-up"),
+        SteerTarget::Investigating => State::named("investigating"),
+        SteerTarget::Done => State::done(),
+        SteerTarget::Close => State::closed(),
+        SteerTarget::Declared => State::named(declared?),
+    })
 }
 
 /// And the target a state names, which is the same rule read the other way.
@@ -2818,17 +2848,18 @@ fn target(target: SteerTarget) -> Lifecycle {
 /// Timeline says it in the form's own words. `None` is a state nothing can be
 /// steered into — Draft and Closed, each of which has a way in of its own — and
 /// no form can have been left on one, so it reads as a target nobody picked.
-pub(crate) fn steered(state: Lifecycle) -> Option<SteerTarget> {
-    Some(match state {
-        Lifecycle::Grilling => SteerTarget::Grilling,
-        Lifecycle::Implementing => SteerTarget::Implementing,
-        Lifecycle::Wrapping => SteerTarget::Wrapping,
-        Lifecycle::FollowUp => SteerTarget::FollowUp,
-        Lifecycle::Investigating => SteerTarget::Investigating,
-        Lifecycle::Done => SteerTarget::Done,
-        Lifecycle::Declared => SteerTarget::Declared,
-        Lifecycle::Closed => SteerTarget::Close,
-        Lifecycle::Draft => return None,
+pub(crate) fn steered(state: &State) -> Option<SteerTarget> {
+    Some(match state.stored() {
+        "grilling" => SteerTarget::Grilling,
+        "implementing" => SteerTarget::Implementing,
+        crate::processes::WRAPPING => SteerTarget::Wrapping,
+        "follow-up" => SteerTarget::FollowUp,
+        "investigating" => SteerTarget::Investigating,
+        State::DONE => SteerTarget::Done,
+        State::CLOSED => SteerTarget::Close,
+        State::DRAFT => return None,
+        // Any other word is a state a Process declared itself.
+        _ => SteerTarget::Declared,
     })
 }
 
@@ -2862,10 +2893,9 @@ async fn clear(state: &AppState, conversation_id: i64) -> anyhow::Result<()> {
 /// The state a submission names, as the record and the manifest spell it: a
 /// declared state by its id, one of Verkstead's by its word.
 fn named(submission: &SteerSubmission) -> String {
-    match submission.target {
-        SteerTarget::Declared => submission.state.clone().unwrap_or_default(),
-        other => target(other).stored().to_owned(),
-    }
+    target(submission.target, submission.state.as_deref())
+        .map(|state| state.stored().to_owned())
+        .unwrap_or_default()
 }
 
 /// The state a submission names where the Conversation's Process does not
@@ -3055,9 +3085,12 @@ fn worded(row: SteerRow, loaded: Option<&crate::processes::Loaded>) -> SteerRow 
     let Some(loaded) = loaded else {
         return row;
     };
+    let Some(standing) = target(row.target, None) else {
+        return row;
+    };
     let Some(declared) = loaded
         .process
-        .state(target(row.target).stored())
+        .state(standing.stored())
         .filter(|declared| declared.steer.is_some())
     else {
         return row;

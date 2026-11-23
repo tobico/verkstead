@@ -5741,7 +5741,7 @@ that one is waiting on is somebody resolving a conflict rather than GitHub
 finishing something.
 
 A condition of Wrapping rather than a state, exactly as *blocked on you* is a
-condition of an active state: the Lifecycle is untouched, and the only thing
+condition of an active state: the state word is untouched, and the only thing
 stored is the mark saying the line has been written. What it is drawn from is
 the wrap-up's own settle facts and the sessions register, read together every
 time they are asked.
@@ -5772,7 +5772,7 @@ settles. So two Stages finishing close together are let in one at a time, in the
 order their tasks finished, and the first one *joining* releases nobody.
 
 A condition of Implementing rather than a state, drawn exactly as *Waiting on
-checks* is drawn one state later: the Lifecycle is untouched, nothing is pushed
+checks* is drawn one state later: the state word is untouched, nothing is pushed
 to any device, and the run holds its registration across the whole wait, so a
 held Stage is one being driven rather than one standing still. The hold itself is
 stored nowhere — it is a task of the running server, so a restart is holding

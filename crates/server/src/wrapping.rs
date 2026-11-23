@@ -200,7 +200,29 @@ pub(crate) async fn record(
     // for the move there would record nothing at all.
     let recorded = match door {
         Door::TheMove => {
-            store::record_pull_request(&state.pool, conversation_id, repo_id, &opened).await
+            // Which state that move lands in is the manifest's: the one running
+            // the Wrap-up Activity, whatever this Process calls it.
+            let Some(process) = store::process(&state.pool, conversation_id).await.ok() else {
+                tracing::error!(
+                    conversation_id,
+                    "reading which Process a Conversation is on failed, so its pull request was \
+                     not recorded",
+                );
+                return;
+            };
+            let Some(wrapping) =
+                crate::processes::running(state, &process, crate::processes::WRAP_UP)
+            else {
+                tracing::error!(
+                    conversation_id,
+                    "the Process of a Conversation whose pull request is being recorded declares \
+                     no state that wraps up, so it was not moved",
+                );
+                return;
+            };
+
+            store::record_pull_request(&state.pool, conversation_id, repo_id, &opened, &wrapping)
+                .await
         }
         Door::Beside => {
             store::record_another_pull_request(&state.pool, conversation_id, repo_id, &opened)
@@ -608,7 +630,7 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
     // watcher asks about before it goes to the network — see
     // [`crate::stopping::stopped`]. A run that has stopped is one nothing
     // advances past, this included.
-    if conversation.state != store::Lifecycle::Wrapping
+    if !crate::processes::wrapping_up(&state, conversation_id).await
         || crate::stopping::stopped(&state, conversation_id).await
     {
         return;
@@ -867,17 +889,7 @@ pub(crate) async fn committed_in(
 /// the one thing this decides: on the other side of it is an agent being let
 /// loose in a Worktree.
 pub(crate) async fn still_going(state: &AppState, conversation_id: i64) -> bool {
-    match store::load_conversation(&state.pool, conversation_id).await {
-        Ok(Some(conversation)) => conversation.state == store::Lifecycle::Wrapping,
-        Ok(None) => {
-            tracing::error!(conversation_id, "there is no Conversation left wrapping up");
-            false
-        }
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading whether a Conversation was wrapping up failed");
-            false
-        }
-    }
+    crate::processes::wrapping_up(state, conversation_id).await
 }
 
 /// Leave the Conversation where it is, with the reason on the Timeline.

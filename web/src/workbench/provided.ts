@@ -24,8 +24,6 @@ import { createRenderEffect, createSignal } from "solid-js";
 
 import { listProcesses } from "../api/client";
 import type {
-  DeclaredState,
-  Lifecycle,
   ProcessChoice,
   ProcessEntry,
   ProvidedProcess,
@@ -40,12 +38,13 @@ const [listed, setListed] = createSignal<ProcessEntry[]>([]);
 ///
 /// The one state table left in the viewer, and it is Verkstead's rather than
 /// any Process's: a Draft is drafting whatever it was going to be for, and
-/// Done and Closed are where work stops. Every other state's word is its
-/// Process's — see [`stateWord`].
-const VERKSTEAD: Partial<Record<Lifecycle, string>> = {
-  Draft: "Draft",
-  Done: "Done",
-  Closed: "Closed",
+/// Done and Closed are where work stops. Keyed by the word the record holds,
+/// as every state is. Every other word is one its Process declares — see
+/// [`stateWord`].
+const VERKSTEAD: Record<string, string> = {
+  draft: "Draft",
+  done: "Done",
+  closed: "Closed",
 };
 
 /// The states the work has ended in: the ladder's last rung, and the way off
@@ -54,47 +53,39 @@ const VERKSTEAD: Partial<Record<Lifecycle, string>> = {
 /// beside the state, because the word for where a finished Conversation got to
 /// *is* the state, and saying it twice with a colour between would be the
 /// button repeating itself.
-export const ENDED: ReadonlySet<Lifecycle> = new Set<Lifecycle>([
-  "Done",
-  "Closed",
-]);
+export const ENDED: ReadonlySet<string> = new Set(["done", "closed"]);
 
 /// What the state a Conversation stands in is called on the page.
 ///
-/// `declared` is the id its Process gives that state, which the server sends
-/// for every state but Verkstead's own three, and the word is what that
-/// Process's manifest declares for it — so a Grilling reads *Grilling* off
+/// `state` is the word its `state` column holds, which is the id its Process
+/// gives that state — so a Grilling carries `grilling` and reads *Grilling* off
 /// Develop, and a state a plugin named reads whatever that plugin called it.
 ///
 /// The id itself where this page holds no Process to read it against, which is
 /// legible where a blank would not be, and Verkstead's own word for the three
 /// that are Verkstead's.
-export function stateWord(
-  process: ProvidedProcess,
-  state: Lifecycle,
-  declared: string | null | undefined,
-): string {
-  return declared
-    ? wordIn(processEntry(process), declared)
-    : (VERKSTEAD[state] ?? "In progress");
-}
-
-/// And the same for a sidebar row, which carries the plugin providing its
-/// Process rather than the word the record holds — see `DeclaredState`, which
-/// is what the server sends it as.
-export function rowWord(
-  declared: DeclaredState | null,
-  state: Lifecycle,
-): string {
-  return declared === null
-    ? (VERKSTEAD[state] ?? "In progress")
-    : wordIn(processEntry(declared.process), declared.state);
+export function stateWord(process: ProvidedProcess, state: string): string {
+  return VERKSTEAD[state] ?? wordIn(processEntry(process), state);
 }
 
 /// The word a Process says the state `state` in, or the state's own id where
 /// this page holds no such Process.
 function wordIn(entry: ProcessEntry | undefined, state: string): string {
   return entry?.states.find((each) => each.id === state)?.word ?? state;
+}
+
+/// Whether the state `state` of `process` runs the **Interview**, which is
+/// what makes a steer into it a round: it opens on a Brief of its own, and the
+/// digest tick on its form primes the interview that round runs.
+///
+/// The manifest's to say and the only thing the page asks about a state besides
+/// its word — see `DeclaredStateEntry`. `false` for a Process this page holds
+/// nothing for, which draws neither.
+export function interviews(process: ProvidedProcess, state: string): boolean {
+  return (
+    processEntry(process)?.states.find((each) => each.id === state)
+      ?.interviews ?? false
+  );
 }
 
 /// Every Process the picker offers as a row of its own, in the order the

@@ -1664,16 +1664,21 @@ naming: boolean,
 /**
  * What the Repo this Conversation is against is called.
  */
-repo: string, state: Lifecycle, 
+repo: string, 
 /**
- * Its Process and the id of the state it declares, for the row's word to
- * be read off the Process list — see [`ProcessEntry::states`].
+ * The word its `state` column holds, which the row.s word is read off its
+ * Process by — see [`ProcessEntry::states`].
  *
- * Filled for every state but the three Verkstead words itself. A row
- * whose Process this server holds nothing for carries the id, which the
- * sidebar reads aloud as the word it has.
+ * Verkstead.s own three — `draft`, `done` and `closed` — are the viewer.s
+ * to word, no Process declaring them. Every other word is one its Process
+ * declares, and a row whose Process this server holds nothing for is read
+ * aloud as the word it has.
  */
-declared: DeclaredState | null, 
+state: string, 
+/**
+ * And the Process to read it against.
+ */
+process: ProvidedProcess, 
 /**
  * Whether a session is running on this Conversation right now.
  *
@@ -2000,17 +2005,17 @@ base_commit: string | null,
  * and settled in the same place and at the same moment: the setup card
  * while the Brief drafts, frozen when grilling starts.
  */
-companions: Array<CompanionView>, state: Lifecycle, 
+companions: Array<CompanionView>, 
 /**
- * The id of the state its Process declares, which is what the card's
- * word is read off — see [`ProcessEntry::states`].
+ * The word its `state` column holds, which the card.s word is read off
+ * its Process by — see [`ProcessEntry::states`].
  *
- * Filled for every state but the three Verkstead words itself: Draft,
- * Done and Closed. All five of Verkstead's own Processes are plugins
- * whose states are named with the words the record holds, so a Grilling
- * carries `grilling` here and reads *Grilling* off Develop's manifest.
+ * All five of Verkstead.s own Processes are plugins whose states are named
+ * with the words the record holds, so a Grilling reads `grilling` here and
+ * is worded *Grilling* off Develop.s manifest; Verkstead.s own three are
+ * the viewer.s to word.
  */
-declared_state: string | null, 
+state: string, 
 /**
  * What each role its Process declares will run its sessions under, in the
  * order the **Agent** control draws them — whole rather than by id: the
@@ -2570,18 +2575,23 @@ github: boolean,
 author?: string, };
 
 /**
- * A Conversation's declared state, named by its Process and its id there.
- */
-export type DeclaredState = { process: ProvidedProcess, state: string, };
-
-/**
  * A declared state and its word.
  */
 export type DeclaredStateEntry = { 
 /**
  * What the `conversations.state` column holds.
  */
-id: string, word: string, };
+id: string, word: string, 
+/**
+ * Whether its Activity is the **Interview**, which is the one thing the
+ * page has to know about a state besides its word.
+ *
+ * What a round is: a steer into it opens one on a Brief of its own, and
+ * the digest tick on its form is what primes the interview that round
+ * runs. Off the manifest rather than off the state's name, as everything
+ * about a state is (Set 1765, Q29).
+ */
+interviews: boolean, };
 
 /**
  * What a row is about.
@@ -3894,7 +3904,14 @@ here: string,
 /**
  * And what that device's is called.
  */
-there: string, } } | { "RepoAuthorUnpicked": { name: string, companion: boolean, } } | { "Harness": { 
+there: string, } } | { "RepoAuthorUnpicked": { name: string, companion: boolean, } } | { "Process": { 
+/**
+ * What this device calls it — the name its manifest gives the
+ * Process, which is what the human picked it by. Its id where this
+ * device holds no manifest for it either, which is legible where a
+ * blank would not be.
+ */
+name: string, } } | { "Harness": { 
 /**
  * The role whose Pairing wants it, as its Process labels it.
  *
@@ -3953,15 +3970,6 @@ enabled: boolean,
  * slow build rather than a broken one.
  */
 compiling: CompileCaching | null, };
-
-/**
- * Where a Conversation has got to.
- *
- * The whole ladder, though only the first two are reachable yet: the states are
- * the domain's, and the page says which one a Conversation is in rather than
- * assuming the only one it can currently be.
- */
-export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Investigating" | "Declared" | "Done" | "Closed";
 
 /**
  * One device linked to this one: what it says it is, and whether the last dial
@@ -4356,17 +4364,12 @@ export type MovedEvent = { id: number,
 /**
  * When it moved, RFC 3339.
  */
-at: string, state: Lifecycle, 
+at: string, 
 /**
- * The id of the state its Process declares, which is what the line's
- * word is read off — see [`ProcessEntry::states`].
- *
- * Every move but the three Verkstead words itself: Draft, Done and
- * Closed. The five written as data name their states with the words the
- * record holds, so a move into Verkstead's own Wrapping carries
- * `wrapping` here exactly as a plugin's Process carries its own.
+ * The word the record holds for the state it moved to, which is what the
+ * line.s word is read off its Process by.
  */
-declared?: string, };
+state: string, };
 
 /**
  * Starting one to adopt a roadmap with: which Repo, and which of its roadmaps.
@@ -7759,7 +7762,7 @@ export type SteerCancelled = "Cancelled" | "NoSuchConversation";
  * yet — or where it is already as open as a companion gets.
  *
  * A vocabulary of its own rather than more variants of the grill start's, for
- * the reason [`SteerTarget`] is not [`crate::Lifecycle`]: what a grilling can
+ * the reason [`SteerTarget`] is not a state word: what a grilling can
  * be refused for and what a steer can be refused for are different lists, and
  * one list would say each press can be refused for things it never could.
  */
@@ -7783,19 +7786,10 @@ export type SteerEvent = { id: number,
  */
 at: string, 
 /**
- * The state the human moved it into.
+ * The state the human moved it into, by the word the record holds — which
+ * is what the card.s word is read off its Process by.
  */
-target: Lifecycle, 
-/**
- * The id of the state its Process declares, which is what the card's
- * word is read off — see [`ProcessEntry::states`].
- *
- * Every target but Done, whose word is Verkstead's: the five written as
- * data name their states with the words the record holds, so a steer
- * into Verkstead's own Wrapping carries `wrapping` here exactly as a
- * plugin's Process carries whatever it called its own.
- */
-declared?: string, 
+target: string, 
 /**
  * The instruction they steered it with, rendered and sanitized on the way
  * out as every piece of markdown on this wire is — and `None` for every

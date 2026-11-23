@@ -299,14 +299,12 @@ import { AUTOMATIC, DRAFT, titled } from "../src/workbench/naming";
 // status and the sidebar's row reads aloud — read off the Process that
 // declares the state, as the page reads them.
 import {
-  declaredAt,
-  declaredOn,
-  declaredRow,
   described,
   named,
   OFFERED,
   offeringOnly,
   PROCESSES,
+  rowProcess,
   saying,
   stateOf,
   whose,
@@ -1123,8 +1121,8 @@ describe("the workbench", () => {
 /// does with `state`, `working` and `waiting`, and everything else about a row
 /// should stay whatever the server really said.
 ///
-/// The state's own id travels with the state, as the server sends the two
-/// together — see `declaredRow`, which is what the row's word is read off.
+/// The Process travels with the state, a row having no Process field of its
+/// own — see `rowProcess`, which is the Process the row's word is read off.
 function theSidebar(...rows: Array<Partial<ConversationEntry>>) {
   return theWorkbench(
     whenever(
@@ -1134,7 +1132,7 @@ function theSidebar(...rows: Array<Partial<ConversationEntry>>) {
           ...SIDEBAR[0]!,
           id: n + 1,
           branch: `b${n}`,
-          ...declaredRow(row.state ?? SIDEBAR[0]!.state),
+          ...rowProcess(),
           ...row,
         })),
       ),
@@ -1195,8 +1193,8 @@ describe("the code icon on a card", () => {
 
   it("is drawn from the row's terminal reading, and says so", async () => {
     theSidebar(
-      { branch: "building", state: "Implementing", terminal_busy: true },
-      { branch: "quiet", state: "Implementing" },
+      { branch: "building", state: "implementing", terminal_busy: true },
+      { branch: "quiet", state: "implementing" },
     );
     const { container } = mount();
 
@@ -1216,8 +1214,8 @@ describe("the code icon on a card", () => {
     unsavedIn(1);
     unsavedIn(2);
     theSidebar(
-      { branch: "editing", state: "Implementing" },
-      { branch: "both", state: "Wrapping", terminal_busy: true },
+      { branch: "editing", state: "implementing" },
+      { branch: "both", state: "wrapping", terminal_busy: true },
     );
     const { container } = mount();
 
@@ -1240,7 +1238,7 @@ describe("the code icon on a card", () => {
   it("is not drawn for unsaved text on a draft or a closed card", async () => {
     unsavedIn(1);
     unsavedIn(2);
-    theSidebar({ state: "Draft" }, { state: "Closed" });
+    theSidebar({ state: "draft" }, { state: "closed" });
     const { container } = mount();
 
     const rows = await cards(container);
@@ -1318,7 +1316,7 @@ describe("the code icon on a card", () => {
     theSidebar(
       {
         branch: "theirs",
-        state: "Implementing",
+        state: "implementing",
         terminal_busy: true,
         rank: `Zz-${member}`,
         device: { id: member, name: "the-laptop", os: null, reachable: true },
@@ -1326,11 +1324,11 @@ describe("the code icon on a card", () => {
       {
         id: 2,
         branch: "edited-there",
-        state: "Implementing",
+        state: "implementing",
         rank: `Zy-${member}`,
         device: { id: member, name: "the-laptop", os: null, reachable: true },
       },
-      { id: 2, branch: "ours", state: "Implementing" },
+      { id: 2, branch: "ours", state: "implementing" },
     );
     const { container } = mount();
 
@@ -1355,7 +1353,7 @@ describe("the code icon on a card", () => {
 /// look at, and all three of those are *this one is under way*.
 describe("how a card says where its conversation has got to", () => {
   it("turns a spinner on a conversation whose session is running", async () => {
-    theSidebar({ state: "Implementing", working: true, waiting: false });
+    theSidebar({ state: "implementing", working: true, waiting: false });
     const { container } = mount();
 
     const [card] = await cards(container);
@@ -1370,7 +1368,7 @@ describe("how a card says where its conversation has got to", () => {
   /// spinner turning the whole time says something is happening when nothing is.
   it("empties the ring on a conversation whose session has gone quiet", async () => {
     theSidebar({
-      state: "Grilling",
+      state: "grilling",
       working: true,
       idle: true,
       waiting: false,
@@ -1387,7 +1385,7 @@ describe("how a card says where its conversation has got to", () => {
   /// round the whole card have both gone, because a waiting card that was also
   /// the open one had two treatments arguing over the one edge.
   it("marks a conversation waiting on the human with the disc alone", async () => {
-    theSidebar({ state: "Grilling", working: false, waiting: true });
+    theSidebar({ state: "grilling", working: false, waiting: true });
     const { container } = mount();
 
     const [card] = await cards(container);
@@ -1407,7 +1405,7 @@ describe("how a card says where its conversation has got to", () => {
   /// The mark is a shape, and a shape is nothing to a screen reader beside the
   /// label that already said it.
   it("keeps the mark out of what is read aloud", async () => {
-    theSidebar({ state: "Grilling", working: false, waiting: true });
+    theSidebar({ state: "grilling", working: false, waiting: true });
     const { container } = mount();
 
     const [card] = await cards(container);
@@ -1421,7 +1419,7 @@ describe("how a card says where its conversation has got to", () => {
   /// idling on the answer. Of the two things true of it, the one the human can do
   /// something about is the ask.
   it("shows the dot and not the spinner when it is both", async () => {
-    theSidebar({ state: "Grilling", working: true, waiting: true });
+    theSidebar({ state: "grilling", working: true, waiting: true });
     const { container } = mount();
 
     const [card] = await cards(container);
@@ -1434,7 +1432,7 @@ describe("how a card says where its conversation has got to", () => {
   /// session that asked has been quiet since it asked. The mark that outranks
   /// both is the one the human can do something about.
   it("shows the dot and not the empty ring when it is both", async () => {
-    theSidebar({ state: "Grilling", working: true, idle: true, waiting: true });
+    theSidebar({ state: "grilling", working: true, idle: true, waiting: true });
     const { container } = mount();
 
     const [card] = await cards(container);
@@ -1477,7 +1475,7 @@ describe("how a card says where its conversation has got to", () => {
   /// is a wrap-up that carried the work to Done while nobody was watching, and
   /// the push that went out about it.
   it("marks a conversation with news on it with the same disc", async () => {
-    theSidebar({ state: "Done", working: false, waiting: false, unseen: true });
+    theSidebar({ state: "done", working: false, waiting: false, unseen: true });
     const { container } = mount();
 
     const [card] = await cards(container);
@@ -1491,11 +1489,11 @@ describe("how a card says where its conversation has got to", () => {
   /// a job nobody had.
   it("says which of the two the disc is about", async () => {
     theSidebar(
-      { branch: "over", state: "Done", working: false, waiting: false, unseen: true },
-      { branch: "asking", state: "Grilling", working: false, waiting: true },
+      { branch: "over", state: "done", working: false, waiting: false, unseen: true },
+      { branch: "asking", state: "grilling", working: false, waiting: true },
       // Both at once, which is a finished Conversation with an ask still
       // answerable on it. The one the human can do something about is the ask.
-      { branch: "both", state: "Done", working: false, waiting: true, unseen: true },
+      { branch: "both", state: "done", working: false, waiting: true, unseen: true },
     );
     const { container } = mount();
 
@@ -1511,7 +1509,7 @@ describe("how a card says where its conversation has got to", () => {
   });
 
   it("marks nothing on a conversation that is neither", async () => {
-    theSidebar({ state: "Implementing", working: false, waiting: false });
+    theSidebar({ state: "implementing", working: false, waiting: false });
     const { container } = mount();
 
     const [card] = await cards(container);
@@ -1520,7 +1518,7 @@ describe("how a card says where its conversation has got to", () => {
   });
 
   it("draws a draft as a draft, and marks nothing on it", async () => {
-    theSidebar({ state: "Draft", working: false, waiting: false });
+    theSidebar({ state: "draft", working: false, waiting: false });
     const { container } = mount();
 
     const [card] = await cards(container);
@@ -1544,8 +1542,8 @@ describe("how a card says where its conversation has got to", () => {
   /// nowhere. A name somebody typed is the row's name exactly as before.
   it("calls a conversation nobody has named a draft", async () => {
     theSidebar(
-      { branch: "amber-kestrel", branch_named: false, state: "Draft" },
-      { branch: "rate-limiting", branch_named: true, state: "Draft" },
+      { branch: "amber-kestrel", branch_named: false, state: "draft" },
+      { branch: "rate-limiting", branch_named: true, state: "draft" },
     );
     const { container } = mount();
     const rows = await cards(container);
@@ -1561,8 +1559,8 @@ describe("how a card says where its conversation has got to", () => {
   /// else. The state it repeats is said once rather than twice over.
   it("reads an unnamed row aloud as the draft it is drawn as", async () => {
     theSidebar(
-      { branch: "amber-kestrel", branch_named: false, state: "Draft" },
-      { branch: "rate-limiting", branch_named: true, state: "Draft" },
+      { branch: "amber-kestrel", branch_named: false, state: "draft" },
+      { branch: "rate-limiting", branch_named: true, state: "draft" },
     );
     const { container } = mount();
 
@@ -1579,9 +1577,9 @@ describe("how a card says where its conversation has got to", () => {
   /// renaming the branch, or by the session ending and leaving it.
   it("keeps calling work on an unnamed branch a draft while it is being named", async () => {
     theSidebar(
-      { branch: "amber-kestrel", branch_named: false, naming: true, state: "Grilling" },
-      { branch: "brave-otter", branch_named: false, naming: false, state: "Grilling" },
-      { branch: "rate-limiting", branch_named: true, naming: false, state: "Implementing" },
+      { branch: "amber-kestrel", branch_named: false, naming: true, state: "grilling" },
+      { branch: "brave-otter", branch_named: false, naming: false, state: "grilling" },
+      { branch: "rate-limiting", branch_named: true, naming: false, state: "implementing" },
     );
     const { container } = mount();
     const rows = await cards(container);
@@ -1595,7 +1593,7 @@ describe("how a card says where its conversation has got to", () => {
   /// Which of the two it was is the details pane's to say. The sidebar's business
   /// is that there is nothing here to do.
   it("dims finished and closed work identically", async () => {
-    theSidebar({ state: "Done" }, { state: "Closed" }, { state: "Wrapping" });
+    theSidebar({ state: "done" }, { state: "closed" }, { state: "wrapping" });
     const { container } = mount();
 
     expect((await cards(container)).map((card) => card.className)).toEqual([
@@ -1650,7 +1648,7 @@ describe("how a card says where its conversation has got to", () => {
 
   /// Dimmed and still a row to press: a Done Conversation can be steered.
   it("opens a dimmed conversation like any other", async () => {
-    theSidebar({ state: "Done" });
+    theSidebar({ state: "done" });
     const { container, history } = mount();
 
     const [card] = await cards(container);
@@ -1667,21 +1665,21 @@ describe("how a card says where its conversation has got to", () => {
       {
         branch: "spinning",
         repo: "verkstead",
-        state: "Implementing",
+        state: "implementing",
         working: true,
         waiting: false,
       },
       {
         branch: "asking",
         repo: "askance",
-        state: "Grilling",
+        state: "grilling",
         working: true,
         waiting: true,
       },
       {
         branch: "sitting",
         repo: "verkstead",
-        state: "Grilling",
+        state: "grilling",
         working: true,
         idle: true,
         waiting: false,
@@ -1689,7 +1687,7 @@ describe("how a card says where its conversation has got to", () => {
       {
         branch: "over",
         repo: "verkstead",
-        state: "Done",
+        state: "done",
         working: false,
         waiting: false,
       },
@@ -1767,9 +1765,9 @@ describe("the collapsed sidebar", () => {
   /// ellipsis, and a draft's in the italic its full name wears.
   it("gives a card the first three characters of its title", async () => {
     theSidebar(
-      { branch: "collapsible-conversations", state: "Implementing" },
-      { branch: "amber-kestrel", state: "Draft", branch_named: false },
-      { branch: "🦀🦀🦀🦀", state: "Implementing" },
+      { branch: "collapsible-conversations", state: "implementing" },
+      { branch: "amber-kestrel", state: "draft", branch_named: false },
+      { branch: "🦀🦀🦀🦀", state: "implementing" },
     );
     const { container } = mount();
 
@@ -1790,8 +1788,8 @@ describe("the collapsed sidebar", () => {
   /// expanded — and nothing on that line for a card with no mark.
   it("puts the card's mark under its characters, or nothing", async () => {
     theSidebar(
-      { state: "Grilling", working: false, waiting: true },
-      { state: "Implementing", working: false, waiting: false },
+      { state: "grilling", working: false, waiting: true },
+      { state: "implementing", working: false, waiting: false },
     );
     const { container } = mount();
 
@@ -2766,8 +2764,8 @@ describe("a press that takes the open conversation off the list", () => {
         `/api/ui/conversations/${GRILLING.id}`,
         json({
           ...GRILLING,
-          state: "Closed",
-          ...declaredOn("Closed"),
+          state: "closed",
+
         } satisfies ConversationView),
       ),
     );
@@ -3371,7 +3369,7 @@ describe("a conversation's timeline", () => {
   /// And on a Draft above all, where the title is the word *Draft* and the Repo
   /// is the whole of what tells this header from the next draft's.
   it("says it on a draft too, where the title is the word Draft", async () => {
-    theRecordedWith({ branch_named: false, state: "Draft" });
+    theRecordedWith({ branch_named: false, state: "draft" });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const head = await drawn(container, `.${shell.middlePane} .${paneHead.head}`);
@@ -3514,7 +3512,7 @@ describe("the escape hatch on a conversation that will not load", () => {
       json(
         SIDEBAR.map((entry) =>
           entry.id === OPEN.id
-            ? { ...entry, state, ...declaredRow(state) }
+            ? { ...entry, state, ...rowProcess() }
             : entry,
         ),
       ),
@@ -3578,7 +3576,7 @@ describe("the escape hatch on a conversation that will not load", () => {
   /// closed — because Archive on one that is not answers `NotClosed` and goes
   /// nowhere, which is a dead end rather than an escape.
   it("offers archive alone where the list says it is closed", async () => {
-    theBrokenConversation(listedAs("Closed"));
+    theBrokenConversation(listedAs("closed"));
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const menu = await openActions(container);
@@ -3604,7 +3602,7 @@ describe("the escape hatch on a conversation that will not load", () => {
 
   it("posts to the archive route where that is the row it drew", async () => {
     const fetching = theBrokenConversation(
-      listedAs("Closed"),
+      listedAs("closed"),
       whenever(ARCHIVE, json("Archived" satisfies ConversationArchived), "POST"),
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -4579,7 +4577,7 @@ describe("a conversation's setup", () => {
   /// different fact from the path it is checked out at.
   it("shows the repo path, the worktree path and the state nowhere", async () => {
     theWorkbenchWith({
-      state: "Grilling",
+      state: "grilling",
       worktree: { path: "/var/lib/verkstead/worktrees/verkstead-open", missing: false },
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -4643,7 +4641,7 @@ describe("a conversation's setup", () => {
     theRecordedWith({
       branch_named: false,
       naming: true,
-      state: "Grilling",
+      state: "grilling",
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
@@ -4660,7 +4658,7 @@ describe("a conversation's setup", () => {
     theRecordedWith({
       branch_named: false,
       naming: false,
-      state: "Grilling",
+      state: "grilling",
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
@@ -5466,8 +5464,8 @@ describe("a conversation's process", () => {
         description: "Draft the change, then check it.",
         offered: true,
         states: [
-          { id: "drafting", word: "Drafting" },
-          { id: "checking", word: "Checking" },
+          { id: "drafting", word: "Drafting", interviews: true },
+          { id: "checking", word: "Checking", interviews: false },
         ],
         roles: [
           { role: "sketching", label: "Sketching", building: true, away: false },
@@ -7417,8 +7415,8 @@ function theTrimmed(...answers: Parameters<typeof serving>) {
       `/api/ui/conversations/${GRILLING.id}`,
       json({
         ...GRILLING,
-        state: "Closed",
-        ...declaredOn("Closed"),
+        state: "closed",
+
         archived: true,
         trimmed: true,
       }),
@@ -7443,7 +7441,7 @@ function lay(element: Element, box: { at: number; wide: number }): void {
 /// holds — a refusal from the server, a worktree that has gone.
 ///
 /// The state's own id travels with the state, as the server sends the two
-/// together — see `declaredOn`, which is what the card's word is read off.
+/// together — which is what the card's word is read off its Process by.
 function theWorkbenchWith(
   over: Partial<ConversationView>,
   ...answers: Parameters<typeof serving>
@@ -7455,7 +7453,7 @@ function theWorkbenchWith(
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(
       `/api/ui/conversations/${OPEN.id}`,
-      json({ ...OPEN, ...declaredOn(over.state ?? OPEN.state), ...over }),
+      json({ ...OPEN, ...over }),
     ),
     ...answers,
   );
@@ -10385,7 +10383,7 @@ describe("closing a conversation", () => {
   /// it, and a line of prose about a press that is no longer offered would be
   /// the only thing in the card that was not a press.
   it("offers nothing to close on one that is closed already", async () => {
-    theRecordedWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await openActions(container);
@@ -10423,9 +10421,9 @@ describe("closing a conversation", () => {
 
     // And the conversation is where it was, on the page and in the list both.
     await waitFor(async () =>
-      expect((await standing(container)).state).toBe(stateOf("Grilling")),
+      expect((await standing(container)).state).toBe(stateOf("grilling")),
     );
-    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("Grilling"));
+    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("grilling"));
   });
 
   /// A request that never came back is said the same way. Nothing about it is a
@@ -10452,7 +10450,7 @@ describe("closing a conversation", () => {
     expect(said.textContent).toContain("the server is not answering");
 
     await waitFor(async () =>
-      expect((await standing(container)).state).toBe(stateOf("Grilling")),
+      expect((await standing(container)).state).toBe(stateOf("grilling")),
     );
   });
 });
@@ -10470,7 +10468,7 @@ describe("closing and archiving a conversation", () => {
     );
     expect(offered.slice(-2)).toEqual([actions.close, actions.closeAndArchive]);
 
-    theRecordedWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "closed", ready_to_grill: false });
     const closed = mount(`/conversations/${OPEN.id}`);
 
     await openActions(closed.container);
@@ -10548,7 +10546,7 @@ describe("closing and archiving a conversation", () => {
     expect(refusal()).toBeNull();
 
     await waitFor(() =>
-      expect(spokenRow(container, GRILLING.id)).toContain(stateOf("Grilling")),
+      expect(spokenRow(container, GRILLING.id)).toContain(stateOf("grilling")),
     );
   });
 });
@@ -10643,8 +10641,8 @@ describe("a close pressed over a run in flight", () => {
     expect(askedFor(fetching, CLOSING_IT), "nothing has been sent").toBe(0);
 
     // And the conversation is where it was, on the page and in the list both.
-    expect((await standing(container)).state).toBe(stateOf("Grilling"));
-    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("Grilling"));
+    expect((await standing(container)).state).toBe(stateOf("grilling"));
+    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("grilling"));
   });
 
   /// And the gap between one step and the next, where no session process exists
@@ -10713,7 +10711,7 @@ describe("a close pressed over a run in flight", () => {
 
     await waitFor(() => expect(asking()).toBeNull());
     expect(askedFor(fetching, CLOSING_IT), "and still nothing was sent").toBe(0);
-    expect((await standing(container)).state).toBe(stateOf("Grilling"));
+    expect((await standing(container)).state).toBe(stateOf("grilling"));
 
     // And the menu drops what it dropped before: both closes, and no archive
     // standing where one of them was.
@@ -10740,7 +10738,7 @@ describe("a close pressed over a run in flight", () => {
 
     await waitFor(() => expect(asking()).toBeNull());
     expect(askedFor(fetching, CLOSING_IT)).toBe(0);
-    expect((await standing(container)).state).toBe(stateOf("Grilling"));
+    expect((await standing(container)).state).toBe(stateOf("grilling"));
   });
 
   /// And the second press is the first one made: the close goes out and the page
@@ -10768,10 +10766,10 @@ describe("a close pressed over a run in flight", () => {
     // the work has ended in — with the request still out and never coming back.
     await waitFor(async () => {
       const line = await standing(container);
-      expect(line.word).toBe(stateOf("Closed"));
+      expect(line.word).toBe(stateOf("closed"));
       expect(line.state).toBeNull();
     });
-    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("Closed"));
+    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("closed"));
   });
 
   /// And the row under it is the same press with the archive already made: the
@@ -10880,7 +10878,7 @@ describe("archiving a conversation", () => {
   });
 
   it("stands where close was, on one that has been closed", async () => {
-    theRecordedWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const menu = await openActions(container);
@@ -10890,7 +10888,7 @@ describe("archiving a conversation", () => {
 
   it("posts to the conversation's own archive route", async () => {
     const fetching = theRecordedWith(
-      { state: "Closed", ready_to_grill: false },
+      { state: "closed", ready_to_grill: false },
       whenever(
         `/api/ui/conversations/${OPEN.id}/archive`,
         json("Archived" satisfies ConversationArchived),
@@ -10910,7 +10908,7 @@ describe("archiving a conversation", () => {
   /// What the human is owed before a press that makes something disappear: that
   /// it is the list it goes off, and that nothing of the record goes with it.
   it("says the record stays where it is", async () => {
-    theRecordedWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await openActions(container);
@@ -10924,7 +10922,7 @@ describe("archiving a conversation", () => {
   /// reason is said in a toast.
   it("puts the row back and says there was nothing to put away", async () => {
     theRecordedWith(
-      { state: "Closed", ready_to_grill: false },
+      { state: "closed", ready_to_grill: false },
       whenever(
         `/api/ui/conversations/${OPEN.id}/archive`,
         json("NotClosed" satisfies ConversationArchived),
@@ -10954,7 +10952,7 @@ describe("unarchiving a conversation", () => {
   /// same conversation.
   it("stands where archive was, on one already put away", async () => {
     theRecordedWith({
-      state: "Closed",
+      state: "closed",
       ready_to_grill: false,
       archived: true,
     });
@@ -10969,7 +10967,7 @@ describe("unarchiving a conversation", () => {
 
   it("posts to the conversation's own unarchive route", async () => {
     const fetching = theRecordedWith(
-      { state: "Closed", ready_to_grill: false, archived: true },
+      { state: "closed", ready_to_grill: false, archived: true },
       whenever(
         `/api/ui/conversations/${OPEN.id}/unarchive`,
         json("Unarchived" satisfies ConversationUnarchived),
@@ -10990,7 +10988,7 @@ describe("unarchiving a conversation", () => {
   /// the list it returns to, and that it stays there.
   it("says the conversation goes back on the list", async () => {
     theRecordedWith({
-      state: "Closed",
+      state: "closed",
       ready_to_grill: false,
       archived: true,
     });
@@ -11007,7 +11005,7 @@ describe("unarchiving a conversation", () => {
   /// since gone. In a toast, as every one of these four presses says a refusal.
   it("says in a toast that the conversation is gone", async () => {
     theRecordedWith(
-      { state: "Closed", ready_to_grill: false, archived: true },
+      { state: "closed", ready_to_grill: false, archived: true },
       whenever(
         `/api/ui/conversations/${OPEN.id}/unarchive`,
         json("NoSuchConversation" satisfies ConversationUnarchived),
@@ -11108,11 +11106,11 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     // conversation the work has ended in.
     await waitFor(async () => {
       const line = await standing(container);
-      expect(line.word).toBe(stateOf("Closed"));
+      expect(line.word).toBe(stateOf("closed"));
       expect(line.state).toBeNull();
     });
 
-    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("Closed"));
+    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("closed"));
   });
 
   /// And the menu it drops is a closed conversation's: archive where close was,
@@ -11191,7 +11189,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
   /// which is where a conversation the order says nothing about goes.
   it("puts a row back on the list where the press takes it out of the archive", async () => {
     theRecordedWith(
-      { state: "Closed", ready_to_grill: false, archived: true },
+      { state: "closed", ready_to_grill: false, archived: true },
       whenever(
         "/api/ui/conversations",
         json(SIDEBAR.filter((row) => row.id !== OPEN.id)),
@@ -11229,7 +11227,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     );
 
     await waitFor(async () =>
-      expect((await standing(container)).word).toBe(stateOf("Closed")),
+      expect((await standing(container)).word).toBe(stateOf("closed")),
     );
 
     // Everything the page is showing, read again — which is the whole of what a
@@ -11237,8 +11235,8 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     // grilled, the close it would be told about not having landed.
     await nudged(client);
 
-    expect((await standing(container)).word).toBe(stateOf("Closed"));
-    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("Closed"));
+    expect((await standing(container)).word).toBe(stateOf("closed"));
+    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("closed"));
   });
 
   /// And it is let go of once the read behind the press has landed, so what the
@@ -11257,8 +11255,8 @@ describe("a press whose outcome is drawn before the server has answered", () => 
             row.id === GRILLING.id
               ? {
                   ...row,
-                  state: "Closed" as const,
-                  ...declaredRow("Closed"),
+                  state: "closed" as const,
+                  ...rowProcess(),
                   waiting: false,
                 }
               : row,
@@ -11276,7 +11274,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     );
 
     await waitFor(() =>
-      expect(spokenRow(container, GRILLING.id)).toContain(stateOf("Closed")),
+      expect(spokenRow(container, GRILLING.id)).toContain(stateOf("closed")),
     );
 
     // And then the server says something else about it — a steer on another
@@ -11286,7 +11284,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     await client.invalidateQueries({ queryKey: ["conversations"] });
 
     await waitFor(() =>
-      expect(spokenRow(container, GRILLING.id)).toContain(stateOf("Grilling")),
+      expect(spokenRow(container, GRILLING.id)).toContain(stateOf("grilling")),
     );
   });
 
@@ -11334,7 +11332,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     // ever lets go of a press is the list's, and the list did not answer.
     for (let turn = 0; turn < 3; turn += 1) {
       await new Promise((settle) => setTimeout(settle, 0));
-      expect((await standing(container)).word).toBe(stateOf("Closed"));
+      expect((await standing(container)).word).toBe(stateOf("closed"));
     }
 
     // And then one that does land, which lets go of it — and says what the
@@ -11344,7 +11342,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     await client.invalidateQueries({ queryKey: ["conversations"] });
 
     await waitFor(async () =>
-      expect((await standing(container)).state).toBe(stateOf("Grilling")),
+      expect((await standing(container)).state).toBe(stateOf("grilling")),
     );
   });
 
@@ -11411,7 +11409,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     // the archive that was waiting on it never went out. One thing was said,
     // because one press was made that did nothing.
     await waitFor(() =>
-      expect(spokenRow(container, GRILLING.id)).toContain(stateOf("Grilling")),
+      expect(spokenRow(container, GRILLING.id)).toContain(stateOf("grilling")),
     );
     expect(askedFor(fetching, ARCHIVING_IT)).toBe(0);
     expect(document.body.querySelectorAll(`.${toasts.toast}`)).toHaveLength(1);
@@ -11432,7 +11430,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     );
 
     await waitFor(async () =>
-      expect((await standing(container)).word).toBe(stateOf("Closed")),
+      expect((await standing(container)).word).toBe(stateOf("closed")),
     );
 
     expect(document.body.querySelector(`.${toasts.toast}`)).toBeNull();
@@ -11511,10 +11509,10 @@ describe("a second round", () => {
   /// one are the record, and the rounds on them still have to be told apart.
   it("keeps the boundary a reopened round was drawn with", async () => {
     theBuilding({
-      state: "Draft",
+      state: "draft",
       timeline: [
         ...BUILDING.timeline,
-        { Moved: { id: 9007, at: "2026-08-24T11:00:00Z", state: "Draft", ...declaredAt("Draft") } },
+        { Moved: { id: 9007, at: "2026-08-24T11:00:00Z", state: "draft" } },
       ],
     });
     const { container } = mount(`/conversations/${BUILDING.id}`);
@@ -11529,7 +11527,7 @@ describe("a second round", () => {
   /// from here: nothing stands under the timeline, and the steer that opens a
   /// round like this one is in the menu on the header.
   it("offers the steer and nothing else on a finished conversation", async () => {
-    theRecordedWith({ state: "Done" });
+    theRecordedWith({ state: "done" });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await drawn(container, `.${timeline.timeline}`);
@@ -12527,7 +12525,7 @@ describe("steering a conversation", () => {
       {
         ready_to_stop: false,
         working: false,
-        state: "Done",
+        state: "done",
         pinned: WRAPPING.pinned,
       },
       whenever(STEERING, PRESSED, "POST"),
@@ -12552,7 +12550,7 @@ describe("steering a conversation", () => {
       {
         ready_to_stop: false,
         working: false,
-        state: "Closed",
+        state: "closed",
         pinned: WRAPPING.pinned,
       },
       whenever(STEERING, PRESSED, "POST"),
@@ -12571,7 +12569,7 @@ describe("steering a conversation", () => {
       {
         ready_to_stop: false,
         working: false,
-        state: "Done",
+        state: "done",
         ready_to_continue: true,
         pinned: WRAPPING.pinned,
       },
@@ -13560,7 +13558,7 @@ describe("steering a conversation", () => {
     const alongside = REPOS[0]!;
     const fetching = theGrillingSteering(
       {
-        state: "Done",
+        state: "done",
         working: true,
         ready_to_stop: true,
         ready_to_continue: true,
@@ -14055,20 +14053,20 @@ describe("steering a conversation", () => {
   /// between the pipeline arriving somewhere and somebody putting it there.
   it("draws the steer beside the move it wrote", async () => {
     theGrillingSteering({
-      state: "Done",
+      state: "done",
       timeline: [
         ...GRILLING.timeline,
         {
           Steer: {
             id: 9001,
             at: "2026-08-24T11:00:00Z",
-            target: "Done",
-            ...declaredAt("Done"),
+            target: "done",
+
             html: null,
             record: null,
           },
         },
-        { Moved: { id: 9002, at: "2026-08-24T11:00:00Z", state: "Done", ...declaredAt("Done") } },
+        { Moved: { id: 9002, at: "2026-08-24T11:00:00Z", state: "done" } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -14097,11 +14095,11 @@ describe("steering a conversation", () => {
   /// be readable back for.
   it("draws the resolve press as itself rather than as a steer", async () => {
     theGrillingSteering({
-      state: "Wrapping",
+      state: "wrapping",
       timeline: [
         ...GRILLING.timeline,
         { ResolveConflicts: { id: 9101, at: "2026-08-24T11:00:00Z" } },
-        { Moved: { id: 9102, at: "2026-08-24T11:00:00Z", state: "Wrapping", ...declaredAt("Wrapping") } },
+        { Moved: { id: 9102, at: "2026-08-24T11:00:00Z", state: "wrapping" } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -14135,20 +14133,20 @@ describe("steering a conversation", () => {
   /// details pane.
   it("draws the instruction a steer carried, and opens the whole of it", async () => {
     theGrillingSteering({
-      state: "Implementing",
+      state: "implementing",
       timeline: [
         ...GRILLING.timeline,
         {
           Steer: {
             id: 9003,
             at: "2026-08-24T11:00:00Z",
-            target: "Implementing",
-            ...declaredAt("Implementing"),
+            target: "implementing",
+
             html: "<p>Note the window the count is against.</p>",
             record: null,
           },
         },
-        { Moved: { id: 9004, at: "2026-08-24T11:00:00Z", state: "Implementing", ...declaredAt("Implementing") } },
+        { Moved: { id: 9004, at: "2026-08-24T11:00:00Z", state: "implementing" } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -14177,15 +14175,15 @@ describe("steering a conversation", () => {
   /// ended are still four questions somebody answered.
   it("opens a steer that carried no document", async () => {
     theGrillingSteering({
-      state: "Done",
+      state: "done",
       timeline: [
         ...GRILLING.timeline,
         {
           Steer: {
             id: 9201,
             at: "2026-08-24T11:00:00Z",
-            target: "Done",
-            ...declaredAt("Done"),
+            target: "done",
+
             html: null,
             record: {
               digest: false,
@@ -14196,7 +14194,7 @@ describe("steering a conversation", () => {
             },
           },
         },
-        { Moved: { id: 9202, at: "2026-08-24T11:00:00Z", state: "Done", ...declaredAt("Done") } },
+        { Moved: { id: 9202, at: "2026-08-24T11:00:00Z", state: "done" } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -14229,15 +14227,15 @@ describe("steering a conversation", () => {
   /// the repos it asked for, under the labels the form asked for them under.
   it("draws the form a steer was made with, frozen", async () => {
     theGrillingSteering({
-      state: "Implementing",
+      state: "implementing",
       timeline: [
         ...GRILLING.timeline,
         {
           Steer: {
             id: 9301,
             at: "2026-08-24T11:00:00Z",
-            target: "Implementing",
-            ...declaredAt("Implementing"),
+            target: "implementing",
+
             html: "<p>Count against the window.</p>",
             record: {
               digest: false,
@@ -14257,7 +14255,7 @@ describe("steering a conversation", () => {
             },
           },
         },
-        { Moved: { id: 9302, at: "2026-08-24T11:00:00Z", state: "Implementing", ...declaredAt("Implementing") } },
+        { Moved: { id: 9302, at: "2026-08-24T11:00:00Z", state: "implementing" } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -14297,15 +14295,15 @@ describe("steering a conversation", () => {
   /// saying nothing was picked would be the pane rewriting their decision.
   it("says so where the profile a steer picked has been removed", async () => {
     theGrillingSteering({
-      state: "Implementing",
+      state: "implementing",
       timeline: [
         ...GRILLING.timeline,
         {
           Steer: {
             id: 9401,
             at: "2026-08-24T11:00:00Z",
-            target: "Implementing",
-            ...declaredAt("Implementing"),
+            target: "implementing",
+
             html: null,
             record: {
               digest: false,
@@ -14316,7 +14314,7 @@ describe("steering a conversation", () => {
             },
           },
         },
-        { Moved: { id: 9402, at: "2026-08-24T11:00:00Z", state: "Implementing", ...declaredAt("Implementing") } },
+        { Moved: { id: 9402, at: "2026-08-24T11:00:00Z", state: "implementing" } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -14872,7 +14870,7 @@ describe("a grilling that has handed over", () => {
     // The timeline is up, so the pane has drawn the whole of what it was handed.
     await drawn(container, `.${timeline.timeline}`);
 
-    expect(BUILDING.state).toBe("Implementing");
+    expect(BUILDING.state).toBe("implementing");
     expect(container.querySelector(`.${sheet.directions}`)).toBeNull();
   });
 
@@ -14906,10 +14904,10 @@ describe("a grilling that has handed over", () => {
   /// the whole of what makes the line worth reading.
   it("names the state a close stopped in", async () => {
     theBuilding({
-      state: "Closed",
+      state: "closed",
       timeline: [
         ...BUILDING.timeline,
-        { Moved: { id: 9001, at: "2026-08-24T11:00:00Z", state: "Closed", ...declaredAt("Closed") } },
+        { Moved: { id: 9001, at: "2026-08-24T11:00:00Z", state: "closed" } },
       ],
     });
     const { container } = mount(`/conversations/${BUILDING.id}`);
@@ -15138,7 +15136,7 @@ describe("disagreeing with a proposal", () => {
   it("draws no chooser while the grilling is still running", async () => {
     // What a refused proposal leaves behind: the set is on the timeline and
     // answered, and the conversation is still grilling.
-    theBuilding({ state: "Grilling", direction: null });
+    theBuilding({ state: "grilling", direction: null });
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     await drawn(container, `.${timeline.timeline}`);
@@ -19209,7 +19207,7 @@ describe("the pinned pull request", () => {
   /// that merges has nothing to resolve, which is the same rule the words above
   /// it are drawn by.
   it("offers the press only on a done conversation whose branch conflicts", async () => {
-    theWrapping({ ...whoseMerging("Conflicting"), state: "Done" });
+    theWrapping({ ...whoseMerging("Conflicting"), state: "done" });
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
     fireEvent.click(
@@ -19225,11 +19223,11 @@ describe("the pinned pull request", () => {
 
     for (const over of [
       // The same conflict on a conversation the wrap-up is still running.
-      { ...whoseMerging("Conflicting"), state: "Wrapping" as const },
+      { ...whoseMerging("Conflicting"), state: "wrapping" as const },
       // And the same finished conversation with nothing to resolve — one that
       // merges, and one nothing has asked GitHub about.
-      { ...whoseMerging("Cleanly"), state: "Done" as const },
-      { ...whoseMerging(null), state: "Done" as const },
+      { ...whoseMerging("Cleanly"), state: "done" as const },
+      { ...whoseMerging(null), state: "done" as const },
     ]) {
       theWrapping(over);
       const { container } = mount(`/conversations/${WRAPPING.id}`);
@@ -19254,7 +19252,7 @@ describe("the pinned pull request", () => {
   it("posts to the conversation's own resolve route and reads it again", async () => {
     const route = `/api/ui/conversations/${WRAPPING.id}/resolve-conflicts`;
     const fetching = theWrapping(
-      { ...whoseMerging("Conflicting"), state: "Done" },
+      { ...whoseMerging("Conflicting"), state: "done" },
       whenever(route, json("Resolving" satisfies Resolved), "POST"),
     );
     const { container } = mount(`/conversations/${WRAPPING.id}`);
@@ -19293,7 +19291,7 @@ describe("the pinned pull request", () => {
       "WorktreeRefused",
     ] satisfies Resolved[]) {
       theWrapping(
-        { ...whoseMerging("Conflicting"), state: "Done" },
+        { ...whoseMerging("Conflicting"), state: "done" },
         whenever(
           `/api/ui/conversations/${WRAPPING.id}/resolve-conflicts`,
           json(outcome),
@@ -19885,8 +19883,8 @@ describe("a wrap-up waiting on its checks", () => {
   /// in place of the lifecycle word rather than beside it.
   it("is what the sidebar row says in place of its state", async () => {
     theSidebar(
-      { state: "Wrapping", working: false, waiting: false },
-      { state: "Wrapping", working: false, waiting: false, waiting_on_checks: true },
+      { state: "wrapping", working: false, waiting: false },
+      { state: "wrapping", working: false, waiting: false, waiting_on_checks: true },
     );
     const { container } = mount();
 
@@ -19940,9 +19938,9 @@ describe("a stage waiting to join its chain", () => {
   /// the lifecycle word, exactly as a wrap-up down to its checks is.
   it("is what the sidebar row says in place of its state", async () => {
     theSidebar(
-      { state: "Implementing", working: false, waiting: false },
+      { state: "implementing", working: false, waiting: false },
       {
-        state: "Implementing",
+        state: "implementing",
         working: false,
         waiting: false,
         waiting_to_join: true,
@@ -19978,9 +19976,9 @@ describe("a session sitting there without asking", () => {
   /// one for ten minutes before concluding nothing was being captured.
   it("is on the sidebar row's label beside its state", async () => {
     theSidebar(
-      { state: "Implementing", working: true, waiting: false },
+      { state: "implementing", working: true, waiting: false },
       {
-        state: "Implementing",
+        state: "implementing",
         working: true,
         waiting: false,
         parked: { idle_seconds: 260, spoken_to: 1 },
@@ -20012,7 +20010,7 @@ describe("a session sitting there without asking", () => {
 /// between them, would be the button reading itself out.
 describe("a conversation that has ended", () => {
   it("says Done where the work reached the end of the ladder", async () => {
-    theRecordedWith({ state: "Done" });
+    theRecordedWith({ state: "done" });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const line = await standing(container);
@@ -20023,7 +20021,7 @@ describe("a conversation that has ended", () => {
   });
 
   it("says Closed where the work stopped wherever it was", async () => {
-    theRecordedWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     expect((await standing(container)).word).toBe("Closed");
@@ -20036,7 +20034,7 @@ describe("a conversation that has ended", () => {
   /// happened — nothing anywhere says one is coming.
   it("names a trimmed conversation Trimmed beside its state", async () => {
     theRecordedWith({
-      state: "Closed",
+      state: "closed",
       ready_to_grill: false,
       archived: true,
       trimmed: true,
@@ -20053,7 +20051,7 @@ describe("a conversation that has ended", () => {
   /// every conversation there is: the line is exactly what it was.
   it("says nothing about trimming on one no cleanup has been through", async () => {
     theRecordedWith({
-      state: "Closed",
+      state: "closed",
       ready_to_grill: false,
       archived: true,
     });
@@ -20081,7 +20079,7 @@ describe("a conversation that has ended", () => {
   /// The states on the way up are where a status is worth saying, and they say
   /// it beside the state rather than instead of it.
   it("says the state beside a status while the work is still going", async () => {
-    for (const state of ["Grilling", "Implementing", "Wrapping", "FollowUp"] as const) {
+    for (const state of ["grilling", "implementing", "wrapping", "follow-up"] as const) {
       theRecordedWith({ state, ready_to_resume: true });
       const { container, unmount } = mount(`/conversations/${OPEN.id}`);
 
@@ -20098,7 +20096,7 @@ describe("a conversation that has ended", () => {
   /// it got to is what the line says about it: there is nothing left for
   /// anybody to resume, so nothing is waiting on them.
   it("says where the work got to over anything it stopped on", async () => {
-    theStopped({ state: "Done" });
+    theStopped({ state: "done" });
     const { container } = mount(`/conversations/${STOPPED.id}`);
 
     const line = await standing(container);
@@ -20533,20 +20531,20 @@ describe("the documents on a timeline", () => {
   /// is a card they will not press.
   it("opens a document too short to be cut off", async () => {
     theGrillingStanding({
-      state: "Implementing",
+      state: "implementing",
       timeline: [
         ...GRILLING.timeline,
         {
           Steer: {
             id: 9005,
             at: "2026-08-24T11:00:00Z",
-            target: "Implementing",
-            ...declaredAt("Implementing"),
+            target: "implementing",
+
             html: SHORT_INSTRUCTION,
             record: null,
           },
         },
-        { Moved: { id: 9006, at: "2026-08-24T11:00:00Z", state: "Implementing", ...declaredAt("Implementing") } },
+        { Moved: { id: 9006, at: "2026-08-24T11:00:00Z", state: "implementing" } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -20938,13 +20936,13 @@ describe("the configuration on the brief's pane", () => {
   /// says where the work has got to, and what kind of work it is is a setup fact
   /// like the Repo and the base.
   ///
-  /// Nothing of it reaches the row at all — `ConversationEntry` carries no
-  /// Process — so the check is that the list the human finds a Conversation by
-  /// reads exactly as it always did.
+  /// Nothing of it reaches the row's words — a row carries the Process so its
+  /// state word can be read off it, and names it nowhere — so the check is that
+  /// the list the human finds a Conversation by reads exactly as it always did.
   ///
   /// Whole words rather than substrings. A card's spoken label carries the
-  /// state word, and `Investigating` is a Lifecycle state the processes
-  /// roadmap brings in — which holds `Investigate` inside it. What is being
+  /// state word, and Develop declares an `Investigating` state — which holds
+  /// `Investigate` inside it. What is being
   /// checked is that a card never *says* a Process, not that its letters never
   /// turn up inside a longer word, and a sweep that could not tell the two
   /// apart would fail here for something that has nothing to do with Processes.

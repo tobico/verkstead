@@ -31,7 +31,7 @@
 
 use serde::Serialize;
 use time::OffsetDateTime;
-use verkstead_render::{ConversationView, Lifecycle, SharedConversation};
+use verkstead_render::{ConversationView, SharedConversation};
 
 /// The empty record slot the share build leaves in the document, exactly as it
 /// writes it.
@@ -187,7 +187,8 @@ pub(crate) fn filename(branch: &str, named: bool, at: OffsetDateTime) -> String 
 /// `web/src/workbench/naming.ts`, which is the same rule at the other end of the
 /// wire.
 pub(crate) fn settled(conversation: &ConversationView) -> bool {
-    conversation.branch_named || (conversation.state != Lifecycle::Draft && !conversation.naming)
+    conversation.branch_named
+        || (conversation.state != crate::store::State::DRAFT && !conversation.naming)
 }
 
 /// What this Conversation is called, as anything naming a share names it: the

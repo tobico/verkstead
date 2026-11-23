@@ -514,7 +514,7 @@ async fn a_repo_with_live_work_on_it_is_refused() {
     assert_eq!(listed(&app).await.len(), 1, "nothing was taken away");
 
     // Closed is over, and what is over is no reason to hold the registration.
-    store::set_state(&pool, going, store::Lifecycle::Closed)
+    store::set_state(&pool, going, store::State::closed())
         .await
         .unwrap();
 
@@ -1522,7 +1522,7 @@ async fn an_idle_repo_is_repointed_to_the_other_author() {
         .await
         .unwrap()
         .unwrap();
-    store::set_state(&pool, over, store::Lifecycle::Done)
+    store::set_state(&pool, over, store::State::done())
         .await
         .unwrap();
 
@@ -1550,7 +1550,7 @@ async fn a_repo_in_live_work_is_refused_a_repoint_naming_the_work() {
         .unwrap()
         .unwrap();
     store::add_companion(&pool, going, beside.id).await.unwrap();
-    store::set_state(&pool, going, store::Lifecycle::Grilling)
+    store::set_state(&pool, going, store::State::named("grilling"))
         .await
         .unwrap();
 
@@ -1576,7 +1576,7 @@ async fn a_repo_in_live_work_is_refused_a_repoint_naming_the_work() {
         "nothing was repointed",
     );
 
-    store::set_state(&pool, going, store::Lifecycle::Closed)
+    store::set_state(&pool, going, store::State::closed())
         .await
         .unwrap();
 

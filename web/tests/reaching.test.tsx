@@ -44,7 +44,7 @@ import {
   retrying,
 } from "../src/api/client";
 import { osIcon } from "../src/devices";
-import { declaredOn, named, whose } from "./processes";
+import { named, whose } from "./processes";
 import { Reaching, rowKey } from "../src/reaching";
 import sheet from "../src/set/Sheet.module.css";
 import { Asked } from "../src/workbench/Asked";
@@ -667,8 +667,8 @@ describe("the merged sidebar", () => {
     ...HERE,
     id: SIDEBAR[0]!.id,
     branch: "over-on-the-member",
-    state: "Closed",
-    ...declaredOn("Closed"),
+    state: "closed",
+
     archived: false,
   };
 

@@ -12,14 +12,13 @@ use sqlx::SqlitePool;
 use verkstead_store::replicated::{Record, merge, records};
 use verkstead_store::{
     Account, AgentType, BUILT_IN, Binding, Bindings, CLAUDE_DIR, CONFIG_FILE, Chosen, Clash,
-    Deleting, Event, Lifecycle, Linking, Pairing, PendingForm, PendingPairing, Picked, Profile,
-    ProfileFacts, ProfileRecord, Profiles, Saving, Settled, Unbound, bind_profile_here,
-    binding_uuid, create_profile, create_profile_holding, delete_profile, load_conversation,
-    load_profile, logins_held, open_database, open_pending_steer, profile_arrived, profiles,
-    record_member, register_repo, save_pending_steer, set_grilling_pairing,
-    set_implementation_pairing, set_review_pairing, settle, skip_review, stamp_the_profiles,
-    start_capture, start_conversation, start_grilling, this_device_called, timeline,
-    update_profile, update_profile_holding,
+    Deleting, Event, Linking, Pairing, PendingForm, PendingPairing, Picked, Profile, ProfileFacts,
+    ProfileRecord, Profiles, Saving, Settled, State, Unbound, bind_profile_here, binding_uuid,
+    create_profile, create_profile_holding, delete_profile, load_conversation, load_profile,
+    logins_held, open_database, open_pending_steer, profile_arrived, profiles, record_member,
+    register_repo, save_pending_steer, set_grilling_pairing, set_implementation_pairing,
+    set_review_pairing, settle, skip_review, stamp_the_profiles, start_capture, start_conversation,
+    start_in, this_device_called, timeline, update_profile, update_profile_holding,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -1215,9 +1214,10 @@ async fn a_profile_a_started_conversation_runs_under_is_removed_all_the_same() {
         .await
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
         &[],
@@ -1232,7 +1232,7 @@ async fn a_profile_a_started_conversation_runs_under_is_removed_all_the_same() {
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
 
-    assert_eq!(conversation.state, Lifecycle::Grilling);
+    assert_eq!(conversation.state, State::named("grilling"));
     assert_eq!(
         conversation
             .pairings
@@ -1323,9 +1323,10 @@ async fn removing_a_profile_leaves_what_ran_under_it_on_the_record() {
         .await
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
         &[],
@@ -1385,9 +1386,10 @@ async fn a_session_under_a_profile_nobody_named_records_no_name() {
         .await
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
         &[],
@@ -1475,9 +1477,10 @@ async fn a_removal_leaves_no_row_anywhere_that_names_the_profile() {
 
     // The Repo's memory of what it was last grilled with, which is the one
     // table naming a Profile that is not a Conversation's own column.
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
         &[],
@@ -1710,9 +1713,10 @@ async fn a_pairing_cannot_be_chosen_once_grilling_has_started() {
         .await
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
         &[],
@@ -2000,9 +2004,10 @@ async fn no_review_cannot_be_picked_once_grilling_has_started() {
         .await
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
         &[],
@@ -2476,9 +2481,10 @@ async fn a_provisional_mirror_is_bridged_onto_the_record_its_home_published() {
 
     let provisional = provisional(&pool, id).await;
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
         &[],

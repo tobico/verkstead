@@ -2798,7 +2798,7 @@ mod packs {
             PackAttached::Attached
         );
 
-        store::set_state(&pool, id, store::Lifecycle::Implementing)
+        store::set_state(&pool, id, store::State::named("implementing"))
             .await
             .unwrap();
 
@@ -2856,7 +2856,7 @@ mod packs {
     #[tokio::test]
     async fn a_pack_picked_on_an_answer_is_attached_by_the_submit() {
         let (app, _dir, pool, id) = drafting().await;
-        store::set_state(&pool, id, store::Lifecycle::Implementing)
+        store::set_state(&pool, id, store::State::named("implementing"))
             .await
             .unwrap();
         let set = asked(&pool, id).await;

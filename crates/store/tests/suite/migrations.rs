@@ -94,17 +94,17 @@ use std::path::PathBuf;
 use sqlx::SqlitePool;
 use verkstead_store::replicated::{Record, merge, records};
 use verkstead_store::{
-    Account, Binding, Bindings, Clash, Commit, Decision, Event, Finished, Lifecycle, Merging,
-    Minted, Pairing, ProfileFacts, ProfileRecord, Profiles, PullRequest, RanUnder, RoadmapStage,
-    Rollup, Saving, StageOf, Standing, WaitingOn, asked_to_stop, binding_uuid, check_rollup,
-    clear_stop, commit_repo, conflict_fix_attempts, conversations, create_profile, finish_wrap_up,
+    Account, Binding, Bindings, Clash, Commit, Decision, Event, Finished, Merging, Minted, Pairing,
+    ProfileFacts, ProfileRecord, Profiles, PullRequest, RanUnder, RoadmapStage, Rollup, Saving,
+    StageOf, Standing, State, WaitingOn, asked_to_stop, binding_uuid, check_rollup, clear_stop,
+    commit_repo, conflict_fix_attempts, conversations, create_profile, finish_wrap_up,
     fix_attempts, load_conversation, load_profile, merging, open_database, open_pending_steer,
     pending_steer, profiles, pull_request, pull_request_repo, pull_requests,
     record_another_pull_request, record_check_rollup, record_commit, record_conflict_fix_attempt,
     record_fix_attempt, recorded_commits, register_repo, renumbered_profiles, save_brief,
     save_pending_steer, settle_wrap_up, stack, stage_roadmap, stamp_the_profiles, standing,
-    start_capture, start_conversation, start_grilling, start_stage, start_unnamed_conversation,
-    stop, stopped, timeline, update_profile, wrap_up_settled,
+    start_capture, start_conversation, start_in, start_stage, start_unnamed_conversation, stop,
+    stopped, timeline, update_profile, wrap_up_settled,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -129,9 +129,10 @@ async fn before(dir: &Path) -> (SqlitePool, i64) {
         .unwrap()
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/data/worktrees/verkstead-rate-limiting"),
         &[],
@@ -462,9 +463,10 @@ async fn beside(dir: &Path) -> (SqlitePool, i64) {
         .unwrap()
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/data/worktrees/verkstead-rate-limiting"),
         &[],
@@ -746,7 +748,7 @@ async fn a_stop_read_across_is_not_read_across_twice() {
 }
 
 /// The states a Conversation's moves say it went through, in Timeline order.
-async fn moves(pool: &SqlitePool, id: i64) -> Vec<Lifecycle> {
+async fn moves(pool: &SqlitePool, id: i64) -> Vec<State> {
     timeline(pool, id)
         .await
         .unwrap()
@@ -791,11 +793,11 @@ async fn a_conversation_that_was_aborted_reads_as_closed() {
 
     assert_eq!(
         load_conversation(&pool, id).await.unwrap().unwrap().state,
-        Lifecycle::Closed,
+        State::closed(),
     );
     assert_eq!(
         moves(&pool, id).await,
-        [Lifecycle::Grilling, Lifecycle::Closed]
+        [State::named("grilling"), State::closed()]
     );
 
     let (stored,): (String,) = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
@@ -870,7 +872,7 @@ async fn the_old_word_is_still_a_state_this_verkstead_can_read() {
 
     assert_eq!(
         load_conversation(&pool, id).await.unwrap().unwrap().state,
-        Lifecycle::Closed,
+        State::closed(),
     );
 }
 
@@ -1546,9 +1548,10 @@ async fn wrap_up_of_before(dir: &Path) -> (i64, i64) {
         .unwrap()
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         Path::new("/state/worktrees/rate-limiting"),
         &[],
@@ -1572,6 +1575,7 @@ async fn wrap_up_of_before(dir: &Path) -> (i64, i64) {
             base: None,
             repo: None,
         },
+        &State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -1791,7 +1795,9 @@ async fn every_settled_suite_of_before_is_the_conversations_own_pull_requests() 
     // either, and *not asked* is not *conflicted* — so the wrap-up waits for the
     // answer the watcher brings a poll after the server comes up.
     assert_eq!(
-        finish_wrap_up(&pool, id).await.unwrap(),
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
         Finished::StillWaiting,
     );
 
@@ -1806,7 +1812,12 @@ async fn every_settled_suite_of_before_is_the_conversations_own_pull_requests() 
     .await
     .unwrap();
 
-    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+    assert_eq!(
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
+        Finished::Done
+    );
 
     pool.close().await;
 
@@ -1861,9 +1872,10 @@ async fn wrap_up_bookkeeping_of_before(dir: &Path) -> (i64, i64, i64) {
         .unwrap()
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         Path::new("/state/worktrees/rate-limiting"),
         &[],
@@ -1887,6 +1899,7 @@ async fn wrap_up_bookkeeping_of_before(dir: &Path) -> (i64, i64, i64) {
             base: None,
             repo: None,
         },
+        &State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -2052,7 +2065,9 @@ async fn a_wrap_up_of_before_is_still_waiting_on_what_it_was() {
     // Which leaves the wrap-up one thing short of over, exactly as it was: what
     // was said on the companion's pull request, and whether GitHub can merge it.
     assert_eq!(
-        finish_wrap_up(&pool, id).await.unwrap(),
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
         Finished::StillWaiting,
     );
 
@@ -2069,7 +2084,12 @@ async fn a_wrap_up_of_before_is_still_waiting_on_what_it_was() {
         settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
 
-    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+    assert_eq!(
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
+        Finished::Done
+    );
 }
 
 /// And the rule the rebuilt tables carry is the new one: a second pull request of
@@ -2354,9 +2374,10 @@ async fn a_conversation_from_before_the_base_branch_was_kept_records_none() {
         .unwrap()
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         Path::new("/data/worktrees/rate-limiting"),
         &[],
@@ -2500,9 +2521,10 @@ async fn a_conversation_from_before_the_naming_instruction_is_waiting_on_nobody(
         .unwrap()
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         Path::new("/data/worktrees/brave-otter"),
         &[],
@@ -3305,7 +3327,7 @@ async fn a_half_written_steer_from_before_investigating_has_no_question_on_it() 
         &pool,
         id,
         &verkstead_store::PendingForm {
-            target: Some(Lifecycle::FollowUp),
+            target: Some(State::named("follow-up")),
             follow_up: Some("Does it count the 429s it sends?".to_owned()),
             ..verkstead_store::PendingForm::default()
         },
@@ -3341,7 +3363,7 @@ async fn a_half_written_steer_from_before_investigating_has_no_question_on_it() 
             Some("Does it count the 429s it sends?"),
             "and what they had written is where they left it",
         );
-        assert_eq!(form.target, Some(Lifecycle::FollowUp));
+        assert_eq!(form.target, Some(State::named("follow-up")));
 
         pool.close().await;
     }
@@ -3547,6 +3569,7 @@ async fn a_stage_recorded_before_the_label_keeps_its_roadmap_and_no_stage() {
     start_stage(
         &pool,
         id,
+        &State::named("implementing"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/data/worktrees/verkstead-stage"),
         Some("roadmaps/mvp/04-implementation"),
@@ -3616,9 +3639,10 @@ async fn profiles_numbered_before_uuids(dir: &Path) -> (i64, i64) {
         .unwrap()
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/data/worktrees/verkstead-rate-limiting"),
         &[],

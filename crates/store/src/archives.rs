@@ -29,7 +29,7 @@
 use anyhow::{Context, Result};
 use sqlx::SqlitePool;
 
-use super::conversations::Lifecycle;
+use super::conversations::State;
 
 /// What became of archiving one.
 ///
@@ -118,13 +118,13 @@ pub async fn archive_conversation(pool: &SqlitePool, id: i64) -> Result<Archivin
         return Ok(Archiving::NoSuchConversation);
     };
 
-    // Tolerantly, as the close is: a word this Verkstead cannot parse is not
-    // Closed, so this answers `NotClosed`. Which is the safe way round and the
-    // deliberate one — archiving is *hide it from the list*, and hiding a
-    // Conversation whose worktree may still be live would put the work out of
-    // sight without ending it. Close and archive is the press that works end to
-    // end on a row like that, because closing heals the word first.
-    if !Lifecycle::reads_as(&state, Lifecycle::Closed) {
+    // A state nothing declares is not Closed, so this answers `NotClosed`.
+    // Which is the safe way round and the deliberate one — archiving is *hide
+    // it from the list*, and hiding a Conversation whose worktree may still be
+    // live would put the work out of sight without ending it. Close and
+    // archive is the press that works end to end on a row whose Process has
+    // gone, because closing moves it to a word Verkstead owns first.
+    if State::named(&state) != State::CLOSED {
         return Ok(Archiving::NotClosed);
     }
 

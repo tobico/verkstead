@@ -34,7 +34,7 @@ use sqlx::SqlitePool;
 
 use crate::AppState;
 use crate::answer_files::OnAnswers;
-use crate::store::{self, Lifecycle};
+use crate::store::{self, State};
 
 /// What an investigating session is primed with.
 ///
@@ -118,10 +118,13 @@ impl Investigation {
 pub(crate) async fn opened(
     state: &AppState,
     conversation_id: i64,
+    standing: &State,
 ) -> Result<Option<Investigation>> {
     let timeline = store::timeline(&state.pool, conversation_id).await?;
 
-    let Some((opened, brief)) = steered(&timeline).or_else(|| briefed(&timeline)) else {
+    let Some((opened, brief)) =
+        steered(&timeline, standing).or_else(|| briefed(&timeline, standing))
+    else {
         return Ok(None);
     };
 
@@ -147,8 +150,8 @@ pub(crate) async fn opened(
 ///
 /// **Three states are never returned to.** Two of them have a way in of their
 /// own that nothing else may use: a Draft is started and a Closed Conversation is
-/// steered back into life. Investigating is the third, for a reason of its own —
-/// an investigation sent back to Investigating is one the human could never end,
+/// steered back into life. The detour itself is the third, for a reason of its
+/// own — an investigation sent back into itself is one the human could never end,
 /// the move that lands it there opening a fresh Nothing-else window that the mark
 /// they have only just ticked falls outside of, so the next session asks them for
 /// the same mark over again. So an Investigating steered out of any of the three
@@ -164,15 +167,22 @@ pub(crate) async fn opened(
 /// wrote one.
 ///
 /// One read of the Timeline, as picking an investigation up again takes one.
-pub(crate) async fn landing(pool: &SqlitePool, conversation_id: i64) -> Result<Landing> {
-    Ok(homeward(&store::timeline(pool, conversation_id).await?))
+pub(crate) async fn landing(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    standing: &State,
+) -> Result<Landing> {
+    Ok(homeward(
+        &store::timeline(pool, conversation_id).await?,
+        standing,
+    ))
 }
 
 /// Where an Investigating goes when it ends, and the steer that sent it there.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Landing {
-    /// The state the Conversation lands in.
-    pub(crate) state: Lifecycle,
+    /// The state the Conversation lands in, by the word its Process gives it.
+    pub(crate) state: State,
 
     /// And the Steer Event this Investigating came in through, where one did:
     /// what the record of that press holds is what the Worktree already held
@@ -187,24 +197,23 @@ pub(crate) struct Landing {
 ///
 /// The brief is not looked at, unlike [`steered`]'s: where the work came from is
 /// the record's to say whatever was written to send it there with.
-fn homeward(timeline: &[store::TimelineEvent]) -> Landing {
+fn homeward(timeline: &[store::TimelineEvent], standing: &State) -> Landing {
     let steer = timeline.iter().rev().find_map(|event| match &event.event {
-        store::Event::Steer(store::Steered::Built(Lifecycle::Investigating), _, record) => {
-            Some((event.id, record))
-        }
+        store::Event::Steer(target, _, record) if target == standing => Some((event.id, record)),
         _ => None,
     });
 
     let came_from = steer
         .and_then(|(_, record)| record.as_deref())
-        .and_then(|record| record.source);
+        .and_then(|record| record.source.clone());
 
     let state = match came_from {
-        None
-        | Some(Lifecycle::Draft)
-        | Some(Lifecycle::Closed)
-        | Some(Lifecycle::Investigating) => Lifecycle::Done,
-        Some(source) => source,
+        Some(source)
+            if source != State::DRAFT && source != State::CLOSED && source != *standing =>
+        {
+            source
+        }
+        _ => State::done(),
     };
 
     Landing {
@@ -402,17 +411,15 @@ fn put_back(worktree: &std::path::Path, already: &[String]) -> Vec<String> {
 /// the one it is in now is the last. Carrying a brief, because that is what a
 /// session is started on: a steer without one is refused, so a Steer Event with
 /// nothing under its target is a record from before Investigating existed.
-fn steered(timeline: &[store::TimelineEvent]) -> Option<(usize, &str)> {
+fn steered<'a>(timeline: &'a [store::TimelineEvent], standing: &State) -> Option<(usize, &'a str)> {
     timeline
         .iter()
         .enumerate()
         .rev()
         .find_map(|(at, event)| match &event.event {
-            store::Event::Steer(
-                store::Steered::Built(store::Lifecycle::Investigating),
-                Some(brief),
-                _,
-            ) => Some((at, brief.as_str())),
+            store::Event::Steer(target, Some(brief), _) if target == standing => {
+                Some((at, brief.as_str()))
+            }
             _ => None,
         })
 }
@@ -424,7 +431,7 @@ fn steered(timeline: &[store::TimelineEvent]) -> Option<(usize, &str)> {
 /// where there is no steer above them — a Conversation steered into
 /// Investigating is having the steer's investigation, not the one its Start
 /// opened all over again.
-fn briefed(timeline: &[store::TimelineEvent]) -> Option<(usize, &str)> {
+fn briefed<'a>(timeline: &'a [store::TimelineEvent], standing: &State) -> Option<(usize, &'a str)> {
     let brief = timeline.iter().rev().find_map(|event| match &event.event {
         store::Event::Brief(markdown) => Some(markdown.as_str()),
         _ => None,
@@ -435,7 +442,7 @@ fn briefed(timeline: &[store::TimelineEvent]) -> Option<(usize, &str)> {
         .enumerate()
         .rev()
         .find_map(|(at, event)| match &event.event {
-            store::Event::Moved(store::Lifecycle::Investigating) => Some(at),
+            store::Event::Moved(state) if state == standing => Some(at),
             _ => None,
         })?;
 
@@ -446,17 +453,26 @@ fn briefed(timeline: &[store::TimelineEvent]) -> Option<(usize, &str)> {
 mod tests {
     use super::*;
 
+    /// The id Develop gives the detour a question takes, which is the state
+    /// every reading here is made against.
+    const INVESTIGATING: &str = "investigating";
+
+    /// That state, as the reading takes it.
+    fn detour() -> State {
+        State::named(INVESTIGATING)
+    }
+
     /// A Steer Event as the store holds it on a Timeline: where the work went, the
     /// brief it went with, and the state the press found the Conversation in.
     ///
     /// `source` is `None` for a steer recorded before that was written down, which
     /// is the one reading here that is about the record rather than about the work.
-    fn steer(target: Lifecycle, source: Option<Lifecycle>) -> store::TimelineEvent {
+    fn steer(target: &str, source: Option<&str>) -> store::TimelineEvent {
         store::TimelineEvent {
             id: 1,
             at: "2026-09-26T12:00:00Z".to_owned(),
             event: store::Event::Steer(
-                store::Steered::Built(target),
+                State::named(target),
                 Some("Where does the 429 count come from?\n".to_owned()),
                 Some(Box::new(store::SteerRecord {
                     digest: false,
@@ -464,7 +480,7 @@ mod tests {
                     pairing: store::RecordedPairing::Nothing,
                     added: Vec::new(),
                     upgraded: Vec::new(),
-                    source,
+                    source: source.map(State::named),
                 })),
             ),
         }
@@ -472,11 +488,11 @@ mod tests {
 
     /// And the move a Start on an **Investigate** draft writes, which is the other
     /// way into the state and the one with no steer above it.
-    fn moved(state: Lifecycle) -> store::TimelineEvent {
+    fn moved(state: &str) -> store::TimelineEvent {
         store::TimelineEvent {
             id: 2,
             at: "2026-09-26T12:00:00Z".to_owned(),
-            event: store::Event::Moved(state),
+            event: store::Event::Moved(State::named(state)),
         }
     }
 
@@ -486,12 +502,12 @@ mod tests {
     #[test]
     fn an_investigation_no_steer_opened_ends_done() {
         assert_eq!(
-            homeward(&[moved(Lifecycle::Investigating)]).state,
-            Lifecycle::Done,
+            homeward(&[moved(INVESTIGATING)], &detour()).state,
+            State::done(),
         );
         assert_eq!(
-            homeward(&[]).state,
-            Lifecycle::Done,
+            homeward(&[], &detour()).state,
+            State::done(),
             "and so does an empty one"
         );
     }
@@ -502,18 +518,16 @@ mod tests {
     /// answered.
     #[test]
     fn a_steered_investigation_goes_back_to_the_state_it_came_from() {
-        for source in [
-            Lifecycle::Grilling,
-            Lifecycle::Implementing,
-            Lifecycle::Wrapping,
-            Lifecycle::FollowUp,
-        ] {
+        for source in ["grilling", "implementing", "wrapping", "follow-up"] {
             assert_eq!(
-                homeward(&[
-                    moved(source),
-                    steer(Lifecycle::Investigating, Some(source)),
-                    moved(Lifecycle::Investigating),
-                ])
+                homeward(
+                    &[
+                        moved(source),
+                        steer(INVESTIGATING, Some(source)),
+                        moved(INVESTIGATING),
+                    ],
+                    &detour(),
+                )
                 .state,
                 source,
                 "{source:?} is where the steer found it, so {source:?} is where it \
@@ -537,15 +551,10 @@ mod tests {
     /// rather than as a case of its own.
     #[test]
     fn the_states_nothing_returns_to_end_done_instead() {
-        for source in [
-            Lifecycle::Draft,
-            Lifecycle::Closed,
-            Lifecycle::Investigating,
-            Lifecycle::Done,
-        ] {
+        for source in [State::DRAFT, State::CLOSED, INVESTIGATING, State::DONE] {
             assert_eq!(
-                homeward(&[steer(Lifecycle::Investigating, Some(source))]).state,
-                Lifecycle::Done,
+                homeward(&[steer(INVESTIGATING, Some(source))], &detour()).state,
+                State::done(),
                 "a steer out of {source:?}",
             );
         }
@@ -560,15 +569,18 @@ mod tests {
     #[test]
     fn the_newest_steer_into_investigating_is_what_decides() {
         assert_eq!(
-            homeward(&[
-                steer(Lifecycle::Investigating, Some(Lifecycle::Grilling)),
-                moved(Lifecycle::Wrapping),
-                steer(Lifecycle::FollowUp, Some(Lifecycle::Wrapping)),
-                steer(Lifecycle::Investigating, Some(Lifecycle::Wrapping)),
-                moved(Lifecycle::Investigating),
-            ])
+            homeward(
+                &[
+                    steer(INVESTIGATING, Some("grilling")),
+                    moved("wrapping"),
+                    steer("follow-up", Some("wrapping")),
+                    steer(INVESTIGATING, Some("wrapping")),
+                    moved(INVESTIGATING),
+                ],
+                &detour(),
+            )
             .state,
-            Lifecycle::Wrapping,
+            "wrapping",
             "the grilling it was taken out of a year ago is not where this one \
              came from",
         );
@@ -583,8 +595,8 @@ mod tests {
     #[test]
     fn a_steer_recorded_before_the_source_was_ends_done() {
         assert_eq!(
-            homeward(&[steer(Lifecycle::Investigating, None)]).state,
-            Lifecycle::Done,
+            homeward(&[steer(INVESTIGATING, None)], &detour()).state,
+            State::done(),
         );
     }
 }

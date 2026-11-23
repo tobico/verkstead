@@ -81,7 +81,7 @@ use crate::AppState;
 use crate::attachments::Attachments;
 use crate::peer::transfers::{ONE_TRANSFERS_ARRIVAL, TRANSFERS};
 use crate::relaying::{self, Call, Refusal, Streamed, as_json};
-use crate::store::{self, Lifecycle};
+use crate::store::{self, State};
 
 /// How often the mover looks again at a session that was still starting: **every
 /// quarter of a second**.
@@ -188,7 +188,7 @@ pub(crate) async fn transfer(
         return Ok(Transferring::Elsewhere);
     }
 
-    if !movable(conversation.state) {
+    if !movable(&conversation.state) {
         return Ok(Transferring::NotTransferable);
     }
 
@@ -198,6 +198,9 @@ pub(crate) async fn transfer(
         &state.settings.config(),
         &conversation,
         &crate::processes::labels(state, &conversation.process),
+        crate::processes::of(state, &conversation.process)
+            .map(|loaded| loaded.process.name)
+            .as_deref(),
         device,
     )
     .await?;
@@ -357,7 +360,7 @@ async fn by_the_session(
         return Err("the work has already been moved to another device".to_owned());
     }
 
-    if !movable(conversation.state) {
+    if !movable(&conversation.state) {
         return Err(
             "this Conversation cannot be moved: a draft moves by its own composer, and \
                     a closed one has no work left to move"
@@ -408,6 +411,9 @@ async fn by_the_session(
         &state.settings.config(),
         &conversation,
         &crate::processes::labels(state, &conversation.process),
+        crate::processes::of(state, &conversation.process)
+            .map(|loaded| loaded.process.name)
+            .as_deref(),
         &device.device,
     )
     .await
@@ -614,6 +620,11 @@ pub(crate) fn lacks(lacking: &verkstead_render::Lacking, device: &str) -> String
             repo = if *companion { "companion repo" } else { "repo" },
         ),
 
+        Lacking::Process { name } => format!(
+            "No plugin on {device} provides the {name} process, so nothing there could drive this \
+             conversation. Install it there to move the work."
+        ),
+
         Lacking::RepoAuthorUnpicked { name, companion } => format!(
             "The {repo} {name} has no author picked on {device}. Pick one for it under Repos in \
              Settings there.",
@@ -709,8 +720,8 @@ pub(crate) async fn permit(
 /// and no work to carry — and a Closed Conversation has none left to move. The
 /// same rule the actions menu draws the row by, asked again here for the reason
 /// every press re-asks what drew it.
-pub(crate) fn movable(lifecycle: Lifecycle) -> bool {
-    !matches!(lifecycle, Lifecycle::Draft | Lifecycle::Closed)
+pub(crate) fn movable(standing: &State) -> bool {
+    *standing != State::DRAFT && *standing != State::CLOSED
 }
 
 /// Whether this Conversation is on its way to another device, or has already
@@ -1218,7 +1229,14 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
         branch: conversation.branch.clone(),
         branch_named: conversation.branch_named,
         naming: conversation.naming,
-        state: crate::ui::lifecycle(conversation.state),
+        state: conversation.state.stored().to_owned(),
+        // And the Process the far end reads that word against: the plugin
+        // providing it and the id its manifest gives it there, which mean the
+        // same on every device (ADR-0030, *Process*).
+        process: Some(verkstead_render::ProcessAcross {
+            plugin: conversation.process.plugin.clone(),
+            id: conversation.process.id.clone(),
+        }),
         rank,
         pairings: conversation
             .pairings
@@ -1696,7 +1714,7 @@ async fn failed(
         tracing::error!(error = ?error, conversation_id, "a transfer that failed could not be forgotten");
     }
 
-    let lifecycle = match store::load_conversation(&state.pool, conversation_id).await {
+    let standing = match store::load_conversation(&state.pool, conversation_id).await {
         Ok(Some(conversation)) => conversation.state,
         Ok(None) => return,
         Err(error) => {
@@ -1710,7 +1728,7 @@ async fn failed(
         &state.nudges,
         conversation_id,
         crate::stopping::Decided::Verkstead,
-        crate::stalls::driving(lifecycle),
+        crate::stalls::driving(&standing),
         &format!("Moving it onto {named} failed. {saying}"),
         crate::stalls::said_last(state, conversation_id).await,
     )
@@ -2063,21 +2081,22 @@ mod tests {
     #[test]
     fn a_draft_and_a_closed_conversation_are_the_two_that_do_not_move() {
         for state in [
-            Lifecycle::Grilling,
-            Lifecycle::Implementing,
-            Lifecycle::Wrapping,
-            Lifecycle::FollowUp,
-            Lifecycle::Done,
+            "grilling",
+            "implementing",
+            "wrapping",
+            "follow-up",
+            State::DONE,
         ] {
-            assert!(movable(state), "{state:?} is work on a machine");
+            let state = State::named(state);
+            assert!(movable(&state), "{state} is work on a machine");
         }
 
         assert!(
-            !movable(Lifecycle::Draft),
+            !movable(&State::draft()),
             "a Draft is moved by its own composer",
         );
         assert!(
-            !movable(Lifecycle::Closed),
+            !movable(&State::closed()),
             "a Closed Conversation has no work left to move",
         );
     }

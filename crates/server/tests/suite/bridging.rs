@@ -423,9 +423,16 @@ async fn both() -> (Verkstead, Verkstead, PathBuf) {
         ],
     );
 
-    store::start_grilling(&b.pool, conversation, &base, &worktree, &[])
-        .await
-        .unwrap();
+    store::start_in(
+        &b.pool,
+        conversation,
+        &store::State::named("grilling"),
+        &base,
+        &worktree,
+        &[],
+    )
+    .await
+    .unwrap();
 
     b.linked_to(&a.device, vec![a.at()]).await;
 

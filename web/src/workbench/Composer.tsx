@@ -172,7 +172,7 @@ export function composing(
   conversation: ConversationView,
   brief: BriefEvent,
 ): boolean {
-  if (conversation.state !== "Draft") {
+  if (conversation.state !== "draft") {
     return false;
   }
 

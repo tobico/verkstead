@@ -581,21 +581,56 @@ fn write_the_artifact(state: &AppState, id: i64, direction: Direction) -> bool {
 /// to the pull request, and what records *that* is the move it makes — see
 /// [`crate::wrapping::opened`].
 ///
+/// **Where it goes is the Process's to say**: the state its manifest maps the
+/// Direction the human picked to (Set 1765, Q27) — Develop maps all three to
+/// the one state that builds. So this is a [`store::transition`] like any
+/// other, out of the state the interview was had in and into the state that
+/// Direction leads to.
+///
 /// Nothing is refused for: the artifact is in hand by the time this runs, and a
 /// move that would not record is something to see in the log.
 pub(crate) async fn grilling_over(state: &AppState, id: i64) {
-    match store::start_implementing(&state.pool, id).await {
-        Ok(store::Implementing::Started) => {
+    let Some(conversation) = store::load_conversation(&state.pool, id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        return tracing::error!(
+            conversation_id = id,
+            "a grilling's tail landed for a Conversation that is not there"
+        );
+    };
+
+    let standing = store::State::named(crate::processes::standing_in(&conversation));
+
+    let Some(direction) = conversation.direction else {
+        return tracing::error!(
+            conversation_id = id,
+            "a grilling's tail landed with no Direction picked, so there was nowhere to move it"
+        );
+    };
+
+    let Some(building) = crate::processes::directed(state, &conversation.process, direction) else {
+        return tracing::error!(
+            conversation_id = id,
+            ?direction,
+            "the Process of a grilling whose tail landed maps that Direction to no state, so \
+             the work was not recorded as being built"
+        );
+    };
+
+    match store::transition(&state.pool, id, &standing, &building).await {
+        Ok(store::Transitioned::Moved) => {
             tracing::info!(
                 conversation_id = id,
                 "a grilling's tail has landed, so the work is being built"
             )
         }
-        Ok(store::Implementing::NotGrilling) => tracing::debug!(
+        Ok(store::Transitioned::Elsewhere) => tracing::debug!(
             conversation_id = id,
             "a grilling's tail landed for a Conversation that had already left grilling"
         ),
-        Ok(store::Implementing::NoSuchConversation) => tracing::error!(
+        Ok(store::Transitioned::NoSuchConversation) => tracing::error!(
             conversation_id = id,
             "a grilling's tail landed for a Conversation that is not there"
         ),
@@ -1260,7 +1295,7 @@ enum Frozen {
 async fn not_drafting(pool: &SqlitePool, id: i64) -> Result<Option<Frozen>> {
     Ok(match store::state(pool, id).await? {
         None => Some(Frozen::NoSuchConversation),
-        Some(store::Lifecycle::Draft) => None,
+        Some(standing) if standing == store::State::DRAFT => None,
         Some(_) => Some(Frozen::NotDrafting),
     })
 }
@@ -1334,7 +1369,7 @@ pub(crate) async fn set_base_branch(
         // a Conversation whose base was frozen months ago is told *that* rather
         // than told about a branch the repository has since lost. The store
         // asks again all the same: this read and that write are not one moment.
-        if conversation.state != store::Lifecycle::Draft {
+        if conversation.state != store::State::DRAFT {
             return Ok(BaseRecorded::NotDrafting);
         }
 
@@ -1625,7 +1660,7 @@ pub(crate) async fn set_companion_base(
             return Ok(CompanionBaseRecorded::NoSuchConversation);
         };
 
-        if conversation.state != store::Lifecycle::Draft {
+        if conversation.state != store::State::DRAFT {
             return Ok(CompanionBaseRecorded::NotDrafting);
         }
 
@@ -1832,7 +1867,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         return Ok(GrillingStarted::NoSuchConversation);
     };
 
-    if conversation.state != store::Lifecycle::Draft {
+    if conversation.state != store::State::DRAFT {
         return Ok(GrillingStarted::NotDrafting);
     }
 
@@ -1883,11 +1918,6 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     if provided && first.is_none() {
         return Ok(GrillingStarted::ProcessNotOffered);
     }
-
-    let declared = first
-        .as_ref()
-        .filter(|_| provided)
-        .map(|first| first.id.clone());
 
     // Which of the host's drivers the first state's Activity is run by, for
     // one of Verkstead's own: the Interview as a Develop's, Follow-up rounds
@@ -2160,23 +2190,19 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     };
 
     // And where the press lands it, which is the one thing about the record
-    // that the Process decides: the same transaction either way, with the state
-    // it comes out in as the word that differs.
+    // that the Process decides: the id of the first state its manifest declares
+    // — so a Tinker lands in `follow-up` because that is the first state
+    // *Tinker* declares, and a Develop in `grilling`.
     //
-    // The first state's word, for a Process that is data: a declared one for a
-    // plugin's, and the one of Verkstead's it names for Verkstead's own — so a
-    // Tinker lands in Follow-up because its manifest's first state is
-    // `follow-up`.
-    let landing = match (&declared, &first) {
-        (Some(declared), _) => Some(store::Destination::Declared(declared)),
-        (None, Some(first)) => store::Lifecycle::named(&first.id).map(store::Destination::Built),
-        (None, None) => None,
+    // A Process whose manifest this build cannot read lands in `grilling`, the
+    // word a Start has always written: the five are refused above where their
+    // plugin is unticked, and this is the Verkstead that carries none of them.
+    let landing = match &first {
+        Some(first) => store::State::named(&first.id),
+        None => store::State::named("grilling"),
     };
 
-    let moved = match landing {
-        Some(landing) => store::start_in(pool, id, landing, base, &path, &checkouts).await?,
-        None => store::start_grilling(pool, id, base, &path, &checkouts).await?,
-    };
+    let moved = store::start_in(pool, id, &landing, base, &path, &checkouts).await?;
 
     match moved {
         store::Grilling::NoSuchConversation => return Ok(GrillingStarted::NoSuchConversation),
@@ -2224,7 +2250,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // [`crate::activities::follow_up_rounds::run`].
     // And a plugin's Process, whose first state's Activity is what drives it
     // from here — see [`crate::processes`].
-    if declared.is_some() {
+    if provided {
         tokio::spawn(crate::processes::run(state.clone(), id, driving));
 
         return Ok(GrillingStarted::Started);
@@ -2798,7 +2824,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         return Ok(Adopted::NoSuchConversation);
     };
 
-    if conversation.state != store::Lifecycle::Draft {
+    if conversation.state != store::State::DRAFT {
         return Ok(Adopted::NotDrafting);
     }
 
@@ -3053,9 +3079,13 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // The roadmap goes in with it, and which stage of it this is, which is what
     // makes this adoption stick: the human picked it here, and every wrap-up from
     // here reads those rather than working anything out from the branch.
+    // Where a stage lands is its Process's to say — see [`crate::processes::staging`].
+    let building = crate::processes::staging(state, id).await;
+
     match store::start_stage(
         pool,
         id,
+        &building,
         base,
         &path,
         stacks_on.as_deref(),
@@ -3392,9 +3422,14 @@ async fn alongside(
         named: Some(named),
     };
 
+    // Where it lands is its Process's to say — see the adoption above, which
+    // reads it the same way.
+    let building = crate::processes::staging(state, id).await;
+
     let staged = store::start_stage(
         &state.pool,
         id,
+        &building,
         base,
         &path,
         stacks_on,
@@ -3757,7 +3792,7 @@ pub(crate) async fn take_up(state: &AppState, id: i64, confirming: &Confirming) 
         return Ok(TakenUp::NoSuchConversation);
     };
 
-    if conversation.state != store::Lifecycle::Draft {
+    if conversation.state != store::State::DRAFT {
         return Ok(TakenUp::NotDrafting);
     }
 
@@ -4106,9 +4141,15 @@ pub(crate) async fn take_up(state: &AppState, id: i64, confirming: &Confirming) 
     // And where it lands, which is the one thing about the record a branch
     // changes: a pull request is recorded a moment from now and that record is
     // the move, and a branch has no such record coming — see [`store::Landing`].
-    let landing = match &taking {
-        Target::PullRequest(_) => store::Landing::Drafting,
-        Target::Branch(_) => store::Landing::Wrapping,
+    // Which state that is, is the manifest's: the one running the Wrap-up
+    // Activity, whatever this Process calls it.
+    let wrapping =
+        crate::processes::running(state, &conversation.process, crate::processes::WRAP_UP);
+
+    let landing = match (&taking, &wrapping) {
+        (Target::PullRequest(_), _) => store::Landing::Drafting,
+        (Target::Branch(_), Some(wrapping)) => store::Landing::In(wrapping),
+        (Target::Branch(_), None) => return Ok(refused(TakenUp::ProcessNotOffered)),
     };
 
     // And what the wrap-up it is entering has settled before it looks, which is
@@ -4187,7 +4228,13 @@ pub(crate) async fn take_up(state: &AppState, id: i64, confirming: &Confirming) 
             repo: None,
         };
 
-        match store::record_pull_request(pool, id, conversation.repo.id, &pull_request).await? {
+        let Some(wrapping) = &wrapping else {
+            return Ok(refused(TakenUp::ProcessNotOffered));
+        };
+
+        match store::record_pull_request(pool, id, conversation.repo.id, &pull_request, wrapping)
+            .await?
+        {
             store::Wrapping::Started => {}
             store::Wrapping::NoSuchConversation => return Ok(refused(TakenUp::NoSuchConversation)),
             store::Wrapping::NothingToWrap => return Ok(refused(TakenUp::NotDrafting)),
@@ -4305,12 +4352,12 @@ pub(crate) enum MadeWay {
 /// standing on the branch and nothing is offering presses over the pull request,
 /// which is the whole of what the close was for.
 ///
-/// **And a holder whose state word will not parse is read as still at work**,
-/// which is [`store::Lifecycle`]'s own reading of a word this Verkstead does not
-/// know: it is not Done, so it is not a Conversation to close. Which is the safe
-/// way round of it — the refusal leads the human to the Conversation, where the
-/// pane's own escape hatch can end it, and closing a record nothing can read on
-/// the strength of a press somewhere else would be Verkstead guessing.
+/// **And a holder standing in a state nothing declares is read as still at
+/// work**: it is not Done, so it is not a Conversation to close. Which is the
+/// safe way round of it — the refusal leads the human to the Conversation, where
+/// the pane's own escape hatch can end it, and closing a record whose Process
+/// has gone on the strength of a press somewhere else would be Verkstead
+/// guessing.
 ///
 /// Nothing is closed here. What closing costs is read first — see [`to_lose`] —
 /// and the close itself is [`close_to_make_way`].
@@ -4330,9 +4377,9 @@ pub(crate) async fn making_way(state: &AppState, other: i64) -> Result<MadeWay> 
         }
     };
 
-    match holder.state {
-        store::Lifecycle::Closed => Ok(MadeWay::NothingToGiveUp),
-        store::Lifecycle::Done => Ok(MadeWay::ToClose(Box::new(holder))),
+    match holder.state.stored() {
+        store::State::CLOSED => Ok(MadeWay::NothingToGiveUp),
+        store::State::DONE => Ok(MadeWay::ToClose(Box::new(holder))),
         _ => Ok(MadeWay::StillAtWork),
     }
 }
@@ -5985,7 +6032,7 @@ pub(crate) async fn worktree(path: Option<PathBuf>) -> Result<Option<Worktree>> 
 /// there is somewhere to ask; an empty field is the one thing a page can see for
 /// itself, and it is the one thing this waits on.
 pub(crate) fn ready_to_grill(
-    state: store::Lifecycle,
+    state: &store::State,
     pairings: &[verkstead_render::RolePairingView],
     brief: &str,
     target: Option<&str>,
@@ -5993,7 +6040,7 @@ pub(crate) fn ready_to_grill(
 ) -> bool {
     let pointed = !targeted || target.is_some_and(|target| !target.trim().is_empty());
 
-    state == store::Lifecycle::Draft
+    *state == store::State::DRAFT
         && !brief.trim().is_empty()
         && crate::profiles::every_role_settled(pairings)
         && pointed

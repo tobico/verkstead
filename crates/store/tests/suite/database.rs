@@ -17,8 +17,8 @@ use std::path::Path;
 
 use sqlx::{Row, SqlitePool};
 use verkstead_store::{
-    Lifecycle, PullRequest, Wrapping, load_conversation, open_database, register_repo, save_brief,
-    start_conversation, start_grilling,
+    PullRequest, State, Wrapping, load_conversation, open_database, register_repo, save_brief,
+    start_conversation, start_in,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -43,9 +43,10 @@ async fn grilling(pool: &SqlitePool, repo: i64, branch: &str) -> i64 {
         .expect("the Repo is registered");
 
     save_brief(pool, id, "# Rate limiting\n").await.unwrap();
-    start_grilling(
+    start_in(
         pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         Path::new("/state/worktrees").join(branch).as_path(),
         &[],
@@ -142,8 +143,14 @@ async fn writes_that_arrive_at_once_all_land() {
             let pool = pool.clone();
 
             tokio::spawn(async move {
-                verkstead_store::record_pull_request(&pool, id, repo, &opened(number as i64 + 1))
-                    .await
+                verkstead_store::record_pull_request(
+                    &pool,
+                    id,
+                    repo,
+                    &opened(number as i64 + 1),
+                    &verkstead_store::State::named("wrapping"),
+                )
+                .await
             })
         })
         .collect();
@@ -159,7 +166,7 @@ async fn writes_that_arrive_at_once_all_land() {
     for &id in &conversations {
         assert_eq!(
             load_conversation(&pool, id).await.unwrap().unwrap().state,
-            Lifecycle::Wrapping,
+            State::named("wrapping"),
             "and every Conversation made the move its recording carries",
         );
     }

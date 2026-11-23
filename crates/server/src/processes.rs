@@ -106,6 +106,11 @@ impl Loaded {
                 .map(|state| verkstead_render::DeclaredStateEntry {
                     id: state.id.clone(),
                     word: state.word.clone(),
+                    interviews: state
+                        .activity
+                        .activities()
+                        .iter()
+                        .any(|(_, id)| *id == INTERVIEW),
                 })
                 .collect(),
             roles: self
@@ -329,8 +334,105 @@ pub(crate) fn runs(
         .unwrap_or(false)
 }
 
-/// What a host driver does with an Outcome of one of Verkstead's own
-/// Activities, as the Conversation's Process's manifest says where it leads:
+/// Which Activity the state `standing` of `process`.s manifest runs, where it
+/// runs one that does not depend on the Conversation.s Direction.
+///
+/// What a host driver dispatches on: a Resume reads the standing state.s
+/// Activity and starts that Activity again, which is the restart rule read off
+/// the manifest rather than off a list of states (ADR-0030, *Process*). A state
+/// whose Activity is the Direction.s own answers with every one it may run, so
+/// a caller asking whether it builds gets a yes whichever Direction was picked.
+pub(crate) fn activities(
+    state: &AppState,
+    process: &store::Process,
+    standing: &str,
+) -> Vec<String> {
+    of(state, process)
+        .and_then(|loaded| {
+            let declared = loaded.process.state(standing)?.activity.clone();
+            Some(
+                declared
+                    .activities()
+                    .iter()
+                    .map(|(_, id)| (*id).to_owned())
+                    .collect(),
+            )
+        })
+        .unwrap_or_default()
+}
+
+/// The state of `process` that runs the Activity `activity`, by its id — the
+/// first its manifest declares, where more than one does.
+///
+/// What a host driver reads to find where a Conversation goes next without an
+/// Outcome to map: a pull request being recorded lands in the state that wraps
+/// up, whatever that Process calls it.
+pub(crate) fn running(
+    state: &AppState,
+    process: &store::Process,
+    activity: &str,
+) -> Option<store::State> {
+    let loaded = of(state, process)?;
+
+    loaded
+        .process
+        .states
+        .iter()
+        .find(|declared| {
+            declared
+                .activity
+                .activities()
+                .iter()
+                .any(|(_, id)| *id == activity)
+        })
+        .map(|declared| store::State::named(&declared.id))
+}
+
+/// The state a stage Conversation is built in: the one its Process's manifest
+/// maps the task-list Direction to, a stage being worked a task at a time.
+///
+/// A Process whose manifest this build cannot read lands in `implementing`, the
+/// word a stage has always been started in — which is what Develop declares,
+/// and Develop is what every stage runs under.
+pub(crate) async fn staging(state: &AppState, conversation_id: i64) -> store::State {
+    let process = match store::process(&state.pool, conversation_id).await {
+        Ok(process) => Some(process),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading which Process a stage is on failed");
+            None
+        }
+    };
+
+    process
+        .and_then(|process| directed(state, &process, verkstead_schema::Direction::TaskList))
+        .unwrap_or_else(|| store::State::named("implementing"))
+}
+
+/// And the state `process`.s interview sends a Conversation to once the human
+/// has picked `direction`, by its id.
+///
+/// The manifest.s `directions` map, which is where the Outcomes the interview
+/// ends a round in lead (Set 1765, Q27) — Develop maps all three to the one
+/// state that builds. `None` where it offers that Direction nowhere, which is
+/// an interview whose chooser never put it up.
+pub(crate) fn directed(
+    state: &AppState,
+    process: &store::Process,
+    direction: verkstead_schema::Direction,
+) -> Option<store::State> {
+    let loaded = of(state, process)?;
+    let word = direction_word(direction);
+
+    loaded
+        .process
+        .directions
+        .iter()
+        .find(|(named, _)| named == word)
+        .map(|(_, to)| store::State::named(to))
+}
+
+/// What a host driver does with an Outcome of one of Verkstead.s own
+/// Activities, as the Conversation.s Process.s manifest says where it leads:
 /// the landing that host already knows for each kind of place.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Leaving {
@@ -453,8 +555,18 @@ pub(crate) fn walks_the_stack(state: &AppState, process: &store::Process) -> boo
     of(state, process).is_some_and(|loaded| loaded.walks_the_stack())
 }
 
-/// The state a built-in Process wraps up in, by the word the record holds.
+/// The state the five Processes Verkstead ships wrap up in, by the word the
+/// record holds.
+///
+/// Read for the **Wrapping** row on the Steer form and the note under it, which
+/// are Verkstead.s own rows on that form while the five are steered by its own
+/// targets — see [`crate::steering`]. Everything else finds the wrap-up by the
+/// Activity it runs, see [`running`].
 pub(crate) const WRAPPING: &str = "wrapping";
+
+/// The id the Wrap-up Activity has in the built-in Activities plugin.s
+/// manifest.
+pub(crate) const WRAP_UP: &str = "wrap-up";
 
 /// The ids the two Activities Verkstead reads a Conversation's own drawing off
 /// have in the built-in Activities plugin's manifest.
@@ -466,12 +578,34 @@ pub(crate) const WRAPPING: &str = "wrapping";
 pub(crate) const INTERVIEW: &str = "interview";
 pub(crate) const FOLLOW_UP_ROUNDS: &str = "follow-up-rounds";
 
+/// And the three a state that builds may run, one per Direction — see
+/// Develop's `implementing`, whose Activity is the Direction's own.
+///
+/// What a host driver dispatches on where it used to match the state: a Resume
+/// on a state running any of these starts the run again, and the run reads the
+/// Direction for itself.
+pub(crate) const BUILDERS: [&str; 3] = ["one-session", "backlog-runner", "stage-runner"];
+
 /// Whether what is running on `conversation_id` is the **Interview**, so a
 /// `proposal` on its Set is one there is still something to inform about —
 /// see [`crate::conversations::settle_a_proposal`].
 pub(crate) async fn interviewing(state: &AppState, conversation_id: i64) -> bool {
     match standing_under(state, conversation_id).await {
         Some((word, process)) => runs(state, &process, &word, INTERVIEW),
+        None => false,
+    }
+}
+
+/// Whether `conversation_id` stands in a state whose Activity is the Wrap-up,
+/// whatever its Process calls that state.
+///
+/// What the wrap-up's own watchers ask before they go to the network, and what
+/// a pull request being recorded is the move into: a Conversation that has been
+/// closed, steered or finished out from under them is no longer wrapping
+/// anything up.
+pub(crate) async fn wrapping_up(state: &AppState, conversation_id: i64) -> bool {
+    match standing_under(state, conversation_id).await {
+        Some((word, process)) => runs(state, &process, &word, WRAP_UP),
         None => false,
     }
 }
@@ -520,17 +654,14 @@ async fn standing_under(
     }
 }
 
-/// The word of the state a Conversation stands in, as its Process's manifest
-/// names it.
+/// The id of the state a Conversation stands in, as its Process.s manifest
+/// names it — which is the word its `state` column holds.
 ///
-/// A declared state carries its id; one of Verkstead's own carries the word the
-/// `conversations.state` column holds, which is the id the five built-in
-/// plugins give their states — see [`crate::plugins::built_in`].
+/// The five Verkstead ships name their states with the words that column has
+/// always held, so a Grilling answers `grilling` here and is read against
+/// Develop.s manifest — see [`crate::plugins::built_in`].
 pub(crate) fn standing_in(conversation: &store::Conversation) -> &str {
-    conversation
-        .declared_state
-        .as_deref()
-        .unwrap_or_else(|| conversation.state.stored())
+    conversation.state.stored()
 }
 
 /// The roles `process` declares, in the order its manifest writes them: what
@@ -700,7 +831,7 @@ async fn step(state: &AppState, conversation_id: i64, driving: &Driving) -> anyh
 
     // Closed or steered off it since, or Done: nothing of the Process's left
     // to run.
-    let Some(standing) = conversation.declared_state.clone() else {
+    let Some(standing) = conversation.state.declared().map(str::to_owned) else {
         return Ok(false);
     };
 
@@ -851,18 +982,12 @@ async fn step(state: &AppState, conversation_id: i64, driving: &Driving) -> anyh
                 state,
                 conversation_id,
                 &standing,
-                store::Destination::Declared(next),
+                &store::State::named(next),
             )
             .await
         }
         To::Done => {
-            moved(
-                state,
-                conversation_id,
-                &standing,
-                store::Destination::Built(store::Lifecycle::Done),
-            )
-            .await?;
+            moved(state, conversation_id, &standing, &store::State::done()).await?;
             state.sessions.end(conversation_id).await;
             Ok(false)
         }
@@ -898,7 +1023,7 @@ async fn still_in(
     steered: Option<i64>,
 ) -> bool {
     let here = match store::load_conversation(&state.pool, conversation_id).await {
-        Ok(Some(conversation)) => conversation.declared_state.as_deref() == Some(standing),
+        Ok(Some(conversation)) => conversation.state.declared() == Some(standing),
         Ok(None) => false,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading where a Conversation stands failed");
@@ -926,9 +1051,10 @@ async fn moved(
     state: &AppState,
     conversation_id: i64,
     from: &str,
-    to: store::Destination<'_>,
+    to: &store::State,
 ) -> anyhow::Result<bool> {
-    let moved = store::transition(&state.pool, conversation_id, from, to).await?;
+    let moved =
+        store::transition(&state.pool, conversation_id, &store::State::named(from), to).await?;
 
     if moved == store::Transitioned::Moved {
         state
@@ -1101,14 +1227,10 @@ pub(crate) async fn taken_back(state: &AppState) {
     };
 
     for row in conversations {
-        let Some(declared) = row.declared else {
-            continue;
-        };
-
-        if declared.process.built_in() {
+        if row.state.declared().is_none() || row.process.built_in() {
             continue;
         }
-        let store::Process { plugin, id } = &declared.process;
+        let store::Process { plugin, id } = &row.process;
 
         if state.plugins.process(plugin, id).is_none() {
             continue;
@@ -1207,7 +1329,7 @@ mod tests {
             let loaded = built_in(id);
             assert_eq!(loaded.process.states[0].id, first, "{id}");
             assert!(
-                store::Lifecycle::named(first).is_some(),
+                !store::State::named(first).verksteads(),
                 "{first} is one of the words the record holds"
             );
             for state in &loaded.process.states {

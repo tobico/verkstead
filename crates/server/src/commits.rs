@@ -1010,9 +1010,16 @@ mod tests {
             "HEAD"
         ));
 
-        store::start_grilling(&pool, conversation, &base, &worktree, &[])
-            .await
-            .unwrap();
+        store::start_in(
+            &pool,
+            conversation,
+            &store::State::named("grilling"),
+            &base,
+            &worktree,
+            &[],
+        )
+        .await
+        .unwrap();
 
         // What the session did: a commit, and then the rename the naming
         // instruction asked it for.

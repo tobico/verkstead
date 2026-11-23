@@ -28,7 +28,7 @@ use anyhow::{Context, Result};
 use sqlx::SqlitePool;
 
 use super::Picked;
-use super::conversations::{Event, Lifecycle, Pairings, Role};
+use super::conversations::{MOVED, Pairings, Role, State};
 
 /// What a Repo was last grilled with, as far as the store can still stand
 /// behind it.
@@ -296,8 +296,8 @@ pub async fn last_started_pairings(pool: &SqlitePool) -> Result<RepoPairings> {
          ORDER BY e.id DESC
          LIMIT 1",
     )
-    .bind(Event::Moved(Lifecycle::Closed).kind())
-    .bind(Lifecycle::Closed.stored())
+    .bind(MOVED)
+    .bind(State::CLOSED)
     .fetch_optional(pool)
     .await
     .context("finding the Conversation whose work most recently started")?;

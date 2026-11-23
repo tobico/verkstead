@@ -42,18 +42,18 @@ use verkstead_render::{
     CompanionView, CompileCaching, ComponentsView, Confirming, ConflictResolution,
     ConversationArchived, ConversationClosed, ConversationEntry, ConversationMove,
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Creation,
-    Cursor, DeclaredState, DevicesView, DiskUse, DroppedRow, Eviction, FileDeleted, FileDeleting,
-    FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView,
-    FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted, HeaderEdit, IgnoreRule,
-    IgnoredCommentsEdit, InstallPress, InstructionsEdit, LanguageCleared, LanguageView, Lifecycle,
-    Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption,
-    NewAnnex, NewCompanion, NewConversation, NewJoin, NewRank, OfferedPack, OpenTerminal,
-    PackAttached, PackRemoved, PairingView, Parked, PendingSteerView, Permitting, Picking,
-    ProcessChoice, ProcessEntry, ProcessPicked, ProfileEdit, ProfileEntry, ProvidedProcess,
-    PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved,
-    Resumed, RoleChoice, RuleField, RuleRefused, Running, ServeEdit, ServePress, ServerAttached,
-    ServerField, ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved,
-    SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    Cursor, DevicesView, DiskUse, DroppedRow, Eviction, FileDeleted, FileDeleting, FileListsView,
+    FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView,
+    FileWrite, FileWritten, FolderListing, GrillingStarted, HeaderEdit, IgnoreRule,
+    IgnoredCommentsEdit, InstallPress, InstructionsEdit, LanguageCleared, LanguageView, Locked,
+    McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption, NewAnnex,
+    NewCompanion, NewConversation, NewJoin, NewRank, OfferedPack, OpenTerminal, PackAttached,
+    PackRemoved, PairingView, Parked, PendingSteerView, Permitting, Picking, ProcessChoice,
+    ProcessEntry, ProcessPicked, ProfileEdit, ProfileEntry, ProvidedProcess, PushKey, Registration,
+    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
+    RuleField, RuleRefused, Running, ServeEdit, ServePress, ServerAttached, ServerField,
+    ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
     ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
     SteerSaved, SteerSubmission, StoreView, Submitted, Subscribed, Subscription, TakenUp,
     TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
@@ -997,7 +997,7 @@ pub(crate) async fn set_reading(
     // addition nothing is ever going to apply — a word of Verkstead's own
     // whatever the Process, so it is read as one.
     let closed = match store::state(&state.pool, conversation).await {
-        Ok(state) => state == Some(store::Lifecycle::Closed),
+        Ok(state) => state.is_some_and(|state| state == store::State::CLOSED),
         Err(error) => {
             tracing::error!(
                 error = ?error,
@@ -1826,14 +1826,13 @@ async fn conversations(
                 branch_named: conversation.branch_named,
                 naming: conversation.naming,
                 repo: conversation.repo,
-                state: row_state(conversation.id, conversation.state),
-                // Which Process declares the state, as the plugin providing
-                // it: a plugin's names itself, and one of Verkstead's own is
-                // the built-in plugin that holds it. The row's word is read
-                // off that Process's manifest either way (Set 1765, Q29).
-                declared: conversation
-                    .declared
-                    .map(|declared| declaring(&declared.process, declared.state)),
+                state: conversation.state.stored().to_owned(),
+                // And which Process to read that word against, as the plugin
+                // providing it: a plugin's names itself, and one of
+                // Verkstead's own is the built-in plugin that holds it. The
+                // row's word is read off that Process's manifest either way
+                // (Set 1765, Q29).
+                process: provided(&conversation.process),
                 working,
                 // Idle is a thing a running session is, and the two sets are
                 // read a moment apart — so the pair is made consistent here
@@ -2386,7 +2385,7 @@ pub(crate) async fn conversation_view(
         .unwrap_or_default();
 
     let ready_to_grill = crate::conversations::ready_to_grill(
-        conversation.state,
+        &conversation.state,
         &pairings,
         brief,
         conversation.target.as_deref(),
@@ -2430,7 +2429,7 @@ pub(crate) async fn conversation_view(
         })
         .collect();
 
-    let open_brief = (conversation.state == store::Lifecycle::Draft)
+    let open_brief = (conversation.state == store::State::DRAFT)
         .then(|| briefs.last().copied())
         .flatten()
         .filter(|open| !(conversation.adopting.is_some() && briefs.first() == Some(open)));
@@ -2478,14 +2477,20 @@ pub(crate) async fn conversation_view(
     // fact about the other end of the ladder: the Conversation says it is being
     // worked on and nothing is working on it. Asked of the running server as
     // much as of the record — see [`crate::resume::ready`].
-    let ready_to_resume = crate::resume::ready(state, id, conversation.state, stopped.is_some());
+    let ready_to_resume = crate::resume::ready(
+        state,
+        id,
+        &conversation.process,
+        &conversation.state,
+        stopped.is_some(),
+    );
 
     // And whether there is driving to stop, which is the same fact read the
     // other way: a Conversation that says it is being worked on and has not
     // stopped is one the human may pull the brake on. Nothing about the register
     // here — a run between two steps is as much a run to stop as a busy one. See
     // [`crate::stops::ready`].
-    let ready_to_stop = crate::stops::ready(conversation.state, stopped.is_some());
+    let ready_to_stop = crate::stops::ready(&conversation.state, stopped.is_some());
 
     // And whether the press has already been made and is waiting for the step
     // the run is on to finish, which is what takes Stop off the menu: the
@@ -2530,7 +2535,7 @@ pub(crate) async fn conversation_view(
     // is history, and the Notice it points at is still on the Timeline.
     let marked = stopped
         .as_ref()
-        .filter(|_| conversation.state != store::Lifecycle::Closed);
+        .filter(|_| conversation.state != store::State::CLOSED);
 
     // And the mark points at the stop's own Notice, whatever wrote it: a run
     // that has stopped is stopped, and a mark with nowhere to go would be one
@@ -2540,8 +2545,8 @@ pub(crate) async fn conversation_view(
     // not a stop, but the one thing on the record the human is waiting on the
     // session over. A read that fails reads as none, which leaves the page
     // quiet. See [`crate::rescues`].
-    let escalated = match (&marked, conversation.state) {
-        (None, lifecycle) if lifecycle != store::Lifecycle::Closed => {
+    let escalated = match (&marked, &conversation.state) {
+        (None, standing) if *standing != store::State::CLOSED => {
             store::escalated(&state.pool, id).await.unwrap_or_else(|error| {
                 tracing::error!(error = ?error, conversation_id = id, "reading whether a Conversation was escalated over failed");
                 None
@@ -2838,8 +2843,7 @@ pub(crate) async fn conversation_view(
         naming: conversation.naming,
         base_commit: conversation.base_commit,
         companions,
-        state: lifecycle(conversation.state),
-        declared_state: conversation.declared_state,
+        state: conversation.state.stored().to_owned(),
         ready_to_grill,
         compiles_uncached,
         ready_to_resume,
@@ -2923,14 +2927,8 @@ pub(crate) async fn conversation_view(
                         markdown,
                         Some(event.id) != open_brief,
                     ),
-                    store::Event::Moved(state) => verkstead_render::moved_event(
-                        event.id,
-                        event.at,
-                        lifecycle(state),
-                        state.stored().to_owned(),
-                    ),
-                    store::Event::Entered(state) => {
-                        verkstead_render::entered_event(event.id, event.at, state)
+                    store::Event::Moved(state) => {
+                        verkstead_render::moved_event(event.id, event.at, state.stored().to_owned())
                     }
                     // The summary and not the Capture: a Timeline is read every
                     // time an open page hears the world moved, and a session's
@@ -3077,14 +3075,11 @@ pub(crate) async fn conversation_view(
                         verkstead_render::steer_event(
                             event.id,
                             event.at,
-                            lifecycle(target.target()),
-                            // And the state's id beside it, which is what the
+                            // The word the record holds, which is what the
                             // card's word is read off: a plugin's Process
                             // names its own states, and Verkstead's five name
-                            // theirs with the words the record holds, so the
-                            // target's own word is the id either way.
-                            (target.target() != store::Lifecycle::Done)
-                                .then(|| target.stored().to_owned()),
+                            // theirs with the words the record holds.
+                            target.stored().to_owned(),
                             instruction.as_deref(),
                             // And the rest of the form that press filled, where
                             // the record has it: the pane this Event opens
@@ -5922,6 +5917,9 @@ async fn preflight(
         &state.settings.config(),
         &conversation,
         &crate::processes::labels(&state, &conversation.process),
+        crate::processes::of(&state, &conversation.process)
+            .map(|loaded| loaded.process.name)
+            .as_deref(),
         &device,
     )
     .await
@@ -6680,33 +6678,6 @@ fn session(
     }
 }
 
-/// A sidebar row's state as the viewer receives it, including the row whose
-/// stored word this Verkstead has never heard of.
-///
-/// Such a row is drawn as a **Draft**, and the word it really held goes in the
-/// log. Draft rather than anything else because of what the row is *for* here:
-/// it is the way to the Conversation's own page, and the page's own read still
-/// refuses a word it cannot parse — so what the human lands on is the pane's
-/// error state and the escape hatch in it. That hatch offers Archive on a state
-/// of Closed and Close-and-archive on anything else, and Archive on a row like
-/// this would answer `NotClosed` and go nowhere. So the fallback has to read as
-/// *not closed*, and Draft is the one that does while drawing harmlessly.
-fn row_state(id: i64, state: store::RowState) -> Lifecycle {
-    match state {
-        store::RowState::Known(state) => lifecycle(state),
-        store::RowState::Unknown(word) => {
-            tracing::warn!(
-                conversation_id = id,
-                state = word,
-                "a Conversation's stored state is a word this Verkstead does not know, so its \
-                 row is drawn as a draft"
-            );
-
-            Lifecycle::Draft
-        }
-    }
-}
-
 /// The register's reading of a session sitting there without asking, as the
 /// viewer receives it — see [`crate::sessions::Parked`].
 ///
@@ -6721,42 +6692,13 @@ fn parked(sitting: &crate::sessions::Parked) -> Parked {
     }
 }
 
-/// The state `state` of `process`, named by the plugin that declares it and
-/// its id there — which is what a sidebar row's word is read off (Set 1765,
-/// Q29).
-///
-/// Every Process names itself, the five Verkstead ships included, all of them
-/// being plugins of their own: the row draws its word off the manifest that
-/// plugin holds, and the state's own id where this build holds no such plugin.
-fn declaring(process: &store::Process, state: String) -> DeclaredState {
-    DeclaredState {
-        process: provided(process),
-        state,
-    }
-}
-
-/// The store's lifecycle state as the viewer receives it. One word either side,
-/// and this is where the two vocabularies are held to each other.
-pub(crate) fn lifecycle(state: store::Lifecycle) -> Lifecycle {
-    match state {
-        store::Lifecycle::Draft => Lifecycle::Draft,
-        store::Lifecycle::Grilling => Lifecycle::Grilling,
-        store::Lifecycle::Implementing => Lifecycle::Implementing,
-        store::Lifecycle::Wrapping => Lifecycle::Wrapping,
-        store::Lifecycle::FollowUp => Lifecycle::FollowUp,
-        store::Lifecycle::Investigating => Lifecycle::Investigating,
-        store::Lifecycle::Declared => Lifecycle::Declared,
-        store::Lifecycle::Done => Lifecycle::Done,
-        store::Lifecycle::Closed => Lifecycle::Closed,
-    }
-}
-
-/// And which Process the record holds, as the viewer receives it: the plugin
+/// Which Process the record holds, as the viewer receives it: the plugin
 /// providing it and its id there, whichever Process it is.
 ///
-/// No table of words beside it, unlike [`lifecycle`] above: a Process is a
-/// reference to a manifest on both sides of the wire, and what it is called is
-/// read off the Process list — see [`processes`].
+/// No table of words beside it, and none for the state either: a Process is a
+/// reference to a manifest on both sides of the wire, a state is the word the
+/// column holds, and what either of them is called is read off the Process
+/// list — see [`processes`] (Set 1765, Q29).
 pub(crate) fn provided(process: &store::Process) -> ProvidedProcess {
     ProvidedProcess {
         plugin: process.plugin.clone(),
@@ -6769,27 +6711,6 @@ pub(crate) fn picked_process(choice: ProcessChoice) -> store::Process {
     store::Process {
         plugin: choice.process.plugin,
         id: choice.process.id,
-    }
-}
-
-/// And the same word read the other way, which is what a Conversation arriving
-/// from another device is written down as.
-///
-/// Beside its opposite number rather than where it is used, because the two
-/// vocabularies are held to each other in one place or in none: a state added to
-/// the ladder is two arms here, and a build that added one to only this one
-/// would land somebody's work in the wrong state.
-pub(crate) fn state_of(lifecycle: Lifecycle) -> store::Lifecycle {
-    match lifecycle {
-        Lifecycle::Draft => store::Lifecycle::Draft,
-        Lifecycle::Grilling => store::Lifecycle::Grilling,
-        Lifecycle::Implementing => store::Lifecycle::Implementing,
-        Lifecycle::Wrapping => store::Lifecycle::Wrapping,
-        Lifecycle::FollowUp => store::Lifecycle::FollowUp,
-        Lifecycle::Investigating => store::Lifecycle::Investigating,
-        Lifecycle::Declared => store::Lifecycle::Declared,
-        Lifecycle::Done => store::Lifecycle::Done,
-        Lifecycle::Closed => store::Lifecycle::Closed,
     }
 }
 
@@ -8980,9 +8901,11 @@ async fn running_here(state: &AppState) -> (Vec<String>, u32) {
         .into_iter()
         .filter(|conversation| working.contains(&conversation.id))
     {
-        let state = row_state(conversation.id, conversation.state);
-
-        match crate::merging::settled(conversation.branch_named, state, conversation.naming) {
+        match crate::merging::settled(
+            conversation.branch_named,
+            conversation.state.stored(),
+            conversation.naming,
+        ) {
             true => named.push(conversation.branch),
             false => drafts += 1,
         }

@@ -37,8 +37,8 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, AgentType, Arrival, ArrivingPicked, Birth, CompanionWorktree, Deletion, Lifecycle,
-    Picked, ProfileFacts, Replacing, Role, Transferred, arrive, birth, born_as, conversation_rank,
+    Account, AgentType, Arrival, ArrivingPicked, Birth, CompanionWorktree, Deletion, Picked,
+    ProfileFacts, Replacing, Role, State, Transferred, arrive, birth, born_as, conversation_rank,
     conversations, create_profile, delete_conversation, load_conversation, open_database,
     register_repo, replace, start_conversation, sweep_arrival, transfer_away, transferred,
 };
@@ -98,11 +98,14 @@ fn arriving(repo_id: i64, profile_id: &str) -> Arrival {
             device: THE_OTHER_DEVICE.to_owned(),
             id: 7,
         },
+        // The Process it arrives on, which is what its state word is read
+        // against over here.
+        process: Some(verkstead_store::Process::develop()),
         repo_id,
         branch: "rate-limiting".to_owned(),
         branch_named: true,
         naming: false,
-        state: Lifecycle::Grilling,
+        state: State::named("grilling"),
         rank: RANK.to_owned(),
         pairings: vec![
             (
@@ -140,7 +143,7 @@ async fn a_conversation_arrives_under_this_devices_own_id_with_everything_else_a
         .unwrap()
         .expect("the Conversation that just landed");
 
-    assert_eq!(held.state, Lifecycle::Grilling, "the state it was in");
+    assert_eq!(held.state, State::named("grilling"), "the state it was in");
     assert_eq!(held.branch, "rate-limiting", "the branch the work is on");
     assert!(held.branch_named, "which is a name somebody settled on");
     assert_eq!(held.repo.id, repo, "in the Repo the matching settled");
@@ -459,7 +462,7 @@ async fn a_conversation_coming_home_lands_on_the_row_it_left() {
 
     let coming_home = Arrival {
         born: born.clone(),
-        state: Lifecycle::Implementing,
+        state: State::named("implementing"),
         branch: "rate-limiting-again".to_owned(),
         ..arriving(repo, &profile)
     };
@@ -488,7 +491,7 @@ async fn a_conversation_coming_home_lands_on_the_row_it_left() {
 
     assert_eq!(
         held.state,
-        Lifecycle::Implementing,
+        State::named("implementing"),
         "in the state the work is in now rather than the one it left in",
     );
     assert_eq!(

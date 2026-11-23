@@ -44,7 +44,6 @@
     }
   ],
   "compiles_uncached": false,
-  "declared_state": "implementing",
   "direction": "inline",
   "drafted_on": "aa00bb11cc22dd33ee44ff5566778899",
   "driven": false,
@@ -170,7 +169,7 @@
   "resets": null,
   "shared": null,
   "skill_packs": [],
-  "state": "Implementing",
+  "state": "implementing",
   "steer_rows": [
     {
       "brief": "Round",
@@ -245,9 +244,8 @@
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "declared": "grilling",
         "id": 11,
-        "state": "Grilling"
+        "state": "grilling"
       }
     },
     {
@@ -294,9 +292,8 @@
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "declared": "implementing",
         "id": 14,
-        "state": "Implementing"
+        "state": "implementing"
       }
     },
     {

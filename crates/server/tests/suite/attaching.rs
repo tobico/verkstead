@@ -24,7 +24,7 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
     AnswerAttached, AnswerAttachmentRemoved, Attached, AttachmentOrigin, AttachmentRemoved,
-    AttachmentView, ConversationClosed, ConversationView, Lifecycle, Registered, ServerAttached,
+    AttachmentView, ConversationClosed, ConversationView, Registered, ServerAttached,
     ServerRemoved, SetReading, Started, TimelineEvent,
 };
 use verkstead_server::{attachments::MAX_BYTES, open_database, router_keeping, store};
@@ -388,7 +388,7 @@ async fn a_file_over_the_cap_is_refused() {
 async fn an_upload_to_a_frozen_brief_is_refused() {
     let (_elsewhere, dir, app, pool, id) = drafting().await;
 
-    store::set_state(&pool, id, store::Lifecycle::Implementing)
+    store::set_state(&pool, id, store::State::named("implementing"))
         .await
         .unwrap();
 
@@ -407,7 +407,7 @@ async fn a_removal_on_a_frozen_brief_is_refused() {
 
     let attachment = kept(attach(&app, id, "notes.md", b"first").await);
 
-    store::set_state(&pool, id, store::Lifecycle::Implementing)
+    store::set_state(&pool, id, store::State::named("implementing"))
         .await
         .unwrap();
 
@@ -587,7 +587,7 @@ async fn a_draft_that_moved_is_closed_and_says_where_it_went() {
 
     let view: ConversationView = get(&app, &format!("/api/ui/conversations/{id}")).await;
 
-    assert_eq!(view.state, Lifecycle::Closed);
+    assert_eq!(view.state, "closed");
 
     let said = view
         .timeline
@@ -995,7 +995,7 @@ async fn a_set_of_a_closed_conversation_takes_no_files() {
 
     let put = on_the_answer(put_on(&app, set, "Q1", "counter.png", b"before").await);
 
-    store::set_state(&pool, id, store::Lifecycle::Closed)
+    store::set_state(&pool, id, store::State::closed())
         .await
         .unwrap();
 
@@ -1438,7 +1438,7 @@ mod servers {
         let (_elsewhere, dir, app, pool, id) = drafting().await;
         declaring(&dir, &["docs"]);
 
-        store::set_state(&pool, id, store::Lifecycle::Implementing)
+        store::set_state(&pool, id, store::State::named("implementing"))
             .await
             .unwrap();
 
@@ -1457,7 +1457,7 @@ mod servers {
 
         attach_server(&app, id, "docs").await;
 
-        store::set_state(&pool, id, store::Lifecycle::Implementing)
+        store::set_state(&pool, id, store::State::named("implementing"))
             .await
             .unwrap();
 
@@ -1738,7 +1738,7 @@ mod additions {
 
         let put = picked(pick(&app, set, Some("Q1"), "docs").await);
 
-        store::set_state(&pool, id, store::Lifecycle::Closed)
+        store::set_state(&pool, id, store::State::closed())
             .await
             .unwrap();
 
@@ -1817,7 +1817,7 @@ mod additions {
     async fn submitting_attaches_a_picked_server() {
         let (_elsewhere, dir, app, pool, id) = drafting().await;
         declaring(&dir, &["docs", "tickets"]);
-        store::set_state(&pool, id, store::Lifecycle::Implementing)
+        store::set_state(&pool, id, store::State::named("implementing"))
             .await
             .unwrap();
         let set = asked(&pool, id).await;
@@ -1930,7 +1930,7 @@ mod additions {
         let set = asked(&pool, id).await;
 
         picked(pick(&app, set, Some("Q1"), "docs").await);
-        store::set_state(&pool, id, store::Lifecycle::Closed)
+        store::set_state(&pool, id, store::State::closed())
             .await
             .unwrap();
 
@@ -2396,7 +2396,7 @@ proposal:
         )
         .await
         .unwrap();
-        store::set_state(&pool, id, store::Lifecycle::Grilling)
+        store::set_state(&pool, id, store::State::named("grilling"))
             .await
             .unwrap();
         let set = verkstead_schema::QuestionSet::from_yaml(WANTING_WINDOWS).unwrap();

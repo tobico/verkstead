@@ -74,7 +74,7 @@ use verkstead_schema::{Direction, Nudge};
 use crate::AppState;
 use crate::drivers::Driving;
 use crate::github;
-use crate::store::{self, Lifecycle};
+use crate::store::{self, State};
 
 /// Who asked for the run to start again.
 ///
@@ -176,7 +176,7 @@ pub(crate) async fn resume(
     // is nothing to start driving again. The button is not drawn on one — this
     // is the same rule asked again on arrival, the way every named refusal here
     // is.
-    if !driven(conversation.state) {
+    if !driven(&conversation.state) {
         return Ok(Resumed::NotDriven);
     }
 
@@ -219,7 +219,13 @@ pub(crate) async fn resume(
         && state.drivers.driven(
             &state.sessions.working(),
             conversation_id,
-            conversation.state,
+            &conversation.state,
+            crate::processes::runs(
+                state,
+                &conversation.process,
+                conversation.state.stored(),
+                crate::processes::INTERVIEW,
+            ),
         )
     {
         return Ok(Resumed::AlreadyDriven);
@@ -294,12 +300,45 @@ pub(crate) fn landed(
         // as by the caller, which does not dispatch for a landing in Done at all:
         // this is the rule said where it is asked, exactly as the press says it
         // twice.
-        if !driven(conversation.state) {
+        if !driven(&conversation.state) {
             return Ok(Resumed::NotDriven);
         }
 
         recompute(state, &conversation, driving, Resuming::Landed).await
     })
+}
+
+/// Which of Verkstead's own drivers a Conversation's standing state wants,
+/// read off the Activity its Process's manifest says that state runs.
+///
+/// **The Activity rather than the state** (ADR-0030, *Process*): what a press
+/// starts again is whatever the state declares, so a Process that calls its
+/// wrap-up something else is driven by the same watchers all the same. And a
+/// Conversation on a plugin's Process goes to the engine, which runs any
+/// Activity there is — see [`crate::processes::run`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Dispatch {
+    /// The Interview: a fresh grilling on the Brief and the digest.
+    Interview,
+
+    /// One of the three that build, each reading the branch for itself.
+    Building,
+
+    /// The Wrap-up's watchers.
+    WrapUp,
+
+    /// Follow-up rounds, over work that is already on a pull request.
+    FollowingUp,
+
+    /// The same Activity told to keep nothing, which is an investigation.
+    Investigating,
+
+    /// The Process engine.
+    Engine,
+
+    /// None of them: one of the three states Verkstead words itself, which
+    /// nothing was ever driving.
+    Nothing,
 }
 
 /// What the two of them do, which is the same recompute from the same reading.
@@ -348,11 +387,39 @@ async fn recompute(
         return Ok(Resumed::WorktreeRefused);
     }
 
-    match conversation.state {
+    // **What runs is the standing state's Activity, off the manifest**
+    // (ADR-0030, *Process*): the restart rule is the Activity's, so what a press
+    // starts again is whatever the state it stands in declares — and a
+    // Conversation on a plugin's own Process goes to the engine, which runs any
+    // Activity there is. The five Verkstead ships are driven by the host's own
+    // tasks, which is what the branches below are.
+    let standing = crate::processes::standing_in(conversation).to_owned();
+    let activities = crate::processes::activities(state, &conversation.process, &standing);
+    let runs = |activity: &str| activities.iter().any(|id| id == activity);
+
+    let dispatch = match conversation.state.declared().is_some() {
+        false => Dispatch::Nothing,
+        true if !conversation.process.built_in() => Dispatch::Engine,
+        true if runs(crate::processes::INTERVIEW) => Dispatch::Interview,
+        true if crate::processes::BUILDERS.iter().any(|id| runs(id)) => Dispatch::Building,
+        true if runs(crate::processes::WRAP_UP) => Dispatch::WrapUp,
+        true if runs(crate::processes::FOLLOW_UP_ROUNDS) => {
+            match crate::processes::ending(state, conversation_id).await {
+                Some(verkstead_render::Ending::Investigation) => Dispatch::Investigating,
+                _ => Dispatch::FollowingUp,
+            }
+        }
+        // A state the manifest says nothing of, or one running an Activity no
+        // host driver here knows: the engine takes it, which stops it with the
+        // Process's own trouble where that is what is wrong.
+        true => Dispatch::Engine,
+    };
+
+    match dispatch {
         // A fresh grilling on the Brief and the digest of what has already been
         // asked and answered — the interview itself went with the process it ran
         // in. See [`crate::grillings::again`].
-        Lifecycle::Grilling => {
+        Dispatch::Interview => {
             if conversation
                 .pairings
                 .under(&store::Role::grilling())
@@ -377,7 +444,7 @@ async fn recompute(
         }
 
         // The next step read off the branch, which is the direction's to say.
-        Lifecycle::Implementing => {
+        Dispatch::Building => {
             // A Conversation implements because a direction was picked, so a
             // missing one is another record that cannot be true — and the one
             // thing that says which run it is that stopped.
@@ -489,7 +556,7 @@ async fn recompute(
         // Asked of the record and nothing else: every other way into Wrapping
         // comes through the pull request being recorded, so a Conversation's own
         // Repo having no row is the whole of the reading.
-        Lifecycle::Wrapping
+        Dispatch::WrapUp
             if store::pull_request(&state.pool, conversation_id, conversation.repo.id)
                 .await?
                 .is_none() =>
@@ -522,7 +589,7 @@ async fn recompute(
         // and asked for another go, and a count left standing would be a watcher
         // that stopped again on its next poll without dispatching anything. See
         // [`crate::wrapping::afresh`].
-        Lifecycle::Wrapping => {
+        Dispatch::WrapUp => {
             starting(state, conversation_id, resuming).await?;
 
             match resuming {
@@ -583,7 +650,7 @@ async fn recompute(
         // It costs one read of the Timeline, and a Conversation in this state
         // with nothing to pick up is one the press should say so about by name
         // rather than one it acts on halfway.
-        Lifecycle::FollowUp => {
+        Dispatch::FollowingUp => {
             if conversation
                 .pairings
                 .under(&store::Role::implementation())
@@ -592,7 +659,7 @@ async fn recompute(
                 return Ok(Resumed::NoImplementationPairing);
             }
 
-            if crate::follow_ups::settled(state, conversation_id)
+            if crate::follow_ups::settled(state, conversation_id, &conversation.state)
                 .await?
                 .is_none()
             {
@@ -617,7 +684,7 @@ async fn recompute(
         //
         // There is no ending left half-made to look for here, the way a
         // follow-up's owed pull request is: an investigation never ends on one.
-        Lifecycle::Investigating => {
+        Dispatch::Investigating => {
             if conversation
                 .pairings
                 .under(&store::Role::implementation())
@@ -626,7 +693,8 @@ async fn recompute(
                 return Ok(Resumed::NoImplementationPairing);
             }
 
-            let Some(investigation) = crate::investigations::opened(state, conversation_id).await?
+            let Some(investigation) =
+                crate::investigations::opened(state, conversation_id, &conversation.state).await?
             else {
                 return Ok(Resumed::NoInvestigation);
             };
@@ -648,7 +716,7 @@ async fn recompute(
         // which works out where it was from its facts — the restart rule
         // (ADR-0030, *Activity*). A Process in trouble stops it where it
         // stands, saying which dependency is wanted. See [`crate::processes`].
-        Lifecycle::Declared => {
+        Dispatch::Engine => {
             starting(state, conversation_id, resuming).await?;
 
             tokio::spawn(crate::processes::run(
@@ -658,14 +726,14 @@ async fn recompute(
             ));
         }
 
-        Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => {
+        Dispatch::Nothing => {
             return Ok(Resumed::NotDriven);
         }
     }
 
     tracing::info!(
         conversation_id,
-        state = ?conversation.state,
+        state = standing,
         ?resuming,
         "the Conversation is being driven again"
     );
@@ -744,15 +812,7 @@ pub(crate) fn at_startup(state: &AppState) -> tokio::task::JoinHandle<()> {
         };
 
         for conversation in conversations {
-            // A row whose state word this Verkstead cannot read is not one to
-            // start a session on: what would be resumed is a guess. The sidebar
-            // draws it so the human can reach it and end it; nothing here acts
-            // on it.
-            let Some(lifecycle) = conversation.state.known() else {
-                continue;
-            };
-
-            if !driven(lifecycle) {
+            if !driven(&conversation.state) {
                 continue;
             }
 
@@ -767,7 +827,7 @@ pub(crate) fn at_startup(state: &AppState) -> tokio::task::JoinHandle<()> {
 
             tracing::info!(
                 conversation_id = conversation.id,
-                state = ?conversation.state,
+                state = conversation.state.stored(),
                 "a restart left a Conversation with nothing driving it, so it is being driven again",
             );
 
@@ -777,7 +837,7 @@ pub(crate) fn at_startup(state: &AppState) -> tokio::task::JoinHandle<()> {
                     refused(
                         &state,
                         conversation.id,
-                        lifecycle,
+                        &conversation.state,
                         refusal,
                         "as the server came back up",
                     )
@@ -883,10 +943,10 @@ pub(crate) async fn on_arrival(state: &AppState, conversation_id: i64, from: &st
     // nothing for an arrival to take up: a Draft does not move at all, and a Done
     // or Closed Conversation arrives as the record of work that has finished. The
     // same rule the button is drawn by — see [`driven`].
-    if !driven(conversation.state) {
+    if !driven(&conversation.state) {
         tracing::info!(
             conversation_id,
-            state = ?conversation.state,
+            state = conversation.state.stored(),
             "a Conversation arrived here in a state nothing drives, so nothing was started for it",
         );
         return;
@@ -912,7 +972,7 @@ pub(crate) async fn on_arrival(state: &AppState, conversation_id: i64, from: &st
     tracing::info!(
         conversation_id,
         from,
-        state = ?conversation.state,
+        state = conversation.state.stored(),
         "a Conversation was moved onto this device, so what ought to be running is being started",
     );
 
@@ -922,7 +982,7 @@ pub(crate) async fn on_arrival(state: &AppState, conversation_id: i64, from: &st
             refused(
                 state,
                 conversation_id,
-                conversation.state,
+                &conversation.state,
                 refusal,
                 &format!("when the work arrived from {from}"),
             )
@@ -963,7 +1023,7 @@ pub(crate) async fn widened(state: AppState, conversation_id: i64, set_id: i64, 
         return;
     };
 
-    let resumed = match driven(conversation.state) {
+    let resumed = match driven(&conversation.state) {
         true => recompute(&state, &conversation, driving, Resuming::Widened).await,
         false => Ok(Resumed::NotDriven),
     };
@@ -974,7 +1034,7 @@ pub(crate) async fn widened(state: AppState, conversation_id: i64, set_id: i64, 
             refused(
                 &state,
                 conversation_id,
-                conversation.state,
+                &conversation.state,
                 refusal,
                 &format!("when the session was carried on for question set {set_id}"),
             )
@@ -1012,7 +1072,7 @@ pub(crate) async fn widened(state: AppState, conversation_id: i64, set_id: i64, 
 async fn refused(
     state: &AppState,
     conversation_id: i64,
-    lifecycle: Lifecycle,
+    standing: &State,
     refusal: Resumed,
     occasion: &str,
 ) {
@@ -1031,7 +1091,7 @@ async fn refused(
         &state.nudges,
         conversation_id,
         crate::stopping::Decided::Verkstead,
-        crate::stalls::driving(lifecycle),
+        crate::stalls::driving(standing),
         &format!("Nothing could be started for it {occasion}. {why}"),
         crate::stalls::said_last(state, conversation_id).await,
     )
@@ -1175,38 +1235,40 @@ async fn starting(
 pub(crate) fn ready(
     state: &AppState,
     conversation_id: i64,
-    lifecycle: Lifecycle,
+    process: &store::Process,
+    standing: &State,
     stopped: bool,
 ) -> bool {
-    driven(lifecycle)
+    let by_its_session = crate::processes::runs(
+        state,
+        process,
+        standing.stored(),
+        crate::processes::INTERVIEW,
+    );
+
+    driven(standing)
         && (stopped
-            || !state
-                .drivers
-                .driven(&state.sessions.working(), conversation_id, lifecycle))
+            || !state.drivers.driven(
+                &state.sessions.working(),
+                conversation_id,
+                standing,
+                by_its_session,
+            ))
 }
 
 /// Whether this is a state something ought to be driving, which is the whole of
 /// what Resume is offered on.
 ///
-/// The five: a grilling has its session, an implementation its run, a wrap-up
-/// its watchers, and a follow-up and an investigation the session the human is
-/// talking to. The three that are left — drafting, done and closed — were never
-/// being driven by anything, so a press on one is not a Conversation that stood
-/// still.
+/// **Every state a Process declares**: each of them runs an Activity, and an
+/// Activity running is something driving. The three that are left — drafting,
+/// done and closed — are Verkstead's own and were never being driven by
+/// anything, so a press on one is not a Conversation that stood still.
 ///
 /// Said once here because three places ask it and none of them may answer it
 /// differently: the button the page draws, the press that arrives, and the
 /// restart that presses it for every Conversation the last server was driving.
-fn driven(lifecycle: Lifecycle) -> bool {
-    matches!(
-        lifecycle,
-        Lifecycle::Grilling
-            | Lifecycle::Implementing
-            | Lifecycle::Wrapping
-            | Lifecycle::FollowUp
-            | Lifecycle::Investigating
-            | Lifecycle::Declared
-    )
+fn driven(standing: &State) -> bool {
+    standing.declared().is_some()
 }
 
 #[cfg(test)]
@@ -1248,9 +1310,10 @@ mod tests {
         // Grilling before the router exists, which is the shape that makes the
         // take-up certain rather than a race: what a restart looks at is
         // whatever the store already holds.
-        store::start_grilling(
+        store::start_in(
             &pool,
             conversation,
+            &store::State::named("grilling"),
             "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
             std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-outbound-retries"),
             &[],

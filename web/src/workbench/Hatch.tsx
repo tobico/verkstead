@@ -187,7 +187,7 @@ export function Hatch(props: {
         >
           {() => (
             <Show
-              when={row()?.state === "Closed"}
+              when={row()?.state === "closed"}
               fallback={
                 <Action
                   class={styles.closeAndArchive}

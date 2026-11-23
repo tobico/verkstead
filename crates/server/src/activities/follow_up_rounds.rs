@@ -67,6 +67,18 @@ pub(crate) async fn run(state: AppState, conversation_id: i64, driving: Driving)
         return;
     }
 
+    // Which state its rounds are being had in, which is what windows them and
+    // what the ending moves out of: the word the record holds, whatever its
+    // Process calls the state.
+    let standing = match store::state(&state.pool, conversation_id).await {
+        Ok(Some(standing)) => standing,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading where a Conversation stood to start its rounds failed");
+            return;
+        }
+    };
+
     // Read before the session starts, so what it lands is this follow-up's own:
     // whether the wrap-up's checks go back to waiting turns on whether *this*
     // follow-up pushed anything, and a Conversation on a pull request has a run
@@ -79,7 +91,7 @@ pub(crate) async fn run(state: AppState, conversation_id: i64, driving: Driving)
         }
     };
 
-    let settled = match crate::follow_ups::settled(&state, conversation_id).await {
+    let settled = match crate::follow_ups::settled(&state, conversation_id, &standing).await {
         Ok(settled) => settled.unwrap_or_default(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading the rounds a follow-up has been through failed");
@@ -95,9 +107,7 @@ pub(crate) async fn run(state: AppState, conversation_id: i64, driving: Driving)
     // between the mark and the work that round asked for would carry that work
     // back to the wrap-up undone. Picked up again, it runs another session,
     // which finds the mark and ends on it.
-    if marked(&state, conversation_id, store::Lifecycle::FollowUp).await
-        && owed_ending(&state, conversation_id).await
-    {
+    if marked(&state, conversation_id).await && owed_ending(&state, conversation_id).await {
         options.push(("marked".to_owned(), "true".to_owned()));
     }
 
@@ -240,20 +250,25 @@ async fn over(
         return;
     };
 
+    let standing = crate::processes::standing_in(&conversation).to_owned();
+
     if on_a_pull_request {
-        return back_to_the_wrap_up(state, conversation_id, already, driving).await;
+        return back_to_the_wrap_up(
+            state,
+            conversation_id,
+            &conversation.process,
+            &standing,
+            already,
+            driving,
+        )
+        .await;
     }
 
-    // Where the Process's manifest says this Outcome goes, for one that is
-    // data: a Tinker's `committed` is its wrapping state, so the pull request
+    // Where the Process.s manifest says this Outcome goes, for one that is
+    // data: a Tinker.s `committed` is its wrapping state, so the pull request
     // is sent for, and its `nothing` is Done.
     let outcome = if committed { "committed" } else { "nothing" };
-    let leaving = crate::processes::leaving(
-        state,
-        &conversation.process,
-        store::Lifecycle::FollowUp.stored(),
-        outcome,
-    );
+    let leaving = crate::processes::leaving(state, &conversation.process, &standing, outcome);
     let committed = match leaving {
         crate::processes::Leaving::AsEver => committed,
         crate::processes::Leaving::ToTheWrapUp => true,
@@ -294,7 +309,7 @@ async fn over(
         return asked_for_a_pull_request(state, conversation_id).await;
     }
 
-    finished(state, conversation_id, driving).await
+    finished(state, conversation_id, &standing, driving).await
 }
 
 /// Land a follow-up back in the wrap-up it was opened over.
@@ -322,9 +337,23 @@ async fn over(
 async fn back_to_the_wrap_up(
     state: &AppState,
     conversation_id: i64,
+    process: &store::Process,
+    standing: &str,
     already: i64,
     driving: Driving,
 ) {
+    // Which state that wrap-up is, off the manifest: the one running the
+    // Wrap-up Activity, whatever this Process calls it.
+    let Some(wrapping) = crate::processes::running(state, process, crate::processes::WRAP_UP)
+    else {
+        tracing::error!(
+            conversation_id,
+            "the Process of a follow-up over a pull request declares no state that wraps up, \
+             so nothing was moved",
+        );
+        return;
+    };
+
     let pushed = match store::commits_landed(&state.pool, conversation_id).await {
         Ok(landed) => landed > already,
         Err(error) => {
@@ -333,8 +362,16 @@ async fn back_to_the_wrap_up(
         }
     };
 
-    match store::follow_up_over(&state.pool, conversation_id, pushed).await {
-        Ok(store::Ending::Wrapped) => {}
+    match store::follow_up_over(
+        &state.pool,
+        conversation_id,
+        &store::State::named(standing),
+        &wrapping,
+        pushed,
+    )
+    .await
+    {
+        Ok(store::Ending::Landed) => {}
         Ok(outcome) => {
             tracing::info!(
                 conversation_id,
@@ -382,14 +419,22 @@ async fn back_to_the_wrap_up(
 /// is what parts this from a wrap-up settling: the human is the one who ended
 /// this, a moment ago, by ticking **Nothing else** — see `crate::settling`, whose
 /// news is for a milestone nobody was there for.
-async fn finished(state: &AppState, conversation_id: i64, driving: Driving) {
+async fn finished(state: &AppState, conversation_id: i64, standing: &str, driving: Driving) {
     // Held until the move is written, which is what every driver here holds it
     // for: dropping first would leave a moment where a sweep could find the
     // Conversation undriven and stop it over a follow-up that had finished.
     let _driving = driving;
 
-    match store::follow_up_done(&state.pool, conversation_id).await {
-        Ok(store::Ending::Finished) => {}
+    match store::follow_up_over(
+        &state.pool,
+        conversation_id,
+        &store::State::named(standing),
+        &store::State::done(),
+        false,
+    )
+    .await
+    {
+        Ok(store::Ending::Landed) => {}
         Ok(outcome) => {
             tracing::info!(
                 conversation_id,
@@ -535,8 +580,11 @@ pub(crate) async fn investigating(
 
     // Where the Process's manifest says it goes, for one that is data: an
     // Investigate's every Outcome is Done, which is where its landing is too.
-    let process = match store::load_conversation(&state.pool, conversation_id).await {
-        Ok(Some(conversation)) => conversation.process,
+    let (process, standing) = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => {
+            let standing = crate::processes::standing_in(&conversation).to_owned();
+            (conversation.process, standing)
+        }
         Ok(None) => return,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading the Conversation an investigation was on failed");
@@ -544,14 +592,9 @@ pub(crate) async fn investigating(
         }
     };
 
-    match crate::processes::leaving(
-        &state,
-        &process,
-        store::Lifecycle::Investigating.stored(),
-        &outcome,
-    ) {
+    match crate::processes::leaving(&state, &process, &standing, &outcome) {
         crate::processes::Leaving::AsEver | crate::processes::Leaving::Done => {
-            found_out(&state, conversation_id, driving).await
+            found_out(&state, conversation_id, &standing, driving).await
         }
         crate::processes::Leaving::Closed => {
             drop(driving);
@@ -621,13 +664,15 @@ const INVESTIGATING: &str = "finding out what was asked";
 ///
 /// The session is ended first, as a follow-up's is, so that nothing is left
 /// holding the Worktree while the move is written.
-async fn found_out(state: &AppState, conversation_id: i64, driving: Driving) {
-    let landing = match crate::investigations::landing(&state.pool, conversation_id).await {
+async fn found_out(state: &AppState, conversation_id: i64, standing: &str, driving: Driving) {
+    let detour = store::State::named(standing);
+    let landing = match crate::investigations::landing(&state.pool, conversation_id, &detour).await
+    {
         Ok(landing) => landing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading where an investigation came from failed, so it is ending Done");
             crate::investigations::Landing {
-                state: store::Lifecycle::Done,
+                state: store::State::done(),
                 steered: None,
             }
         }
@@ -642,7 +687,7 @@ async fn found_out(state: &AppState, conversation_id: i64, driving: Driving) {
 
     state.sessions.end(conversation_id).await;
 
-    match store::investigation_over(&state.pool, conversation_id, landing.state).await {
+    match store::investigation_over(&state.pool, conversation_id, &detour, &landing.state).await {
         Ok(store::Investigated::Landed) => {}
         Ok(outcome) => {
             tracing::info!(
@@ -675,7 +720,7 @@ async fn found_out(state: &AppState, conversation_id: i64, driving: Driving) {
     // Its scratch stays where the session wrote it, as it does for any Done
     // Conversation — the Worktree goes with the close, and nothing is going to
     // work in there before then.
-    if landing.state == store::Lifecycle::Done {
+    if landing.state == store::State::DONE {
         drop(driving);
         return;
     }
@@ -763,27 +808,32 @@ pub(crate) async fn left_open(state: &AppState, conversation_id: i64) {
     }
 }
 
-/// Whether the newest round the human answered inside `within`'s own window
-/// carries the Nothing-else mark.
+/// Whether the newest round the human answered inside the standing state's own
+/// window carries the Nothing-else mark.
 ///
-/// `within` is the state the rounds are being had in —
-/// [`store::Lifecycle::FollowUp`] for a follow-up,
-/// [`store::Lifecycle::Investigating`] for an investigation — because each
-/// windows its rounds by the newest move into itself and a Conversation can
-/// have been through both. See [`store::nothing_else`].
+/// **Windowed by the state the Conversation stands in**, read off the record
+/// here rather than named by the caller: rounds are windowed by the newest move
+/// into the state they are had in, and a Conversation can have been through
+/// more than one state that has them — Develop's `follow-up` and its
+/// `investigating` detour both run this Activity. See [`store::nothing_else`].
 ///
 /// A store that will not answer reads as *not marked*, which leaves the rounds
 /// running: the same way round as [`crate::runner::open`], read from the other
 /// side.
-pub(crate) async fn marked(
-    state: &AppState,
-    conversation_id: i64,
-    within: store::Lifecycle,
-) -> bool {
-    match store::nothing_else(&state.pool, conversation_id, within).await {
+pub(crate) async fn marked(state: &AppState, conversation_id: i64) -> bool {
+    let standing = match store::state(&state.pool, conversation_id).await {
+        Ok(Some(standing)) => standing,
+        Ok(None) => return false,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading where a Conversation stood to window its rounds failed");
+            return false;
+        }
+    };
+
+    match store::nothing_else(&state.pool, conversation_id, &standing).await {
         Ok(marked) => marked,
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, ?within, "reading whether the rounds were over failed");
+            tracing::error!(error = ?error, conversation_id, "reading whether the rounds were over failed");
             false
         }
     }

@@ -30,6 +30,16 @@
 //! own Repo dropdown would. One with no origin carries nothing, is not
 //! clonable, and is still a matter of **Open repo** over there.
 //!
+//! **And the Process it is on is asked after too** (ADR-0030, *Process*): every
+//! Process is data in a plugin, so a Conversation moved onto a device with no
+//! plugin providing its Process is one nothing over there could drive — it would
+//! land and stop with the plugin's trouble as its Notice. Which plugins loaded is
+//! each device's own reading of its own copy, so the far end answers; see
+//! [`crate::peer::processes`]. A device that says nothing about its Processes at
+//! all is read as holding it, for the reason a built-in harness it said nothing
+//! about is read as there: a move refused over a probe nobody made is worse than
+//! one made and found wanting.
+//!
 //! **And the Conversation's repositories are all of them**: the Repo the work is
 //! in, and every Companion beside it. A Companion travels the same way the
 //! branch does, so a Companion with nowhere to land is as much a refusal as the
@@ -40,6 +50,7 @@ use verkstead_render::{AuthorThere, HarnessThere, Lacking, Preflight};
 
 use crate::device::Devices;
 use crate::peer::harnesses::{HARNESSES, PLUGGED};
+use crate::peer::processes::{MOST_THE_PROCESSES_ARE, PROCESSES};
 use crate::relaying::{self, Refusal};
 use crate::settings::Config;
 use crate::store;
@@ -66,6 +77,7 @@ pub async fn of(
     config: &Config,
     conversation: &store::Conversation,
     roles: &[(String, String)],
+    process: Option<&str>,
     device: &str,
 ) -> Result<Preflight, Refusal> {
     let Some(devices) = devices else {
@@ -94,7 +106,7 @@ pub async fn of(
 
     let asked = ask(devices, device, &repos).await;
 
-    let (matched, harnesses) = match asked {
+    let (matched, harnesses, there_processes) = match asked {
         Ok(answered) => answered,
 
         // The machine said nothing, which is the whole of what there is to say
@@ -166,6 +178,21 @@ pub async fn of(
         }
     }
 
+    // The Process before the Pairings: a Conversation nothing over there could
+    // drive is refused whatever its accounts are, and the order the findings
+    // are drawn in is the order a move would meet them.
+    if let Some(held) = &there_processes
+        && !held.iter().any(|there| {
+            there.plugin == conversation.process.plugin && there.id == conversation.process.id
+        })
+    {
+        lacks.push(Lacking::Process {
+            name: process
+                .map(str::to_owned)
+                .unwrap_or_else(|| conversation.process.id.clone()),
+        });
+    }
+
     for (role, pairing) in pairings(conversation, roles) {
         let agent_type = pairing.profile.agent_type();
 
@@ -197,6 +224,7 @@ async fn ask(
     (
         Vec<(Option<String>, Option<verkstead_render::RepoAcross>)>,
         Vec<HarnessThere>,
+        Option<Vec<verkstead_render::ProvidedProcess>>,
     ),
     Refusal,
 > {
@@ -219,7 +247,27 @@ async fn ask(
         .filter_map(|row| serde_json::from_value::<HarnessThere>(row).ok())
         .collect();
 
-    Ok((matched, harnesses))
+    // And the Processes it holds, tolerantly: a device that will not answer
+    // this one at all — a release from before Processes were plugins — says
+    // nothing rather than failing the preflight, which is the rule a built-in
+    // harness it said nothing about is read by. The reading above has already
+    // found out whether the machine is there.
+    let there_processes: Option<Vec<verkstead_render::ProvidedProcess>> =
+        relaying::word_from::<Vec<serde_json::Value>>(
+            Some(devices),
+            device,
+            relaying::asking(PROCESSES.to_owned()),
+            MOST_THE_PROCESSES_ARE,
+        )
+        .await
+        .ok()
+        .map(|rows| {
+            rows.into_iter()
+                .filter_map(|row| serde_json::from_value(row).ok())
+                .collect()
+        });
+
+    Ok((matched, harnesses, there_processes))
 }
 
 /// Every Pairing this Conversation names, in the order the work goes through

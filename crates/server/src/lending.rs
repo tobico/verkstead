@@ -601,14 +601,12 @@ impl Lent {
             };
         }
 
-        let within = match evidence {
-            Evidence::NothingElse => store::Lifecycle::FollowUp,
-            Evidence::Investigated => store::Lifecycle::Investigating,
-            _ => return world::Waited::Gone(ended.badly()),
-        };
+        if !matches!(evidence, Evidence::NothingElse | Evidence::Investigated) {
+            return world::Waited::Gone(ended.badly());
+        }
 
         if !crate::runner::open(state, conversation_id).await
-            && crate::activities::follow_up_rounds::marked(state, conversation_id, within).await
+            && crate::activities::follow_up_rounds::marked(state, conversation_id).await
         {
             return world::Waited::Marked;
         }

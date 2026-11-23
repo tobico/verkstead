@@ -586,7 +586,7 @@ const ITS_CONVERSATIONS: &str = "/api/ui/conversations?archived=true";
 struct Running {
     branch: String,
     branch_named: bool,
-    state: verkstead_render::Lifecycle,
+    state: String,
     naming: bool,
     working: bool,
 }
@@ -631,7 +631,7 @@ async fn running_there(devices: &Devices) -> Result<(), String> {
     };
 
     // Called what the sidebar calls it — see [`crate::merging::settled`].
-    let named = match crate::merging::settled(first.branch_named, first.state, first.naming) {
+    let named = match crate::merging::settled(first.branch_named, &first.state, first.naming) {
         true => first.branch.clone(),
         false => "a draft".to_owned(),
     };

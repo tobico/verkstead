@@ -24,8 +24,8 @@ import {
   narrowed,
   offeredProcesses,
   processDescription,
+  interviews,
   processName,
-  rowWord,
   stateWord,
   targeted,
 } from "../src/workbench/provided";
@@ -47,8 +47,8 @@ const THEIRS: ProcessEntry = {
   description: "Draft the change, then check it.",
   offered: true,
   states: [
-    { id: "drafting", word: "Drafting" },
-    { id: "checking", word: "Checking" },
+    { id: "drafting", word: "Drafting", interviews: true },
+    { id: "checking", word: "Checking", interviews: false },
   ],
   roles: [
     { role: "sketching", label: "Sketching", building: true, away: false },
@@ -225,46 +225,44 @@ describe("which processes wrap up narrowed", () => {
 });
 
 describe("the word a state is said in", () => {
-  /// Its Process's, by the id the server sends beside it — a Grilling reads
-  /// *Grilling* off Develop's manifest, and *Follow-up* is the hyphenated word
-  /// the manifest spells rather than the variant's.
+  /// Its Process's, by the word the record holds — a Grilling carries
+  /// `grilling` and reads *Grilling* off Develop's manifest, and *Follow-up* is
+  /// the hyphenated word the manifest spells rather than the id.
   it("is the word its process declares", () => {
-    expect(stateWord(whose("develop"), "Grilling", "grilling")).toBe(
-      "Grilling",
-    );
-    expect(stateWord(whose("develop"), "FollowUp", "follow-up")).toBe(
-      "Follow-up",
-    );
-    expect(stateWord(whose("tinker"), "Wrapping", "wrapping")).toBe("Wrapping");
+    expect(stateWord(whose("develop"), "grilling")).toBe("Grilling");
+    expect(stateWord(whose("develop"), "follow-up")).toBe("Follow-up");
+    expect(stateWord(whose("tinker"), "wrapping")).toBe("Wrapping");
   });
 
   /// A state a plugin's Process declares reads whatever that plugin called it.
   it("is a plugin's own word for a state it declares", () => {
     knowProvidedProcesses([...PROCESSES, THEIRS]);
 
-    expect(stateWord(WHOSE, "Declared", "checking")).toBe("Checking");
+    expect(stateWord(WHOSE, "checking")).toBe("Checking");
   });
 
-  /// And an unknown word — a plugin removed under a Conversation — is drawn as
-  /// the word the record holds, which is legible where a blank would not be.
+  /// And a word nothing declares — a plugin removed under a Conversation — is
+  /// drawn as the word the record holds, which is legible where a blank would
+  /// not be.
   it("is the word itself where no process is listed for it", () => {
-    expect(stateWord(GONE, "Declared", "sorting")).toBe("sorting");
+    expect(stateWord(GONE, "sorting")).toBe("sorting");
   });
 
-  /// The three Verkstead words itself carry no state id and are Verkstead's
-  /// own words: nothing returns to any of them, and no Process declares one.
+  /// The three Verkstead words itself are Verkstead's own words whatever the
+  /// Process: nothing returns to any of them, and no Process declares one.
   it("is Verkstead's own for Draft, Done and Closed", () => {
-    expect(stateWord(whose("develop"), "Draft", null)).toBe("Draft");
-    expect(stateWord(whose("develop"), "Done", null)).toBe("Done");
-    expect(stateWord(whose("develop"), "Closed", null)).toBe("Closed");
+    expect(stateWord(whose("develop"), "draft")).toBe("Draft");
+    expect(stateWord(whose("develop"), "done")).toBe("Done");
+    expect(stateWord(whose("develop"), "closed")).toBe("Closed");
   });
 
-  /// And a sidebar row reads the same word off the plugin its row names, that
-  /// being what the server sends it as.
-  it("is read the same way on a sidebar row", () => {
-    expect(
-      rowWord({ process: whose("develop"), state: "grilling" }, "Grilling"),
-    ).toBe("Grilling");
-    expect(rowWord(null, "Draft")).toBe("Draft");
+  /// And which state runs the interview, the one thing besides the word the
+  /// page asks of a state: a steer into it opens a round, and the digest tick
+  /// on its form primes that round's interview.
+  it("says which state runs the interview", () => {
+    expect(interviews(whose("develop"), "grilling")).toBe(true);
+    expect(interviews(whose("develop"), "implementing")).toBe(false);
+    expect(interviews(whose("tinker"), "follow-up")).toBe(false);
+    expect(interviews(GONE, "sorting")).toBe(false);
   });
 });

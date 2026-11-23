@@ -6,7 +6,7 @@
 //! Timeline say afterwards: the state, the PR Event, and the move under it.
 //!
 //! Two states get here, because two kinds of work end on a pull request: a
-//! backlog worked to empty, from Implementing, and a roadmap, from Grilling. And
+//! backlog worked to empty, from and a roadmap, from Grilling. And
 //! two doors beside them: a Draft holding a pull request somebody opened
 //! elsewhere, and a Tinker in Follow-up whose ending sent for one.
 //!
@@ -18,15 +18,15 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    AdoptedPullRequest, Entering, Event, Finished, Landing, Lifecycle, Merging, PullRequest,
-    Rebuilding, Resolving, Rollup, Standing, Taking, WAITED_ON, WaitingOn, Wrapping, check_rollup,
+    AdoptedPullRequest, Entering, Event, Finished, Landing, Merging, PullRequest, Rebuilding,
+    Resolving, Rollup, Standing, State, Taking, WAITED_ON, WaitingOn, Wrapping, check_rollup,
     close_conversation, conversation_on_pull_request, finish_wrap_up, hold_pull_request,
     implement_again, load_conversation, merges, merging, open_database,
     other_conversation_on_pull_request, pick_direction, pull_request, pull_request_repo,
     pull_requests, record_another_pull_request, record_check_rollup, record_merging,
     record_pull_request, record_standing, register_repo, resolve_conflicts, rollups, save_brief,
-    settle_wrap_up, stack, standing, start_conversation, start_grilling, start_tinkering, take_up,
-    timeline, unfinished_pull_requests, wrap_up_settled,
+    settle_wrap_up, stack, standing, start_conversation, start_in, take_up, timeline,
+    unfinished_pull_requests, wrap_up_settled,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -60,9 +60,10 @@ async fn grilling(pool: &SqlitePool) -> i64 {
         .expect("the Repo was just registered");
 
     save_brief(pool, id, "# Rate limiting\n").await.unwrap();
-    start_grilling(
+    start_in(
         pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         Path::new("/state/worktrees/rate-limiting"),
         &[],
@@ -104,9 +105,10 @@ async fn tinkering(pool: &SqlitePool) -> i64 {
         .expect("the Repo was just registered");
 
     save_brief(pool, id, "# Rate limiting\n").await.unwrap();
-    start_tinkering(
+    start_in(
         pool,
         id,
+        &State::named("follow-up"),
         "c0ffee",
         Path::new("/state/worktrees/rate-limiting"),
         &[],
@@ -197,20 +199,26 @@ async fn recording_the_pull_request_moves_the_conversation_into_wrapping() {
     let id = implementing(&pool).await;
 
     assert_eq!(
-        record_pull_request(&pool, id, own(&pool, id).await, &opened())
-            .await
-            .unwrap(),
+        record_pull_request(
+            &pool,
+            id,
+            own(&pool, id).await,
+            &opened(),
+            &State::named("wrapping"),
+        )
+        .await
+        .unwrap(),
         Wrapping::Started,
     );
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Wrapping);
+    assert_eq!(conversation.state, State::named("wrapping"));
 
     let events = events(&pool, id).await;
 
     assert_eq!(
         events.last(),
-        Some(&Event::Moved(Lifecycle::Wrapping)),
+        Some(&Event::Moved(State::named("wrapping"))),
         "the move is the last thing on the Timeline: {events:?}",
     );
     assert_eq!(
@@ -235,19 +243,25 @@ async fn a_roadmap_conversation_wraps_up_straight_out_of_its_grilling() {
 
     assert_eq!(
         load_conversation(&pool, id).await.unwrap().unwrap().state,
-        Lifecycle::Grilling,
+        State::named("grilling"),
         "the pick moved nothing: the grilling is what writes the roadmap",
     );
 
     assert_eq!(
-        record_pull_request(&pool, id, own(&pool, id).await, &opened())
-            .await
-            .unwrap(),
+        record_pull_request(
+            &pool,
+            id,
+            own(&pool, id).await,
+            &opened(),
+            &State::named("wrapping"),
+        )
+        .await
+        .unwrap(),
         Wrapping::Started,
     );
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Wrapping);
+    assert_eq!(conversation.state, State::named("wrapping"));
 
     assert_eq!(
         events(&pool, id)
@@ -258,7 +272,7 @@ async fn a_roadmap_conversation_wraps_up_straight_out_of_its_grilling() {
                 _ => None,
             })
             .collect::<Vec<_>>(),
-        [Lifecycle::Grilling, Lifecycle::Wrapping],
+        [State::named("grilling"), State::named("wrapping")],
         "and the ladder skips Implementing rather than idling in it",
     );
 }
@@ -271,14 +285,26 @@ async fn a_conversation_that_is_already_wrapping_records_no_second_pull_request(
     let (_dir, pool) = fresh_pool().await;
     let id = implementing(&pool).await;
 
-    record_pull_request(&pool, id, own(&pool, id).await, &opened())
-        .await
-        .unwrap();
+    record_pull_request(
+        &pool,
+        id,
+        own(&pool, id).await,
+        &opened(),
+        &State::named("wrapping"),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
-        record_pull_request(&pool, id, own(&pool, id).await, &opened())
-            .await
-            .unwrap(),
+        record_pull_request(
+            &pool,
+            id,
+            own(&pool, id).await,
+            &opened(),
+            &State::named("wrapping"),
+        )
+        .await
+        .unwrap(),
         Wrapping::NothingToWrap,
     );
 
@@ -301,14 +327,20 @@ async fn a_closed_conversation_is_not_moved_on_by_a_pull_request() {
     close_conversation(&pool, id).await.unwrap();
 
     assert_eq!(
-        record_pull_request(&pool, id, own(&pool, id).await, &opened())
-            .await
-            .unwrap(),
+        record_pull_request(
+            &pool,
+            id,
+            own(&pool, id).await,
+            &opened(),
+            &State::named("wrapping"),
+        )
+        .await
+        .unwrap(),
         Wrapping::NothingToWrap,
     );
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Closed);
+    assert_eq!(conversation.state, State::closed());
 }
 
 /// An ordinary Draft is not one to move into Wrapping, whatever recorded a pull
@@ -329,14 +361,14 @@ async fn a_draft_holding_no_pull_request_is_not_moved_on_by_one() {
         .expect("the Repo was just registered");
 
     assert_eq!(
-        record_pull_request(&pool, id, repo.id, &opened())
+        record_pull_request(&pool, id, repo.id, &opened(), &State::named("wrapping"))
             .await
             .unwrap(),
         Wrapping::NothingToWrap,
     );
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Draft);
+    assert_eq!(conversation.state, State::draft());
 }
 
 /// And one that *is* holding a pull request is: the take-up has put it on that
@@ -389,14 +421,14 @@ async fn a_draft_holding_a_pull_request_is_moved_on_by_recording_it() {
     );
 
     assert_eq!(
-        record_pull_request(&pool, id, repo.id, &opened())
+        record_pull_request(&pool, id, repo.id, &opened(), &State::named("wrapping"))
             .await
             .unwrap(),
         Wrapping::Started,
     );
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Wrapping);
+    assert_eq!(conversation.state, State::named("wrapping"));
     assert_eq!(conversation.branch, "rate-limiting");
     assert_eq!(conversation.base_commit.as_deref(), Some("c0ffee"));
 
@@ -409,7 +441,7 @@ async fn a_draft_holding_a_pull_request_is_moved_on_by_recording_it() {
                 _ => None,
             })
             .collect::<Vec<_>>(),
-        [Lifecycle::Wrapping],
+        [State::named("wrapping")],
         "one move, from the Draft it was straight into the wrap-up",
     );
 }
@@ -454,7 +486,7 @@ async fn a_take_up_can_enter_wrapping_with_the_review_and_the_comments_settled()
             Path::new("/state/worktrees/rate-limiting"),
             &[],
             Entering {
-                landing: Landing::Wrapping,
+                landing: Landing::In(&State::named("wrapping")),
                 settled: &[
                     WaitingOn::Review,
                     WaitingOn::Comments {
@@ -470,7 +502,7 @@ async fn a_take_up_can_enter_wrapping_with_the_review_and_the_comments_settled()
     );
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Wrapping);
+    assert_eq!(conversation.state, State::named("wrapping"));
 
     let settled = wrap_up_settled(&pool, id).await.unwrap();
 
@@ -512,25 +544,31 @@ async fn a_follow_up_is_moved_on_by_the_pull_request_its_ending_sent_for() {
 
     assert_eq!(
         load_conversation(&pool, id).await.unwrap().unwrap().state,
-        Lifecycle::FollowUp,
+        State::named("follow-up"),
         "the press landed it there rather than in a grilling",
     );
 
     assert_eq!(
-        record_pull_request(&pool, id, own(&pool, id).await, &opened())
-            .await
-            .unwrap(),
+        record_pull_request(
+            &pool,
+            id,
+            own(&pool, id).await,
+            &opened(),
+            &State::named("wrapping"),
+        )
+        .await
+        .unwrap(),
         Wrapping::Started,
     );
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Wrapping);
+    assert_eq!(conversation.state, State::named("wrapping"));
 
     let events = events(&pool, id).await;
 
     assert_eq!(
         events.last(),
-        Some(&Event::Moved(Lifecycle::Wrapping)),
+        Some(&Event::Moved(State::named("wrapping"))),
         "the move is the last thing on the Timeline: {events:?}",
     );
     assert_eq!(
@@ -545,7 +583,9 @@ async fn a_conversation_that_is_not_there_records_nothing() {
     let (_dir, pool) = fresh_pool().await;
 
     assert_eq!(
-        record_pull_request(&pool, 404, 1, &opened()).await.unwrap(),
+        record_pull_request(&pool, 404, 1, &opened(), &State::named("wrapping"))
+            .await
+            .unwrap(),
         Wrapping::NoSuchConversation,
     );
 }
@@ -559,24 +599,43 @@ async fn a_second_wrap_reuses_the_pull_request_the_first_one_recorded() {
     let (_dir, pool) = fresh_pool().await;
     let id = implementing(&pool).await;
 
-    record_pull_request(&pool, id, own(&pool, id).await, &opened())
-        .await
-        .unwrap();
+    record_pull_request(
+        &pool,
+        id,
+        own(&pool, id).await,
+        &opened(),
+        &State::named("wrapping"),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
-        implement_again(&pool, id).await.unwrap(),
+        implement_again(
+            &pool,
+            id,
+            &State::named("wrapping"),
+            &State::named("implementing")
+        )
+        .await
+        .unwrap(),
         Rebuilding::Started,
     );
     assert_eq!(
         load_conversation(&pool, id).await.unwrap().unwrap().state,
-        Lifecycle::Implementing,
+        State::named("implementing"),
         "the split-out work is built, and building is Implementing",
     );
 
     assert_eq!(
-        record_pull_request(&pool, id, own(&pool, id).await, &opened())
-            .await
-            .unwrap(),
+        record_pull_request(
+            &pool,
+            id,
+            own(&pool, id).await,
+            &opened(),
+            &State::named("wrapping"),
+        )
+        .await
+        .unwrap(),
         Wrapping::Started,
         "and the finish that follows the backlog wraps it up again",
     );
@@ -600,10 +659,10 @@ async fn a_second_wrap_reuses_the_pull_request_the_first_one_recorded() {
             })
             .collect::<Vec<_>>(),
         [
-            Lifecycle::Grilling,
-            Lifecycle::Wrapping,
-            Lifecycle::Implementing,
-            Lifecycle::Wrapping,
+            State::named("grilling"),
+            State::named("wrapping"),
+            State::named("implementing"),
+            State::named("wrapping"),
         ],
         "and the moves are what tell the re-entry's story",
     );
@@ -623,26 +682,53 @@ async fn only_a_wrapping_conversation_can_be_sent_back_to_be_built() {
     let id = implementing(&pool).await;
 
     assert_eq!(
-        implement_again(&pool, id).await.unwrap(),
+        implement_again(
+            &pool,
+            id,
+            &State::named("wrapping"),
+            &State::named("implementing")
+        )
+        .await
+        .unwrap(),
         Rebuilding::NotWrapping,
     );
 
-    record_pull_request(&pool, id, own(&pool, id).await, &opened())
-        .await
-        .unwrap();
+    record_pull_request(
+        &pool,
+        id,
+        own(&pool, id).await,
+        &opened(),
+        &State::named("wrapping"),
+    )
+    .await
+    .unwrap();
     close_conversation(&pool, id).await.unwrap();
 
     assert_eq!(
-        implement_again(&pool, id).await.unwrap(),
+        implement_again(
+            &pool,
+            id,
+            &State::named("wrapping"),
+            &State::named("implementing")
+        )
+        .await
+        .unwrap(),
         Rebuilding::NotWrapping,
     );
     assert_eq!(
         load_conversation(&pool, id).await.unwrap().unwrap().state,
-        Lifecycle::Closed,
+        State::closed(),
     );
 
     assert_eq!(
-        implement_again(&pool, 404).await.unwrap(),
+        implement_again(
+            &pool,
+            404,
+            &State::named("wrapping"),
+            &State::named("implementing")
+        )
+        .await
+        .unwrap(),
         Rebuilding::NoSuchConversation,
     );
 }
@@ -656,9 +742,15 @@ async fn a_companions_pull_request_stands_beside_the_works_own() {
     let id = implementing(&pool).await;
     let beside = companion(&pool).await;
 
-    record_pull_request(&pool, id, own(&pool, id).await, &opened())
-        .await
-        .unwrap();
+    record_pull_request(
+        &pool,
+        id,
+        own(&pool, id).await,
+        &opened(),
+        &State::named("wrapping"),
+    )
+    .await
+    .unwrap();
 
     assert!(
         record_another_pull_request(&pool, id, beside, &beside_it())
@@ -697,7 +789,7 @@ async fn a_companions_pull_request_stands_beside_the_works_own() {
                 _ => None,
             })
             .collect::<Vec<_>>(),
-        [Lifecycle::Grilling, Lifecycle::Wrapping],
+        [State::named("grilling"), State::named("wrapping")],
         "and the second one moved nothing twice",
     );
 }
@@ -724,9 +816,15 @@ async fn a_pull_request_already_on_the_record_keeps_the_row_it_has() {
     let id = implementing(&pool).await;
     let beside = companion(&pool).await;
 
-    record_pull_request(&pool, id, own(&pool, id).await, &opened())
-        .await
-        .unwrap();
+    record_pull_request(
+        &pool,
+        id,
+        own(&pool, id).await,
+        &opened(),
+        &State::named("wrapping"),
+    )
+    .await
+    .unwrap();
     record_another_pull_request(&pool, id, beside, &beside_it())
         .await
         .unwrap();
@@ -754,7 +852,7 @@ async fn a_stack_is_several_pull_requests_of_one_repository() {
     let id = implementing(&pool).await;
     let own = own(&pool, id).await;
 
-    record_pull_request(&pool, id, own, &opened())
+    record_pull_request(&pool, id, own, &opened(), &State::named("wrapping"))
         .await
         .unwrap();
 
@@ -861,9 +959,15 @@ async fn a_pull_request_says_which_repository_it_is_in() {
     let id = implementing(&pool).await;
     let beside = companion(&pool).await;
 
-    record_pull_request(&pool, id, own(&pool, id).await, &opened())
-        .await
-        .unwrap();
+    record_pull_request(
+        &pool,
+        id,
+        own(&pool, id).await,
+        &opened(),
+        &State::named("wrapping"),
+    )
+    .await
+    .unwrap();
     record_another_pull_request(&pool, id, beside, &beside_it())
         .await
         .unwrap();
@@ -925,7 +1029,7 @@ async fn how_the_checks_are_is_written_down_and_read_back() {
     let own = own(&pool, id).await;
     let beside = companion(&pool).await;
 
-    record_pull_request(&pool, id, own, &opened())
+    record_pull_request(&pool, id, own, &opened(), &State::named("wrapping"))
         .await
         .unwrap();
     record_another_pull_request(&pool, id, beside, &beside_it())
@@ -1012,7 +1116,7 @@ async fn every_pull_requests_rollup_is_read_back_by_the_event_it_is() {
     let own = own(&pool, id).await;
     let beside = companion(&pool).await;
 
-    record_pull_request(&pool, id, own, &opened())
+    record_pull_request(&pool, id, own, &opened(), &State::named("wrapping"))
         .await
         .unwrap();
     record_another_pull_request(&pool, id, beside, &beside_it())
@@ -1054,7 +1158,7 @@ async fn how_the_checks_are_outlives_the_server_that_asked() {
     let pool = open_database(&database).await.unwrap();
     let id = implementing(&pool).await;
     let own = own(&pool, id).await;
-    record_pull_request(&pool, id, own, &opened())
+    record_pull_request(&pool, id, own, &opened(), &State::named("wrapping"))
         .await
         .unwrap();
     record_check_rollup(&pool, id, own, 41, Rollup::Passed)
@@ -1086,7 +1190,7 @@ async fn whether_each_pull_request_merges_is_written_down_and_read_back() {
     let own = own(&pool, id).await;
     let beside = companion(&pool).await;
 
-    record_pull_request(&pool, id, own, &opened())
+    record_pull_request(&pool, id, own, &opened(), &State::named("wrapping"))
         .await
         .unwrap();
     record_another_pull_request(&pool, id, beside, &beside_it())
@@ -1156,7 +1260,7 @@ async fn every_pull_requests_merge_is_read_back_by_the_event_it_is() {
     let own = own(&pool, id).await;
     let beside = companion(&pool).await;
 
-    record_pull_request(&pool, id, own, &opened())
+    record_pull_request(&pool, id, own, &opened(), &State::named("wrapping"))
         .await
         .unwrap();
     record_another_pull_request(&pool, id, beside, &beside_it())
@@ -1207,7 +1311,7 @@ async fn whether_a_pull_request_merges_outlives_the_server_that_asked() {
     let pool = open_database(&database).await.unwrap();
     let id = implementing(&pool).await;
     let own = own(&pool, id).await;
-    record_pull_request(&pool, id, own, &opened())
+    record_pull_request(&pool, id, own, &opened(), &State::named("wrapping"))
         .await
         .unwrap();
     record_merging(&pool, id, own, 41, Merging::Conflicting)
@@ -1238,7 +1342,7 @@ async fn where_each_pull_request_has_got_to_is_written_down_and_read_back() {
     let own = own(&pool, id).await;
     let beside = companion(&pool).await;
 
-    record_pull_request(&pool, id, own, &opened())
+    record_pull_request(&pool, id, own, &opened(), &State::named("wrapping"))
         .await
         .unwrap();
     record_another_pull_request(&pool, id, beside, &beside_it())
@@ -1309,7 +1413,7 @@ async fn the_pull_requests_still_waiting_to_land_are_the_done_ones_nobody_has_me
 
     let wrapping = implementing(&pool).await;
     let own = own(&pool, wrapping).await;
-    record_pull_request(&pool, wrapping, own, &opened())
+    record_pull_request(&pool, wrapping, own, &opened(), &State::named("wrapping"))
         .await
         .unwrap();
 
@@ -1325,7 +1429,9 @@ async fn the_pull_requests_still_waiting_to_land_are_the_done_ones_nobody_has_me
         settle_wrap_up(&pool, wrapping, waiting_on).await.unwrap();
     }
     assert_eq!(
-        finish_wrap_up(&pool, wrapping).await.unwrap(),
+        finish_wrap_up(&pool, wrapping, &State::named("wrapping"))
+            .await
+            .unwrap(),
         Finished::Done
     );
 
@@ -1375,7 +1481,7 @@ async fn a_stack_leaves_the_sweep_one_pull_request_at_a_time() {
     let id = implementing(&pool).await;
     let own = own(&pool, id).await;
 
-    record_pull_request(&pool, id, own, &opened())
+    record_pull_request(&pool, id, own, &opened(), &State::named("wrapping"))
         .await
         .unwrap();
 
@@ -1391,7 +1497,12 @@ async fn a_stack_leaves_the_sweep_one_pull_request_at_a_time() {
     for waiting_on in waiting_on(&pool, id).await {
         settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
-    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+    assert_eq!(
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
+        Finished::Done
+    );
 
     assert_eq!(
         unfinished_pull_requests(&pool)
@@ -1431,14 +1542,19 @@ async fn a_closed_conversations_pull_request_is_never_asked_about() {
 
     let id = implementing(&pool).await;
     let own = own(&pool, id).await;
-    record_pull_request(&pool, id, own, &opened())
+    record_pull_request(&pool, id, own, &opened(), &State::named("wrapping"))
         .await
         .unwrap();
 
     for waiting_on in waiting_on(&pool, id).await {
         settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
-    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+    assert_eq!(
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
+        Finished::Done
+    );
     assert_eq!(unfinished_pull_requests(&pool).await.unwrap().len(), 1);
 
     close_conversation(&pool, id).await.unwrap();
@@ -1462,7 +1578,7 @@ async fn where_a_pull_request_has_got_to_outlives_the_server_that_asked() {
     let pool = open_database(&database).await.unwrap();
     let id = implementing(&pool).await;
     let own = own(&pool, id).await;
-    record_pull_request(&pool, id, own, &opened())
+    record_pull_request(&pool, id, own, &opened(), &State::named("wrapping"))
         .await
         .unwrap();
     record_standing(&pool, id, own, 41, Standing::Merged)
@@ -1491,14 +1607,19 @@ async fn resolving_a_conflict_sends_a_done_conversation_back_to_wrapping_up() {
 
     let id = implementing(&pool).await;
     let own = own(&pool, id).await;
-    record_pull_request(&pool, id, own, &opened())
+    record_pull_request(&pool, id, own, &opened(), &State::named("wrapping"))
         .await
         .unwrap();
 
     for waiting_on in waiting_on(&pool, id).await {
         settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
-    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+    assert_eq!(
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
+        Finished::Done
+    );
 
     // The base moved under the branch while nobody was working on it, which is
     // what the sweep after Done writes down and dispatches nothing about.
@@ -1513,7 +1634,7 @@ async fn resolving_a_conflict_sends_a_done_conversation_back_to_wrapping_up() {
 
     assert_eq!(
         load_conversation(&pool, id).await.unwrap().unwrap().state,
-        Lifecycle::Wrapping,
+        State::named("wrapping"),
     );
 
     assert_eq!(
@@ -1521,23 +1642,23 @@ async fn resolving_a_conflict_sends_a_done_conversation_back_to_wrapping_up() {
             .await
             .into_iter()
             .filter_map(|event| match event {
-                Event::Steer(target, ..) => Some(format!("steered into {target:?}")),
+                Event::Steer(target, ..) => Some(format!("steered into {target}")),
                 Event::ResolveConflicts => Some("pressed resolve".to_owned()),
-                Event::Moved(state) => Some(format!("moved to {state:?}")),
+                Event::Moved(state) => Some(format!("moved to {state}")),
                 _ => None,
             })
             .collect::<Vec<_>>(),
         [
-            "moved to Grilling",
-            "moved to Wrapping",
-            "moved to Done",
+            "moved to grilling",
+            "moved to wrapping",
+            "moved to done",
             // The press, in a steer's own shape and a kind of its own: somebody
             // decided this, and the move under it is what came of it. Its own
             // kind because a steer into Wrapping carrying nothing written would
             // otherwise be the same row, and the two are different acts — that
             // one reads the branch again and this one leaves the review alone.
             "pressed resolve",
-            "moved to Wrapping",
+            "moved to wrapping",
         ]
         .map(str::to_owned),
         "the human's line lands above the machine's move, and says which press \
@@ -1572,7 +1693,9 @@ async fn resolving_a_conflict_sends_a_done_conversation_back_to_wrapping_up() {
     );
 
     assert_eq!(
-        finish_wrap_up(&pool, id).await.unwrap(),
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
         Finished::StillWaiting,
         "so the wrap-up that starts here does not finish on the first turn of \
          its settling loop",
@@ -1592,7 +1715,7 @@ async fn only_the_pull_requests_that_conflict_go_back_to_being_waited_on() {
     let id = implementing(&pool).await;
     let own = own(&pool, id).await;
     let beside = companion(&pool).await;
-    record_pull_request(&pool, id, own, &opened())
+    record_pull_request(&pool, id, own, &opened(), &State::named("wrapping"))
         .await
         .unwrap();
     record_another_pull_request(&pool, id, beside, &beside_it())
@@ -1602,7 +1725,12 @@ async fn only_the_pull_requests_that_conflict_go_back_to_being_waited_on() {
     for waiting_on in waiting_on(&pool, id).await {
         settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
-    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+    assert_eq!(
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
+        Finished::Done
+    );
 
     record_merging(&pool, id, own, 41, Merging::Cleanly)
         .await
@@ -1648,14 +1776,19 @@ async fn a_conversation_with_nothing_conflicting_is_left_where_it_is() {
 
     let id = implementing(&pool).await;
     let own = own(&pool, id).await;
-    record_pull_request(&pool, id, own, &opened())
+    record_pull_request(&pool, id, own, &opened(), &State::named("wrapping"))
         .await
         .unwrap();
 
     for waiting_on in waiting_on(&pool, id).await {
         settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
-    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+    assert_eq!(
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
+        Finished::Done
+    );
 
     // Nothing has asked GitHub at all, which is not a conflict — not knowing
     // never is.
@@ -1676,7 +1809,7 @@ async fn a_conversation_with_nothing_conflicting_is_left_where_it_is() {
 
     assert_eq!(
         load_conversation(&pool, id).await.unwrap().unwrap().state,
-        Lifecycle::Done,
+        State::done(),
         "so the Conversation is where the press found it",
     );
 }
@@ -1693,7 +1826,7 @@ async fn only_a_done_conversation_is_sent_back_to_wrapping_up() {
 
     let id = implementing(&pool).await;
     let own = own(&pool, id).await;
-    record_pull_request(&pool, id, own, &opened())
+    record_pull_request(&pool, id, own, &opened(), &State::named("wrapping"))
         .await
         .unwrap();
     record_merging(&pool, id, own, 41, Merging::Conflicting)
@@ -1748,9 +1881,15 @@ async fn a_stack_reads_back_from_the_bottom_whatever_order_it_was_recorded_in() 
     let own = own(&pool, id).await;
 
     // The middle of the chain, which is the one the Conversation is on.
-    record_pull_request(&pool, id, own, &link(42, "stage-02", "stage-01"))
-        .await
-        .unwrap();
+    record_pull_request(
+        &pool,
+        id,
+        own,
+        &link(42, "stage-02", "stage-01"),
+        &State::named("wrapping"),
+    )
+    .await
+    .unwrap();
 
     // And the two around it, recorded top first so that the order they arrived
     // in is nothing like the order they sit in.
@@ -1797,7 +1936,7 @@ async fn a_lone_pull_request_is_a_stack_of_one() {
     let own = own(&pool, id).await;
     let beside = companion(&pool).await;
 
-    record_pull_request(&pool, id, own, &opened())
+    record_pull_request(&pool, id, own, &opened(), &State::named("wrapping"))
         .await
         .unwrap();
 
@@ -1832,25 +1971,42 @@ async fn the_conversation_a_pull_request_leads_to_is_the_open_one() {
     let first = implementing(&pool).await;
     let own = own(&pool, first).await;
 
-    record_pull_request(&pool, first, own, &link(41, "stage-01", "main"))
-        .await
-        .unwrap();
+    record_pull_request(
+        &pool,
+        first,
+        own,
+        &link(41, "stage-01", "main"),
+        &State::named("wrapping"),
+    )
+    .await
+    .unwrap();
 
     // The first has finished with it and been closed, which is what a take-up
     // over somebody else's finished work leaves behind.
     for waiting_on in waiting_on(&pool, first).await {
         settle_wrap_up(&pool, first, waiting_on).await.unwrap();
     }
-    assert_eq!(finish_wrap_up(&pool, first).await.unwrap(), Finished::Done);
+    assert_eq!(
+        finish_wrap_up(&pool, first, &State::named("wrapping"))
+            .await
+            .unwrap(),
+        Finished::Done
+    );
     close_conversation(&pool, first).await.unwrap();
 
     // And the second took the same pull request up, which is the row that now
     // matters: it is the one still at work on it.
     let second = beside_it_in(&pool, own, "stage-01-again").await;
 
-    record_pull_request(&pool, second, own, &link(41, "stage-01", "main"))
-        .await
-        .unwrap();
+    record_pull_request(
+        &pool,
+        second,
+        own,
+        &link(41, "stage-01", "main"),
+        &State::named("wrapping"),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         conversation_on_pull_request(&pool, own, 41).await.unwrap(),
@@ -1863,7 +2019,12 @@ async fn the_conversation_a_pull_request_leads_to_is_the_open_one() {
     for waiting_on in waiting_on(&pool, second).await {
         settle_wrap_up(&pool, second, waiting_on).await.unwrap();
     }
-    assert_eq!(finish_wrap_up(&pool, second).await.unwrap(), Finished::Done);
+    assert_eq!(
+        finish_wrap_up(&pool, second, &State::named("wrapping"))
+            .await
+            .unwrap(),
+        Finished::Done
+    );
 
     assert_eq!(
         conversation_on_pull_request(&pool, own, 41).await.unwrap(),
@@ -1909,9 +2070,15 @@ async fn a_pull_request_one_conversation_has_leads_to_nobody_else() {
     let only = implementing(&pool).await;
     let own = own(&pool, only).await;
 
-    record_pull_request(&pool, only, own, &link(41, "stage-01", "main"))
-        .await
-        .unwrap();
+    record_pull_request(
+        &pool,
+        only,
+        own,
+        &link(41, "stage-01", "main"),
+        &State::named("wrapping"),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         conversation_on_pull_request(&pool, own, 41).await.unwrap(),
@@ -1945,17 +2112,29 @@ async fn the_old_word_for_closed_is_shut_in_the_ordering_too() {
     let at_work = implementing(&pool).await;
     let own = own(&pool, at_work).await;
 
-    record_pull_request(&pool, at_work, own, &link(41, "stage-01", "main"))
-        .await
-        .unwrap();
+    record_pull_request(
+        &pool,
+        at_work,
+        own,
+        &link(41, "stage-01", "main"),
+        &State::named("wrapping"),
+    )
+    .await
+    .unwrap();
 
     // The Conversation that took the pull request over and was shut afterwards,
     // which is the newer of the two rows.
     let shut = beside_it_in(&pool, own, "stage-01-again").await;
 
-    record_pull_request(&pool, shut, own, &link(41, "stage-01", "main"))
-        .await
-        .unwrap();
+    record_pull_request(
+        &pool,
+        shut,
+        own,
+        &link(41, "stage-01", "main"),
+        &State::named("wrapping"),
+    )
+    .await
+    .unwrap();
 
     // Written by hand, because nothing in this Verkstead spells it any more: this
     // is the row a restored backup leaves behind.
@@ -1989,9 +2168,10 @@ async fn beside_it_in(pool: &SqlitePool, repo: i64, branch: &str) -> i64 {
         .unwrap();
 
     save_brief(pool, id, "# Rate limiting\n").await.unwrap();
-    start_grilling(
+    start_in(
         pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         &std::path::PathBuf::from(format!("/state/worktrees/{branch}")),
         &[],
@@ -2028,9 +2208,15 @@ async fn pull_requests_that_are_not_one_chain_read_in_the_order_they_were_record
         let id = implementing(&pool).await;
         let own = own(&pool, id).await;
 
-        record_pull_request(&pool, id, own, &link(41, "stage-01", "main"))
-            .await
-            .unwrap();
+        record_pull_request(
+            &pool,
+            id,
+            own,
+            &link(41, "stage-01", "main"),
+            &State::named("wrapping"),
+        )
+        .await
+        .unwrap();
 
         for one in beside {
             assert!(
@@ -2066,9 +2252,15 @@ async fn the_conversation_a_pull_request_leads_to_is_the_one_whose_work_is_on_it
     let id = implementing(&pool).await;
     let own = own(&pool, id).await;
 
-    record_pull_request(&pool, id, own, &link(42, "stage-02", "stage-01"))
-        .await
-        .unwrap();
+    record_pull_request(
+        &pool,
+        id,
+        own,
+        &link(42, "stage-02", "stage-01"),
+        &State::named("wrapping"),
+    )
+    .await
+    .unwrap();
 
     for beside in [
         link(41, "stage-01", "main"),
@@ -2101,9 +2293,15 @@ async fn the_conversation_a_pull_request_leads_to_is_the_one_whose_work_is_on_it
     // whatever anybody else recorded beside it.
     let neighbour = beside_it_in(&pool, own, "stage-01").await;
 
-    record_pull_request(&pool, neighbour, own, &link(41, "stage-01", "main"))
-        .await
-        .unwrap();
+    record_pull_request(
+        &pool,
+        neighbour,
+        own,
+        &link(41, "stage-01", "main"),
+        &State::named("wrapping"),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         conversation_on_pull_request(&pool, own, 41).await.unwrap(),

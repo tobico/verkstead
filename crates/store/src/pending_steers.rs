@@ -41,7 +41,8 @@
 //! is what gives the rows written before the second of them the value that says
 //! what was true of them before the column existed.
 
-use super::{CompanionMode, Lifecycle};
+use super::CompanionMode;
+use super::conversations::State;
 use anyhow::{Context, Result};
 use sqlx::SqlitePool;
 use sqlx::{Sqlite, Transaction};
@@ -77,11 +78,7 @@ pub struct PendingForm {
     ///
     /// `None` is a form nothing has been saved on yet, which is every one of
     /// them between the press and the first thing typed or ticked.
-    pub target: Option<Lifecycle>,
-
-    /// The declared state's id, where [`Self::target`] is
-    /// [`Lifecycle::Declared`]: what the `target` column holds for it.
-    pub declared: Option<String>,
+    pub target: Option<State>,
 
     /// The new round's Brief, for a steer into Grilling.
     pub brief: Option<String>,
@@ -322,12 +319,7 @@ pub async fn pending_steer(
         interrupt,
     ) = row;
 
-    // Read rather than guessed past, as every other stored state word is: a
-    // target this build does not understand is a database written by a
-    // Verkstead this one is not.
-    let declared = target.clone();
-    let target = target.as_deref().map(Lifecycle::read).transpose()?;
-    let declared = declared.filter(|_| target == Some(Lifecycle::Declared));
+    let target = target.as_deref().map(State::named);
 
     let added: Vec<(i64, String, Option<String>, String)> = sqlx::query_as(
         "SELECT repo_id, mode, base_ref, branch
@@ -355,7 +347,6 @@ pub async fn pending_steer(
         at,
         form: PendingForm {
             target,
-            declared,
             brief,
             digest: digest != 0,
             instruction,
@@ -414,11 +405,7 @@ pub async fn save_pending_steer(
              investigation = ?, profile_id = ?, model = ?, interrupt = ?
          WHERE conversation_id = ?",
     )
-    .bind(match form.target {
-        // A declared state is written by its own word.
-        Some(Lifecycle::Declared) => form.declared.as_deref(),
-        target => target.map(Lifecycle::stored),
-    })
+    .bind(form.target.as_ref().map(State::stored))
     .bind(form.brief.as_deref())
     .bind(i64::from(form.digest))
     .bind(form.instruction.as_deref())

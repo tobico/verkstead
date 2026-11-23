@@ -81,11 +81,7 @@ export type Status = {
 /// where a finished one got to is the state itself — so the line is the state
 /// on its own rather than the same word said twice with a colour between.
 export function status(conversation: ConversationView): Status {
-  const state = stateWord(
-    conversation.process,
-    conversation.state,
-    conversation.declared_state,
-  );
+  const state = stateWord(conversation.process, conversation.state);
 
   // The work is on its way to another machine, which is the one thing that
   // outranks everything below: from the press until it lands, what this
@@ -101,7 +97,7 @@ export function status(conversation: ConversationView): Status {
     };
   }
 
-  if (conversation.state === "Draft" || ENDED.has(conversation.state)) {
+  if (conversation.state === "draft" || ENDED.has(conversation.state)) {
     return { word: null, state, attention: false };
   }
 

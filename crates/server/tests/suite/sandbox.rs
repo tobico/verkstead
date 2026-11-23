@@ -1155,9 +1155,16 @@ async fn grilling_with(
         });
     }
 
-    store::start_grilling(&pool, id, &commit, &worktree, &checkouts)
-        .await
-        .unwrap();
+    store::start_in(
+        &pool,
+        id,
+        &store::State::named("grilling"),
+        &commit,
+        &worktree,
+        &checkouts,
+    )
+    .await
+    .unwrap();
 
     let conversation = store::load_conversation(&pool, id)
         .await
@@ -1720,13 +1727,9 @@ async fn a_repo_repointed_runs_its_next_session_as_the_new_author() {
 
     // The grilling is live, which refuses a repoint — so it is put over first,
     // and the session built after stands in for the next one on the Repo.
-    store::set_state(
-        &fixture.pool,
-        fixture.conversation.id,
-        store::Lifecycle::Done,
-    )
-    .await
-    .unwrap();
+    store::set_state(&fixture.pool, fixture.conversation.id, store::State::done())
+        .await
+        .unwrap();
 
     let app =
         verkstead_server::router_keeping(fixture.pool.clone(), fixture.state.path().to_owned());

@@ -56,11 +56,15 @@ use crate::store;
 /// on those Answers at the path this session will open them — which is a
 /// question about the Data Directory as well as about the record. See
 /// [`OnAnswers`].
-pub(crate) async fn settled(state: &AppState, conversation_id: i64) -> Result<Option<String>> {
+pub(crate) async fn settled(
+    state: &AppState,
+    conversation_id: i64,
+    standing: &store::State,
+) -> Result<Option<String>> {
     let timeline = store::timeline(&state.pool, conversation_id).await?;
 
-    let Some(opened) = steered(&timeline)
-        .or_else(|| briefed(&timeline))
+    let Some(opened) = steered(&timeline, standing)
+        .or_else(|| briefed(&timeline, standing))
         .map(|(at, _)| at)
     else {
         return Ok(None);
@@ -72,7 +76,7 @@ pub(crate) async fn settled(state: &AppState, conversation_id: i64) -> Result<Op
     // this one are all above it. See [`window`], which is why that is not the
     // same event as the one the brief was read off.
     Ok(Some(crate::grillings::settled(
-        &timeline[window(&timeline, opened) + 1..],
+        &timeline[window(&timeline, standing, opened) + 1..],
         &OnAnswers::of(state, conversation_id).await,
     )))
 }
@@ -84,17 +88,18 @@ pub(crate) async fn settled(state: &AppState, conversation_id: i64) -> Result<Op
 /// the one it is in now is the last. Carrying a brief, because that is what a
 /// session is started on: a steer without one is refused, so a Steer Event with
 /// nothing under its target is a record from before Follow-up existed.
-fn steered(timeline: &[store::TimelineEvent]) -> Option<(usize, &str)> {
+fn steered<'a>(
+    timeline: &'a [store::TimelineEvent],
+    standing: &store::State,
+) -> Option<(usize, &'a str)> {
     timeline
         .iter()
         .enumerate()
         .rev()
         .find_map(|(at, event)| match &event.event {
-            store::Event::Steer(
-                store::Steered::Built(store::Lifecycle::FollowUp),
-                Some(brief),
-                _,
-            ) => Some((at, brief.as_str())),
+            store::Event::Steer(target, Some(brief), _) if target == standing => {
+                Some((at, brief.as_str()))
+            }
             _ => None,
         })
 }
@@ -114,13 +119,16 @@ fn steered(timeline: &[store::TimelineEvent]) -> Option<(usize, &str)> {
 /// Read only where there is no steer above them — a Tinker steered into Follow-up
 /// a second time is having the steer's follow-up, not its first one all over
 /// again.
-fn briefed(timeline: &[store::TimelineEvent]) -> Option<(usize, &str)> {
+fn briefed<'a>(
+    timeline: &'a [store::TimelineEvent],
+    standing: &store::State,
+) -> Option<(usize, &'a str)> {
     let brief = timeline.iter().rev().find_map(|event| match &event.event {
         store::Event::Brief(markdown) => Some(markdown.as_str()),
         _ => None,
     })?;
 
-    Some((entered(timeline)?, brief))
+    Some((entered(timeline, standing)?, brief))
 }
 
 /// Where this follow-up's rounds begin, given the Event its brief was read off.
@@ -145,18 +153,18 @@ fn briefed(timeline: &[store::TimelineEvent]) -> Option<(usize, &str)> {
 /// `None` from [`entered`] is a Timeline with no move into Follow-up on it at
 /// all, which is a record from before the move was written down. Then the Event
 /// the brief came off is the window, as it always was.
-fn window(timeline: &[store::TimelineEvent], brief_at: usize) -> usize {
-    entered(timeline).map_or(brief_at, |moved| brief_at.max(moved))
+fn window(timeline: &[store::TimelineEvent], standing: &store::State, brief_at: usize) -> usize {
+    entered(timeline, standing).map_or(brief_at, |moved| brief_at.max(moved))
 }
 
 /// The newest move into Follow-up on this Timeline.
-fn entered(timeline: &[store::TimelineEvent]) -> Option<usize> {
+fn entered(timeline: &[store::TimelineEvent], standing: &store::State) -> Option<usize> {
     timeline
         .iter()
         .enumerate()
         .rev()
         .find_map(|(at, event)| match &event.event {
-            store::Event::Moved(store::Lifecycle::FollowUp) => Some(at),
+            store::Event::Moved(state) if state == standing => Some(at),
             _ => None,
         })
 }
@@ -164,24 +172,33 @@ fn entered(timeline: &[store::TimelineEvent]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::Lifecycle;
+    use crate::store::State;
+
+    /// The id Develop gives the state a follow-up is had in, which every
+    /// reading here is made against.
+    const FOLLOW_UP: &str = "follow-up";
+
+    /// That state, as the reading takes it.
+    fn following_up() -> State {
+        State::named(FOLLOW_UP)
+    }
 
     /// A move onto a Timeline, which is the Event the window opens at.
-    fn moved(state: Lifecycle) -> store::TimelineEvent {
+    fn moved(state: &str) -> store::TimelineEvent {
         store::TimelineEvent {
             id: 1,
             at: "2026-09-26T12:00:00Z".to_owned(),
-            event: store::Event::Moved(state),
+            event: store::Event::Moved(State::named(state)),
         }
     }
 
     /// And the human's own line above one, with the brief they steered with.
-    fn steer(target: Lifecycle) -> store::TimelineEvent {
+    fn steer(target: &str) -> store::TimelineEvent {
         store::TimelineEvent {
             id: 2,
             at: "2026-09-26T12:00:00Z".to_owned(),
             event: store::Event::Steer(
-                store::Steered::Built(target),
+                State::named(target),
                 Some("Say what came of it\n".to_owned()),
                 None,
             ),
@@ -192,13 +209,9 @@ mod tests {
     /// move and the Sets under it are this follow-up's.
     #[test]
     fn the_window_is_the_move_the_steer_wrote() {
-        let timeline = [
-            moved(Lifecycle::Wrapping),
-            steer(Lifecycle::FollowUp),
-            moved(Lifecycle::FollowUp),
-        ];
+        let timeline = [moved("wrapping"), steer(FOLLOW_UP), moved(FOLLOW_UP)];
 
-        assert_eq!(window(&timeline, 1), 2);
+        assert_eq!(window(&timeline, &following_up(), 1), 2);
     }
 
     /// And a follow-up an investigation was steered out of opens its window at
@@ -210,15 +223,15 @@ mod tests {
     #[test]
     fn a_follow_up_put_back_opens_its_window_where_it_came_back() {
         let timeline = [
-            steer(Lifecycle::FollowUp),
-            moved(Lifecycle::FollowUp),
-            steer(Lifecycle::Investigating),
-            moved(Lifecycle::Investigating),
-            moved(Lifecycle::FollowUp),
+            steer(FOLLOW_UP),
+            moved(FOLLOW_UP),
+            steer("investigating"),
+            moved("investigating"),
+            moved(FOLLOW_UP),
         ];
 
         assert_eq!(
-            window(&timeline, 0),
+            window(&timeline, &following_up(), 0),
             4,
             "the investigation's rounds are above the window rather than in it",
         );
@@ -228,9 +241,9 @@ mod tests {
     /// off the move the start wrote, so the two are already the same Event.
     #[test]
     fn a_tinkers_window_is_the_move_its_brief_was_found_against() {
-        let timeline = [moved(Lifecycle::FollowUp)];
+        let timeline = [moved(FOLLOW_UP)];
 
-        assert_eq!(window(&timeline, 0), 0);
+        assert_eq!(window(&timeline, &following_up(), 0), 0);
     }
 
     /// And a Timeline with no move into Follow-up on it is a record from before
@@ -238,8 +251,8 @@ mod tests {
     /// always was.
     #[test]
     fn a_record_with_no_move_into_follow_up_windows_at_the_brief() {
-        let timeline = [moved(Lifecycle::Wrapping), steer(Lifecycle::FollowUp)];
+        let timeline = [moved("wrapping"), steer(FOLLOW_UP)];
 
-        assert_eq!(window(&timeline, 1), 1);
+        assert_eq!(window(&timeline, &following_up(), 1), 1);
     }
 }

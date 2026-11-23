@@ -83,6 +83,22 @@ pub enum Lacking {
     /// several it has, so nothing could be committed in it there.
     RepoAuthorUnpicked { name: String, companion: bool },
 
+    /// No plugin on that device provides the Process the Conversation is on.
+    ///
+    /// Every Process is data in a plugin (ADR-0030, *Process*), so a
+    /// Conversation moved onto a device that holds no plugin providing its
+    /// Process is one nothing over there could drive: it would land and stop
+    /// with the plugin's trouble as its Notice. What puts it right is
+    /// installing the plugin over there, which is an errand on that machine
+    /// like the repository and the harness beside it.
+    Process {
+        /// What this device calls it — the name its manifest gives the
+        /// Process, which is what the human picked it by. Its id where this
+        /// device holds no manifest for it either, which is legible where a
+        /// blank would not be.
+        name: String,
+    },
+
     /// The harness a Pairing names is not on that device's `PATH`.
     Harness {
         /// The role whose Pairing wants it, as its Process labels it.
@@ -235,9 +251,27 @@ pub struct ConversationAcross {
     pub branch_named: bool,
     pub naming: bool,
 
-    /// The state it is in, which is what the far end's Resume asks its question
-    /// of.
-    pub state: crate::Lifecycle,
+    /// The state it is in, which is what the far end.s Resume asks its question
+    /// of: the word its `state` column holds, read over there against the
+    /// Process below (ADR-0030, *Process*).
+    pub state: String,
+
+    /// And which Process that is: the uuid of the plugin providing it and the
+    /// id its manifest gives it there.
+    ///
+    /// **Cluster-wide by construction**, which is why it crosses unchanged: a
+    /// plugin is one uuid on every device, and what the Process is called, what
+    /// its states are called and what each of them runs are that manifest's to
+    /// say — so the far end reads where the work stands against the same
+    /// manifest this one did. A device holding no plugin for it is refused the
+    /// move before anything crosses, naming the Process; see
+    /// [`Lacking::Process`].
+    ///
+    /// `None` is a copy from a release that sent none, which reads as the
+    /// store's own default — the reading every Conversation from before there
+    /// were Processes has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process: Option<ProcessAcross>,
 
     /// Its **Rank**, verbatim.
     pub rank: String,
@@ -250,6 +284,17 @@ pub struct ConversationAcross {
     /// crosses carrying names the far end may never have seen. Each arrives
     /// under its own name and is written down under it.
     pub pairings: Vec<RoleAcross>,
+}
+
+/// Which Process a Conversation is on, as it crosses: the plugin providing it
+/// and the id its manifest gives the Process there.
+///
+/// Its own shape rather than the viewer's `ProvidedProcess`: nothing here is a
+/// viewer type, and the two ends of this are two Verksteads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessAcross {
+    pub plugin: String,
+    pub id: String,
 }
 
 /// One role's name and what it has settled, as they cross.
@@ -348,7 +393,7 @@ pub struct StageReport {
     pub born: BirthKey,
 
     /// The state its live copy is in.
-    pub state: crate::Lifecycle,
+    pub state: String,
 
     /// Whether it has ever moved to Done.
     pub done: bool,

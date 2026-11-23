@@ -2473,9 +2473,10 @@ mod tests {
         assert!(add(&companion, &alongside_path, "rate-limiting", "HEAD"));
         assert!(add(&repo, &orphan, "abandoned", "HEAD"));
 
-        store::start_grilling(
+        store::start_in(
             &pool,
             id,
+            &store::State::named("grilling"),
             "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
             &own,
             &[store::CompanionWorktree {

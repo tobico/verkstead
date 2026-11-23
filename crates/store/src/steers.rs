@@ -57,7 +57,8 @@ use anyhow::{Context, Result};
 use sqlx::SqlitePool;
 use sqlx::{Sqlite, Transaction};
 
-use super::{CompanionMode, Lifecycle, Pairing};
+use super::conversations::State;
+use super::{CompanionMode, Pairing};
 
 /// Everything one steer settled that its Event's own body does not carry.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,14 +84,13 @@ pub struct SteerRecord {
     /// And the ones already there it opened up, one per row ticked up.
     pub upgraded: Vec<SteerUpgrade>,
 
-    /// The state the steer found the Conversation in, which is where a steer
-    /// into Investigating goes back to when the human says there is nothing
-    /// else.
+    /// The state the steer found the Conversation in, which is where a detour
+    /// goes back to when its Activity ends.
     ///
     /// `None` is a steer recorded before this was written down, which is not an
     /// error anywhere: ADR-0006's rule again — a record is read as it was
     /// written.
-    pub source: Option<Lifecycle>,
+    pub source: Option<State>,
 }
 
 /// What one checkout already held uncommitted when a steer went in.
@@ -596,7 +596,7 @@ async fn additions(
 async fn sources(
     connection: &mut sqlx::SqliteConnection,
     conversation_id: i64,
-) -> Result<HashMap<i64, Lifecycle>> {
+) -> Result<HashMap<i64, State>> {
     let rows: Vec<(i64, String)> = sqlx::query_as(
         "SELECT f.event_id, f.state
          FROM steer_sources f
@@ -610,12 +610,10 @@ async fn sources(
         format!("reading what the steers of Conversation {conversation_id} came out of")
     })?;
 
-    rows.into_iter()
-        // Read rather than guessed past, as every other stored state word is: a
-        // state this build does not know is a database written by a Verkstead
-        // this one is not.
-        .map(|(event_id, state)| Ok((event_id, Lifecycle::read(&state)?)))
-        .collect()
+    Ok(rows
+        .into_iter()
+        .map(|(event_id, state)| (event_id, State::named(&state)))
+        .collect())
 }
 
 /// And the ones each opened up, read the same way and in the same order.
@@ -650,9 +648,7 @@ async fn upgrades(
     Ok(upgraded)
 }
 
-/// The newest Steer on a Conversation's Timeline, by the words its rows hold —
-/// a declared state by its own id, which [`Lifecycle`] reads as nothing but
-/// declared.
+/// The newest Steer on a Conversation.s Timeline, by the words its rows hold.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LatestSteer {
     /// The Steer Event's id.

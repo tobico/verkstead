@@ -2105,7 +2105,7 @@ function Moved(props: {
   process: ProvidedProcess;
 }): JSX.Element {
   const word = (moved: MovedEvent | null) =>
-    stateWord(props.process, moved?.state ?? "Draft", moved?.declared);
+    stateWord(props.process, moved?.state ?? "draft");
   const tone = () => styles[props.moved.state.toLowerCase()];
 
   return (
@@ -2162,7 +2162,7 @@ function Steered(props: {
         classList={tone() === undefined ? {} : { [tone()!]: true }}
       >
         You steered this into{" "}
-        {stateWord(props.process, props.steer.target, props.steer.declared)}
+        {stateWord(props.process, props.steer.target)}
         .
       </p>
       <Show when={props.steer.html}>

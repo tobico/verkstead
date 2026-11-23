@@ -458,7 +458,36 @@ async fn carried_out(state: &AppState, conversation_id: i64) {
 /// the log: a Conversation closed out from under the session that wrote the
 /// backlog is not one to start building.
 async fn built_instead(state: &AppState, conversation_id: i64) {
-    match store::implement_again(&state.pool, conversation_id).await {
+    // Out of the state it is wrapping up in and into the one its manifest maps
+    // the task-list Direction to, which is where a backlog is built: a review
+    // answered into splitting work out has made the work a backlog, so the
+    // Process's own answer to *where a backlog is built* is where it goes.
+    let Some(conversation) = store::load_conversation(&state.pool, conversation_id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        return tracing::error!(
+            conversation_id,
+            "there is no Conversation left to build the backlog its review wrote"
+        );
+    };
+
+    let standing = store::State::named(crate::processes::standing_in(&conversation));
+
+    let Some(building) = crate::processes::directed(
+        state,
+        &conversation.process,
+        verkstead_schema::Direction::TaskList,
+    ) else {
+        return tracing::error!(
+            conversation_id,
+            "the Process of a review that split work out maps no state to build a backlog in, \
+             so the backlog was not started"
+        );
+    };
+
+    match store::implement_again(&state.pool, conversation_id, &standing, &building).await {
         Ok(store::Rebuilding::Started) => {}
         Ok(store::Rebuilding::NotWrapping) => {
             return tracing::info!(

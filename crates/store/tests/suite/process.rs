@@ -17,8 +17,8 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    AdoptedPullRequest, Edited, Process, hold_pull_request, load_conversation, open_database,
-    process, register_repo, save_brief, set_process, start_conversation, start_grilling,
+    AdoptedPullRequest, Edited, Process, State, hold_pull_request, load_conversation,
+    open_database, process, register_repo, save_brief, set_process, start_conversation, start_in,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -330,9 +330,10 @@ async fn a_pick_is_refused_from_the_moment_the_branch_is_cut() {
     let (_dir, pool) = fresh_pool().await;
     let id = drafting(&pool).await;
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         Path::new("/state/worktrees/rate-limiting"),
         &[],
@@ -394,50 +395,75 @@ async fn a_process_survives_a_restart() {
 #[tokio::test]
 async fn the_five_stored_before_processes_were_data_read_on() {
     use verkstead_schema::Direction;
-    use verkstead_store::Lifecycle;
+    use verkstead_store::State;
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("verkstead.db");
     let stored = [
-        (Process::develop(), "grilling", Lifecycle::Grilling, None),
+        (
+            Process::develop(),
+            "grilling",
+            State::named("grilling"),
+            None,
+        ),
         (
             Process::develop(),
             "implementing",
-            Lifecycle::Implementing,
+            State::named("implementing"),
             Some(Direction::Inline),
         ),
         (
             Process::develop(),
             "implementing",
-            Lifecycle::Implementing,
+            State::named("implementing"),
             Some(Direction::TaskList),
         ),
         (
             Process::develop(),
             "implementing",
-            Lifecycle::Implementing,
+            State::named("implementing"),
             Some(Direction::Roadmap),
         ),
-        (Process::develop(), "wrapping", Lifecycle::Wrapping, None),
-        (Process::develop(), "follow-up", Lifecycle::FollowUp, None),
+        (
+            Process::develop(),
+            "wrapping",
+            State::named("wrapping"),
+            None,
+        ),
+        (
+            Process::develop(),
+            "follow-up",
+            State::named("follow-up"),
+            None,
+        ),
         (
             Process::develop(),
             "investigating",
-            Lifecycle::Investigating,
+            State::named("investigating"),
             None,
         ),
-        (Process::tinker(), "follow-up", Lifecycle::FollowUp, None),
+        (
+            Process::tinker(),
+            "follow-up",
+            State::named("follow-up"),
+            None,
+        ),
         (
             Process::investigate(),
             "investigating",
-            Lifecycle::Investigating,
+            State::named("investigating"),
             None,
         ),
-        (Process::review(), "wrapping", Lifecycle::Wrapping, None),
+        (
+            Process::review(),
+            "wrapping",
+            State::named("wrapping"),
+            None,
+        ),
         (
             Process::fix_merge_issues(),
             "wrapping",
-            Lifecycle::Wrapping,
+            State::named("wrapping"),
             None,
         ),
     ];
@@ -490,10 +516,10 @@ async fn the_five_stored_before_processes_were_data_read_on() {
         // stored before any of this is worded off its Process's manifest with
         // nothing rewritten.
         assert_eq!(
-            conversation.declared_state.as_deref(),
-            match lifecycle {
-                Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => None,
-                state => Some(state.stored()),
+            conversation.state.declared(),
+            match lifecycle.verksteads() {
+                true => None,
+                false => Some(lifecycle.stored()),
             },
             "{picked:?}"
         );

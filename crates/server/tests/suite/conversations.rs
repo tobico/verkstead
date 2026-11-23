@@ -25,12 +25,11 @@ use verkstead_render::{
     Broken, CheckRollup, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle, Merging, OtherAuthor,
-    PickedView, PinnedEvent, ProcessPicked, ProfileChosen, ProfileSaved, ProfileTrouble,
-    ProvidedProcess, Registered, RepoEntry, RepoSwitched, Resolved, Resumed, RoadmapPane,
-    RoleWanted, ShowingArchived, StageState, Standing, Started, SteerCancelled,
-    SteerCompanionRefusal, SteerOpened, SteerPairingView, SteerSaved, TakenUp, TargetRecorded,
-    TimelineEvent, Uncommitted,
+    ConversationUnarchived, ConversationView, GrillingStarted, Merging, OtherAuthor, PickedView,
+    PinnedEvent, ProcessPicked, ProfileChosen, ProfileSaved, ProfileTrouble, ProvidedProcess,
+    Registered, RepoEntry, RepoSwitched, Resolved, Resumed, RoadmapPane, RoleWanted,
+    ShowingArchived, StageState, Standing, Started, SteerCancelled, SteerCompanionRefusal,
+    SteerOpened, SteerPairingView, SteerSaved, TakenUp, TargetRecorded, TimelineEvent, Uncommitted,
 };
 use verkstead_server::plugins::built_in::DEVELOP;
 use verkstead_server::settings::{Author, Recorded, Settings};
@@ -313,11 +312,11 @@ fn briefs(view: &ConversationView) -> Vec<&verkstead_render::BriefEvent> {
 }
 
 /// The states a Conversation's Timeline says it has moved through, in order.
-fn moves(view: &ConversationView) -> Vec<Lifecycle> {
+fn moves(view: &ConversationView) -> Vec<String> {
     view.timeline
         .iter()
         .filter_map(|event| match event {
-            TimelineEvent::Moved(moved) => Some(moved.state),
+            TimelineEvent::Moved(moved) => Some(moved.state.clone()),
             _ => None,
         })
         .collect()
@@ -416,7 +415,7 @@ async fn a_conversation_starts_against_a_registered_repo_and_appears_in_the_side
     assert_eq!(sidebar.len(), 1);
     assert_eq!(sidebar[0].id, id);
     assert_eq!(sidebar[0].repo, "verkstead");
-    assert_eq!(sidebar[0].state, Lifecycle::Draft);
+    assert_eq!(sidebar[0].state, "draft");
 
     // The branch is the row's name, so there has to be one from the start.
     assert!(!sidebar[0].branch.is_empty());
@@ -489,7 +488,7 @@ async fn opening_a_conversation_brings_its_repo_and_its_timeline_with_it() {
         repo.canonicalize().unwrap().to_str().unwrap()
     );
     assert_eq!(view.repo.default_branch, "main");
-    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.state, "draft");
 
     // No override, which is the default-branch rule rather than a missing value.
     assert_eq!(view.base_commit, None);
@@ -1992,12 +1991,12 @@ async fn steer_grilling(app: &Router, id: i64, brief: Option<&str>) -> Conversat
 /// Both kinds together, because what a steer leaves is the pair — the human's
 /// own line and the machine's move under it — and a reading that kept only one
 /// of them could not say they stand beside each other.
-fn steered(view: &ConversationView) -> Vec<(&'static str, Lifecycle)> {
+fn steered(view: &ConversationView) -> Vec<(&'static str, &str)> {
     view.timeline
         .iter()
         .filter_map(|event| match event {
-            TimelineEvent::Steer(steer) => Some(("steer", steer.target)),
-            TimelineEvent::Moved(moved) => Some(("moved", moved.state)),
+            TimelineEvent::Steer(steer) => Some(("steer", steer.target.as_str())),
+            TimelineEvent::Moved(moved) => Some(("moved", moved.state.as_str())),
             _ => None,
         })
         .collect()
@@ -2055,8 +2054,8 @@ async fn starting_a_grilling_makes_the_branch_and_the_worktree() {
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Grilling);
-    assert_eq!(moves(&view), [Lifecycle::Grilling]);
+    assert_eq!(view.state, "grilling");
+    assert_eq!(moves(&view), ["grilling"]);
 
     // The branch is in the Repo's own git directory, not in the worktree.
     assert!(
@@ -2200,10 +2199,10 @@ async fn starting_a_tinker_lands_it_in_follow_up() {
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::FollowUp);
+    assert_eq!(view.state, "follow-up");
     assert_eq!(
         moves(&view),
-        [Lifecycle::FollowUp],
+        ["follow-up"],
         "one move, straight past the state a Develop would have been grilled in",
     );
 
@@ -2271,7 +2270,7 @@ async fn starting_a_tinker_checks_its_companions_out_too() {
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::FollowUp);
+    assert_eq!(view.state, "follow-up");
     assert_eq!(view.companions.len(), 1);
 
     let worktree = view.companions[0]
@@ -2372,10 +2371,10 @@ async fn starting_an_investigate_lands_it_in_investigating() {
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Investigating);
+    assert_eq!(view.state, "investigating");
     assert_eq!(
         moves(&view),
-        [Lifecycle::Investigating],
+        ["investigating"],
         "one move, straight past the state a Develop would have been grilled in",
     );
 
@@ -2445,7 +2444,7 @@ async fn starting_an_investigate_checks_its_companions_out_too() {
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Investigating);
+    assert_eq!(view.state, "investigating");
     assert_eq!(view.companions.len(), 1);
 
     let worktree = view.companions[0]
@@ -2699,7 +2698,7 @@ async fn a_fetch_that_fails_refuses_the_start_by_name() {
 
     // And nothing was made on the way to finding out.
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.state, "draft");
     assert_eq!(view.worktree, None);
     assert_eq!(worktrees(&repo).len(), 1, "only the repository itself");
 }
@@ -2829,7 +2828,7 @@ async fn starting_is_refused_when_the_base_branch_no_longer_resolves() {
 
     // And nothing was made on the way to finding out.
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.state, "draft");
     assert_eq!(view.worktree, None);
     assert!(worktrees(&repo).len() == 1, "only the repository itself");
 }
@@ -2850,7 +2849,7 @@ async fn starting_is_refused_when_the_named_branch_is_already_there() {
     assert_eq!(grill(&app, id).await, GrillingStarted::BranchExists);
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.state, "draft");
     assert_eq!(view.branch, "rate-limiting", "and the name is still theirs");
 }
 
@@ -2874,7 +2873,7 @@ async fn starting_is_refused_when_the_named_branch_is_a_path_git_will_not_give()
     assert_eq!(grill(&app, id).await, GrillingStarted::BranchExists);
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.state, "draft");
     assert_eq!(view.worktree, None);
     assert_eq!(worktrees(&repo).len(), 1, "only the repository itself");
 }
@@ -3195,7 +3194,7 @@ async fn a_companion_that_cannot_be_delivered_refuses_the_start_by_name() {
         );
 
         let view = opened(&app, id).await;
-        assert_eq!(view.state, Lifecycle::Draft, "{why:?}");
+        assert_eq!(view.state, "draft", "{why:?}");
         assert_eq!(view.worktree, None, "{why:?}");
         assert_eq!(view.companions[0].worktree, None, "{why:?}");
         assert!(!has_branch(&repo, &view.branch), "{why:?}");
@@ -3243,7 +3242,7 @@ async fn a_companion_with_a_branch_in_the_way_refuses_the_start_by_both_names() 
         // And nothing made anywhere on the way to finding out, the same as every
         // other question asked before the making.
         let view = opened(&app, id).await;
-        assert_eq!(view.state, Lifecycle::Draft, "{blocker}");
+        assert_eq!(view.state, "draft", "{blocker}");
         assert_eq!(view.worktree, None, "{blocker}");
         assert_eq!(view.companions[0].worktree, None, "{blocker}");
         assert!(!has_branch(&repo, &view.branch), "{blocker}");
@@ -3294,7 +3293,7 @@ async fn a_start_refused_over_a_companion_unmakes_the_checkouts_it_had_made() {
 
     // The Conversation is where it was, and so is every repository it touched.
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.state, "draft");
     assert_eq!(view.worktree, None);
     assert!(view.companions.iter().all(|one| one.worktree.is_none()));
 
@@ -3493,7 +3492,7 @@ async fn starting_on_a_repo_whose_author_has_no_email_is_refused_by_name() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Draft, "the press did not happen");
+    assert_eq!(view.state, "draft", "the press did not happen");
     assert_eq!(view.worktree, None);
     assert!(!has_branch(&repo, &branch));
 }
@@ -3550,7 +3549,7 @@ async fn starting_on_a_repo_whose_author_is_gone_is_refused_naming_the_repo() {
         assert_eq!(grill(&app, id).await, gone);
 
         let view = opened(&app, id).await;
-        assert_eq!(view.state, Lifecycle::Draft, "the press did not happen");
+        assert_eq!(view.state, "draft", "the press did not happen");
         assert_eq!(view.worktree, None);
         assert!(!has_branch(&repo, &branch));
     }
@@ -3989,7 +3988,7 @@ async fn a_companion_repointed_since_its_add_refuses_the_cut() {
     );
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Draft, "the press did not happen");
+    assert_eq!(view.state, "draft", "the press did not happen");
     assert_eq!(view.worktree, None);
     assert!(!has_branch(&repo, &branch));
 
@@ -4045,7 +4044,7 @@ async fn starting_with_no_git_author_is_refused_by_name() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Draft, "the press did not happen");
+    assert_eq!(view.state, "draft", "the press did not happen");
     assert_eq!(view.worktree, None);
     assert!(
         !has_branch(&repo, &branch),
@@ -4084,7 +4083,7 @@ async fn pressing_steer_stops_the_drive_and_opens_a_pending_steer() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Grilling, "the press moves nothing");
+    assert_eq!(view.state, "grilling", "the press moves nothing");
     assert!(
         view.blocked_on.is_some(),
         "the drive has stopped, and the Notice saying so is what the badge points at",
@@ -4099,7 +4098,7 @@ async fn pressing_steer_stops_the_drive_and_opens_a_pending_steer() {
     );
     assert_eq!(
         steered(&view),
-        [("moved", Lifecycle::Grilling)],
+        [("moved", "grilling")],
         "and nothing was steered, so nothing on the record says it was",
     );
 
@@ -4148,7 +4147,7 @@ async fn a_second_press_on_steer_finds_the_one_there_is() {
     );
     assert_eq!(
         steered(&view),
-        [("moved", Lifecycle::Grilling)],
+        [("moved", "grilling")],
         "neither press put anything on the record",
     );
 }
@@ -4177,14 +4176,14 @@ async fn cancelling_takes_the_pending_steer_away_and_leaves_it_stopped() {
         view.pending_steer.is_none(),
         "the form is gone, so nothing is drawn at the end of the Timeline",
     );
-    assert_eq!(view.state, Lifecycle::Grilling, "and nothing moved");
+    assert_eq!(view.state, "grilling", "and nothing moved");
     assert!(
         view.ready_to_resume,
         "the Conversation is left stopped, with Resume on offer",
     );
     assert_eq!(
         steered(&view),
-        [("moved", Lifecycle::Grilling)],
+        [("moved", "grilling")],
         "and a steer that decided nothing is no Event",
     );
 
@@ -4222,7 +4221,7 @@ async fn submitting_takes_the_pending_steer_away_with_the_record() {
     );
     assert_eq!(
         steered(&view).last(),
-        Some(&("moved", Lifecycle::Done)),
+        Some(&("moved", "done")),
         "and the pair the steer leaves is on the record",
     );
 }
@@ -4326,7 +4325,7 @@ async fn resuming_discards_the_pending_steer_it_starts_over() {
     );
     assert_eq!(
         steered(&view),
-        [("moved", Lifecycle::Grilling)],
+        [("moved", "grilling")],
         "and a steer nobody submitted is still no Event",
     );
 }
@@ -4414,7 +4413,7 @@ async fn closing_takes_the_pending_steer_away() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Closed);
+    assert_eq!(view.state, "closed");
     assert!(
         view.pending_steer.is_none(),
         "the form is gone with the work it was about",
@@ -4662,14 +4661,10 @@ async fn steering_into_done_moves_it_and_starts_nothing() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Done);
+    assert_eq!(view.state, "done");
     assert_eq!(
         steered(&view),
-        [
-            ("moved", Lifecycle::Grilling),
-            ("steer", Lifecycle::Done),
-            ("moved", Lifecycle::Done),
-        ],
+        [("moved", "grilling"), ("steer", "done"), ("moved", "done"),],
         "the human's own Event carrying the target, and the plain move under it",
     );
     assert_eq!(
@@ -4702,7 +4697,7 @@ async fn a_draft_is_somewhere_to_steer_from_too() {
     assert_eq!(steer(&app, id).await, SteerOpened::Opened);
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.state, "draft");
     assert_eq!(
         view.blocked_on, None,
         "there was no drive to stop, so nothing was written down as stopped",
@@ -4714,11 +4709,8 @@ async fn a_draft_is_somewhere_to_steer_from_too() {
     );
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Done);
-    assert_eq!(
-        steered(&view),
-        [("steer", Lifecycle::Done), ("moved", Lifecycle::Done)],
-    );
+    assert_eq!(view.state, "done");
+    assert_eq!(steered(&view), [("steer", "done"), ("moved", "done")],);
 }
 
 /// A Draft steered into Grilling gets everything a pressed *Start grilling*
@@ -4748,13 +4740,10 @@ async fn steering_a_draft_into_grilling_makes_its_branch_and_worktree() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(view.state, "grilling");
     assert_eq!(
         steered(&view),
-        [
-            ("steer", Lifecycle::Grilling),
-            ("moved", Lifecycle::Grilling)
-        ],
+        [("steer", "grilling"), ("moved", "grilling")],
     );
     assert_eq!(
         view.base_commit.as_deref(),
@@ -4819,7 +4808,7 @@ async fn steering_into_grilling_without_a_brief_writes_none() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(view.state, "grilling");
     assert_eq!(
         briefs(&view)
             .iter()
@@ -4863,7 +4852,7 @@ async fn steering_into_grilling_with_no_brief_anywhere_is_refused_by_name() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Draft, "it is where it was");
+    assert_eq!(view.state, "draft", "it is where it was");
     assert_eq!(
         steered(&view),
         [],
@@ -4879,7 +4868,7 @@ async fn steering_into_grilling_with_no_brief_anywhere_is_refused_by_name() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(view.state, "grilling");
     assert_eq!(
         briefs(&view)
             .iter()
@@ -4955,7 +4944,7 @@ async fn a_conversation_whose_profile_was_removed_is_steered_back_onto_another()
             .id,
         rescue,
     );
-    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(view.state, "grilling");
 }
 
 /// The Pairing picked on the form for a steer into Grilling is the *grilling*
@@ -5093,6 +5082,7 @@ async fn steering_into_wrapping_leaves_a_review_account_the_human_chose_alone() 
                 base: None,
                 repo: None,
             },
+            &store::State::named("wrapping"),
         )
         .await
         .unwrap(),
@@ -5211,6 +5201,7 @@ async fn steering_into_wrapping_fills_a_review_nobody_picked_an_account_for() {
                 base: None,
                 repo: None,
             },
+            &store::State::named("wrapping"),
         )
         .await
         .unwrap(),
@@ -5275,6 +5266,7 @@ async fn steering_into_wrapping_leaves_a_conversation_with_no_review_unreviewed(
                 base: None,
                 repo: None,
             },
+            &store::State::named("wrapping"),
         )
         .await
         .unwrap(),
@@ -5355,10 +5347,10 @@ async fn steering_into_implementing_with_nothing_to_do_is_refused_by_name() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Grilling, "so nothing moved");
+    assert_eq!(view.state, "grilling", "so nothing moved");
     assert_eq!(
         steered(&view),
-        [("moved", Lifecycle::Grilling)],
+        [("moved", "grilling")],
         "and nothing on the record says it was steered",
     );
     assert!(
@@ -5394,13 +5386,13 @@ async fn steering_into_implementing_with_an_instruction_records_what_was_asked_f
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Implementing);
+    assert_eq!(view.state, "implementing");
     assert_eq!(
         steered(&view),
         [
-            ("moved", Lifecycle::Grilling),
-            ("steer", Lifecycle::Implementing),
-            ("moved", Lifecycle::Implementing),
+            ("moved", "grilling"),
+            ("steer", "implementing"),
+            ("moved", "implementing"),
         ],
     );
 
@@ -5456,7 +5448,7 @@ async fn steering_a_closed_conversation_into_grilling_gives_it_a_worktree_back()
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(view.state, "grilling");
     assert_eq!(view.branch, branch, "on the branch closing kept");
 
     // And a round of its own, which is the whole of what a closed Conversation
@@ -5531,7 +5523,7 @@ async fn a_finished_conversation_steered_into_grilling_opens_a_second_round() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(view.state, "grilling");
     assert_eq!(
         view.worktree.as_ref().map(|worktree| worktree.path.clone()),
         Some(worked_in),
@@ -5554,11 +5546,11 @@ async fn a_finished_conversation_steered_into_grilling_opens_a_second_round() {
     assert_eq!(
         steered(&view),
         [
-            ("moved", Lifecycle::Grilling),
-            ("steer", Lifecycle::Done),
-            ("moved", Lifecycle::Done),
-            ("steer", Lifecycle::Grilling),
-            ("moved", Lifecycle::Grilling),
+            ("moved", "grilling"),
+            ("steer", "done"),
+            ("moved", "done"),
+            ("steer", "grilling"),
+            ("moved", "grilling"),
         ],
     );
 }
@@ -5596,6 +5588,7 @@ async fn steering_a_finished_conversation_into_follow_up_records_the_brief() {
                 base: None,
                 repo: None,
             },
+            &store::State::named("wrapping"),
         )
         .await
         .unwrap(),
@@ -5621,16 +5614,16 @@ async fn steering_a_finished_conversation_into_follow_up_records_the_brief() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::FollowUp);
+    assert_eq!(view.state, "follow-up");
     assert_eq!(
         steered(&view),
         [
-            ("moved", Lifecycle::Grilling),
-            ("moved", Lifecycle::Wrapping),
-            ("steer", Lifecycle::Done),
-            ("moved", Lifecycle::Done),
-            ("steer", Lifecycle::FollowUp),
-            ("moved", Lifecycle::FollowUp),
+            ("moved", "grilling"),
+            ("moved", "wrapping"),
+            ("steer", "done"),
+            ("moved", "done"),
+            ("steer", "follow-up"),
+            ("moved", "follow-up"),
         ],
         "the human's own line, and the plain move under it",
     );
@@ -5689,6 +5682,7 @@ async fn steering_a_closed_conversation_into_follow_up_gives_it_a_worktree_back(
                 base: None,
                 repo: None,
             },
+            &store::State::named("wrapping"),
         )
         .await
         .unwrap(),
@@ -5710,15 +5704,12 @@ async fn steering_a_closed_conversation_into_follow_up_gives_it_a_worktree_back(
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::FollowUp);
+    assert_eq!(view.state, "follow-up");
     let moves = steered(&view);
 
     assert_eq!(
         moves[moves.len() - 2..],
-        [
-            ("steer", Lifecycle::FollowUp),
-            ("moved", Lifecycle::FollowUp),
-        ],
+        [("steer", "follow-up"), ("moved", "follow-up"),],
         "steered straight in, with no Done on the way",
     );
     assert_eq!(view.branch, branch, "on the branch closing kept");
@@ -5764,6 +5755,7 @@ async fn steering_into_follow_up_with_nothing_to_follow_up_is_refused_by_name() 
             base: None,
             repo: None,
         },
+        &store::State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -5784,13 +5776,10 @@ async fn steering_into_follow_up_with_nothing_to_follow_up_is_refused_by_name() 
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Wrapping, "so nothing moved");
+    assert_eq!(view.state, "wrapping", "so nothing moved");
     assert_eq!(
         steered(&view),
-        [
-            ("moved", Lifecycle::Grilling),
-            ("moved", Lifecycle::Wrapping),
-        ],
+        [("moved", "grilling"), ("moved", "wrapping"),],
         "and nothing on the record says it was steered",
     );
 }
@@ -5820,10 +5809,10 @@ async fn steering_into_wrapping_without_a_pull_request_is_refused_by_name() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Grilling, "nothing moved");
+    assert_eq!(view.state, "grilling", "nothing moved");
     assert_eq!(
         steered(&view),
-        [("moved", Lifecycle::Grilling)],
+        [("moved", "grilling")],
         "and nothing on the record says it was steered",
     );
     assert!(
@@ -5851,7 +5840,7 @@ async fn a_draft_has_no_pull_request_to_be_steered_onto() {
         ConversationSteered::NoPullRequest,
     );
 
-    assert_eq!(opened(&app, id).await.state, Lifecycle::Draft);
+    assert_eq!(opened(&app, id).await.state, "draft");
 
     // And Done is still there to steer it into, the refusal being about the one
     // target rather than about the Conversation.
@@ -5982,9 +5971,9 @@ async fn closing_removes_the_worktree_and_keeps_the_branch() {
     );
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Closed);
+    assert_eq!(view.state, "closed");
     assert_eq!(view.worktree, None);
-    assert_eq!(moves(&view), [Lifecycle::Grilling, Lifecycle::Closed]);
+    assert_eq!(moves(&view), ["grilling", "closed"]);
 }
 
 /// And every companion's goes the same way, keeping every companion's branch.
@@ -6028,7 +6017,7 @@ async fn closing_removes_every_companion_worktree_and_keeps_their_branches() {
     // And the Conversation has none of them any more, which is the same fact the
     // record tells about its own.
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Closed);
+    assert_eq!(view.state, "closed");
     assert!(view.companions.iter().all(|one| one.worktree.is_none()));
 }
 
@@ -6041,10 +6030,7 @@ async fn closing_twice_is_not_an_error() {
     assert_eq!(close(&app, id).await, ConversationClosed::Closed);
     assert_eq!(close(&app, id).await, ConversationClosed::AlreadyClosed);
 
-    assert_eq!(
-        moves(&opened(&app, id).await),
-        [Lifecycle::Grilling, Lifecycle::Closed]
-    );
+    assert_eq!(moves(&opened(&app, id).await), ["grilling", "closed"]);
 }
 
 /// Closing is reachable from every state this stage can reach, including the
@@ -6057,7 +6043,7 @@ async fn a_drafting_conversation_can_be_closed() {
     assert_eq!(close(&app, id).await, ConversationClosed::Closed);
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Closed);
+    assert_eq!(view.state, "closed");
     assert_eq!(view.worktree, None);
     assert!(!view.ready_to_grill);
 }
@@ -6074,7 +6060,7 @@ async fn closing_a_conversation_whose_worktree_has_already_gone_works() {
     std::fs::remove_dir_all(&path).unwrap();
 
     assert_eq!(close(&app, id).await, ConversationClosed::Closed);
-    assert_eq!(opened(&app, id).await.state, Lifecycle::Closed);
+    assert_eq!(opened(&app, id).await.state, "closed");
     assert_eq!(worktrees(&repo).len(), 1, "git should have let it go too");
 }
 
@@ -6095,7 +6081,7 @@ async fn closing_a_conversation_whose_worktree_git_will_not_remove_sweeps_it_awa
     assert_eq!(close(&app, id).await, ConversationClosed::Closed);
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Closed);
+    assert_eq!(view.state, "closed");
     assert_eq!(view.worktree, None);
     assert!(
         !path.exists(),
@@ -6162,7 +6148,7 @@ async fn a_close_the_browser_left_part_way_through_still_finishes() {
     let mut closed = false;
 
     for _ in 0..200 {
-        closed = opened(&app, id).await.state == Lifecycle::Closed;
+        closed = opened(&app, id).await.state == "closed";
 
         if closed && !path.exists() {
             return;
@@ -6248,10 +6234,10 @@ async fn closing_and_archiving_in_one_press_does_both() {
     assert!(sidebar(&app).await.is_empty());
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Closed);
+    assert_eq!(view.state, "closed");
     assert!(view.archived);
     assert_eq!(view.worktree, None);
-    assert_eq!(moves(&view), [Lifecycle::Grilling, Lifecycle::Closed]);
+    assert_eq!(moves(&view), ["grilling", "closed"]);
 }
 
 /// On one that is closed already it is the archive alone, which is the whole
@@ -6305,7 +6291,7 @@ async fn archiving_a_closed_conversation_takes_it_off_the_sidebar() {
     assert!(sidebar(&app).await.is_empty());
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Closed);
+    assert_eq!(view.state, "closed");
     assert_eq!(
         brief(&view).markdown,
         "# Rate limiting\n\nThe API has none.\n"
@@ -6391,17 +6377,16 @@ async fn stored_state(dir: &tempfile::TempDir, id: i64) -> String {
     state
 }
 
-/// A Conversation whose state word nothing can parse is one the human can still
-/// see, still reach, and still end.
+/// A Conversation standing in a state no Process declares is one the human can
+/// still see, still reach, and still end.
 ///
-/// Its own page refuses — the read that draws it will not guess at where the
-/// work stands — which is the error state the pane draws its escape hatch in.
-/// What has to hold for that hatch to be reachable and to work is all here: the
-/// sidebar still draws the row, close-and-archive goes through, and what the
-/// close leaves behind is a row holding `closed`, so the Conversation reads
-/// again afterwards.
+/// A state *is* a word (ADR-0030, *Process*), so nothing refuses one: the pane
+/// draws, the sidebar row draws, and both read the word the record holds —
+/// which is what a plugin removed from under a Conversation leaves. What the
+/// close does is move it to one Verkstead owns, and the row holds `closed`
+/// afterwards.
 #[tokio::test]
-async fn a_conversation_whose_state_word_is_unreadable_can_still_be_closed_and_archived() {
+async fn a_conversation_in_a_state_no_process_declares_can_still_be_closed_and_archived() {
     let (elsewhere, dir, app, repo, repo_id) = workbench().await;
     let id = ready(&app, elsewhere.path(), repo_id).await;
     grill(&app, id).await;
@@ -6409,24 +6394,14 @@ async fn a_conversation_whose_state_word_is_unreadable_can_still_be_closed_and_a
     let path = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
     corrupt_the_state(&dir, id).await;
 
-    // The pane cannot be drawn, which is what puts the human in front of the
-    // hatch rather than the ordinary ⋯ menu.
-    let (status, _) = fetch(
-        &app,
-        Request::builder()
-            .uri(format!("/api/ui/conversations/{id}"))
-            .body(Body::empty())
-            .unwrap(),
-    )
-    .await;
-    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    // The pane draws, carrying the word the record holds: there is no reading
+    // of that column left to fail.
+    assert_eq!(opened(&app, id).await.state, "meandering");
 
-    // And the sidebar is still there, with the row on it — drawn as a draft,
-    // which is the fallback the hatch reads as *not closed* and so offers
-    // Close and archive for.
+    // And the sidebar row carries it too, which is what it is worded from.
     let row = only_row(&app).await;
     assert_eq!(row.id, id);
-    assert_eq!(row.state, Lifecycle::Draft);
+    assert_eq!(row.state, "meandering");
 
     assert_eq!(
         close_and_archive(&app, id).await,
@@ -6441,12 +6416,11 @@ async fn a_conversation_whose_state_word_is_unreadable_can_still_be_closed_and_a
     );
     assert!(sidebar(&app).await.is_empty());
 
-    // The close wrote `closed` over the word nobody could read, so everything
-    // that was locked behind that column reads again.
+    // The close wrote `closed` over the word nothing declared.
     assert_eq!(stored_state(&dir, id).await, "closed");
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Closed);
+    assert_eq!(view.state, "closed");
     assert!(view.archived);
     assert_eq!(view.worktree, None);
 }
@@ -6455,10 +6429,10 @@ async fn a_conversation_whose_state_word_is_unreadable_can_still_be_closed_and_a
 ///
 /// The safe way round: archiving is *hide it from the list*, and hiding a
 /// Conversation whose worktree may still be live would put the work out of
-/// sight without ending it. Which is why the hatch offers Close and archive
-/// wherever it cannot read the state.
+/// sight without ending it. A word nothing declares is not Closed, so Archive
+/// on its own goes nowhere and Close and archive is the press that works.
 #[tokio::test]
-async fn archiving_a_conversation_whose_state_word_is_unreadable_says_it_is_not_closed() {
+async fn archiving_a_conversation_in_a_state_no_process_declares_says_it_is_not_closed() {
     let (_elsewhere, dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
     corrupt_the_state(&dir, id).await;
@@ -6563,7 +6537,7 @@ async fn unarchiving_returns_a_conversation_to_the_ordinary_list() {
 
     let view = opened(&app, id).await;
     assert!(!view.archived);
-    assert_eq!(view.state, Lifecycle::Closed);
+    assert_eq!(view.state, "closed");
 }
 
 /// And what a Cleanup has taken is on the view too, which is what lets the page
@@ -6890,13 +6864,12 @@ async fn picking_a_direction_on_the_closing_set_settles_it() {
         "nothing on this page was pressed to get here: the agent proposed and the human picked",
     );
     assert_eq!(
-        view.state,
-        Lifecycle::Grilling,
+        view.state, "grilling",
         "and the grilling is what is still happening: the pick informs it",
     );
     assert_eq!(
         moves(&view),
-        [Lifecycle::Grilling],
+        ["grilling"],
         "with no rung in between and none reached: nothing was ever waiting to be chosen",
     );
 }
@@ -6919,8 +6892,7 @@ async fn a_pick_the_agent_did_not_recommend_is_the_one_that_runs() {
          whatever the agent argued for",
     );
     assert_eq!(
-        view.state,
-        Lifecycle::Grilling,
+        view.state, "grilling",
         "and the grilling session writes what was picked for itself, so the pick \
          records the direction and moves nothing",
     );
@@ -6993,7 +6965,7 @@ async fn a_closing_set_stops_drawing_the_human_the_moment_it_is_picked_on() {
     answer(&app, set).await;
 
     let row = only_row(&app).await;
-    assert_eq!(row.state, Lifecycle::Grilling);
+    assert_eq!(row.state, "grilling");
     assert!(
         !row.waiting,
         "the pick settled the direction as it settled the Set",
@@ -7011,7 +6983,7 @@ async fn a_draft_is_never_marked_as_waiting() {
     let set = ask(&app, id, ORDINARY).await;
     let row = only_row(&app).await;
 
-    assert_eq!(row.state, Lifecycle::Draft);
+    assert_eq!(row.state, "draft");
     assert!(!row.waiting);
 
     // And the Set is genuinely unanswered: what is being read here is the draft
@@ -7102,7 +7074,7 @@ async fn a_closed_conversation_carries_neither_waiting_mark() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Closed);
+    assert_eq!(view.state, "closed");
     assert_eq!(view.blocked_on, None, "so there is no header mark to press");
     assert!(!view.stopped_by_hand, "of either kind");
     assert!(!only_row(&app).await.waiting, "and no disc beside the row");
@@ -7142,7 +7114,7 @@ async fn closing_takes_the_news_off_the_row_the_human_never_opened() {
 
     let row = only_row(&app).await;
 
-    assert_eq!(row.state, Lifecycle::Closed);
+    assert_eq!(row.state, "closed");
     assert!(
         !row.unseen,
         "and closing it is them being done with it, so there is no news to go back for",
@@ -7171,7 +7143,7 @@ async fn a_done_conversation_with_an_open_set_is_still_waiting() {
 
     let row = only_row(&app).await;
 
-    assert_eq!(row.state, Lifecycle::Done);
+    assert_eq!(row.state, "done");
     assert!(row.waiting, "the Set is open, and nothing has closed it");
     assert!(
         matches!(standings(&opened(&app, id).await)[0], Standing::Waiting(_)),
@@ -7745,9 +7717,9 @@ async fn answering_an_ordinary_grilling_set_leaves_the_grilling_running() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(view.state, "grilling");
     assert_eq!(view.direction, None);
-    assert_eq!(moves(&view), [Lifecycle::Grilling]);
+    assert_eq!(moves(&view), ["grilling"]);
 }
 
 /// Every pick stays where it is. The session that proposed writes the backlog,
@@ -7784,12 +7756,11 @@ async fn a_pick_leaves_the_conversation_grilling() {
             "the pick is recorded: it is what the artifact is elsewhere for — picking {picked}",
         );
         assert_eq!(
-            view.state,
-            Lifecycle::Grilling,
+            view.state, "grilling",
             "and nothing moved, because the grilling is what is still happening \
              — picking {picked}",
         );
-        assert_eq!(moves(&view), [Lifecycle::Grilling], "picking {picked}");
+        assert_eq!(moves(&view), ["grilling"], "picking {picked}");
 
         assert!(
             written.exists() && handoff(&view).is_none(),
@@ -7855,12 +7826,8 @@ async fn disagreeing_with_a_proposal_leaves_the_grilling_running() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(
-        view.state,
-        Lifecycle::Grilling,
-        "only a pick ends a grilling",
-    );
-    assert_eq!(moves(&view), [Lifecycle::Grilling]);
+    assert_eq!(view.state, "grilling", "only a pick ends a grilling",);
+    assert_eq!(moves(&view), ["grilling"]);
     assert_eq!(view.direction, None, "and nothing was picked");
 }
 
@@ -7876,7 +7843,7 @@ async fn a_proposal_put_again_after_a_refusal_can_be_picked_on() {
         serde_json::json!({ "label": "Q9", "selected": 2 }),
     )
     .await;
-    assert_eq!(opened(&app, id).await.state, Lifecycle::Grilling);
+    assert_eq!(opened(&app, id).await.state, "grilling");
 
     // The agent read the Response, went back down the branch, and proposed
     // again — this time recommending something else.
@@ -7887,7 +7854,7 @@ async fn a_proposal_put_again_after_a_refusal_can_be_picked_on() {
 
     assert_eq!(
         moves(&view),
-        [Lifecycle::Grilling],
+        ["grilling"],
         "neither the refusal nor the pick moved anything: what moves a \
          Conversation is the artifact the pick asked for",
     );
@@ -8534,7 +8501,7 @@ async fn adopting_a_roadmap_starts_a_draft_naming_it_and_its_next_stage() {
     let sidebar = sidebar(&app).await;
     assert_eq!(sidebar.len(), 1);
     assert_eq!(sidebar[0].id, id);
-    assert_eq!(sidebar[0].state, Lifecycle::Draft);
+    assert_eq!(sidebar[0].state, "draft");
 
     let view = opened(&app, id).await;
     let adopting = view
@@ -8657,7 +8624,7 @@ async fn a_draft_from_before_is_a_review_pointed_at_the_pull_request_it_holds() 
     let id = holding_a_pull_request(&app, dir.path(), repo_id, 41).await;
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.state, "draft");
     assert_eq!(view.process, processes::review());
     assert_eq!(
         view.target.as_deref(),
@@ -8919,7 +8886,7 @@ async fn steering_puts_a_companion_in_and_checks_it_out() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(view.state, "grilling");
     assert_eq!(companions(&app, id).await, ["askance", "granit"]);
 
     // The read-only one is detached at whatever its base came to, and holds no
@@ -9023,7 +8990,7 @@ async fn steering_into_done_puts_no_companion_in() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Done);
+    assert_eq!(view.state, "done");
     assert_eq!(companions(&app, id).await, ["askance"]);
     assert!(
         notices(&view).iter().all(|said| !said.contains("granit")),
@@ -9101,7 +9068,7 @@ async fn a_companion_a_steer_cannot_deliver_refuses_it_by_name() {
         let view = opened(&app, id).await;
 
         assert!(companions(&app, id).await.is_empty(), "{why:?}");
-        assert_eq!(view.state, Lifecycle::Grilling, "{why:?}");
+        assert_eq!(view.state, "grilling", "{why:?}");
         assert_eq!(
             worktrees(&askance).len(),
             1,
@@ -9169,7 +9136,7 @@ async fn a_repo_a_steer_cannot_put_in_is_refused_by_name() {
 
         assert_eq!(companions(&app, id).await, ["askance"]);
         assert_eq!(companion(&view, "askance").mode, CompanionMode::ReadWrite);
-        assert_eq!(view.state, Lifecycle::Grilling);
+        assert_eq!(view.state, "grilling");
     }
 }
 
@@ -9231,7 +9198,7 @@ async fn steering_opens_a_read_only_companion_up() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(view.state, "grilling");
     assert_eq!(companions(&app, id).await, ["askance", "granit"]);
 
     // The name typed, and the Conversation's own where nothing was — which is
@@ -9391,7 +9358,7 @@ async fn an_upgrade_git_will_not_make_refuses_the_steer_by_name() {
             2,
             "the repository itself and the detached checkout, and nothing new: {why:?}",
         );
-        assert_eq!(view.state, Lifecycle::Grilling, "{why:?}");
+        assert_eq!(view.state, "grilling", "{why:?}");
         assert!(
             view.blocked_on.is_some(),
             "the stop is still there: {why:?}"
@@ -9504,7 +9471,7 @@ async fn no_downgrade_and_no_removal_is_obeyed() {
         assert_eq!(checked_out(&view, "askance"), worked);
         assert_eq!(companion(&view, "granit").mode, CompanionMode::ReadOnly);
         assert_eq!(checked_out(&view, "granit"), detached);
-        assert_eq!(view.state, Lifecycle::Grilling);
+        assert_eq!(view.state, "grilling");
     }
 }
 
@@ -9543,7 +9510,7 @@ async fn steering_a_draft_checks_out_the_companions_it_was_configured_with() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(view.state, "grilling");
     checked_out(&view, "askance");
 
     let worked = checked_out(&view, "granit");
@@ -9680,7 +9647,7 @@ async fn steering_a_closed_conversation_checks_its_companions_out_again() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(view.state, "grilling");
     checked_out(&view, "askance");
 
     let worked = checked_out(&view, "granit");
@@ -9715,10 +9682,10 @@ async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
     // The stage's own name, rather than the one the server invented for the
     // row: its brief under the roadmap it belongs to.
     assert_eq!(view.branch, "roadmaps/mvp/03-implementation");
-    assert_eq!(view.state, Lifecycle::Implementing);
+    assert_eq!(view.state, "implementing");
     assert_eq!(
         moves(&view),
-        [Lifecycle::Implementing],
+        ["implementing"],
         "straight to Implementing: there was no grilling and no direction to choose",
     );
 
@@ -9803,7 +9770,7 @@ async fn adopting_checks_out_the_companions_it_was_configured_with() {
     let view = opened(&app, id).await;
 
     assert_eq!(view.branch, "roadmaps/mvp/03-implementation");
-    assert_eq!(view.state, Lifecycle::Implementing);
+    assert_eq!(view.state, "implementing");
     assert_eq!(companions(&app, id).await, ["askance", "granit"]);
 
     // The read-only one is detached at whatever its base came to, and holds no
@@ -9886,7 +9853,7 @@ async fn a_companion_adoption_cannot_deliver_refuses_the_press_by_name() {
     // before any of them is answered.
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.state, "draft");
     assert!(view.worktree.is_none());
     assert!(companion(&view, "askance").worktree.is_none());
     assert!(!has_branch(&repo, "roadmaps/mvp/03-implementation"));
@@ -9938,7 +9905,7 @@ async fn adopting_a_declaring_roadmap_starts_every_stage_that_is_ready() {
     let first = opened(&app, id).await;
 
     assert_eq!(first.branch, "roadmaps/mvp/01-workbench");
-    assert_eq!(first.state, Lifecycle::Implementing);
+    assert_eq!(first.state, "implementing");
 
     // And the other is a Conversation of its own, on its own branch.
     let second = sidebar(&app)
@@ -9949,7 +9916,7 @@ async fn adopting_a_declaring_roadmap_starts_every_stage_that_is_ready() {
 
     let beside = opened(&app, second.id).await;
 
-    assert_eq!(beside.state, Lifecycle::Implementing);
+    assert_eq!(beside.state, "implementing");
     assert_eq!(beside.repo.id, repo_id);
 
     // The same base the human settled on the composer, which is the one act that
@@ -10174,7 +10141,7 @@ async fn a_stage_that_cannot_start_beside_the_adopted_one_is_said_on_the_timelin
     let first = opened(&app, id).await;
 
     assert_eq!(first.branch, "roadmaps/mvp/01-workbench");
-    assert_eq!(first.state, Lifecycle::Implementing);
+    assert_eq!(first.state, "implementing");
 
     // And the halt is on the Timeline they were standing on, naming the stage,
     // the repository it could not be given and what is in the way of it.
@@ -10200,7 +10167,7 @@ async fn a_stage_that_cannot_start_beside_the_adopted_one_is_said_on_the_timelin
 
     let halted = opened(&app, halted.id).await;
 
-    assert_eq!(halted.state, Lifecycle::Closed);
+    assert_eq!(halted.state, "closed");
     assert_eq!(halted.worktree, None);
     assert!(
         !has_branch(&repo, "roadmaps/mvp/02-grilling"),
@@ -10260,7 +10227,7 @@ async fn a_roadmap_with_a_stage_in_flight_is_continued_for_the_one_that_is_ready
     let view = opened(&app, second).await;
 
     assert_eq!(view.branch, "roadmaps/mvp/02-grilling");
-    assert_eq!(view.state, Lifecycle::Implementing);
+    assert_eq!(view.state, "implementing");
 
     assert_eq!(
         sidebar(&app)
@@ -10371,7 +10338,7 @@ async fn adopting_with_no_git_author_is_refused_by_name() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.state, "draft");
     assert_eq!(view.worktree, None);
     assert!(!has_branch(&repo, "roadmaps/mvp/03-implementation"));
     assert_eq!(
@@ -10413,7 +10380,7 @@ async fn a_stage_steered_into_a_second_round_is_not_a_stage_to_adopt_again() {
     );
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(view.state, "grilling");
     assert_eq!(
         view.adopting, None,
         "the adoption has happened; what is offered now is the ordinary start",
@@ -10538,7 +10505,7 @@ Turns this askance clone into Verkstead.
 async fn nothing_adopted(app: &Router, id: i64, repo: &Path) {
     let view = opened(app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.state, "draft");
     assert_eq!(view.worktree, None);
     assert!(
         worktrees(repo).len() == 1,
@@ -10723,7 +10690,7 @@ async fn the_record_is_what_says_which_stage_a_roadmap_has_left_to_adopt() {
         steer_into(&app, first, "Done", false).await,
         ConversationSteered::Steered,
     );
-    assert_eq!(opened(&app, first).await.state, Lifecycle::Done);
+    assert_eq!(opened(&app, first).await.state, "done");
 
     // The notice, the page and the press, all three off the one rule and all three
     // naming stage 02 — with stage 01's box still unticked on the branch every one
@@ -11011,7 +10978,7 @@ async fn adopting_is_refused_when_the_stages_own_branch_is_taken() {
     assert_eq!(press_adopt(&app, id).await, Adopted::BranchExists);
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.state, "draft");
     assert_eq!(view.worktree, None);
     assert_eq!(worktrees(&repo).len(), 1, "only the repository itself");
     assert_eq!(
@@ -11113,7 +11080,7 @@ async fn the_cheap_refusals_are_answered_before_the_ones_git_is_paid_for() {
     );
     assert_eq!(
         opened(&app, id).await.state,
-        Lifecycle::Draft,
+        "draft",
         "and nothing about the roadmap was read to find that out",
     );
 }
@@ -11163,7 +11130,7 @@ fn head_on_origin(upstream: &Path, branch: &str) -> String {
 async fn nothing_taken_up(app: &Router, id: i64, repo: &Path) {
     let view = opened(app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.state, "draft");
     assert_eq!(view.worktree, None);
     assert!(
         worktrees(repo).len() == 1,
@@ -11358,7 +11325,7 @@ async fn a_head_branch_behind_origin_is_fast_forwarded_and_taken() {
     );
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(view.base_commit.as_deref(), Some(head.as_str()));
 }
 
@@ -11681,7 +11648,7 @@ async fn a_review_takes_up_the_pull_request_its_brief_names() {
     assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(view.process, processes::review());
     assert_eq!(
         view.branch, "rate-limiting",
@@ -11756,7 +11723,7 @@ async fn a_review_takes_up_a_pull_request_its_brief_names_by_number() {
     assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(view.branch, "rate-limiting");
 }
 
@@ -11878,7 +11845,7 @@ async fn a_review_whose_head_branch_has_diverged_is_refused_by_name() {
     let id = ready_to_review(&app, elsewhere.path(), repo_id, "Wrap #41 up.\n").await;
 
     assert_eq!(press_take_up(&app, id).await, TakenUp::BranchDiverged);
-    assert_eq!(opened(&app, id).await.state, Lifecycle::Draft);
+    assert_eq!(opened(&app, id).await.state, "draft");
 }
 /// And a pull request another Conversation is still at work on is refused naming
 /// that Conversation: there is one *open* Conversation per pull request, so the
@@ -11918,14 +11885,13 @@ async fn a_review_over_a_pull_request_another_conversation_is_at_work_on_leads_t
             conversation: first,
         },
     );
-    assert_eq!(opened(&app, second).await.state, Lifecycle::Draft);
+    assert_eq!(opened(&app, second).await.state, "draft");
     assert_eq!(opened(&app, second).await.worktree, None);
 
     let holder = opened(&app, first).await;
 
     assert_eq!(
-        holder.state,
-        Lifecycle::Wrapping,
+        holder.state, "wrapping",
         "and the Conversation that has it is exactly where the press found it",
     );
     assert!(
@@ -11966,8 +11932,8 @@ async fn a_review_over_a_branch_another_conversation_is_at_work_on_leads_there()
         },
         "the branch is the pull request, and the way on is the Conversation on it",
     );
-    assert_eq!(opened(&app, second).await.state, Lifecycle::Draft);
-    assert_eq!(opened(&app, first).await.state, Lifecycle::Wrapping);
+    assert_eq!(opened(&app, second).await.state, "draft");
+    assert_eq!(opened(&app, first).await.state, "wrapping");
 }
 
 /// A Review over a pull request whose Conversation has *finished* with it closes
@@ -12015,7 +11981,7 @@ async fn a_review_over_a_finished_conversations_pull_request_closes_it_and_takes
 
     let holder = opened(&app, first).await;
 
-    assert_eq!(holder.state, Lifecycle::Closed);
+    assert_eq!(holder.state, "closed");
     assert_eq!(
         holder.worktree, None,
         "closed by the ordinary Close, so its checkout went with it",
@@ -12023,7 +11989,7 @@ async fn a_review_over_a_finished_conversations_pull_request_closes_it_and_takes
 
     let view = opened(&app, second).await;
 
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(view.branch, "rate-limiting");
     assert!(view.worktree.is_some());
 
@@ -12063,12 +12029,12 @@ async fn a_fix_merge_issues_over_a_finished_conversations_pull_request_closes_it
 
     assert_eq!(press_take_up(&app, second).await, TakenUp::TakenUp);
 
-    assert_eq!(opened(&app, first).await.state, Lifecycle::Closed);
+    assert_eq!(opened(&app, first).await.state, "closed");
     assert_eq!(opened(&app, first).await.worktree, None);
 
     let view = opened(&app, second).await;
 
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(view.branch, "rate-limiting");
 }
 
@@ -12104,12 +12070,12 @@ async fn a_review_over_the_branch_of_a_finished_conversations_pull_request_close
 
     assert_eq!(press_take_up(&app, second).await, TakenUp::TakenUp);
 
-    assert_eq!(opened(&app, first).await.state, Lifecycle::Closed);
+    assert_eq!(opened(&app, first).await.state, "closed");
     assert_eq!(opened(&app, first).await.worktree, None);
 
     let view = opened(&app, second).await;
 
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(view.branch, "rate-limiting");
     assert_eq!(
         worktrees(&repo).len(),
@@ -12187,11 +12153,11 @@ async fn a_holder_that_is_closed_or_archived_is_passed_over_and_left_as_it_was()
             TakenUp::TakenUp,
             "a finished holder with nothing to give up is nothing to refuse for",
         );
-        assert_eq!(opened(&app, second).await.state, Lifecycle::Wrapping);
+        assert_eq!(opened(&app, second).await.state, "wrapping");
 
         let holder = opened(&app, first).await;
 
-        assert_eq!(holder.state, Lifecycle::Closed);
+        assert_eq!(holder.state, "closed");
         assert_eq!(
             holder.timeline.len(),
             moved,
@@ -12249,7 +12215,7 @@ async fn a_take_up_is_refused_by_every_state_the_holders_work_is_still_in() {
             },
             "a holder in {word} is still at work on it",
         );
-        assert_eq!(opened(&app, second).await.state, Lifecycle::Draft);
+        assert_eq!(opened(&app, second).await.state, "draft");
         assert_eq!(opened(&app, second).await.worktree, None);
 
         assert_eq!(
@@ -12305,7 +12271,7 @@ async fn a_start_refused_for_its_profiles_or_its_target_closes_nothing() {
     );
     assert_eq!(
         opened(&app, first).await.state,
-        Lifecycle::Done,
+        "done",
         "the Target is resolved before the record is asked who has the pull request",
     );
 
@@ -12334,7 +12300,7 @@ async fn a_start_refused_for_its_profiles_or_its_target_closes_nothing() {
     );
     assert_eq!(
         opened(&app, first).await.state,
-        Lifecycle::Done,
+        "done",
         "and the Profiles are answered before it in turn",
     );
     assert!(opened(&app, first).await.worktree.is_some());
@@ -12391,8 +12357,7 @@ async fn a_finished_holder_with_uncommitted_changes_stops_the_press_naming_it() 
         let holder = opened(&app, first).await;
 
         assert_eq!(
-            holder.state,
-            Lifecycle::Done,
+            holder.state, "done",
             "and the holder is exactly where the press found it",
         );
 
@@ -12404,7 +12369,7 @@ async fn a_finished_holder_with_uncommitted_changes_stops_the_press_naming_it() 
             "and what was uncommitted in it still uncommitted",
         );
 
-        assert_eq!(opened(&app, second).await.state, Lifecycle::Draft);
+        assert_eq!(opened(&app, second).await.state, "draft");
         assert_eq!(
             opened(&app, second).await.worktree,
             None,
@@ -12477,14 +12442,14 @@ async fn a_finished_holders_companion_checkout_stops_the_press_too() {
             }],
         },
     );
-    assert_eq!(opened(&app, first).await.state, Lifecycle::Done);
+    assert_eq!(opened(&app, first).await.state, "done");
 
     // And the press that confirms it goes ahead, companion checkout and all.
     assert_eq!(
         press_take_up_confirming(&app, second, &[first]).await,
         TakenUp::TakenUp,
     );
-    assert_eq!(opened(&app, first).await.state, Lifecycle::Closed);
+    assert_eq!(opened(&app, first).await.state, "closed");
 }
 
 /// The second press names what the first one stopped over, and that one closes
@@ -12531,7 +12496,7 @@ async fn the_second_press_closes_the_holder_and_takes_the_pull_request_up() {
 
     let holder = opened(&app, first).await;
 
-    assert_eq!(holder.state, Lifecycle::Closed);
+    assert_eq!(holder.state, "closed");
     assert_eq!(
         holder.worktree, None,
         "closed by the ordinary Close, so the checkout it was holding went with it",
@@ -12539,7 +12504,7 @@ async fn the_second_press_closes_the_holder_and_takes_the_pull_request_up() {
 
     let view = opened(&app, second).await;
 
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(view.branch, "rate-limiting");
 }
 
@@ -12588,8 +12553,8 @@ async fn a_confirmation_that_does_not_name_what_is_held_stops_the_press_again() 
         },
         "what it agreed to is not what would be lost, so it is asked again",
     );
-    assert_eq!(opened(&app, first).await.state, Lifecycle::Done);
-    assert_eq!(opened(&app, second).await.state, Lifecycle::Draft);
+    assert_eq!(opened(&app, first).await.state, "done");
+    assert_eq!(opened(&app, second).await.state, "draft");
 }
 
 /// And a Done holder whose checkouts are clean is closed and taken up from with
@@ -12640,8 +12605,8 @@ async fn a_finished_holder_with_a_clean_or_missing_checkout_is_closed_with_no_qu
             TakenUp::TakenUp,
             "nothing to lose, so nothing to ask about",
         );
-        assert_eq!(opened(&app, first).await.state, Lifecycle::Closed);
-        assert_eq!(opened(&app, second).await.state, Lifecycle::Wrapping);
+        assert_eq!(opened(&app, first).await.state, "closed");
+        assert_eq!(opened(&app, second).await.state, "wrapping");
     }
 }
 
@@ -12721,7 +12686,7 @@ async fn a_finished_holder_whose_checkout_git_will_not_read_stops_the_press() {
 
     assert_eq!(
         opened(&app, first).await.state,
-        Lifecycle::Done,
+        "done",
         "and nothing was closed",
     );
     assert!(
@@ -12735,7 +12700,7 @@ async fn a_finished_holder_whose_checkout_git_will_not_read_stops_the_press() {
         press_take_up_confirming(&app, second, &[first]).await,
         TakenUp::TakenUp,
     );
-    assert_eq!(opened(&app, first).await.state, Lifecycle::Closed);
+    assert_eq!(opened(&app, first).await.state, "closed");
 }
 
 /// A kind of uncommitted change to leave in a checkout, which is the reading a
@@ -12835,7 +12800,7 @@ async fn finished_with_it(app: &Router, id: i64) {
         steer_into(app, id, "Done", false).await,
         ConversationSteered::Steered,
     );
-    assert_eq!(opened(app, id).await.state, Lifecycle::Done);
+    assert_eq!(opened(app, id).await.state, "done");
 }
 
 /// Write a state word into a Conversation's row, leaving everything else about it
@@ -12901,8 +12866,8 @@ async fn a_review_takes_up_a_branch_on_origin_with_no_pull_request() {
     assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Wrapping);
-    assert_eq!(moves(&view), [Lifecycle::Wrapping]);
+    assert_eq!(view.state, "wrapping");
+    assert_eq!(moves(&view), ["wrapping"]);
     assert_eq!(
         view.branch, "rate-limiting",
         "the Conversation is on the branch the field named",
@@ -12992,7 +12957,7 @@ async fn a_review_over_a_branch_with_no_base_picked_falls_to_the_default_branch(
         .unwrap()
         .expect("it is on the record");
 
-    assert_eq!(record.state, store::Lifecycle::Wrapping);
+    assert_eq!(record.state, store::State::named("wrapping"));
     assert_eq!(record.base_ref.as_deref(), Some("main"));
 }
 
@@ -13122,7 +13087,7 @@ async fn a_review_over_a_branch_git_will_not_move_is_refused_by_name() {
         PathBuf::from(at).canonicalize().unwrap(),
         repo.canonicalize().unwrap(),
     );
-    assert_eq!(opened(&app, id).await.state, Lifecycle::Draft);
+    assert_eq!(opened(&app, id).await.state, "draft");
 }
 
 /// The branch on the human's own checkout of the Repo — the case this was built
@@ -13176,7 +13141,7 @@ async fn a_take_up_over_the_humans_own_checkout_stops_once_and_switches_it() {
     assert_eq!(on_branch(&repo), "main", "their checkout was switched");
 
     let view = opened(&app, fixing).await;
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(view.branch, "rate-limiting");
 
     let said = notices(&view).join("\n");
@@ -13802,7 +13767,7 @@ async fn a_review_waits_on_its_target_and_takes_up_what_it_names() {
     assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(view.branch, "rate-limiting");
 }
 
@@ -14001,7 +13966,7 @@ async fn a_fix_merge_issues_takes_up_the_pull_request_its_brief_names() {
     assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(view.process, processes::fix_merge_issues());
     assert_eq!(view.branch, "rate-limiting");
     assert_eq!(view.base_commit.as_deref(), Some(head.as_str()));
@@ -14067,10 +14032,10 @@ async fn a_fix_merge_issues_takes_up_a_branch_with_no_pull_request() {
     assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(
         moves(&view),
-        [Lifecycle::Wrapping],
+        ["wrapping"],
         "the take-up made the move itself, there being no record of a pull request to make it",
     );
     assert_eq!(view.branch, "rate-limiting");
@@ -14353,7 +14318,7 @@ async fn a_fix_merge_issues_over_a_stack_closes_the_conversations_on_its_neighbo
     for holder in [below, above] {
         let view = opened(&app, holder).await;
 
-        assert_eq!(view.state, Lifecycle::Closed);
+        assert_eq!(view.state, "closed");
         assert_eq!(
             view.worktree, None,
             "closed by the ordinary Close, so the checkout it was standing on went with it",
@@ -14362,7 +14327,7 @@ async fn a_fix_merge_issues_over_a_stack_closes_the_conversations_on_its_neighbo
 
     let view = opened(&app, fixing).await;
 
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(view.branch, "stage-02");
     assert_eq!(
         stack(dir.path(), fixing, repo_id).await,
@@ -14444,8 +14409,7 @@ async fn a_neighbour_still_at_work_refuses_the_start_and_nothing_is_closed() {
         let view = opened(&app, finished).await;
 
         assert_eq!(
-            view.state,
-            Lifecycle::Done,
+            view.state, "done",
             "nothing was closed for a start that was refused",
         );
         assert!(
@@ -14454,7 +14418,7 @@ async fn a_neighbour_still_at_work_refuses_the_start_and_nothing_is_closed() {
         );
     }
 
-    assert_eq!(opened(&app, above).await.state, Lifecycle::Wrapping);
+    assert_eq!(opened(&app, above).await.state, "wrapping");
     assert_eq!(
         worktrees(&repo).len(),
         4,
@@ -14548,7 +14512,7 @@ async fn a_link_checked_out_by_hand_is_switched_with_the_head_in_one_press() {
     );
 
     let view = opened(&app, fixing).await;
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(view.branch, "stage-02");
 
     let said = notices(&view).join("\n");
@@ -14565,7 +14529,7 @@ async fn a_link_checked_out_by_hand_is_switched_with_the_head_in_one_press() {
 async fn nothing_taken_up_alongside(app: &Router, id: i64) {
     let view = opened(app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.state, "draft");
     assert_eq!(view.worktree, None);
     assert!(
         !view
@@ -14628,7 +14592,7 @@ async fn a_stacks_uncommitted_changes_are_asked_about_in_one_list() {
     for untouched in [below, holder, above] {
         assert_eq!(
             opened(&app, untouched).await.state,
-            Lifecycle::Done,
+            "done",
             "nothing is closed by the press that asks",
         );
     }
@@ -14642,13 +14606,13 @@ async fn a_stacks_uncommitted_changes_are_asked_about_in_one_list() {
     for closed in [below, holder, above] {
         let view = opened(&app, closed).await;
 
-        assert_eq!(view.state, Lifecycle::Closed);
+        assert_eq!(view.state, "closed");
         assert_eq!(view.worktree, None);
     }
 
     let view = opened(&app, fixing).await;
 
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(
         worktrees(&repo),
         vec![repo.canonicalize().unwrap_or(repo.clone()), {
@@ -14772,10 +14736,10 @@ async fn a_neighbour_another_conversation_holds_is_recorded_without_being_claime
         press_take_up(&app, second).await,
         TakenUp::AlreadyHeld { conversation: id },
     );
-    assert_eq!(opened(&app, second).await.state, Lifecycle::Draft);
+    assert_eq!(opened(&app, second).await.state, "draft");
     assert_eq!(
         opened(&app, id).await.state,
-        Lifecycle::Wrapping,
+        "wrapping",
         "and a holder still at work is refused for rather than closed",
     );
 }
@@ -14842,7 +14806,7 @@ async fn a_steer_back_into_a_wrap_up_closes_the_conversation_that_took_the_pull_
 
     let holder = opened(&app, second).await;
 
-    assert_eq!(holder.state, Lifecycle::Closed);
+    assert_eq!(holder.state, "closed");
     assert_eq!(
         holder.worktree, None,
         "closed by the ordinary Close, so its checkout went with it",
@@ -14850,7 +14814,7 @@ async fn a_steer_back_into_a_wrap_up_closes_the_conversation_that_took_the_pull_
 
     let view = opened(&app, first).await;
 
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(view.branch, "rate-limiting");
     assert!(
         view.worktree.is_some(),
@@ -14894,11 +14858,11 @@ async fn a_steer_back_into_a_follow_up_makes_way_the_same() {
         ConversationSteered::Steered,
     );
 
-    assert_eq!(opened(&app, second).await.state, Lifecycle::Closed);
+    assert_eq!(opened(&app, second).await.state, "closed");
 
     let view = opened(&app, first).await;
 
-    assert_eq!(view.state, Lifecycle::FollowUp);
+    assert_eq!(view.state, "follow-up");
     assert!(view.worktree.is_some());
 }
 
@@ -14949,8 +14913,7 @@ async fn a_steer_onto_a_pull_request_somebody_is_at_work_on_is_refused_naming_it
     let holder = opened(&app, second).await;
 
     assert_eq!(
-        holder.state,
-        Lifecycle::Wrapping,
+        holder.state, "wrapping",
         "the Conversation that has it is exactly where the submit found it",
     );
     assert!(
@@ -14960,7 +14923,7 @@ async fn a_steer_onto_a_pull_request_somebody_is_at_work_on_is_refused_naming_it
 
     let view = opened(&app, first).await;
 
-    assert_eq!(view.state, Lifecycle::Closed, "and nothing moved here");
+    assert_eq!(view.state, "closed", "and nothing moved here");
     assert_eq!(view.worktree, None, "with nothing made");
     assert!(
         view.pending_steer.is_some(),
@@ -15002,11 +14965,7 @@ async fn a_steer_whose_holder_holds_something_stops_the_submit_naming_it() {
     let holder = opened(&app, second).await;
     let worktree = holder.worktree.clone().expect("nothing was closed");
 
-    assert_eq!(
-        holder.state,
-        Lifecycle::Done,
-        "nothing is closed by the ask"
-    );
+    assert_eq!(holder.state, "done", "nothing is closed by the ask");
     assert_eq!(
         changed(Path::new(&worktree.path)),
         vec![left],
@@ -15015,7 +14974,7 @@ async fn a_steer_whose_holder_holds_something_stops_the_submit_naming_it() {
 
     let view = opened(&app, first).await;
 
-    assert_eq!(view.state, Lifecycle::Closed, "and nothing moved here");
+    assert_eq!(view.state, "closed", "and nothing moved here");
     assert!(
         view.pending_steer.is_some(),
         "and the pending steer stands, so the submit that confirms has a form to send",
@@ -15027,8 +14986,8 @@ async fn a_steer_whose_holder_holds_something_stops_the_submit_naming_it() {
         "and the submit that names it goes ahead",
     );
 
-    assert_eq!(opened(&app, second).await.state, Lifecycle::Closed);
-    assert_eq!(opened(&app, first).await.state, Lifecycle::Wrapping);
+    assert_eq!(opened(&app, second).await.state, "closed");
+    assert_eq!(opened(&app, first).await.state, "wrapping");
 }
 
 /// And a confirmation that does not name what is held stops the submit all over
@@ -15061,8 +15020,8 @@ async fn a_steers_confirmation_that_names_nobody_stops_it_again() {
         },
     );
 
-    assert_eq!(opened(&app, second).await.state, Lifecycle::Done);
-    assert_eq!(opened(&app, first).await.state, Lifecycle::Closed);
+    assert_eq!(opened(&app, second).await.state, "done");
+    assert_eq!(opened(&app, first).await.state, "closed");
 }
 
 /// A steer into Done closes nothing: it runs nothing, so it wants no checkout and
@@ -15092,13 +15051,13 @@ async fn a_steer_into_done_closes_nothing() {
 
     let holder = opened(&app, second).await;
 
-    assert_eq!(holder.state, Lifecycle::Done, "nothing was closed");
+    assert_eq!(holder.state, "done", "nothing was closed");
     assert!(
         holder.worktree.is_some(),
         "and nothing was taken away from it",
     );
 
-    assert_eq!(opened(&app, first).await.state, Lifecycle::Done);
+    assert_eq!(opened(&app, first).await.state, "done");
 }
 
 /// And a steer by a Conversation nobody else shares a pull request with is the
@@ -15132,7 +15091,7 @@ async fn a_steer_over_a_pull_request_nobody_else_has_is_unchanged() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert!(view.worktree.is_some());
     assert!(
         !notices(&view).join("\n").contains("closed to make way"),
@@ -15167,6 +15126,7 @@ async fn how_a_pull_requests_checks_are_reaches_both_copies_of_its_card() {
             base: None,
             repo: None,
         },
+        &store::State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -15242,6 +15202,7 @@ async fn whether_a_pull_request_merges_reaches_both_copies_of_its_card() {
             base: None,
             repo: None,
         },
+        &store::State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -15289,7 +15250,9 @@ async fn whether_a_pull_request_merges_reaches_both_copies_of_its_card() {
     ]) {
         store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
-    store::finish_wrap_up(&pool, id).await.unwrap();
+    store::finish_wrap_up(&pool, id, &store::State::named("wrapping"))
+        .await
+        .unwrap();
 
     store::record_merging(&pool, id, repo_id, 41, store::Merging::Conflicting)
         .await
@@ -15297,7 +15260,7 @@ async fn whether_a_pull_request_merges_reaches_both_copies_of_its_card() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Done);
+    assert_eq!(view.state, "done");
     assert_eq!(
         merges(&view),
         [Some(Merging::Conflicting), Some(Merging::Conflicting)],
@@ -15354,6 +15317,7 @@ async fn each_pull_request_carries_how_its_own_checks_are() {
             base: None,
             repo: None,
         },
+        &store::State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -15433,6 +15397,7 @@ async fn each_pull_request_carries_whether_its_own_branch_merges() {
             base: None,
             repo: None,
         },
+        &store::State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -15519,6 +15484,7 @@ async fn resolving_a_conflict_is_refused_where_there_is_none_to_resolve() {
             base: None,
             repo: None,
         },
+        &store::State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -15549,7 +15515,9 @@ async fn resolving_a_conflict_is_refused_where_there_is_none_to_resolve() {
     ]) {
         store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
-    store::finish_wrap_up(&pool, id).await.unwrap();
+    store::finish_wrap_up(&pool, id, &store::State::named("wrapping"))
+        .await
+        .unwrap();
 
     // Where somebody has resolved it in the meantime, or the freshening the pane
     // does as it opens found the conflict gone.
@@ -15565,7 +15533,7 @@ async fn resolving_a_conflict_is_refused_where_there_is_none_to_resolve() {
 
     assert_eq!(
         opened(&app, id).await.state,
-        Lifecycle::Done,
+        "done",
         "so the Conversation is where the press found it",
     );
 }
@@ -15607,6 +15575,7 @@ async fn resolving_a_conflict_is_refused_where_there_is_nowhere_to_resolve_it() 
             base: None,
             repo: None,
         },
+        &store::State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -15630,7 +15599,9 @@ async fn resolving_a_conflict_is_refused_where_there_is_nowhere_to_resolve_it() 
     ]) {
         store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
-    store::finish_wrap_up(&pool, id).await.unwrap();
+    store::finish_wrap_up(&pool, id, &store::State::named("wrapping"))
+        .await
+        .unwrap();
 
     // The work is finished with, the pull request conflicts, and there is
     // nothing left on this machine to do anything about it in.
@@ -15645,7 +15616,7 @@ async fn resolving_a_conflict_is_refused_where_there_is_nowhere_to_resolve_it() 
 
     assert_eq!(
         opened(&app, id).await.state,
-        Lifecycle::Done,
+        "done",
         "and the Conversation is where the press found it",
     );
 }
@@ -15669,7 +15640,7 @@ async fn resolving(app: &Router, id: i64) -> Resolved {
 /// Conversation sits in Wrapping with exactly the settle facts it is given. What
 /// the watchers make of the same facts is `sessions.rs`'s.
 ///
-/// The condition is Wrapping's own and never a state: the Lifecycle does not
+/// The condition is Wrapping's own and never a state: the state word does not
 /// move at either end of it.
 #[tokio::test]
 async fn a_wrap_up_down_to_its_checks_says_so_on_the_card_and_in_the_sidebar() {
@@ -15692,6 +15663,7 @@ async fn a_wrap_up_down_to_its_checks_says_so_on_the_card_and_in_the_sidebar() {
                 base: None,
                 repo: None,
             },
+            &store::State::named("wrapping"),
         )
         .await
         .unwrap(),
@@ -15699,7 +15671,7 @@ async fn a_wrap_up_down_to_its_checks_says_so_on_the_card_and_in_the_sidebar() {
     );
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert!(
         !view.waiting_on_checks,
         "a wrap-up nobody has read yet is waiting on all four of them",
@@ -15725,8 +15697,7 @@ async fn a_wrap_up_down_to_its_checks_says_so_on_the_card_and_in_the_sidebar() {
         "the checks are the whole of what is left, so that is what it is waiting on",
     );
     assert_eq!(
-        view.state,
-        Lifecycle::Wrapping,
+        view.state, "wrapping",
         "which is a condition of Wrapping and not a rung of its own",
     );
     assert!(
@@ -15792,6 +15763,7 @@ async fn a_wrap_up_that_narrows_twice_is_worth_saying_so_twice() {
             base: None,
             repo: None,
         },
+        &store::State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -16139,7 +16111,7 @@ async fn an_empty_grilling_picker_refuses_the_start_until_a_pairing_answers_it()
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
     assert_eq!(
         opened(&app, id).await.state,
-        Lifecycle::Grilling,
+        "grilling",
         "and every Conversation this press starts is grilled",
     );
 }
@@ -16182,15 +16154,15 @@ async fn steering_a_finished_conversation_into_investigating_records_where_it_ca
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Investigating);
+    assert_eq!(view.state, "investigating");
     assert_eq!(
         steered(&view),
         [
-            ("moved", Lifecycle::Grilling),
-            ("steer", Lifecycle::Done),
-            ("moved", Lifecycle::Done),
-            ("steer", Lifecycle::Investigating),
-            ("moved", Lifecycle::Investigating),
+            ("moved", "grilling"),
+            ("steer", "done"),
+            ("moved", "done"),
+            ("steer", "investigating"),
+            ("moved", "investigating"),
         ],
         "the human's own line, and the plain move under it",
     );
@@ -16229,13 +16201,13 @@ async fn steering_a_finished_conversation_into_investigating_records_where_it_ca
     // The store's own word for a state rather than the viewer's: what is being
     // read here is the record, one side of the seam the view types are the other
     // side of.
-    let sources: Vec<(store::Lifecycle, Option<store::Lifecycle>)> = store::timeline(&pool, id)
+    let sources: Vec<(store::State, Option<store::State>)> = store::timeline(&pool, id)
         .await
         .unwrap()
         .into_iter()
         .filter_map(|event| match event.event {
             store::Event::Steer(target, _, recorded) => {
-                Some((target.target(), recorded.and_then(|record| record.source)))
+                Some((target, recorded.and_then(|record| record.source)))
             }
             _ => None,
         })
@@ -16246,10 +16218,10 @@ async fn steering_a_finished_conversation_into_investigating_records_where_it_ca
     assert_eq!(
         sources,
         [
-            (store::Lifecycle::Done, Some(store::Lifecycle::Grilling)),
+            (store::State::done(), Some(store::State::named("grilling"))),
             (
-                store::Lifecycle::Investigating,
-                Some(store::Lifecycle::Done)
+                store::State::named("investigating"),
+                Some(store::State::done())
             ),
         ],
         "each press says where it went and where it found the work",
@@ -16284,10 +16256,10 @@ async fn steering_into_investigating_with_nothing_to_find_out_is_refused_by_name
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Grilling, "so nothing moved");
+    assert_eq!(view.state, "grilling", "so nothing moved");
     assert_eq!(
         steered(&view),
-        [("moved", Lifecycle::Grilling)],
+        [("moved", "grilling")],
         "and nothing on the record says it was steered",
     );
 }

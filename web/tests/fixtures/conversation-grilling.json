@@ -16,7 +16,6 @@
   "branch_named": true,
   "companions": [],
   "compiles_uncached": false,
-  "declared_state": "grilling",
   "direction": null,
   "drafted_on": "aa00bb11cc22dd33ee44ff5566778899",
   "driven": false,
@@ -148,7 +147,7 @@
   "resets": null,
   "shared": null,
   "skill_packs": [],
-  "state": "Grilling",
+  "state": "grilling",
   "steer_rows": [
     {
       "brief": "Round",
@@ -223,9 +222,8 @@
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "declared": "grilling",
         "id": 4,
-        "state": "Grilling"
+        "state": "grilling"
       }
     },
     {

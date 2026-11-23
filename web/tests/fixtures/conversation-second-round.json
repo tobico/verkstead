@@ -8,7 +8,6 @@
   "branch_named": true,
   "companions": [],
   "compiles_uncached": false,
-  "declared_state": "grilling",
   "direction": "task-list",
   "drafted_on": "aa00bb11cc22dd33ee44ff5566778899",
   "driven": false,
@@ -147,7 +146,7 @@
   "resets": null,
   "shared": null,
   "skill_packs": [],
-  "state": "Grilling",
+  "state": "grilling",
   "steer_rows": [
     {
       "brief": "Round",
@@ -222,17 +221,15 @@
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "declared": "grilling",
         "id": 35,
-        "state": "Grilling"
+        "state": "grilling"
       }
     },
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "declared": "implementing",
         "id": 36,
-        "state": "Implementing"
+        "state": "implementing"
       }
     },
     {
@@ -263,9 +260,8 @@
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "declared": "wrapping",
         "id": 39,
-        "state": "Wrapping"
+        "state": "wrapping"
       }
     },
     {
@@ -279,13 +275,12 @@
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
         "id": 41,
-        "state": "Done"
+        "state": "done"
       }
     },
     {
       "Steer": {
         "at": "2026-08-03T09:07:11.000Z",
-        "declared": "grilling",
         "html": null,
         "id": 42,
         "record": {
@@ -295,15 +290,14 @@
           "pairing": "Nothing",
           "upgraded": []
         },
-        "target": "Grilling"
+        "target": "grilling"
       }
     },
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "declared": "grilling",
         "id": 43,
-        "state": "Grilling"
+        "state": "grilling"
       }
     },
     {

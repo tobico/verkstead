@@ -11,10 +11,10 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    ConversationRow, Decision, Event, Stopped, Stopping, ask_to_stop, asked_to_stop, clear_stop,
-    close_conversation, conversations, forget_stop, open_database, register_repo, signed_out_on,
-    start_conversation, start_grilling, stop, stop_as_asked, stop_signed_out, stop_undriven,
-    stopped, timeline,
+    ConversationRow, Decision, Event, State, Stopped, Stopping, ask_to_stop, asked_to_stop,
+    clear_stop, close_conversation, conversations, forget_stop, open_database, register_repo,
+    signed_out_on, start_conversation, start_in, stop, stop_as_asked, stop_signed_out,
+    stop_undriven, stopped, timeline,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -517,9 +517,10 @@ async fn a_stop_from_outside_the_human_is_waiting_on_them_in_the_sidebar() {
     let (_dir, pool) = fresh_pool().await;
     let id = conversation(&pool).await;
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "abc1234",
         Path::new("/data/worktrees/rate-limiting"),
         &[],
@@ -585,9 +586,10 @@ async fn the_humans_own_stop_is_not_waiting_on_them_in_the_sidebar() {
             .unwrap()
             .expect("the Repo was just registered");
 
-        start_grilling(
+        start_in(
             &pool,
             id,
+            &State::named("grilling"),
             "abc1234",
             Path::new("/data/worktrees/rate-limiting"),
             &[],
@@ -627,9 +629,10 @@ async fn a_closed_conversation_is_not_waiting_on_them_whatever_stopped_it() {
     let (_dir, pool) = fresh_pool().await;
     let id = conversation(&pool).await;
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "abc1234",
         Path::new("/data/worktrees/rate-limiting"),
         &[],

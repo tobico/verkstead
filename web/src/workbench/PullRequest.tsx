@@ -167,7 +167,7 @@ export function PullRequest(props: {
         <Show
           when={
             props.opened.merging === "Conflicting" &&
-            props.conversation.state === "Done"
+            props.conversation.state === "done"
           }
         >
           <button

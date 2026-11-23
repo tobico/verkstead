@@ -126,9 +126,16 @@ async fn grilling_alongside(
         });
     }
 
-    store::start_grilling(pool, conversation, &base, &worktree, &checkouts)
-        .await
-        .unwrap();
+    store::start_in(
+        pool,
+        conversation,
+        &store::State::named("grilling"),
+        &base,
+        &worktree,
+        &checkouts,
+    )
+    .await
+    .unwrap();
 
     (
         conversation,

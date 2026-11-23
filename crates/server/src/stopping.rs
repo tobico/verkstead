@@ -244,7 +244,7 @@ pub(crate) async fn stopped(state: &AppState, conversation_id: i64) -> bool {
 /// stops on either `true`, and the stop below is the one that has evidence to
 /// say so.
 pub(crate) async fn undriven(state: &AppState, conversation_id: i64) -> bool {
-    let lifecycle = match store::load_conversation(&state.pool, conversation_id).await {
+    let standing = match store::load_conversation(&state.pool, conversation_id).await {
         Ok(Some(conversation)) => conversation.state,
         // Nothing to launch into and nothing to say about it: whatever took the
         // Conversation away has said so already.
@@ -255,21 +255,16 @@ pub(crate) async fn undriven(state: &AppState, conversation_id: i64) -> bool {
         }
     };
 
-    if matches!(
-        lifecycle,
-        store::Lifecycle::Grilling
-            | store::Lifecycle::Implementing
-            | store::Lifecycle::Wrapping
-            | store::Lifecycle::FollowUp
-            | store::Lifecycle::Investigating
-            | store::Lifecycle::Declared
-    ) {
+    // Any state its Process declares is one something drives, each of them
+    // running an Activity. The three Verkstead words itself are the ones
+    // nothing does.
+    if standing.declared().is_some() {
         return false;
     }
 
     tracing::info!(
         conversation_id,
-        state = ?lifecycle,
+        state = standing.stored(),
         "the Conversation is in a state nothing drives, so nothing was launched",
     );
 

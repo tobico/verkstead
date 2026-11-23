@@ -148,7 +148,7 @@ import { SPOKEN } from "./Mark";
 import marks from "./Mark.module.css";
 import { WAITING_ON_CHECKS, WAITING_TO_JOIN, parked } from "./conditions";
 import { titled } from "./naming";
-import { rowWord } from "./provided";
+import { stateWord } from "./provided";
 import { Wordmark } from "./Wordmark";
 
 export function Conversations(props: {
@@ -778,7 +778,7 @@ const DISC = {
 type Active = ("terminal" | "unsaved")[];
 
 function active(entry: ConversationEntry, unsaved: boolean): Active {
-  const worktree = entry.state !== "Draft" && entry.state !== "Closed";
+  const worktree = entry.state !== "draft" && entry.state !== "closed";
 
   return [
     ...(entry.terminal_busy ? (["terminal"] as const) : []),
@@ -865,7 +865,7 @@ function spoken(entry: ConversationEntry, reasons: Active): string {
     ? WAITING_ON_CHECKS
     : entry.waiting_to_join
       ? WAITING_TO_JOIN
-      : rowWord(entry.declared, entry.state);
+      : stateWord(entry.process, entry.state);
   const name = titled(entry);
   const marked =
     which === "waiting"
@@ -940,7 +940,7 @@ function ConversationRow(props: {
   ask: (event: MouseEvent, entry: ConversationEntry) => void;
 }): JSX.Element {
   const ended = (): boolean =>
-    props.entry.state === "Done" || props.entry.state === "Closed";
+    props.entry.state === "done" || props.entry.state === "closed";
 
   /// And whether the machine this row's work is on has stopped answering,
   /// which the row wears the same dimming for.
@@ -966,7 +966,7 @@ function ConversationRow(props: {
       data-row={keyFor(props.entry)}
       classList={{
         [styles.selected!]: props.selected,
-        [styles.draft!]: props.entry.state === "Draft",
+        [styles.draft!]: props.entry.state === "draft",
         [styles.ended!]: ended(),
         [styles.unreachable!]: away(),
         [styles.held!]: props.held,

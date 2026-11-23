@@ -47,7 +47,7 @@
 use anyhow::{Context, Result, bail};
 use sqlx::SqlitePool;
 
-use super::conversations::{Lifecycle, moved};
+use super::conversations::{State, WRAPPING, moved};
 
 /// One of the things a Conversation has to have settled before wrap-up is over.
 ///
@@ -669,7 +669,7 @@ async fn narrowed(tx: &mut sqlx::SqliteConnection, conversation_id: i64) -> Resu
         return Ok(false);
     };
 
-    if Lifecycle::read(&state)? != Lifecycle::Wrapping {
+    if State::named(&state) != WRAPPING {
         return Ok(false);
     }
 
@@ -1235,21 +1235,33 @@ pub async fn forget_every_addressed_comment(pool: &SqlitePool, conversation_id: 
 ///
 /// What it does *not* wait for is the merge. Done means Verkstead has finished
 /// with the work, not that it is on `main`.
-pub async fn finish_wrap_up(pool: &SqlitePool, conversation_id: i64) -> Result<Finished> {
-    finishing(pool, conversation_id, Rule::Applied).await
+pub async fn finish_wrap_up(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    from: &State,
+) -> Result<Finished> {
+    finishing(pool, conversation_id, from, Rule::Applied).await
 }
 
 /// Move the Conversation to Done because every pull request it is on has been
 /// merged, whatever is still unsettled: the work has landed, and there is
 /// nothing left for a wrap-up to wait on.
-pub async fn finish_merged_wrap_up(pool: &SqlitePool, conversation_id: i64) -> Result<Finished> {
-    finishing(pool, conversation_id, Rule::Landed).await
+pub async fn finish_merged_wrap_up(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    from: &State,
+) -> Result<Finished> {
+    finishing(pool, conversation_id, from, Rule::Landed).await
 }
 
 /// Whether [`finish_wrap_up`] would move the Conversation now, read and nothing
 /// written: [`Finished::Done`] where everything is settled.
-pub async fn wrap_up_would_finish(pool: &SqlitePool, conversation_id: i64) -> Result<Finished> {
-    finishing(pool, conversation_id, Rule::Read).await
+pub async fn wrap_up_would_finish(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    from: &State,
+) -> Result<Finished> {
+    finishing(pool, conversation_id, from, Rule::Read).await
 }
 
 /// How [`finishing`] goes by the rule.
@@ -1263,7 +1275,12 @@ enum Rule {
     Landed,
 }
 
-async fn finishing(pool: &SqlitePool, conversation_id: i64, rule: Rule) -> Result<Finished> {
+async fn finishing(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    from: &State,
+    rule: Rule,
+) -> Result<Finished> {
     let mut tx = super::writing(pool, "finishing a wrap-up").await?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
@@ -1276,7 +1293,7 @@ async fn finishing(pool: &SqlitePool, conversation_id: i64, rule: Rule) -> Resul
         return Ok(Finished::NoSuchConversation);
     };
 
-    if Lifecycle::read(&state)? != Lifecycle::Wrapping {
+    if State::named(&state) != *from {
         return Ok(Finished::NotWrapping);
     }
 
@@ -1304,13 +1321,13 @@ async fn finishing(pool: &SqlitePool, conversation_id: i64, rule: Rule) -> Resul
     }
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
-        .bind(Lifecycle::Done.stored())
+        .bind(State::DONE)
         .bind(conversation_id)
         .execute(&mut *tx)
         .await
         .with_context(|| format!("moving Conversation {conversation_id} to done"))?;
 
-    moved(&mut tx, conversation_id, Lifecycle::Done).await?;
+    moved(&mut tx, conversation_id, &State::done()).await?;
 
     tx.commit().await.context("finishing a wrap-up")?;
 
