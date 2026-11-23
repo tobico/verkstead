@@ -9980,6 +9980,123 @@ async fn an_heir_adopts_a_stage_of_the_home_that_left_and_lets_it_join() {
     );
 }
 
+/// **The join ask adopts on its own** (ADR-0029, *A roadmap's home outlives its
+/// device*): B's stage was born on C, which has left with A named its heir, and
+/// no report of B's has landed on A — B holds its standing as already told, so
+/// none is sent. B's finish, asking A, says what the stage is, and is let in.
+#[tokio::test]
+async fn an_heir_adopts_a_stage_from_its_join_ask_with_no_report_landed() {
+    let spill = tempfile::tempdir().unwrap();
+    let told = spill.path().join("finish-prompt");
+    let away = finishing_away(spill.path(), &told).await;
+
+    let born = store::Birth {
+        device: C.to_owned(),
+        id: 7,
+    };
+
+    store::record_birth(&away.b.pool, away.copy, &born)
+        .await
+        .unwrap();
+
+    for pool in [&away.a.pool, &away.b.pool] {
+        store::name_heir(pool, A, C, A).await.unwrap();
+    }
+
+    // What B will stand at once its finish is taken up — the copy resumed — as
+    // told already, so nothing B reports reaches A.
+    let mut standing = store::live_standing(&away.b.pool, away.copy)
+        .await
+        .unwrap()
+        .expect("B's copy stands somewhere");
+    standing.stopped = false;
+    store::tell(&away.b.pool, away.copy, &standing)
+        .await
+        .unwrap();
+
+    away.finishes().await;
+
+    told_at_the_finish(&told).await;
+
+    let adopted = store::born_as(&away.a.pool, &born)
+        .await
+        .unwrap()
+        .expect("A adopted the stage B asked about");
+
+    assert_eq!(
+        store::transferred(&away.a.pool, adopted).await.unwrap(),
+        Some(store::Transferred {
+            device: B.to_owned(),
+            id: away.copy,
+        }),
+        "naming B as where the work is",
+    );
+    assert!(
+        away.queued_at_home().await.contains(&adopted),
+        "and queued to join when B asked",
+    );
+}
+
+/// **An heir with no repo to keep the stage in is said to have none**: A is C's
+/// heir and has no repo with the origin of B's, so it cannot adopt B's stage,
+/// and B's Timeline says that — rather than that A refused the ask — and its
+/// finish stays held.
+#[tokio::test]
+async fn a_finish_away_whose_heir_has_no_repo_for_it_says_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let told = spill.path().join("finish-prompt");
+    let away = finishing_away(spill.path(), &told).await;
+
+    let born = store::Birth {
+        device: C.to_owned(),
+        id: 7,
+    };
+
+    store::record_birth(&away.b.pool, away.copy, &born)
+        .await
+        .unwrap();
+
+    for pool in [&away.a.pool, &away.b.pool] {
+        store::name_heir(pool, A, C, A).await.unwrap();
+    }
+
+    // B's repository pointed at an origin nothing on A is a clone of.
+    let ours = store::load_conversation(&away.b.pool, away.copy)
+        .await
+        .unwrap()
+        .expect("B's copy is a Conversation")
+        .repo
+        .path;
+    git(
+        &ours,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://example.com/elsewhere.git",
+        ],
+    );
+
+    away.finishes().await;
+
+    let said = away
+        .b
+        .notice_saying(away.copy, "has no repo with the same origin as")
+        .await;
+
+    assert!(
+        said.contains("keeps the <code>rate-limiting</code> roadmap now"),
+        "the Timeline says A keeps the roadmap, and why it cannot take the stage: {said}",
+    );
+    assert!(
+        store::born_as(&away.a.pool, &born).await.unwrap().is_none(),
+        "A adopted nothing",
+    );
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(!told.exists(), "and B's finish is still held");
+}
+
 /// **Home's queue orders the far stage by when it asked to join**, against the
 /// stages finishing at home: a home stage queued first goes first, and the far
 /// stage waits on it — said on the far Timeline — until it settles.

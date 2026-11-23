@@ -142,7 +142,7 @@ async fn report(state: &AppState, conversation_id: i64) {
     // what the stage is; the device the stage was born on made the stage, and
     // is told nothing it does not hold already.
     let adopting = match away.home != away.born.device {
-        true => adopting(state, conversation_id, &away.home).await,
+        true => described(state, conversation_id, &away.home).await.told(),
         false => None,
     };
 
@@ -206,14 +206,16 @@ async fn report(state: &AppState, conversation_id: i64) {
 
 /// What `conversation_id` is, for an heir at `home` that has never heard of it
 /// (ADR-0029, *A roadmap's home outlives its device*): which roadmap and stage,
-/// its branches, the id it goes by here, and which of the heir's Repos it is in.
+/// its branches, its state, the id it goes by here, and which of the heir's
+/// Repos it is in.
 ///
-/// `None` where any of that cannot be had — the heir not answering the match,
-/// or holding no such repository — and the report goes without it: an heir that
-/// has adopted the stage already needs none of it, and one that has not refuses
-/// the report, which is sent again on the next round.
-async fn adopting(state: &AppState, conversation_id: i64, home: &str) -> Option<StageAdopting> {
-    let devices = state.devices.as_ref()?;
+/// Asked by the report and by the join ask alike, each of which adopts the stage
+/// on an heir that has not yet — see [`Described`] for what each makes of an
+/// answer that is not a description.
+pub(crate) async fn described(state: &AppState, conversation_id: i64, home: &str) -> Described {
+    let Some(devices) = state.devices.as_ref() else {
+        return Described::Untold;
+    };
 
     let read = async {
         let of = store::stage_roadmap(&state.pool, conversation_id).await?;
@@ -225,14 +227,16 @@ async fn adopting(state: &AppState, conversation_id: i64, home: &str) -> Option<
 
     let (of, conversation, stacks_on) = match read.await {
         Ok((Some(of), Some(conversation), stacks_on)) => (of, conversation, stacks_on),
-        Ok(_) => return None,
+        Ok(_) => return Described::Untold,
         Err(why) => {
             tracing::error!(error = ?why, conversation_id, "reading what a stage is, for its home's heir, failed");
-            return None;
+            return Described::Untold;
         }
     };
 
-    let stage = of.stage?;
+    let Some(stage) = of.stage else {
+        return Described::Untold;
+    };
 
     let there = match crate::matching::across(devices, home, &conversation.repo).await {
         Ok(Some(there)) => there,
@@ -243,7 +247,9 @@ async fn adopting(state: &AppState, conversation_id: i64, home: &str) -> Option<
                 repo = conversation.repo.name,
                 "the heir of a stage's home holds no copy of its repository, so it cannot adopt it",
             );
-            return None;
+            return Described::NoRepo {
+                repo: conversation.repo.name,
+            };
         }
         Err(refusal) => {
             tracing::info!(
@@ -252,18 +258,50 @@ async fn adopting(state: &AppState, conversation_id: i64, home: &str) -> Option<
                 "the heir of a stage's home could not be asked which of its repos the stage is in: {}",
                 refusal.saying,
             );
-            return None;
+            return Described::Untold;
         }
     };
 
-    Some(StageAdopting {
+    Described::Told(StageAdopting {
         repo: there.id,
         roadmap: of.roadmap,
         stage,
         branch: conversation.branch,
         stacks_on: stacks_on.flatten(),
         live: conversation_id,
+        state: Some(drawn(conversation.state)),
     })
+}
+
+/// What [`described`] could tell an heir about a stage.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Described {
+    /// Everything the heir makes its tombstone from.
+    Told(StageAdopting),
+
+    /// The heir holds no repository this stage's matches — by origin, as every
+    /// match across devices is made — so it has nowhere to keep the stage. Its
+    /// name here, which is the one the human knows it by.
+    ///
+    /// Nothing the device asking can mend: a join ask says so on the Timeline,
+    /// and a report goes without, to be refused and sent again.
+    NoRepo { repo: String },
+
+    /// Something in the way that the log has already said: the heir not
+    /// answering, or this device's own record not reading. Asked again on the
+    /// next round, and the call goes without it meanwhile — an heir that has
+    /// adopted the stage already needs none of it.
+    Untold,
+}
+
+impl Described {
+    /// The description, where there is one.
+    pub(crate) fn told(self) -> Option<StageAdopting> {
+        match self {
+            Described::Told(adopting) => Some(adopting),
+            Described::NoRepo { .. } | Described::Untold => None,
+        }
+    }
 }
 
 /// The state as it crosses the link, which is the viewer's word for it.

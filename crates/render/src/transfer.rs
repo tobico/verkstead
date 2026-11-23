@@ -388,6 +388,13 @@ pub struct StageAdopting {
     /// The id the live copy goes by on the reporting device, which the
     /// tombstone's mark names.
     pub live: i64,
+
+    /// The state the live copy is in, which the tombstone starts at: what a
+    /// join ask carries it in, having no state of its own. A report says its
+    /// state beside this, and that is the one read. Defaulted, for the reports
+    /// of the release that first sent this without it.
+    #[serde(default)]
+    pub state: Option<crate::Lifecycle>,
 }
 
 /// The pull request a stage away from home opened as it joined its roadmap's
@@ -411,6 +418,14 @@ pub struct StageJoined {
 pub struct StageJoining {
     /// The stage, by the key it was born under on home.
     pub born: BirthKey,
+
+    /// What the stage is, for a home that is the **Heir** of the device it was
+    /// born on — sent for the report's reason, so that the ask adopts the stage
+    /// on its own rather than waiting on a report to have landed first. See
+    /// [`StageReport::adopting`]. Defaulted, so a home older than this reads the
+    /// ask it always read.
+    #[serde(default)]
+    pub adopting: Option<StageAdopting>,
 }
 
 /// Home's answer: what the stage is still waiting on, and the chain it would
