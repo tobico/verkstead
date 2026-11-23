@@ -47,9 +47,14 @@ preinit — sources `/etc/set-environment` unless
 `__NIXOS_SET_ENVIRONMENT_DONE` is already set, and that file rebuilds `PATH`
 out of the *host's* profiles: a terminal's `verkstead ask` would have run
 whatever the machine had installed rather than the server's own image. So a
-Sandbox built to run a shell says that variable, which is the plain truth of
-it — the environment was set, here, by the Sandbox — and off NixOS it is a
-variable nothing reads.
+Sandbox says that variable, which is the plain truth of it — the environment
+was set, here, by the Sandbox — and off NixOS it is a variable nothing reads.
+
+Said by **every** Sandbox rather than only one built to run a shell, which is
+where this landed first and was half the answer: a session's own commands are
+shells too, so a session on such a host had the same `PATH` rebuilt in front
+of it. That is a session's invariant rather than a terminal's, and the sandbox
+module is where it is argued.
 
 ## What a terminal is not
 

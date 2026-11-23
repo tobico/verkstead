@@ -1239,6 +1239,46 @@ release tag. What the files are is
 its suite evaluates the written flake with a real `nix` where one is on
 `PATH` — minutes on a cold store, for two nixpkgs, NixOS-WSL and the release.
 
+### Asserting on a Nudge stream
+
+**A test reads the stream for the kind it is about, rather than asserting on
+the first thing off it.** A Nudge is notify-only
+([ADR 0009](adr/0009-scoped-nudges.md)): the stream carries kinds rather than a
+sequence, and what an open page is owed is that the kind its section is drawn
+from arrives at all. So the shape to write is a read that walks past everything
+else —
+
+```rust
+while page.nudge().await != Nudge::Devices {}
+```
+
+— and `announcing.rs`, `unlinking.rs` and `joining.rs` all read it that way.
+
+**Because one press moves more than one list.** Unlink takes a row off the
+cluster *and* names this device the heir of whatever the leaver kept
+([ADR 0029](adr/0029-work-is-placed-by-platform.md#a-roadmaps-home-outlives-its-device)),
+so `Heirs` goes down the stream beside `Devices`; an Allow admits the member
+and settles the question, so `Devices` follows `Joins` out of a carried task;
+a settings save announces `Authors`, `Instructions` and `McpServers` in that
+order, each where that part of it moved; and a `Devices` announced to the
+cluster — `announce` rather than `announce_here` — has every replicated kind
+pull each member again, so a merge that changes something announces *its* kind
+too. Which of them lands first is a race between the handler and the tasks the
+press left running, and a test that takes the first arrival is asserting an
+order nothing promises. Two did. The unlinking one failed on main rather than
+on the machine it was written on; the Allow one was found by reading for this
+rule once it was written, and had never failed at all — the task it races
+dials first, which is a head start and not a promise.
+
+**Where a test is about the kind rather than about the page being told, it says
+so and keeps the first arrival.**
+`joining::a_keepers_join_settles_in_one_round_trip` asserts `Devices` precisely
+because no question was raised for a modal, and
+`freshness::a_take_up_that_finds_nothing_moved_says_nothing_of_the_devices` is
+the same judgement the other way round. Those are exclusivity claims, and
+reading past the other kinds would throw the claim away — `nothing_more()` is
+how the `nudges` suite spells one out.
+
 ### The sessions suite, and the machine under it
 
 `crates/server/tests/suite/sessions.rs` is the one suite that is really a
@@ -1269,6 +1309,58 @@ never how its flakes reproduced — each loaded run failed a different test and
 every one of them passed alone — so the bar is ten in a row under load rather
 than one green run. It takes about fifty minutes, which is why nothing runs it
 for you.
+
+**And the machine under a run is the host's own hardening, inherited.** A
+session is a sandbox inside whatever started the server, and three facts about
+that host have each failed a suite of its own on a developer's machine while
+the runners stayed green — `sessions`, `sandbox` and `logins`, one apiece. All
+three are fixed; they are written down because the *shape* of them recurs, and
+because what each one looks like from a test is nothing like its cause.
+
+**A seccomp filter is inherited and it kills.** Everything the service starts
+runs under the unit's `SystemCallFilter`, bwrap and the session inside it
+alike, and a denied call does not return an error unless
+`SystemCallErrorNumber` says so — it raises SIGSYS, which is
+`Bad system call (core dumped)` and exit `159`. The NixOS module denied the
+`@chown` family that way, by way of `~@privileged`, which killed `sed -i` —
+it chowns its temporary file before renaming it — along with `deno` and
+`dotnet` outright. What that looked like from the suite was **151 `sessions`
+tests timing out identically**: the backlog stub ticks its task off with
+`sed -i`, sed died, the task stayed open, and the server re-prompted the
+session three times and filed the idle notice. So an in-place edit that
+silently does not happen, or a toolchain that exits `159` having printed
+nothing, is this shape — and `grep Seccomp /proc/self/status` says whether a
+filter is in force at all.
+
+**It killed the agent's own `grep` as well**, which is how far one group goes:
+`~@resources` took `sched_setaffinity` with it, the bundled `ugrep` pins its
+thread pool with that call, and a recursive search died the same way — looking
+from inside like a search that found nothing, which is the one failure worse
+than a crash. Both calls are named back in, and the module now says
+`SystemCallErrorNumber = "EPERM"` as well, so the next call it refuses is an
+error a tool can report rather than a death nobody is told about. The shape
+above is still worth knowing: the exit `159` is what a filter that says nothing
+does, and a session inherits whatever the host it is on has set.
+
+**A NixOS shell rebuilds the environment, login shell or not.** `/etc/bashrc`
+and the wrapped `/bin/sh` that stands in for it each source
+`/etc/set-environment` unless `__NIXOS_SET_ENVIRONMENT_DONE` is already in the
+environment — and a sandbox hands over a composed environment, so it was not.
+That file prepends `/run/wrappers/bin` to the `PATH` the server composed and
+exports a `LANG`, which is why
+`sandbox::the_verkstead_a_session_asks_with_is_the_one_serving_it` read the
+wrong first entry, and why a listing compared byte for byte came back collated
+instead. Every sandbox now says that variable ([ADR
+0013](adr/0013-conversation-terminals.md), which met it at a terminal first),
+so what a session's shell starts with is what the description said.
+
+**And the name a process reports is not the name it was started with.** That
+same wrapper re-execs the real shell, so a stub spawned as `/bin/sh` has the
+shell's own store path as its `argv[0]` in `/proc/<pid>/cmdline`. The `logins`
+suite counts live stubs by reading those lines, and asking for `/bin/sh` found
+none of them. It asks for the `-c` the script is passed with instead — which is
+what told the shell from the `bwrap` in front of it anyway. **So a test that
+reads `/proc` matches on what it passed, never on the path it named.**
 
 **Windows runs an arm of its own**, because that suite is `cfg(unix)`: it
 stands on a mount namespace, a `/bin/sh` probe and a `stty`, and a Windows

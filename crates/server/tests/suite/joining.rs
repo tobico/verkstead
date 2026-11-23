@@ -1242,7 +1242,16 @@ async fn a_press_tells_the_workbench_that_did_not_press() {
 
     press(&asked.workbench_in_a_hurry(), &request, "allow").await;
 
-    assert_eq!(page.nudge().await, Nudge::Joins);
+    // Read past the other kind this one press announces, rather than taking the
+    // first thing off the stream: an Allow settles the question here and admits
+    // the member, so Joins comes out of the handler and Devices out of the task
+    // the press leaves running — see [`crate::device::Devices::allow`], which
+    // carries it. Which of the two lands first is a race the dialling in that
+    // task only usually loses, and notify-only is a stream of kinds rather than
+    // a sequence (ADR-0009), so what this page is owed is that the kind its
+    // modal is drawn from arrives at all.
+    while page.nudge().await != Nudge::Joins {}
+
     assert!(
         being_asked(&over_there).await.is_empty(),
         "and what it reads back is a question that is no longer being asked",

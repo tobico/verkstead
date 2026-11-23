@@ -636,7 +636,55 @@ in
           "capset"
           "pivot_root"
           "sethostname"
+          # And `@chown`, which is in `@privileged` and is not a privileged
+          # thing to do to a file one owns. Everything a session runs inherits
+          # this filter, and until `SystemCallErrorNumber` below a denied call
+          # did not fail — it **killed the process with SIGSYS**. What that
+          # costs is not hypothetical: `sed -i` chowns its temporary file before
+          # renaming it, and so dies on every in-place edit an agent makes;
+          # `deno` and `dotnet` cannot start at all. A coding agent that cannot
+          # run `sed -i` is the same kind of setting as the
+          # `MemoryDenyWriteExecute` above — one the product cannot have.
+          #
+          # The group rather than its four calls one at a time, unlike the three
+          # above: `chown`, `fchown`, `fchownat` and `lchown` are one thing
+          # asked four ways, and a session reaching for the one spelling left
+          # out would die for the same reason again.
+          "@chown"
+          # And `sched_setaffinity` out of `@resources`, which is a process
+          # saying which cores its *own* threads may run on. The agent's `grep`
+          # is a bundled `ugrep`, and it pins the threads of its pool that way
+          # — so every recursive search a session made died, and what that
+          # looked like from inside was a search that found nothing. The same
+          # fault as `sed -i` above, one group over.
+          #
+          # Named one at a time, like the three out of `@privileged`: the rest
+          # of `@resources` is a process reaching for somebody else's
+          # scheduling or memory policy, and what this is, is a thread pool
+          # asking for its own cores.
+          "sched_setaffinity"
         ];
+        # And a denied call **fails rather than kills**, which is the half of
+        # the two findings above that was not about any one syscall. Nothing set
+        # this, so a call the filter refused raised SIGSYS — `Bad system call
+        # (core dumped)`, exit `159` — and both were found by the damage
+        # instead of by an error: an in-place edit that silently did not happen,
+        # and a search that silently found nothing. A filter that answers
+        # `EPERM` is one the next denial is reported by rather than killed by.
+        #
+        # And `core dumped` is the literal truth of it: eleven of those deaths,
+        # reproducing the two above, left eleven 1.3 GB cores in the worktree —
+        # fourteen gigabytes of a repository, written by a tool that was asked
+        # to search it.
+        #
+        # `EPERM` rather than `ENOSYS`, which is the other spelling systemd
+        # takes: a program told the call does not exist concludes the kernel is
+        # old and falls back on whatever it has, where *not allowed* is the
+        # truth and is what a program checks for. What is given up is that a
+        # process which ignores the error carries on in the state the filter
+        # meant to forbid — and a coding agent dying mid-edit is the worse of
+        # the two by a long way.
+        SystemCallErrorNumber = "EPERM";
         UMask = "0077";
 
         # `ProtectSystem = "strict"` leaves the state directory writable and

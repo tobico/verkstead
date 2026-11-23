@@ -414,11 +414,21 @@ impl Workbench {
             .flatten()
             .filter(|process| {
                 // The shell itself rather than the `bwrap` in front of it,
-                // whose own line carries the script as well.
+                // whose own line carries the script as well — told apart by
+                // the `-c` the script is passed with, which is the shell's
+                // second word and is never bwrap's.
+                //
+                // **Not by the first word.** The stub is spawned as `/bin/sh`,
+                // but `argv[0]` is not the spelling a process is started with
+                // on every machine: where the host's `/bin/sh` is a wrapper
+                // that re-execs the real shell, as NixOS' is, the line reads
+                // that shell's own store path instead. Asking for `/bin/sh`
+                // counted 0 there and 1 on the runners, which is a fact about
+                // the machine rather than about a login.
                 std::fs::read(process.path().join("cmdline")).is_ok_and(|line| {
                     let words: Vec<_> = line.split(|byte| *byte == 0).collect();
 
-                    words.first() == Some(&&b"/bin/sh"[..])
+                    words.get(1) == Some(&&b"-c"[..])
                         && String::from_utf8_lossy(&line).contains(&self.marker)
                         && (words.contains(&&b"login"[..]) || words.contains(&&b"/help"[..]))
                 })

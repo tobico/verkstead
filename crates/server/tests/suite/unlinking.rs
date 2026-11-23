@@ -730,15 +730,25 @@ async fn the_press_tells_this_devices_other_workbenches_too() {
     let over_here = a.workbench();
     let mut page = Listening::open(&over_here).await;
 
-    // Heard while the press is still going, as a page hears it. The press says
+    // Read while the press is still going, as a page reads it. The press says
     // Devices a dozen times over as its pieces land, and a listener that waited
     // for the answer before reading would find the backlog run over and the
     // stream ended — which tells a browser to read everything back, and tells
     // this test nothing.
+    //
+    // And read *past* the other kinds this one press announces, rather than
+    // taking the first thing off the stream: the press also names this device
+    // the heir of whatever the leaver kept (ADR-0029), so Heirs goes down the
+    // stream beside Devices, and which of the two lands first is a race between
+    // the handler and the relay tasks noticing the member has gone. Notify-only
+    // is a stream of kinds rather than a sequence (ADR-0009), so what this page
+    // is owed is that the kind its section is drawn from arrives at all.
     let pressed_on = a.workbench();
-    let (heard, _) = tokio::join!(page.nudge(), unlink(&pressed_on, B));
+    tokio::join!(
+        async { while page.nudge().await != Nudge::Devices {} },
+        unlink(&pressed_on, B),
+    );
 
-    assert_eq!(heard, Nudge::Devices);
     assert!(
         listing(&over_here).await.members.is_empty(),
         "and what it reads back is the cluster without the device that has gone",
