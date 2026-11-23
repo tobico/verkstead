@@ -20,7 +20,9 @@
 //! home carries its roadmap on and answers with what it would have said on the
 //! tombstone — which nobody opens — so this copy says it on its own Timeline.
 
-use verkstead_render::{BirthKey, Lifecycle as Drawn, StageJoined, StageReport, StageReported};
+use verkstead_render::{
+    BirthKey, Lifecycle as Drawn, StageAdopting, StageJoined, StageReport, StageReported,
+};
 use verkstead_schema::Nudge;
 
 use crate::AppState;
@@ -109,8 +111,8 @@ async fn every_owed(state: &AppState) {
 /// Only ever called from [`looked`], one report after another, so no two can
 /// overlap and land an older standing on home after a newer one.
 async fn report(state: &AppState, conversation_id: i64) {
-    let home = match store::away_from_home(&state.pool, conversation_id, &state.device).await {
-        Ok(Some(home)) => home,
+    let away = match store::away_from_home(&state.pool, conversation_id, &state.device).await {
+        Ok(Some(away)) => away,
         Ok(None) => return,
         Err(why) => {
             tracing::error!(error = ?why, conversation_id, "reading whether a Conversation is a stage away from home failed");
@@ -136,10 +138,18 @@ async fn report(state: &AppState, conversation_id: i64) {
         }
     }
 
+    // An heir holds no tombstone of a stage until it adopts one, so it is told
+    // what the stage is; the device the stage was born on made the stage, and
+    // is told nothing it does not hold already.
+    let adopting = match away.home != away.born.device {
+        true => adopting(state, conversation_id, &away.home).await,
+        false => None,
+    };
+
     let report = StageReport {
         born: BirthKey {
-            device: home.device.clone(),
-            id: home.id,
+            device: away.born.device.clone(),
+            id: away.born.id,
         },
         state: drawn(standing.state),
         done: standing.done,
@@ -152,11 +162,12 @@ async fn report(state: &AppState, conversation_id: i64) {
             url: joined.url.clone(),
             base: joined.base.clone(),
         }),
+        adopting,
     };
 
     let answered = relaying::word_from::<StageReported>(
         state.devices.as_ref(),
-        &home.device,
+        &away.home,
         Call {
             method: reqwest::Method::POST,
             onwards: REPORTS.to_owned(),
@@ -176,7 +187,7 @@ async fn report(state: &AppState, conversation_id: i64) {
         Err(refusal) => {
             tracing::info!(
                 conversation_id,
-                home = %home.device,
+                home = %away.home,
                 "a stage away from home could not tell home where it stands, and will again: {}",
                 refusal.saying,
             );
@@ -191,6 +202,68 @@ async fn report(state: &AppState, conversation_id: i64) {
     for said in reported.said {
         crate::continuing::say(state, conversation_id, &said).await;
     }
+}
+
+/// What `conversation_id` is, for an heir at `home` that has never heard of it
+/// (ADR-0029, *A roadmap's home outlives its device*): which roadmap and stage,
+/// its branches, the id it goes by here, and which of the heir's Repos it is in.
+///
+/// `None` where any of that cannot be had — the heir not answering the match,
+/// or holding no such repository — and the report goes without it: an heir that
+/// has adopted the stage already needs none of it, and one that has not refuses
+/// the report, which is sent again on the next round.
+async fn adopting(state: &AppState, conversation_id: i64, home: &str) -> Option<StageAdopting> {
+    let devices = state.devices.as_ref()?;
+
+    let read = async {
+        let of = store::stage_roadmap(&state.pool, conversation_id).await?;
+        let conversation = store::load_conversation(&state.pool, conversation_id).await?;
+        let stacks_on = store::stacks_on(&state.pool, conversation_id).await?;
+
+        anyhow::Ok((of, conversation, stacks_on))
+    };
+
+    let (of, conversation, stacks_on) = match read.await {
+        Ok((Some(of), Some(conversation), stacks_on)) => (of, conversation, stacks_on),
+        Ok(_) => return None,
+        Err(why) => {
+            tracing::error!(error = ?why, conversation_id, "reading what a stage is, for its home's heir, failed");
+            return None;
+        }
+    };
+
+    let stage = of.stage?;
+
+    let there = match crate::matching::across(devices, home, &conversation.repo).await {
+        Ok(Some(there)) => there,
+        Ok(None) => {
+            tracing::warn!(
+                conversation_id,
+                heir = home,
+                repo = conversation.repo.name,
+                "the heir of a stage's home holds no copy of its repository, so it cannot adopt it",
+            );
+            return None;
+        }
+        Err(refusal) => {
+            tracing::info!(
+                conversation_id,
+                heir = home,
+                "the heir of a stage's home could not be asked which of its repos the stage is in: {}",
+                refusal.saying,
+            );
+            return None;
+        }
+    };
+
+    Some(StageAdopting {
+        repo: there.id,
+        roadmap: of.roadmap,
+        stage,
+        branch: conversation.branch,
+        stacks_on: stacks_on.flatten(),
+        live: conversation_id,
+    })
 }
 
 /// The state as it crosses the link, which is the viewer's word for it.

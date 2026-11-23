@@ -12,11 +12,12 @@ use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Birth, JoinedAway, Lifecycle, LiveStanding, PullRequest, Renaming, RoadmapStage, StageStanding,
-    Transferred, away_from_home, conversation_branch, follow, join_queue, land, live_standing,
-    open_database, queue_to_join, record_birth, record_pull_request, register_repo, set_state,
-    slice, stage_chain, stage_standings, stages_away_from_home, start_conversation, start_stage,
-    tell, told, transfer_away,
+    Adopting, Away, Birth, JoinedAway, Lifecycle, LiveStanding, PullRequest, Renaming,
+    RoadmapStage, StageStanding, Transferred, adopt, away_from_home, born_as, conversation_branch,
+    driven_roadmaps, follow, homes, join_queue, land, live_standing, name_heir, open_database,
+    queue_to_join, record_birth, record_pull_request, register_repo, set_state, slice, stage_chain,
+    stage_standings, stages_away_from_home, start_conversation, start_stage, tell, told,
+    transfer_away, transferred,
 };
 
 /// The device this database is on.
@@ -168,9 +169,12 @@ async fn only_a_live_stage_born_elsewhere_is_away_from_home() {
 
     assert_eq!(
         away_from_home(&pool, away, HERE).await.unwrap(),
-        Some(Birth {
-            device: HOME.to_owned(),
-            id: 41,
+        Some(Away {
+            born: Birth {
+                device: HOME.to_owned(),
+                id: 41,
+            },
+            home: HOME.to_owned(),
         }),
     );
 
@@ -480,4 +484,171 @@ async fn a_stage_that_comes_home_keeps_its_standing_and_its_places_in_the_chain_
             "home reads 01 as it did before its {trip} return",
         );
     }
+}
+
+/// The device a third member is on, which is neither home nor here.
+const ELSEWHERE: &str = "ffeeddccbbaa00998877665544332211";
+
+/// A home that leaves the cluster leaves an heir, and home is read through it:
+/// a copy here born on the home that left reports to the heir, keeping the key
+/// it was born under — and where the heir is this device, the copy is at home.
+#[tokio::test]
+async fn a_home_that_left_is_read_through_its_heir() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool).await;
+
+    let away = copy(&pool, repo_id, "07", 47).await;
+
+    assert!(name_heir(&pool, HERE, HOME, ELSEWHERE).await.unwrap());
+
+    assert_eq!(
+        away_from_home(&pool, away, HERE).await.unwrap(),
+        Some(Away {
+            born: Birth {
+                device: HOME.to_owned(),
+                id: 47,
+            },
+            home: ELSEWHERE.to_owned(),
+        }),
+        "the birth key stays, and home is the heir",
+    );
+    assert_eq!(stages_away_from_home(&pool, HERE).await.unwrap(), [away]);
+
+    assert!(
+        driven_roadmaps(&pool, HERE).await.unwrap().is_empty(),
+        "a roadmap whose heir is another device is not driven here",
+    );
+
+    // Named again, this device: the newest naming wins, and the copy is home.
+    assert!(name_heir(&pool, HERE, HOME, HERE).await.unwrap());
+
+    assert_eq!(away_from_home(&pool, away, HERE).await.unwrap(), None);
+    assert!(stages_away_from_home(&pool, HERE).await.unwrap().is_empty());
+    assert_eq!(
+        driven_roadmaps(&pool, HERE)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|driven| driven.roadmap)
+            .collect::<Vec<_>>(),
+        ["mvp"],
+        "and the roadmap is driven by its heir",
+    );
+
+    assert_eq!(homes(&pool).await.unwrap().of(HOME), HERE);
+}
+
+/// Naming an heir forgets what every copy born on the home that left last told
+/// its home: the heir was told nothing, and a report matching what the old
+/// home took would never be sent to it.
+#[tokio::test]
+async fn naming_an_heir_has_the_copies_tell_their_home_again() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool).await;
+
+    let away = copy(&pool, repo_id, "07", 47).await;
+    let born_here = stage(&pool, repo_id, "08").await;
+
+    let told_home = standing(Lifecycle::Implementing, false, false, false);
+    tell(&pool, away, &told_home).await.unwrap();
+    tell(&pool, born_here, &told_home).await.unwrap();
+
+    name_heir(&pool, HERE, HOME, ELSEWHERE).await.unwrap();
+
+    assert_eq!(told(&pool, away).await.unwrap(), None);
+    assert_eq!(
+        told(&pool, born_here).await.unwrap(),
+        Some(told_home),
+        "a copy born anywhere else keeps what it told",
+    );
+}
+
+/// The heir adopts a stage it has never heard of: a tombstone keyed by the
+/// birth key, marked as elsewhere, in the roadmap and on the branches the copy
+/// reported — and adopting it twice makes one.
+#[tokio::test]
+async fn an_heir_adopts_a_stage_it_never_held() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool).await;
+
+    let born = Birth {
+        device: HOME.to_owned(),
+        id: 47,
+    };
+    let live = Transferred {
+        device: ELSEWHERE.to_owned(),
+        id: 3,
+    };
+    let adopting = Adopting {
+        repo_id,
+        roadmap: "mvp".to_owned(),
+        stage: "07".to_owned(),
+        branch: "roadmaps/mvp/07".to_owned(),
+        stacks_on: Some("roadmaps/mvp/06".to_owned()),
+        state: Lifecycle::Implementing,
+    };
+
+    let tombstone = adopt(&pool, &born, &live, &adopting)
+        .await
+        .unwrap()
+        .expect("the repo is registered");
+
+    assert_eq!(born_as(&pool, &born).await.unwrap(), Some(tombstone));
+    assert_eq!(
+        transferred(&pool, tombstone).await.unwrap(),
+        Some(live.clone())
+    );
+    assert_eq!(
+        adopt(&pool, &born, &live, &adopting).await.unwrap(),
+        Some(tombstone),
+        "a second report adopts nothing twice",
+    );
+
+    let standings = stage_standings(&pool, repo_id).await.unwrap();
+    assert_eq!(
+        standings.of("mvp", "07"),
+        Some(StageStanding::InFlight),
+        "the roadmap reads the adopted stage",
+    );
+
+    // Its join reported, it is in the heir's chain on the branch it joined with.
+    follow(
+        &pool,
+        tombstone,
+        &LiveStanding {
+            joined: Some(joined_on("roadmaps/mvp/07", 70)),
+            ..standing(Lifecycle::Wrapping, false, true, false)
+        },
+    )
+    .await
+    .unwrap();
+
+    let chain = stage_chain(&pool, repo_id, "mvp").await.unwrap();
+    assert_eq!(
+        chain
+            .iter()
+            .map(|link| (link.stage.as_str(), link.branch.as_str()))
+            .collect::<Vec<_>>(),
+        [("07", "roadmaps/mvp/07")],
+    );
+
+    // A repo that is not registered here adopts nothing.
+    let unknown = Adopting {
+        repo_id: repo_id + 100,
+        ..adopting
+    };
+    assert_eq!(
+        adopt(
+            &pool,
+            &Birth {
+                device: HOME.to_owned(),
+                id: 48,
+            },
+            &live,
+            &unknown,
+        )
+        .await
+        .unwrap(),
+        None,
+    );
 }

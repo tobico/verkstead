@@ -9818,6 +9818,158 @@ async fn a_finish_away_refused_by_home_says_home_refused_and_goes_on_when_let_in
     told_at_the_finish(&told).await;
 }
 
+/// **A home unlinked by the far device leaves that device its heir**
+/// (ADR-0029, *A roadmap's home outlives its device*): A answering nowhere, and
+/// then B's press of Unlink on it, names B the heir of everything A kept — so
+/// B's stage is at home, and its finish is let in by B's own reading rather
+/// than waiting on A for ever.
+#[tokio::test]
+async fn a_finish_away_whose_home_is_unlinked_there_is_let_in_by_its_heir() {
+    let spill = tempfile::tempdir().unwrap();
+    let told = spill.path().join("finish-prompt");
+    let away = finishing_away(spill.path(), &told).await;
+
+    // A gone for good: answering nowhere, and unlinked by B's press.
+    let (machine, os) = this_machine();
+    away.b
+        .linked_to(
+            &away.a.device,
+            &machine,
+            &os,
+            vec!["127.0.0.1:9".to_owned()],
+        )
+        .await;
+
+    press(
+        &away.b.workbench,
+        &format!("/api/ui/devices/members/{A}/unlink"),
+        None,
+    )
+    .await;
+
+    assert_eq!(
+        store::homes(&away.b.pool).await.unwrap().of(A),
+        B,
+        "the device that unlinked A keeps what A kept",
+    );
+    assert_eq!(
+        store::away_from_home(&away.b.pool, away.copy, B)
+            .await
+            .unwrap(),
+        None,
+        "so the stage on it is at home",
+    );
+
+    away.finishes().await;
+
+    told_at_the_finish(&told).await;
+}
+
+/// **A home that left with no heir is asked about** (ADR-0029, *A roadmap's
+/// home outlives its device*): A is no member of B's any more — unlinked
+/// somewhere B never heard of an heir from — so B's held finish says the device
+/// that kept the roadmap has left, and asks whether B keeps it. *Keep it here*
+/// names B the heir, and the finish goes on.
+#[tokio::test]
+async fn a_finish_away_whose_home_has_left_asks_to_keep_the_roadmap_and_goes_on_once_kept() {
+    let spill = tempfile::tempdir().unwrap();
+    let told = spill.path().join("finish-prompt");
+    let away = finishing_away(spill.path(), &told).await;
+
+    store::forget_member(&away.b.pool, A).await.unwrap();
+
+    away.finishes().await;
+
+    let said = away.b.notice_saying(away.copy, "Waiting to join").await;
+
+    assert!(
+        said.contains(
+            "the device that kept the <code>rate-limiting</code> roadmap has left the cluster"
+        ),
+        "the Timeline says home has left rather than that it is not answering: {said}",
+    );
+    assert!(
+        away.b.view(away.copy).await.waiting_to_join,
+        "under the same label as every wait to join",
+    );
+
+    let asked = verksteads_set(&away.b, away.copy).await;
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(
+        !told.exists(),
+        "and no finish session was launched while nobody kept the roadmap",
+    );
+
+    picks(&away.b, asked.set_id, 1).await;
+
+    told_at_the_finish(&told).await;
+
+    assert_eq!(
+        store::homes(&away.b.pool).await.unwrap().of(A),
+        B,
+        "B keeps what A kept",
+    );
+}
+
+/// **An heir adopts a stage it never held** (ADR-0029, *A roadmap's home
+/// outlives its device*): B's stage was born on C, which has left with A named
+/// its heir. B's report tells A what the stage is, A makes the tombstone C
+/// would have held — naming B as where the work is — and B's finish, asking A,
+/// is let in.
+#[tokio::test]
+async fn an_heir_adopts_a_stage_of_the_home_that_left_and_lets_it_join() {
+    let spill = tempfile::tempdir().unwrap();
+    let told = spill.path().join("finish-prompt");
+    let away = finishing_away(spill.path(), &told).await;
+
+    let born = store::Birth {
+        device: C.to_owned(),
+        id: 7,
+    };
+
+    // B's copy born on C rather than on A, and A named C's heir on both — the
+    // record being the cluster's.
+    store::record_birth(&away.b.pool, away.copy, &born)
+        .await
+        .unwrap();
+
+    for pool in [&away.a.pool, &away.b.pool] {
+        store::name_heir(pool, A, C, A).await.unwrap();
+    }
+
+    away.finishes().await;
+
+    told_at_the_finish(&told).await;
+
+    let adopted = store::born_as(&away.a.pool, &born)
+        .await
+        .unwrap()
+        .expect("A adopted the stage it heard of");
+
+    assert_ne!(adopted, away.tombstone, "a tombstone of its own");
+    assert_eq!(
+        store::transferred(&away.a.pool, adopted).await.unwrap(),
+        Some(store::Transferred {
+            device: B.to_owned(),
+            id: away.copy,
+        }),
+        "naming B as where the work is",
+    );
+    assert_eq!(
+        store::stage_roadmap(&away.a.pool, adopted)
+            .await
+            .unwrap()
+            .map(|of| (of.roadmap, of.stage)),
+        Some(("rate-limiting".to_owned(), Some("01".to_owned()))),
+        "in the roadmap and at the stage B said",
+    );
+    assert!(
+        away.queued_at_home().await.contains(&adopted),
+        "and queued to join when B asked",
+    );
+}
+
 /// **Home's queue orders the far stage by when it asked to join**, against the
 /// stages finishing at home: a home stage queued first goes first, and the far
 /// stage waits on it — said on the far Timeline — until it settles.

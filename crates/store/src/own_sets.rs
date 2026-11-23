@@ -52,6 +52,21 @@ pub enum OwnAsking {
         #[serde(default)]
         waiting_on: Vec<String>,
     },
+
+    /// Whether this device keeps a roadmap whose home has left the cluster
+    /// with no **Heir** named for it, asked by a stage of it held waiting to
+    /// join (ADR-0029, *A roadmap's home outlives its device*).
+    ///
+    /// Its Options are *Keep it here* and then *Leave it waiting*. Kept here
+    /// names this device the heir of `left`, which is every roadmap `left`
+    /// kept, not this one alone: an heir is a device's, never a roadmap's.
+    Heir {
+        /// The Device Id of the home that left.
+        left: String,
+
+        /// The roadmap the stage that asked is a stage of, which the Set names.
+        roadmap: String,
+    },
 }
 
 /// The work a placing Set is about.

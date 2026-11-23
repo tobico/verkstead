@@ -2,7 +2,10 @@
 //! a stage born here, saying where that stage now stands (ADR-0029, *Home
 //! drives a roadmap across devices*).
 //!
-//! **Home keeps the roadmap.** Every stage is made on the device driving its
+//! **Home keeps the roadmap**, home being the device the stage was born on or,
+//! once that device has left the cluster, its **Heir** — which adopts a stage it
+//! has never heard of the first time its live copy reports (see [`adopted`]).
+//! Every stage is made on the device driving its
 //! roadmap, and a stage moved away leaves a tombstone here that the standings,
 //! the places and the chain go on reading. So what arrives is written onto that
 //! tombstone — see [`store::follow`] — and the roadmap is read where it always
@@ -32,7 +35,9 @@ use axum::extract::{ConnectInfo, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
-use verkstead_render::{BirthKey, HandedOn, StageReport, StageReported, StageWhereabouts};
+use verkstead_render::{
+    BirthKey, HandedOn, StageAdopting, StageReport, StageReported, StageWhereabouts,
+};
 use verkstead_schema::Nudge;
 
 use crate::relaying::{self, Call, Streamed, as_json};
@@ -70,7 +75,12 @@ pub(crate) async fn heard(
     ConnectInfo(caller): ConnectInfo<Caller>,
     Json(report): Json<StageReport>,
 ) -> Response {
-    let tombstone = match tombstone_of(&state, &caller, &report.born).await {
+    let adopting = report
+        .adopting
+        .as_ref()
+        .map(|adopting| (adopting, crate::ui::state_of(report.state)));
+
+    let tombstone = match tombstone_of(&state, &caller, &report.born, adopting).await {
         Ok(tombstone) => tombstone,
         Err(refusal) => return refusal,
     };
@@ -131,6 +141,7 @@ pub(super) async fn tombstone_of(
     state: &AppState,
     caller: &Caller,
     born: &BirthKey,
+    adopting: Option<(&StageAdopting, store::Lifecycle)>,
 ) -> Result<i64, Response> {
     let Some(presented) = caller.fingerprint() else {
         return Err(refused(
@@ -170,7 +181,20 @@ pub(super) async fn tombstone_of(
         }
     };
 
-    if born.device != state.device {
+    // Home is the birth device, or the heir it left what it kept to.
+    let home = match store::homes(&state.pool).await {
+        Ok(homes) => homes.of(&born.device),
+        Err(why) => {
+            tracing::error!(error = ?why, "reading the heirs failed");
+
+            return Err(refused(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "this device could not read its own record",
+            ));
+        }
+    };
+
+    if home != state.device {
         return Err(refused(
             StatusCode::NOT_FOUND,
             "that stage was not born on this device, so this is not its home",
@@ -184,6 +208,15 @@ pub(super) async fn tombstone_of(
 
     let tombstone = match store::born_as(&state.pool, &born).await {
         Ok(Some(id)) => id,
+
+        // A stage of a device this one is the heir of, never heard of here
+        // until now: the tombstone the device it was born on would have held
+        // is made, naming the caller as where the work is.
+        Ok(None) if born.device != state.device && adopting.is_some() => {
+            let (adopting, state_now) = adopting.expect("matched as there");
+
+            adopted(state, &born, &member.device, adopting, state_now).await?
+        }
 
         Ok(None) => {
             return Err(refused(
@@ -263,6 +296,65 @@ pub(super) async fn tombstone_of(
     }
 
     Ok(tombstone)
+}
+
+/// Make the tombstone of stage `born`, live on `caller`, on this device as the
+/// heir of the device it was born on (ADR-0029, *A roadmap's home outlives its
+/// device*) — see [`store::adopt`].
+///
+/// The mark names the caller and the id it gave in the report, so the check
+/// that follows finds the work on the device calling, as it would for any
+/// tombstone. A Repo that is not registered here is refused: the caller matched
+/// it against this registry a moment ago, and it went in between.
+async fn adopted(
+    state: &AppState,
+    born: &store::Birth,
+    caller: &str,
+    adopting: &StageAdopting,
+    state_now: store::Lifecycle,
+) -> Result<i64, Response> {
+    let live = store::Transferred {
+        device: caller.to_owned(),
+        id: adopting.live,
+    };
+
+    let facts = store::Adopting {
+        repo_id: adopting.repo,
+        roadmap: adopting.roadmap.clone(),
+        stage: adopting.stage.clone(),
+        branch: adopting.branch.clone(),
+        stacks_on: adopting.stacks_on.clone(),
+        state: state_now,
+    };
+
+    match store::adopt(&state.pool, born, &live, &facts).await {
+        Ok(Some(tombstone)) => {
+            tracing::info!(
+                tombstone,
+                born_on = %born.device,
+                roadmap = facts.roadmap,
+                stage = facts.stage,
+                live_on = caller,
+                "a stage whose home left the cluster was adopted by its heir",
+            );
+
+            Ok(tombstone)
+        }
+
+        Ok(None) => Err(refused(
+            StatusCode::NOT_FOUND,
+            "this device has no repo registered for that stage",
+        )),
+
+        Err(why) => {
+            tracing::error!(error = ?why, born = born.key(), "adopting a stage failed");
+
+            Err(refused(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "this device could not write the stage down",
+            ))
+        }
+    }
 }
 
 /// Where the work on the stage `born` went from the device `mark` names, where

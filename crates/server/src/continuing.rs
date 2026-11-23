@@ -430,10 +430,10 @@ pub(crate) async fn reading(state: AppState, conversation_id: i64, brought: Brou
     // the stage's report — see [`crate::reporting`].
     match store::away_from_home(&state.pool, conversation_id, &state.device).await {
         Ok(None) => {}
-        Ok(Some(home)) => {
+        Ok(Some(away)) => {
             tracing::debug!(
                 conversation_id,
-                home = home.device,
+                home = away.home,
                 "a stage away from home settled, and its home carries the roadmap on",
             );
             return;

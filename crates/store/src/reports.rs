@@ -1,8 +1,10 @@
 //! What a stage worked on another device tells its **home**, and what home
 //! writes onto its tombstone (ADR-0029, *Home drives a roadmap across devices*).
 //!
-//! **Home is the stage's birth device.** Every stage is made on the device
-//! driving its roadmap, so the **Birth Key** names home and never changes. A
+//! **Home is the stage's birth device** — or, once that device has left the
+//! cluster, its **Heir**, which keeps what it kept (see [`super::heirs`]).
+//! Every stage is made on the device driving its roadmap, so the **Birth Key**
+//! names home and never changes. A
 //! stage moved away leaves a tombstone there — see [`super::births`] — and the
 //! roadmap is read off the record it always was: `stage_standings`, the places
 //! and the chain all read home's rows, the tombstone's among them. So the
@@ -108,41 +110,63 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     Ok(())
 }
 
+/// A stage whose live record is on this device and whose home is not: the key
+/// it was born under, and the device that is its home now.
+///
+/// **Two facts, which are one until a home leaves.** The birth key is what the
+/// stage is named by on every device, its home's tombstone included, and it never
+/// changes; the home is the birth device or, where that device has left the
+/// cluster, its **Heir** — see [`super::heirs`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Away {
+    pub born: Birth,
+    pub home: String,
+}
+
 /// Where `conversation_id`'s home is, where it is a stage whose live record is
 /// on this device and whose home is not — a **copy away from home**.
 ///
-/// `None` for everything else: a Conversation that is no stage, one born here,
-/// and a tombstone, which is no live record at all. `here` is this device's
-/// Device Id, which the store has no way of knowing for itself.
+/// `None` for everything else: a Conversation that is no stage, one whose home
+/// is here — born here, or born on a device this one is the heir of — and a
+/// tombstone, which is no live record at all. `here` is this device's Device
+/// Id, which the store has no way of knowing for itself.
 pub async fn away_from_home(
     pool: &SqlitePool,
     conversation_id: i64,
     here: &str,
-) -> Result<Option<Birth>> {
+) -> Result<Option<Away>> {
     let row: Option<(String, i64)> = sqlx::query_as(
         "SELECT b.device, b.born_as
          FROM births b
          JOIN stage_roadmaps r ON r.conversation_id = b.conversation_id
-         WHERE b.conversation_id = ? AND b.device <> ? AND r.stage IS NOT NULL
+         WHERE b.conversation_id = ? AND r.stage IS NOT NULL
            AND NOT EXISTS (SELECT 1 FROM transferred t
                            WHERE t.conversation_id = b.conversation_id)",
     )
     .bind(conversation_id)
-    .bind(here)
     .fetch_optional(pool)
     .await
     .with_context(|| {
         format!("reading whether Conversation {conversation_id} is a stage away from home")
     })?;
 
-    Ok(row.map(|(device, id)| Birth { device, id }))
+    let Some((device, id)) = row else {
+        return Ok(None);
+    };
+
+    let home = super::heirs::homes(pool).await?.of(&device);
+
+    Ok((home != here).then_some(Away {
+        born: Birth { device, id },
+        home,
+    }))
 }
 
 /// Every Conversation [`away_from_home`] would answer for, in id order: what a
 /// sweep for reports still owed walks.
 pub async fn stages_away_from_home(pool: &SqlitePool, here: &str) -> Result<Vec<i64>> {
-    let rows: Vec<(i64,)> = sqlx::query_as(
-        "SELECT b.conversation_id
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT b.conversation_id, b.device
          FROM births b
          JOIN stage_roadmaps r ON r.conversation_id = b.conversation_id
          WHERE b.device <> ? AND r.stage IS NOT NULL
@@ -155,7 +179,13 @@ pub async fn stages_away_from_home(pool: &SqlitePool, here: &str) -> Result<Vec<
     .await
     .context("reading which stages on this device are away from home")?;
 
-    Ok(rows.into_iter().map(|(id,)| id).collect())
+    let homes = super::heirs::homes(pool).await?;
+
+    Ok(rows
+        .into_iter()
+        .filter(|(_, born_on)| homes.of(born_on) != here)
+        .map(|(id, _)| id)
+        .collect())
 }
 
 /// What `conversation_id` stands at now, read the way `stage_standings` reads

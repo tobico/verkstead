@@ -101,7 +101,7 @@ pub(crate) async fn wait(state: &AppState, conversation_id: i64, set_id: i64) {
     let waking = match store::own_asking(&state.pool, set_id).await {
         Ok(Some(asking)) => match &asking {
             store::OwnAsking::Placing { waiting_on, .. } if !waiting_on.is_empty() => Some(asking),
-            store::OwnAsking::Placing { .. } => None,
+            _ => None,
         },
         Ok(None) => None,
         Err(error) => {
@@ -251,6 +251,11 @@ async fn settling(state: &AppState, set_id: i64, response: &Response) {
     match &asking {
         store::OwnAsking::Placing { .. } => {
             crate::placing::answered(state, conversation_id, set_id, &asking, response, held).await
+        }
+
+        store::OwnAsking::Heir { .. } => {
+            drop(held);
+            crate::joins::answered(state, conversation_id, &asking, response).await
         }
     }
 }

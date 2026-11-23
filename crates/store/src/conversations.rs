@@ -7175,26 +7175,42 @@ pub struct Driven {
 /// it has none, which is a database from before there were any. Home's
 /// tombstone of a stage moved away was born here and counts, and so does a
 /// stage that has come home.
+///
+/// **And what was born on a device this one is the heir of** — see
+/// [`super::heirs`]: its home left the cluster, and this device keeps what it
+/// kept, the tombstones it has adopted and any live copy here among them.
 pub async fn driven_roadmaps(pool: &SqlitePool, here: &str) -> Result<Vec<Driven>> {
-    let rows: Vec<(i64, String)> = sqlx::query_as(
-        "SELECT c.repo_id, r.roadmap
+    let rows: Vec<(i64, String, Option<String>)> = sqlx::query_as(
+        "SELECT c.repo_id, r.roadmap, b.device
          FROM stage_roadmaps r
          JOIN conversations c ON c.id = r.conversation_id
          LEFT JOIN births b ON b.conversation_id = r.conversation_id
          WHERE c.repo_id NOT IN (SELECT repo_id FROM unregistered_repos)
-           AND (b.device IS NULL OR b.device = ?)
-         GROUP BY c.repo_id, r.roadmap
-         ORDER BY MIN(r.conversation_id)",
+         ORDER BY r.conversation_id",
     )
-    .bind(here)
     .fetch_all(pool)
     .await
     .context("reading which roadmaps Verkstead is driving")?;
 
-    Ok(rows
-        .into_iter()
-        .map(|(repo_id, roadmap)| Driven { repo_id, roadmap })
-        .collect())
+    let homes = super::heirs::homes(pool).await?;
+
+    // In the order of each roadmap's oldest row that is driven here, which is
+    // the order the rows come back in.
+    let mut driven: Vec<Driven> = Vec::new();
+
+    for (repo_id, roadmap, born_on) in rows {
+        let ours = born_on.is_none_or(|born_on| homes.of(&born_on) == here);
+
+        if ours
+            && !driven
+                .iter()
+                .any(|held| held.repo_id == repo_id && held.roadmap == roadmap)
+        {
+            driven.push(Driven { repo_id, roadmap });
+        }
+    }
+
+    Ok(driven)
 }
 
 /// One stage **queued to join** its roadmap's chain: the Conversation it is, and

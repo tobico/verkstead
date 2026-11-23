@@ -61,6 +61,12 @@
 //! merged is still git's reading, made here as it always is. A home that does
 //! not answer is waited for, said on the Timeline, and never a refusal: the
 //! finish runs here, and only home can let it in.
+//!
+//! **And home is read afresh at every look**, because it can move while a stage
+//! waits (ADR-0029, *A roadmap's home outlives its device*): a home that leaves
+//! the cluster leaves an **Heir**, which is asked instead, and a home that left
+//! with none is asked about — the human answering whether this device keeps the
+//! roadmap, which makes the stage one at home.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -170,21 +176,33 @@ impl Drop for Waiting {
 /// What both of the places a finish session is launched from call, in front of
 /// the launch.
 pub(crate) async fn let_in(state: &AppState, conversation_id: i64) -> Vec<skills::Link> {
-    match store::away_from_home(&state.pool, conversation_id, &state.device).await {
-        Ok(Some(home)) => return held_away(state, conversation_id, &home).await,
-        Ok(None) => {}
-
-        // [`hold`]'s reasoning: a record that will not be read is not one saying
-        // the stage is away, and the reading here is the one there is.
-        Err(error) => tracing::error!(
-            error = ?error,
-            conversation_id,
-            "reading whether a stage is away from home failed",
-        ),
+    if let Some(links) = held_away(state, conversation_id).await {
+        return links;
     }
 
     hold(state, conversation_id).await;
     joining(state, conversation_id).await
+}
+
+/// Whether `conversation_id` is a stage away from home, and where home is —
+/// read afresh at every look, because home can move while a stage waits: its
+/// device leaves the cluster and this one, or another, is named its heir.
+///
+/// `None` where it is not away, and where that cannot be read — [`hold`]'s
+/// reasoning: a record that will not be read is not one saying the stage is
+/// away, and the reading here is the one there is.
+async fn away(state: &AppState, conversation_id: i64) -> Option<store::Away> {
+    match store::away_from_home(&state.pool, conversation_id, &state.device).await {
+        Ok(away) => away,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                conversation_id,
+                "reading whether a stage is away from home failed",
+            );
+            None
+        }
+    }
 }
 
 /// Hold this Conversation's finish until every stage already in its roadmap's
@@ -277,23 +295,35 @@ async fn hold(state: &AppState, conversation_id: i64) {
 /// own, said once, and asked again at the same pace: the stage goes on the moment
 /// home answers. A home that answers and refuses is held for the same way, and
 /// said as what it is — see [`Heard`].
-async fn held_away(
-    state: &AppState,
-    conversation_id: i64,
-    home: &store::Birth,
-) -> Vec<skills::Link> {
+///
+/// **A home that has left the cluster is asked about** (ADR-0029, *A roadmap's
+/// home outlives its device*): no member answers for it any more, and no heir
+/// has been named for it, so the human is asked whether this device keeps the
+/// roadmap — see [`ask_heir`]. Answered *Keep it here*, this device is home, and
+/// the look after that finds the stage away from nothing: `None`, and [`let_in`]
+/// holds it the way a stage at home is held. An heir named anywhere else is the
+/// home the next look asks.
+///
+/// `None` where the stage is not away from home at all, or no longer is.
+async fn held_away(state: &AppState, conversation_id: i64) -> Option<Vec<skills::Link>> {
+    away(state, conversation_id).await?;
+
     let Some(of) = stage(state, conversation_id).await else {
-        return Vec::new();
+        return Some(Vec::new());
     };
 
     let mut waiting: Option<Waiting> = None;
 
     // What was last said, as [`hold`] keeps it — and home not answering, or
-    // refusing, are two more things it can have said.
+    // refusing, or having left, are three more things it can have said.
     let mut said: Option<Heard> = None;
 
     loop {
-        let answered = ask_home(state, home).await;
+        // Asked afresh at every look: an heir named while the stage waits is
+        // where home is now, and this device named one is home.
+        let away = away(state, conversation_id).await?;
+
+        let answered = ask_home(state, &away).await;
 
         if let Ok(join) = &answered {
             if join.ahead.is_empty() {
@@ -313,13 +343,15 @@ async fn held_away(
                     .chain(join.foot.clone())
                     .collect();
 
-                // Home's ids, so the stage's own link is home's tombstone.
-                return below(
-                    home.id,
+                // Home answers the chain without the stage's own link in it — see
+                // [`asked`] — so nothing here is this stage's: home's ids are not
+                // this device's, and an heir's are not the birth key's.
+                return Some(below(
+                    away.born.id,
                     &chain,
                     join.foot.as_deref(),
                     &landed(state, &of, named).await,
-                );
+                ));
             }
         }
 
@@ -328,7 +360,7 @@ async fn held_away(
                 conversation_id,
                 "the run has stopped, so there is nothing left waiting to join",
             );
-            return Vec::new();
+            return Some(Vec::new());
         }
 
         if waiting.is_none() {
@@ -349,7 +381,7 @@ async fn held_away(
             Err(refusal) => {
                 tracing::info!(
                     conversation_id,
-                    home = %home.device,
+                    home = %away.home,
                     answered = refusal.answered(),
                     "a stage away from home could not ask home whether it may join, and will again: {}",
                     refusal.saying,
@@ -357,6 +389,7 @@ async fn held_away(
 
                 match refusal.answered() {
                     true => Heard::Refused(refusal.saying),
+                    false if left(state, &away.home).await => Heard::Left(away.home.clone()),
                     false => Heard::Unanswered,
                 }
             }
@@ -366,12 +399,16 @@ async fn held_away(
             match &now {
                 Heard::Ahead(ahead) => say(state, conversation_id, &of.roadmap, ahead).await,
                 Heard::Unanswered => {
-                    let named = relaying::called(state.devices.as_ref(), &home.device).await;
+                    let named = relaying::called(state.devices.as_ref(), &away.home).await;
                     unanswered(state, conversation_id, &of.roadmap, &named).await;
                 }
                 Heard::Refused(saying) => {
-                    let named = relaying::called(state.devices.as_ref(), &home.device).await;
+                    let named = relaying::called(state.devices.as_ref(), &away.home).await;
                     refused(state, conversation_id, &of.roadmap, &named, saying).await;
+                }
+                Heard::Left(home) => {
+                    gone(state, conversation_id, &of.roadmap).await;
+                    ask_heir(state, conversation_id, home, &of).await;
                 }
             }
 
@@ -389,8 +426,12 @@ enum Heard {
     /// Home answered, and these stages are ahead of it.
     Ahead(Vec<Ahead>),
 
-    /// Home could not be reached, or is no longer a member.
+    /// Home could not be reached.
     Unanswered,
+
+    /// Home is no longer a member, and nobody has been named its heir: the
+    /// Device Id of the home that left.
+    Left(String),
 
     /// Home answered and refused, in the sentence [`relaying`] put it in — which
     /// says the release gap where there is one, the likeliest reason a home
@@ -402,17 +443,17 @@ enum Heard {
 const MOST_AN_ANSWER_IS: usize = 256 * 1024;
 
 /// Put the question to home: may this stage join, and onto what.
-async fn ask_home(state: &AppState, home: &store::Birth) -> Result<StageJoin, relaying::Refusal> {
+async fn ask_home(state: &AppState, away: &store::Away) -> Result<StageJoin, relaying::Refusal> {
     let asking = StageJoining {
         born: BirthKey {
-            device: home.device.clone(),
-            id: home.id,
+            device: away.born.device.clone(),
+            id: away.born.id,
         },
     };
 
     relaying::word_from::<StageJoin>(
         state.devices.as_ref(),
-        &home.device,
+        &away.home,
         Call {
             method: reqwest::Method::POST,
             onwards: CHAINS.to_owned(),
@@ -473,8 +514,12 @@ pub(crate) async fn asked(state: &AppState, tombstone: i64) -> StageJoin {
                 joined: ahead.joined,
             })
             .collect(),
+        // Never the stage's own link, which the far device could not tell for
+        // itself: these ids are this device's, and where this device is an heir
+        // they are not the birth key's either.
         chain: chain
             .into_iter()
+            .filter(|link| link.conversation_id != tombstone)
             .map(|link| ChainLink {
                 conversation: link.conversation_id,
                 stage: link.stage,
@@ -955,6 +1000,235 @@ async fn refused(state: &AppState, conversation_id: i64, roadmap: &str, home: &s
     );
 
     noted(state, conversation_id, &markdown).await;
+}
+
+/// Whether `home` has left the cluster: no member of this device's is it.
+///
+/// A membership that cannot be read is not one saying home has left, so that is
+/// `false`, and the wait goes on as a home not answering.
+async fn left(state: &AppState, home: &str) -> bool {
+    let Some(devices) = state.devices.as_ref() else {
+        return false;
+    };
+
+    match devices.membership().rows().await {
+        Ok(members) => !members.iter().any(|member| member.device == home),
+        Err(error) => {
+            tracing::error!(error = ?error, "reading the membership failed");
+            false
+        }
+    }
+}
+
+/// Say on the Timeline that a stage away from home is waiting to join on a home
+/// that has left the cluster.
+///
+/// The device is not named: a device that has left has no member row left to
+/// name it by, and an id is no name.
+async fn gone(state: &AppState, conversation_id: i64, roadmap: &str) {
+    let markdown = format!(
+        "**Waiting to join.** Every task is done, and the finish is held: the device that kept \
+         the `{roadmap}` roadmap has left the cluster. Keep the roadmap on this device to let \
+         this stage join.",
+    );
+
+    noted(state, conversation_id, &markdown).await;
+}
+
+/// The label of the one Question the Set asking for an heir asks, and which of
+/// its Options keeps the roadmap here.
+const QUESTION: &str = "Q1";
+const KEEP_IT_HERE: u32 = 1;
+
+/// Ask the human whether this device keeps what `home`, which has left the
+/// cluster, kept (ADR-0029, *A roadmap's home outlives its device*): a Set of
+/// Verkstead's own, on this stage's Timeline, on the badge and on a phone.
+///
+/// **Asked once while it is open.** A stage held again — a restart's resume
+/// reaching its finish — finds the Set it put up still open and asks nothing;
+/// one answered *Leave it waiting*, or locked, is asked again.
+///
+/// Nothing waits on it here: the hold this stage is in already keeps it on the
+/// drivers register, and its next look after the answer finds home moved. See
+/// [`answered`].
+async fn ask_heir(state: &AppState, conversation_id: i64, home: &str, of: &Stage) {
+    match store::own_sets(&state.pool, conversation_id).await {
+        Ok(own) => {
+            let open = own.iter().any(|own| {
+                own.response.is_none()
+                    && !own.locked
+                    && matches!(&own.asking, store::OwnAsking::Heir { left, .. } if left == home)
+            });
+
+            if open {
+                return;
+            }
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Sets Verkstead asked failed, so no heir is asked for");
+            return;
+        }
+    }
+
+    let conversation = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the stage an heir is asked for failed");
+            return;
+        }
+    };
+
+    let here = state
+        .devices
+        .as_ref()
+        .map(|devices| devices.name())
+        .unwrap_or_else(|| "this device".to_owned());
+
+    let set = heir_asked(
+        &of.roadmap,
+        &of.label,
+        &here,
+        &conversation.branch,
+        &conversation.repo.name,
+    );
+
+    let about = store::OwnAsking::Heir {
+        left: home.to_owned(),
+        roadmap: of.roadmap.clone(),
+    };
+
+    let created = match store::ask_on_our_own(&state.pool, conversation_id, &set, &about).await {
+        Ok(Some(created)) => created,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "asking whether this device keeps a roadmap failed");
+            return;
+        }
+    };
+
+    tracing::info!(
+        conversation_id,
+        left = home,
+        roadmap = of.roadmap,
+        "a stage's home has left the cluster with no heir, so the human is asked whether this \
+         device keeps its roadmap",
+    );
+
+    crate::push::announce(&state.pool, created.id, &set);
+    state.nudges.announce(verkstead_schema::Nudge::Set {
+        conversation: conversation_id,
+    });
+}
+
+/// The Set that asks whether this device keeps a roadmap whose home has left.
+fn heir_asked(
+    roadmap: &str,
+    label: &str,
+    here: &str,
+    branch: &str,
+    project: &str,
+) -> verkstead_schema::QuestionSet {
+    use verkstead_schema::{Question, QuestionOption, QuestionSet};
+
+    let text = format!(
+        "The device that kept the `{roadmap}` roadmap has left the cluster, so stage {label} \
+         can't join. Keep it here to make {here} the roadmap's home: its stages on other devices \
+         report here, and they join in order again. Any other roadmap that device kept comes \
+         here too.",
+    );
+
+    let options = ["Keep it here", "Leave it waiting"]
+        .into_iter()
+        .zip(1..)
+        .map(|(text, n)| QuestionOption {
+            n,
+            text: text.to_owned(),
+            recommended: false,
+            cells: Vec::new(),
+        })
+        .collect();
+
+    QuestionSet {
+        title: format!("Keep the {roadmap} roadmap on {here}?"),
+        preface: None,
+        questions: vec![Question {
+            label: QUESTION.to_owned(),
+            text,
+            columns: Vec::new(),
+            options,
+            subquestions: Vec::new(),
+        }],
+        postscript: None,
+        proposal: None,
+        project: Some(project.to_owned()),
+        branch: Some(branch.to_owned()),
+        diff: None,
+        diffs: Vec::new(),
+    }
+}
+
+/// Act on the answer to a Set of Verkstead's own asking whether this device
+/// keeps a roadmap whose home has left: *Keep it here* names this device the
+/// heir of the home that left, and tells the cluster; *Leave it waiting* does
+/// nothing, and the stage goes on waiting.
+///
+/// What lets the stage in is its own next look — see [`held_away`] — which
+/// finds this device home and holds it the way a stage at home is held.
+pub(crate) async fn answered(
+    state: &AppState,
+    conversation_id: i64,
+    asking: &store::OwnAsking,
+    response: &verkstead_schema::Response,
+) {
+    let store::OwnAsking::Heir { left, roadmap } = asking else {
+        return;
+    };
+
+    let picked = response
+        .answers
+        .iter()
+        .find(|answer| answer.label.trim() == QUESTION)
+        .and_then(|answer| answer.selected);
+
+    if picked != Some(KEEP_IT_HERE) {
+        tracing::info!(
+            conversation_id,
+            left = %left,
+            "the human left a stage waiting on a home that has left the cluster",
+        );
+        return;
+    }
+
+    match store::name_heir(&state.pool, &state.device, left, &state.device).await {
+        Ok(_) => {}
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, left = %left, "naming this device an heir failed");
+            return;
+        }
+    }
+
+    tracing::info!(
+        conversation_id,
+        left = %left,
+        roadmap = %roadmap,
+        "this device is the heir of a device that left the cluster, and keeps what it kept",
+    );
+
+    state.nudges.announce(verkstead_schema::Nudge::Heirs);
+
+    let here = state
+        .devices
+        .as_ref()
+        .map(|devices| devices.name())
+        .unwrap_or_else(|| "This device".to_owned());
+
+    noted(
+        state,
+        conversation_id,
+        &format!("**{here}** keeps the `{roadmap}` roadmap now."),
+    )
+    .await;
 }
 
 /// One stage being waited on, and what it is being waited on for.

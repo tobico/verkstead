@@ -43,6 +43,7 @@ mod deferrals;
 mod deliveries;
 mod endings;
 mod escalations;
+mod heirs;
 mod joins;
 mod lock_lines;
 mod mcp_servers;
@@ -140,6 +141,7 @@ pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, 
 pub use deliveries::{delivered, record_delivery};
 pub use endings::{ended_on, nothing_else};
 pub use escalations::{escalate, escalated, settle_escalation};
+pub use heirs::{Adopting, Heir, Heirs, Homes, adopt, homes, name_heir, retell};
 pub use joins::{
     AskedJoin, HeldJoin, ask_join, asked_join, asked_joins, forget_asked_join, held_join,
     held_join_count, held_joins, hold_join, let_go_of_expired_joins, let_go_of_join,
@@ -195,7 +197,7 @@ pub use push::{
     store_subscription, vapid_keys,
 };
 pub use reports::{
-    Followed, JoinedAway, LiveStanding, away_from_home, follow, live_standing,
+    Away, Followed, JoinedAway, LiveStanding, away_from_home, follow, live_standing,
     stages_away_from_home, tell, told,
 };
 pub use repos::{

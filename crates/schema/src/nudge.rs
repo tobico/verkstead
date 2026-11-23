@@ -180,6 +180,16 @@ pub enum Nudge {
     /// [`Nudge::Authors`] is for the Authors.
     McpServers,
 
+    /// The heirs moved: a device that left the cluster had an heir named for
+    /// it here, or a member's naming of one merged into the table (ADR-0029,
+    /// *A roadmap's home outlives its device*).
+    ///
+    /// **What a member hears to pull this device's heirs again**, as
+    /// [`Nudge::Authors`] is for the Authors. No page draws an heir: what moves
+    /// on a screen is the stage that was waiting on the home that left, which
+    /// says so with a Nudge of its own.
+    Heirs,
+
     /// Where a Profile's login has got to moved: the harness printed the
     /// address, took a code, finished, or was killed.
     ///
