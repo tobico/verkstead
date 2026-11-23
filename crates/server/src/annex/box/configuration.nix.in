@@ -17,6 +17,31 @@
   # as NixOS's `nixos`. NixOS-WSL hands it to WSL as the distro's hostname.
   networking.hostName = "@hostName@";
 
+  # And the shell this box opens logs in as the service's own user rather than
+  # as NixOS-WSL's `nixos`: a repository the human clones by hand there is then
+  # owned by the user the server runs git as, so there is no shared group, no
+  # ACL and no `safe.directory` anywhere — git never sees an owner it is not
+  # (ADR-0024, *Open repo asks where the repository is*).
+  wsl.defaultUser = "verkstead";
+
+  users.users.verkstead = {
+    # NixOS-WSL makes its default user a normal one. The module's `verkstead`
+    # is a system user and stays one — nothing about it as a service moves —
+    # so that flag is forced back off, and what a normal user would have been
+    # given comes from the two settings below instead.
+    isNormalUser = lib.mkForce false;
+
+    # A home that exists, which is where that shell lands and where a
+    # `gh auth login` run in it keeps its login. Not the service's own `HOME`,
+    # which stays under the state directory, where the module puts it.
+    home = "@home@";
+    createHome = true;
+
+    # Sudo, as NixOS-WSL's own default user has it: a rebuild of this box is
+    # run from this shell.
+    extraGroups = [ "wheel" ];
+  };
+
   services.verkstead = {
     enable = true;
 
@@ -25,7 +50,13 @@
     listen = "@listen@";
     peerListen = "@peerListen@";
 
-    paths = [ "@repos@" ];
+    # Where the Annex's Repos are — its own parent, and the login user's home,
+    # which is where the human's own clones land. The namespace the service
+    # runs in holds these and the state directory and nothing else.
+    paths = [
+      "@repos@"
+      "@home@"
+    ];
 
     # An Annex is never advertised: its Keeper's forward is where it is
     # reached.

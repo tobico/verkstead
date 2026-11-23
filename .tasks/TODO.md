@@ -12,6 +12,6 @@ where the repository is* carries the decisions, and CONTEXT.md's **Repo**,
 
 ## Tasks
 
-- [ ] 01: The box logs in as verkstead — [details](01-the-box-logs-in-as-verkstead.md)
+- [x] 01: The box logs in as verkstead — [details](01-the-box-logs-in-as-verkstead.md)
 - [ ] 02: The choice on the card, and the Linux side — [details](02-the-choice-and-the-linux-side.md)
 - [ ] 03: The Windows side — [details](03-the-windows-side.md)

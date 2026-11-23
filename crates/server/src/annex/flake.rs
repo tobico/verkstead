@@ -49,6 +49,16 @@ pub const ANNEX_BINARY: &str = "VERKSTEAD_ANNEX_BINARY";
 /// the parent a Repo made or cloned on the Annex goes under.
 pub const REPOS: &str = "/srv/repos";
 
+/// And the home of the user the box logs in as, which is the service's own
+/// user: `wsl.defaultUser` is `verkstead`, so a repository the human clones by
+/// hand in that shell is owned by the user the server runs git as. Bound in
+/// through the module's `paths` beside [`REPOS`] (ADR-0024, *Open repo asks
+/// where the repository is*).
+///
+/// Not the service's `HOME`, which stays under the state directory: this is
+/// the user's home in passwd, which the box's own configuration gives it.
+pub const HOME: &str = "/home/verkstead";
+
 /// The Keeper's own version, which the box is pinned to.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -199,6 +209,7 @@ pub fn system(hostname: &str, binary: &Binary) -> System {
             ("listen", &format!("127.0.0.1:{ANNEX_WORKBENCH_PORT}")),
             ("peerListen", &format!("0.0.0.0:{ANNEX_PEER_PORT}")),
             ("repos", REPOS),
+            ("home", HOME),
             ("stateVersion", state_version()),
         ],
     );
@@ -438,13 +449,52 @@ mod tests {
             "networking.hostName = \"WINVM\";",
             "listen = \"127.0.0.1:8426\";",
             "peerListen = \"0.0.0.0:8425\";",
-            "paths = [ \"/srv/repos\" ];",
+            "paths = [\n      \"/srv/repos\"\n      \"/home/verkstead\"\n    ];",
             "advertising = false;",
             &format!("system.stateVersion = \"{}\";", state_version()),
         ] {
             assert!(configuration.contains(line), "no {line} in {configuration}");
         }
         assert!(!unfilled(&configuration), "{configuration}");
+    }
+
+    /// The box logs in as the service's own user: `verkstead` is what WSL
+    /// opens a shell as, with a home that exists and sudo, and that home is
+    /// bound into the service's namespace beside the Repos parent. What the
+    /// configuration says here is what a repository cloned by hand in that
+    /// shell rests on — one user owning everything.
+    #[test]
+    fn the_box_logs_in_as_the_services_own_user() {
+        let configuration = written_for("winvm", &Binary::Released).configuration;
+
+        for line in [
+            "wsl.defaultUser = \"verkstead\";",
+            "isNormalUser = lib.mkForce false;",
+            &format!("home = \"{HOME}\";"),
+            "createHome = true;",
+            "extraGroups = [ \"wheel\" ];",
+        ] {
+            assert!(configuration.contains(line), "no {line} in {configuration}");
+        }
+
+        // And the home is in `paths`, which is the whole of why the service
+        // can see it: `ProtectHome` leaves an empty tmpfs where `/home` was.
+        let (_, paths) = configuration.split_once("paths = [").unwrap();
+        let (paths, _) = paths.split_once("];").unwrap();
+
+        for path in [REPOS, HOME] {
+            assert!(
+                paths.contains(&format!("\"{path}\"")),
+                "no {path} in paths: {paths}"
+            );
+        }
+
+        // The service's own `HOME` is the module's and is not said here —
+        // `evaluated` below reads back where it lands.
+        let (_, service) = configuration.split_once("services.verkstead = {").unwrap();
+        let (service, _) = service.split_once("\n  };").unwrap();
+
+        assert!(!service.contains("home ="), "{service}");
     }
 
     #[test]
@@ -516,6 +566,13 @@ mod tests {
             advertising = c.services.verkstead.advertising;
             hostName = c.networking.hostName;
             wslHostname = c.wsl.wslConf.network.hostname;
+            wslUser = c.wsl.wslConf.user.default;
+            loginHome = c.users.users.verkstead.home;
+            loginGroups = c.users.users.verkstead.extraGroups;
+            loginIsSystemUser = c.users.users.verkstead.isSystemUser;
+            loginCreatesHome = c.users.users.verkstead.createHome;
+            serviceHome = c.services.verkstead.home;
+            serviceEnvironment = c.systemd.services.verkstead.serviceConfig.Environment;
             packages = map (p: p.pname or p.name) c.environment.systemPackages;
             package = c.services.verkstead.package.buildCommand;
             toplevel = c.system.build.toplevel.drvPath;
@@ -607,10 +664,34 @@ mod tests {
 
             assert_eq!(read["listen"], "127.0.0.1:8426");
             assert_eq!(read["peerListen"], "0.0.0.0:8425");
-            assert_eq!(read["paths"], serde_json::json!(["/srv/repos"]));
+            assert_eq!(read["paths"], serde_json::json!([REPOS, HOME]));
             assert_eq!(read["advertising"], false);
             assert_eq!(read["hostName"], "winvm");
             assert_eq!(read["wslHostname"], "winvm");
+
+            // The shell WSL opens is the service's own user, which stays a
+            // system user with a home of its own and sudo — and the evaluation
+            // reaching here at all is the assertion `users-groups` makes of
+            // exactly one of the two flags being set.
+            assert_eq!(read["wslUser"], "verkstead");
+            assert_eq!(read["loginHome"], HOME);
+            assert_eq!(read["loginIsSystemUser"], true);
+            assert_eq!(read["loginCreatesHome"], true);
+            assert!(
+                read["loginGroups"]
+                    .as_array()
+                    .is_some_and(|groups| groups.iter().any(|group| group == "wheel")),
+                "{}",
+                read["loginGroups"]
+            );
+
+            // And the service's own `HOME` is untouched by that: it is the
+            // module's, under the state directory systemd hands over.
+            assert_eq!(read["serviceHome"], "/var/lib/verkstead/home");
+            assert_eq!(
+                read["serviceEnvironment"],
+                serde_json::json!(["HOME=/var/lib/verkstead/home"])
+            );
 
             let packages: Vec<&str> = read["packages"]
                 .as_array()
