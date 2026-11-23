@@ -1239,6 +1239,44 @@ release tag. What the files are is
 its suite evaluates the written flake with a real `nix` where one is on
 `PATH` — minutes on a cold store, for two nixpkgs, NixOS-WSL and the release.
 
+### Asserting on a Nudge stream
+
+**A test reads the stream for the kind it is about, rather than asserting on
+the first thing off it.** A Nudge is notify-only
+([ADR 0009](adr/0009-scoped-nudges.md)): the stream carries kinds rather than a
+sequence, and what an open page is owed is that the kind its section is drawn
+from arrives at all. So the shape to write is a read that walks past everything
+else —
+
+```rust
+while page.nudge().await != Nudge::Devices {}
+```
+
+— and `announcing.rs` and `unlinking.rs` both read it that way.
+
+**Because one press moves more than one list.** Unlink takes a row off the
+cluster *and* names this device the heir of whatever the leaver kept
+([ADR 0029](adr/0029-work-is-placed-by-platform.md#a-roadmaps-home-outlives-its-device)),
+so `Heirs` goes down the stream beside `Devices`; an Allow admits the member
+and settles the question, so `Devices` follows `Joins` out of a carried task;
+a settings save announces `Authors`, `Instructions` and `McpServers` in that
+order, each where that part of it moved; and a `Devices` announced to the
+cluster — `announce` rather than `announce_here` — has every replicated kind
+pull each member again, so a merge that changes something announces *its* kind
+too. Which of them lands first is a race between the handler and the tasks the
+press left running, and a test that takes the first arrival is asserting an
+order nothing promises. One did, and it failed on main rather than on the
+machine it was written on.
+
+**Where a test is about the kind rather than about the page being told, it says
+so and keeps the first arrival.**
+`joining::a_keepers_join_settles_in_one_round_trip` asserts `Devices` precisely
+because no question was raised for a modal, and
+`freshness::a_take_up_that_finds_nothing_moved_says_nothing_of_the_devices` is
+the same judgement the other way round. Those are exclusivity claims, and
+reading past the other kinds would throw the claim away — `nothing_more()` is
+how the `nudges` suite spells one out.
+
 ### The sessions suite, and the machine under it
 
 `crates/server/tests/suite/sessions.rs` is the one suite that is really a
