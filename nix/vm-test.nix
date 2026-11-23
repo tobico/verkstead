@@ -1170,21 +1170,20 @@ testers.runNixOSTest {
             f"the file was answered {uploaded}"
         )
 
-        # The one role that can be picked away — the review — is chosen inside a
-        # wrapper naming the Pairing, because the absence of one there is the
-        # picker's own "no review" row rather than a choice nobody has made yet.
-        # The other two have no such row: something has to build the work, and
-        # every Develop Conversation is grilled.
-        pairing = {"profile_id": profile_id, "model": model}
-        for which, choice in [
-            ("grilling-pairing", pairing),
-            ("implementation-pairing", pairing),
-            ("review-pairing", {"pairing": pairing}),
-        ]:
+        # Each role is chosen on the one route, keyed by the role's own name,
+        # and every pick is made inside a wrapper naming the Pairing: the body
+        # is a RoleChoice, whose missing `pairing` is the picker's row that runs
+        # no session at all — the review's "no review" — rather than a choice
+        # nobody has made yet. Which roles there are is the Process's manifest's
+        # to say (ADR-0030, *Process*), and these three are Develop's.
+        pairing = {"pairing": {"profile_id": profile_id, "model": model}}
+        for role in ["grilling", "implementation", "review"]:
             chosen = post(
-                f"/api/ui/conversations/{conversation}/{which}", choice
+                f"/api/ui/conversations/{conversation}/pairings/{role}", pairing
             )
-            assert chosen == '"Chosen"', f"the {which} was answered {chosen}"
+            assert chosen == '"Chosen"', (
+                f"the {role} pairing was answered {chosen}"
+            )
 
         grilling = post(f"/api/ui/conversations/{conversation}/grill", {})
         assert grilling == '"Started"', f"grilling was answered {grilling}"

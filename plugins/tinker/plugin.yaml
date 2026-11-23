@@ -35,6 +35,11 @@ provides:
     roles:
       - { name: implementation, label: Implementation, building: true }
       - { name: review, label: Review, away: true }
+    # Where a backlog is built: this Process interviews nobody, so the only
+    # Direction it answers is the one a review decides for it — work split out
+    # of the wrap-up is a task list from that moment, and `implementing` is
+    # where that list is worked.
+    directions: { task-list: implementing }
     states:
       - id: follow-up
         word: Follow-up
@@ -46,6 +51,13 @@ provides:
         activity: wrap-up
         roles: [implementation, review]
         steer: { brief: none }
+      # The backlog a review split out of the wrap-up, worked as any other is
+      # and wrapped up again on the pull request there already. Nothing steers
+      # into it: the way in is a review answered into splitting work out.
+      - id: implementing
+        word: Implementing
+        activity: backlog-runner
+        roles: [implementation]
       - id: investigating
         word: Investigating
         activity: follow-up-rounds
@@ -55,3 +67,4 @@ provides:
     transitions:
       follow-up: { committed: wrapping, nothing: done }
       wrapping: { settled: done, merged: done, closed: stopped, given-up: stopped }
+      implementing: { finished: wrapping }

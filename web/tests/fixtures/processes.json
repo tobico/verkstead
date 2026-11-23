@@ -74,6 +74,11 @@
         "interviews": false
       },
       {
+        "id": "implementing",
+        "word": "Implementing",
+        "interviews": false
+      },
+      {
         "id": "investigating",
         "word": "Investigating",
         "interviews": false
@@ -132,6 +137,11 @@
       {
         "id": "wrapping",
         "word": "Wrapping",
+        "interviews": false
+      },
+      {
+        "id": "implementing",
+        "word": "Implementing",
         "interviews": false
       },
       {

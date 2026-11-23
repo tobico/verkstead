@@ -34,12 +34,26 @@ provides:
     roles:
       - { name: implementation, label: Implementation, building: true }
       - { name: review, label: Review }
+    # Where a backlog is built, which is the one question this Process is asked
+    # about a Direction: a review that splits a finding out has made the work a
+    # task list, and `implementing` is where that list is worked. No interview
+    # offers these — a take-up never had a round to pick in — so this is the
+    # mapping read on its own, by the review that writes the backlog.
+    directions: { task-list: implementing }
     states:
       - id: wrapping
         word: Wrapping
         activity: wrap-up
         roles: [implementation, review]
         steer: { brief: none }
+      # The split-out backlog, worked exactly as any other is, and wrapped up
+      # again on the pull request the take-up already had. Nothing steers into
+      # it: it is reached by a review answered into splitting work out, which
+      # is a move out of the wrap-up rather than a row on the form.
+      - id: implementing
+        word: Implementing
+        activity: backlog-runner
+        roles: [implementation]
       - id: follow-up
         word: Follow-up
         activity: follow-up-rounds
@@ -53,4 +67,5 @@ provides:
         detour: true
     transitions:
       wrapping: { settled: done, merged: done, closed: stopped, given-up: stopped }
+      implementing: { finished: wrapping }
       follow-up: { committed: wrapping, nothing: done }

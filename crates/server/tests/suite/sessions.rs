@@ -9260,6 +9260,31 @@ async fn companion_merge_settled(fixture: &Grilling) -> bool {
 }
 
 /// Whether one of the things this wrap-up waits on is settled.
+/// Put everything this Conversation's wrap-up has settled back to waiting, which
+/// is what the end of a round does to it.
+///
+/// Read and then unsettled one by one rather than wiped, so that what a wrap-up
+/// had written is what is taken away: a row this suite had never thought of is
+/// forgotten along with the rest, and a Conversation that had settled nothing
+/// is left exactly as it was.
+///
+/// For the tests whose subject is a wrap-up that arrives with nothing written
+/// under it, on a Process that declares no state opening a round to get there.
+async fn forget_what_the_wrap_up_settled(fixture: &Grilling) {
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    for waiting_on in verkstead_server::store::wrap_up_settled(&pool, fixture.id)
+        .await
+        .unwrap()
+    {
+        verkstead_server::store::unsettle_wrap_up(&pool, fixture.id, waiting_on)
+            .await
+            .unwrap();
+    }
+
+    pool.close().await;
+}
+
 async fn settled(fixture: &Grilling, waiting_on: verkstead_server::store::WaitingOn) -> bool {
     let pool = open_database(&fixture.database).await.unwrap();
     let settled = verkstead_server::store::wrap_up_settled(&pool, fixture.id)
@@ -15828,20 +15853,22 @@ async fn pressing_resolve_on_a_conflicted_done_pull_request_gets_it_resolved() {
             .iter()
             .filter_map(|event| match event {
                 verkstead_render::TimelineEvent::Moved(moved) =>
-                    Some(format!("moved to {:?}", moved.state)),
+                // The word the record holds, which is what a move carries
+                // now that a state is one — `done` rather than `Done`.
+                    Some(format!("moved to {}", moved.state)),
                 verkstead_render::TimelineEvent::Steer(steer) =>
                     Some(format!("steered into {:?}", steer.target)),
                 verkstead_render::TimelineEvent::ResolveConflicts(_) =>
                     Some("asked for the conflict to be resolved".to_owned()),
                 _ => None,
             })
-            .skip_while(|event| event.as_str() != "moved to Done")
+            .skip_while(|event| event.as_str() != "moved to done")
             .collect::<Vec<_>>(),
         [
-            "moved to Done",
+            "moved to done",
             "asked for the conflict to be resolved",
-            "moved to Wrapping",
-            "moved to Done",
+            "moved to wrapping",
+            "moved to done",
         ]
         .map(str::to_owned),
         "somebody decided this, the machine's move says what came of it, and no \
@@ -28101,13 +28128,12 @@ async fn a_steer_into_wrapping_a_narrowed_wrap_up_reads_no_branch_either() {
 /// them again and finishes, which is the door the take-up's own writing does not
 /// cover.
 ///
-/// A steer into Grilling opens a round, so the round before it is over and its
-/// wrap-up bookkeeping goes with it — every settle, not only the review's. So the
-/// wrap-up after it arrives with nothing written at all, and the take-up that
-/// wrote the narrowing is two rounds behind: what has to hold it up is the two
-/// watchers reading the Process for themselves and settling what they will never
-/// act on. The review watcher always did; the comments watcher settling before it
-/// stops is what makes the pair of them enough.
+/// The end of a round takes its wrap-up bookkeeping with it — every settle, not
+/// only the review's. So a wrap-up entered after one arrives with nothing written
+/// at all, and the take-up that wrote the narrowing is a round behind: what has to
+/// hold it up is the two watchers reading the Process for themselves and settling
+/// what they will never act on. The review watcher always did; the comments
+/// watcher settling before it stops is what makes the pair of them enough.
 ///
 /// Which is worth its own test because the failure is a silence. Nothing stops and
 /// no Notice is written — the narrowing Notice reads the comments' settle too — so
@@ -28138,32 +28164,24 @@ async fn a_narrowed_wrap_up_whose_round_was_forgotten_settles_it_all_again() {
         "the take-up wrote both, and that is what carried this one to Done",
     );
 
-    // A round of its own, under the one Profile this Process has: the pick goes on
-    // the grilling role the form asks for, a Fix having none of its own.
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened,
-        "everything had finished, so the click found nothing to interrupt",
-    );
+    // And then every settle under it is forgotten, which is what the end of a
+    // round takes with it — see `store::wrap_up::forget_the_round`.
+    //
+    // Forgotten here rather than by steering into a round, because a **Fix merge
+    // issues** declares no state that opens one: it is a wrap-up with the rounds
+    // beside it, and the states its manifest marks as taking a steer are the
+    // wrap-up, a follow-up of the pull request and the detour (ADR-0030,
+    // *Process*). What this test is about is the door the take-up's own writing
+    // does not cover, and arriving at a wrap-up with nothing written under it is
+    // the whole of what puts a Conversation in front of it.
+    forget_what_the_wrap_up_settled(&fixture).await;
 
-    let profile = fixture.profile("implementation").await;
-
-    assert_eq!(
-        fixture
-            .steer_under("Grilling", &profile, "claude-implementation-5")
-            .await,
-        ConversationSteered::Steered,
-    );
-
-    // Read before the round it opened could have reached a wrap-up of its own,
-    // which is several sessions away and this is one read of a table.
     assert!(
         !review_settled(&fixture).await && !comments_settled(&fixture).await,
-        "the round that ended took every settle with it",
+        "so there is nothing settled under the wrap-up that is about to run",
     );
 
-    // Then straight back into a wrap-up, which is the shortest road to the door
-    // that writes nothing: the interview is interrupted where it stands, and what
+    // Then back into the wrap-up, which is the shortest road to that door: what
     // arrives in Wrapping is a narrowed wrap-up with nothing settled under it.
     assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(

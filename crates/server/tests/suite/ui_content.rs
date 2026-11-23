@@ -1905,7 +1905,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             .unwrap()
             .unwrap();
     }
-    write("repos.json", &get(&app, "/api/ui/repos").await);
+    write(
+        "repos.json",
+        &pin_origins(&get(&app, "/api/ui/repos").await),
+    );
 
     // The abandoned roadmaps: what a registered Repo holds that nothing is
     // driving, drawn as a notice under the new-conversation box.
@@ -5315,6 +5318,37 @@ fn mend(profile: &mut serde_json::Value) {
     );
     profile["broken"] = serde_json::Value::Null;
     profile["login"] = true.into();
+}
+
+/// Pin the GitHub repository each Repo row's origin names, which is the other
+/// thing in these fixtures a filesystem decides.
+///
+/// The Repo list asks `git remote get-url origin` in each Repo's own directory
+/// — the one read no other page makes — and these two are paths under
+/// `/srv/repos` that nothing is at. Nothing, that is, except on a box that
+/// keeps its checkouts there: `/srv/repos/verkstead` is this very repository on
+/// one of those, and the row came out naming its origin. A fixture written on
+/// such a machine says *tobico/verkstead* and one written on a runner says
+/// nothing, and whichever is committed, the drift check fails on the other kind
+/// of box.
+///
+/// So the answer is stated, and it is the one every other payload here already
+/// gives: no Repo in these fixtures has an origin, these being paths nothing is
+/// at. What a Repo with one looks like is `tests/suite/repos.rs`'s subject,
+/// over repositories it makes.
+fn pin_origins(json: &str) -> String {
+    let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
+
+    for row in payload.as_array_mut().unwrap() {
+        assert!(
+            row.get("github").is_some(),
+            "no Repo row here to pin:\n{row}"
+        );
+
+        row["github"] = serde_json::Value::Null;
+    }
+
+    serde_json::to_string(&payload).unwrap()
 }
 
 /// Pin the times a Conversation's Timeline carries, so the fixture does not
