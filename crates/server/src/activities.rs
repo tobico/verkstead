@@ -18,7 +18,9 @@
 //!
 //! **It ends in an Outcome, or it stops.** What the caller is handed is a word
 //! the block declared, or `steered`; the caller maps it to where the
-//! Conversation goes, which a Process does as data from stage 11 on. A
+//! Conversation goes, which the Conversation's Process says as data: the
+//! engine reads the row off the manifest, and a host driver asks
+//! [`crate::processes::leaving`] for the same row. A
 //! component that cannot be started, traps, or answers a word it never
 //! declared stops the Conversation with a Notice saying so, and is never a
 //! server panic. A stop that landed while it ran — a Force stop, say — ends it
@@ -52,9 +54,9 @@ pub(crate) mod wrap_up;
 /// [`under`], and the `process` block's `options` in `docs/plugins.md`.
 const SKILL: &str = "skill";
 
-/// The built-in Activities plugin, and its Activity whose id is `id`: how
-/// the Conversation's states call Verkstead's own Activities by name, until a
-/// Process names them (stage 11).
+/// The built-in Activities plugin, and its Activity whose id is `id`: how a
+/// Process's state names one of Verkstead's own Activities, by the `activity`
+/// id its manifest writes, looked up in the plugin as this build ships it.
 pub(crate) fn built_in(
     id: &str,
 ) -> Option<(

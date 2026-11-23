@@ -1,7 +1,8 @@
 //! The **Wrap-up**: the one Activity that watches a Conversation's pull
 //! requests through to their landing — checks, comments, the review and
 //! mergeability, each a watcher inside the component — and where its Outcome
-//! takes the Conversation, until a Process says that as data (stage 11).
+//! takes the Conversation, which its Process's manifest says: see
+//! [`crate::processes::leaving`].
 //!
 //! Started by [`crate::wrapping::watching`] alone, which every start of a
 //! wrap-up goes through.
@@ -62,7 +63,8 @@ pub(crate) fn pacing(state: &AppState) -> Vec<(String, String)> {
 /// - **`reviewing`** is a Resume asking for the branch read afresh, whatever
 ///   the last review left standing — see [`crate::review::wanted_now`].
 ///
-/// And the Outcomes, mapped here until a Process says them as data:
+/// And the Outcomes, each mapped by the Process's manifest — the row is read
+/// by [`crate::processes::leaving`] — with what the move itself does here:
 ///
 /// - **`settled`** is Done, the news, the share and the next stage, as the rule
 ///   always ended a wrap-up — see [`crate::settling::settled`]. A rule that is

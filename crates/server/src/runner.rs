@@ -793,7 +793,8 @@ pub(crate) async fn backlog_landed(worktree: &Path) -> bool {
 /// stage's finish for its chain through the host, and stops
 /// over a step that did not land or an entry naming no task file — all of it
 /// read off the Repo, so a Resume or a restart is this started again. What it
-/// ends in is mapped here, until a Process says it as data:
+/// ends in is mapped here, over the one Outcome it acts on — the state its
+/// Process maps that row to is the wrap-up, which is where this leads:
 ///
 /// - **`finished`** is the finish landed, its session ended already, so the
 ///   pull request is recorded and the wrap-up starts — or, where the finish

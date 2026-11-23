@@ -2530,8 +2530,10 @@ fn a_tinker_round(prompts: &Path) -> String {
 }
 
 /// A grilling whose interview offers `offers` alone — what a Process declares
-/// (Set 1765, Q27), said through the bench's hosting until stage 11 writes it —
-/// started as [`grilling`] starts one.
+/// (Set 1765, Q27), said through the bench's hosting because one of the five
+/// Verkstead runs itself has no Process of its own to swap for a narrower one,
+/// see [`verkstead_server::activities::Hosting::offering`] — started as
+/// [`grilling`] starts one.
 async fn grilling_offering(
     spill: tempfile::TempDir,
     stub: &str,

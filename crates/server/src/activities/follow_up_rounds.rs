@@ -27,8 +27,8 @@ use super::one_session::asked_for_a_pull_request;
 /// functions alone: it reads what to follow up on off the Timeline, writes the
 /// session's prompt, launches it expecting the human's Nothing-else mark, and
 /// reads the branches at the end. What it answers is an Outcome, and where that
-/// leaves the Conversation is decided here — a Process says it as data from
-/// stage 11 on.
+/// leaves the Conversation is its Process's to say: the row is read off the
+/// manifest by [`crate::processes::leaving`], and what the move does is here.
 ///
 /// **Nothing is kept for it between starts.** What it is handed beyond the
 /// start facts is two readings of the Timeline as it now stands, which a

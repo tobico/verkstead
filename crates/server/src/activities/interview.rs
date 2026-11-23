@@ -1,7 +1,8 @@
 //! The **Interview**: where the grilling session is started under the
 //! built-in Activity, and where the Direction it ends in takes the
 //! Conversation — the backlog run, the inline build or the roadmap's pull
-//! request — until a Process says that as data (stage 11).
+//! request — each of them a state its Process's `directions` map names: see
+//! [`crate::processes::directed`].
 //!
 //! Called by name from [`crate::conversations::start_grilling`], and from
 //! [`crate::grillings::again`] for one started again.
@@ -34,8 +35,11 @@ use super::one_session::follow_inline;
 /// second.
 ///
 /// The three Directions differ in what the artifact is and in where landing it
-/// leaves the Conversation, which is this function's mapping until a Process
-/// says it (stage 11). A backlog is the start of a run — the tasks it names are
+/// leaves the Conversation, which the Process's `directions` map says rather
+/// than this function: [`crate::conversations::grilling_over`] reads the state
+/// a Direction leads to through [`crate::processes::directed`]. What the five
+/// Verkstead ships declare there, and why they declare it, is this. A backlog
+/// is the start of a run — the tasks it names are
 /// worked one fresh session each, under the Profile that builds — so the
 /// Conversation goes on to Implementing. The handoff an inline pick asks for
 /// leaves it in the same place, one session rather than a run standing on the

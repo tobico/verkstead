@@ -1080,7 +1080,8 @@ pub fn router_running_sessions(
 
 /// And the same again, handing back beside it the seam that starts an
 /// Activity on one of its Conversations — what the suite drives a fixture
-/// component through, until a Process names which Activity a state runs.
+/// component through, for an Activity no Process of this build's names: see
+/// [`activities::Hosting`].
 pub fn router_hosting_activities(
     pool: SqlitePool,
     data_dir: PathBuf,
