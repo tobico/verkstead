@@ -1342,6 +1342,14 @@ instead. Every sandbox now says that variable ([ADR
 0013](adr/0013-conversation-terminals.md), which met it at a terminal first),
 so what a session's shell starts with is what the description said.
 
+**And the name a process reports is not the name it was started with.** That
+same wrapper re-execs the real shell, so a stub spawned as `/bin/sh` has the
+shell's own store path as its `argv[0]` in `/proc/<pid>/cmdline`. The `logins`
+suite counts live stubs by reading those lines, and asking for `/bin/sh` found
+none of them. It asks for the `-c` the script is passed with instead — which is
+what told the shell from the `bwrap` in front of it anyway. **So a test that
+reads `/proc` matches on what it passed, never on the path it named.**
+
 **Windows runs an arm of its own**, because that suite is `cfg(unix)`: it
 stands on a mount namespace, a `/bin/sh` probe and a `stty`, and a Windows
 session has none of the three.
