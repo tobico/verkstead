@@ -1252,7 +1252,7 @@ else —
 while page.nudge().await != Nudge::Devices {}
 ```
 
-— and `announcing.rs` and `unlinking.rs` both read it that way.
+— and `announcing.rs`, `unlinking.rs` and `joining.rs` all read it that way.
 
 **Because one press moves more than one list.** Unlink takes a row off the
 cluster *and* names this device the heir of whatever the leaver kept
@@ -1265,8 +1265,10 @@ cluster — `announce` rather than `announce_here` — has every replicated kind
 pull each member again, so a merge that changes something announces *its* kind
 too. Which of them lands first is a race between the handler and the tasks the
 press left running, and a test that takes the first arrival is asserting an
-order nothing promises. One did, and it failed on main rather than on the
-machine it was written on.
+order nothing promises. Two did. The unlinking one failed on main rather than
+on the machine it was written on; the Allow one was found by reading for this
+rule once it was written, and had never failed at all — the task it races
+dials first, which is a head start and not a promise.
 
 **Where a test is about the kind rather than about the page being told, it says
 so and keeps the first arrival.**
