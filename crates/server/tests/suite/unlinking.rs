@@ -68,15 +68,6 @@ const D: &str = "99887766554433221100ffeeddccbbaa";
 /// The port the workbench is taken to be on, which nothing here asks about.
 const PORT: u16 = 8422;
 
-/// How long a dial in this suite gives one address, rather than the two seconds
-/// a running server gives one.
-///
-/// Spent where a dial is meant to reach nobody, which here is the member that
-/// is not there when the human presses Unlink: what is being asked is that the
-/// press stands whole anyway, and a test that waited out the real deadline
-/// would be spending its time on the clock rather than on the question.
-const PATIENCE: Duration = Duration::from_millis(300);
-
 /// A machine with no Tailscale on it.
 fn no_tailscale() -> Tailscale {
     Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], PORT)
@@ -163,18 +154,15 @@ impl Verkstead {
 
     /// The workbench its browser would be talking to, which is what the presses
     /// go through.
+    ///
+    /// **With a running server's deadlines, and no press here in a hurry.** An
+    /// unlink dials the leaver and every staying member through the one span,
+    /// and the tellings among those are meant to land — while the member that
+    /// is not there sits at `127.0.0.1:1`, which is refused at once rather than
+    /// waited out. A shorter patience would cut the dials meant to be answered
+    /// short and buy nothing back.
     fn workbench(&self) -> Router {
         router_answering_devices_telling(self.pool.clone(), self.devices(), self.nudges.clone())
-    }
-
-    /// And the same with every dial given [`PATIENCE`], for the press whose
-    /// broadcast is meant to reach somebody who is not there.
-    fn workbench_in_a_hurry(&self) -> Router {
-        router_answering_devices_telling(
-            self.pool.clone(),
-            self.devices().waiting(PATIENCE),
-            self.nudges.clone(),
-        )
     }
 
     fn devices(&self) -> Devices {
@@ -190,9 +178,9 @@ impl Verkstead {
     /// How it dials, for the questions that are about a call rather than about
     /// a press.
     ///
-    /// At the ordinary patience, not [`PATIENCE`]: every such call is to a
-    /// member that is there, and one cut short on a slow machine reads as that
-    /// member answering at none of its addresses.
+    /// At the ordinary patience, like every dial in this suite: every such
+    /// call is to a member that is there, and one cut short on a slow machine
+    /// reads as that member answering at none of its addresses.
     fn peers(&self) -> Peers {
         Peers::of(self.device.clone(), self.members.clone())
     }
@@ -701,7 +689,7 @@ async fn a_member_that_is_not_there_is_unlinked_all_the_same() {
     .await
     .unwrap();
 
-    let after = unlink(&a.workbench_in_a_hurry(), C).await;
+    let after = unlink(&a.workbench(), C).await;
 
     assert_eq!(
         after
@@ -791,7 +779,7 @@ async fn a_member_that_was_away_is_told_the_removal_when_it_answers() {
     .await
     .unwrap();
 
-    unlink(&a.workbench_in_a_hurry(), C).await;
+    unlink(&a.workbench(), C).await;
 
     assert_eq!(
         a.cluster().await,
