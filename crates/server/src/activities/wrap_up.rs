@@ -14,6 +14,34 @@ use crate::runner::{documents, stop};
 use crate::skills;
 use crate::store;
 
+/// What the host tells the Wrap-up about this machine and this run, whoever
+/// started it: how often to ask the Forge, how many goes a red check gets, and
+/// the review window a test holds open.
+///
+/// **The host's facts rather than the Process's**, so they are the same
+/// wherever the Wrap-up runs: a Process's own `wrapping` state is started by
+/// [`run`] below and a plugin's by the engine, and a manifest that had to name
+/// a poll would be naming this server's pace in a file that is every device's
+/// — see [`crate::processes::options`], which adds these for a state whose
+/// Activity is the Wrap-up. Written first, so a manifest that names one of them
+/// anyway does not move this machine off its pace: the component reads the
+/// first value an option is given.
+pub(crate) fn pacing(state: &AppState) -> Vec<(String, String)> {
+    vec![
+        (
+            "poll".to_owned(),
+            state.sessions.pace().checks.as_millis().to_string(),
+        ),
+        ("attempts".to_owned(), crate::checks::ATTEMPTS.to_string()),
+        // Zero in a server, and a window a test holds open — see
+        // [`Pace::reviewing`].
+        (
+            "review-after".to_owned(),
+            state.sessions.pace().reviewing.as_millis().to_string(),
+        ),
+    ]
+}
+
 /// Run a wrap-up under the **Wrap-up** Activity, and land the Conversation
 /// wherever its Outcome says.
 ///
@@ -82,19 +110,7 @@ pub(crate) async fn run(
         }
     };
 
-    let mut options = vec![
-        (
-            "poll".to_owned(),
-            state.sessions.pace().checks.as_millis().to_string(),
-        ),
-        ("attempts".to_owned(), crate::checks::ATTEMPTS.to_string()),
-        // Zero in a server, and a window a test holds open — see
-        // [`Pace::reviewing`].
-        (
-            "review-after".to_owned(),
-            state.sessions.pace().reviewing.as_millis().to_string(),
-        ),
-    ];
+    let mut options = pacing(&state);
 
     // What the Process's manifest starts its wrapping state's Wrap-up with —
     // Fix Merge Issues' `review` and `comments` off, which is the whole of

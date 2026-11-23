@@ -249,6 +249,12 @@ dependencies:
   of its skills too; an installed dependency's pack is checked when the plugins
   load, and a skill it lacks is the plugin's trouble.
 
+  **And the one it is handed**, beside these: a Process's state names the skill
+  its Activity runs under in its `options`, and that skill is declared by the
+  Process's own plugin — see *A Process* below. So the start facts list it with
+  the rest, and a launch under it is not refused. An Activity that reads no
+  `skill` option is held to this list alone.
+
 **The `activity` world.** The component exports one function, `run`, which is
 handed the **start facts** and answers the Outcome as its word:
 
@@ -262,7 +268,8 @@ handed the **start facts** and answers the Outcome as its word:
   state's word, then a newline and the instruction where the human wrote one;
   and a session's output, a question set or a commit has an empty body;
 - the options the Process configured the Activity with;
-- each skill it declared, with the path a session reads its `SKILL.md` at.
+- each skill it may launch under, with the path a session reads its `SKILL.md`
+  at: the ones its block declared, and the one the options named.
 
 It imports the **host functions**, `verkstead:plugin/host`, and nothing else
 of Verkstead's:
@@ -441,6 +448,19 @@ provides:
     `skill` option names a skill as `<pack>/<skill>`, and **what a Process
     names, it declares**: the pack is the plugin's own or a dependency's, as
     for an Activity's `skills`.
+
+    **A skill named here is one the Activity may launch under**, whether or
+    not its own block lists it: an Activity is held to the skills it declares
+    *and* the one it was handed, so a Process can run Verkstead's own
+    Activities under a pack of its own. The pack has to be **attached** to the
+    Conversation for a session to read it, as any pack does — a `skill` option
+    says which skill, and the Attach menu is what mounts it.
+
+    **The host fills in what only it can answer.** Where the state's Activity
+    is the **Wrap-up**, it is started with this machine's `poll`, `attempts`
+    and `review-after` whatever the manifest says — the pace it asks the Forge
+    at and the goes it gives a red check are the server's facts rather than a
+    file every device shares.
   - **`steer`** — optional: the state takes a steer, and `brief` says which
     of Verkstead's brief kinds the Steer form draws for it — `round`, a new
     round's Brief; `instruction`, what the human wants done; `follow-up`, what

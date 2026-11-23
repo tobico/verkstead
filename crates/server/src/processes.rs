@@ -1119,8 +1119,16 @@ fn direction_named(word: &str) -> Option<verkstead_schema::Direction> {
         .find(|direction| direction_word(*direction) == word)
 }
 
-/// The options `declared` starts its Activity with: the manifest's, and a
-/// `prompt` over the Conversation's documents where the state names a skill.
+/// The options `declared` starts its Activity with: the host's own facts where
+/// the Activity reads any, the manifest's, and a `prompt` over the
+/// Conversation's documents where the state names a skill.
+///
+/// **What only the host can answer, the host answers** — the Wrap-up's `poll`,
+/// `attempts` and `review-after`, which are this server's pace and budget
+/// rather than anything a manifest shared between devices could say. Written
+/// first, so the manifest cannot move this machine off them; the host driver
+/// that runs the five writes the same three the same way round, see
+/// [`crate::activities::wrap_up::pacing`].
 ///
 /// **The prompt is Verkstead's to put the documents under**, as every
 /// session's is: the manifest's `prompt`, where it writes one, is the opening
@@ -1134,7 +1142,20 @@ async fn options(
     standing: &str,
     declared: &State,
 ) -> Option<Vec<(String, String)>> {
-    let mut options = declared.options.clone();
+    // The host's own facts about this machine and this run come first, where
+    // the Activity is one that reads them: the Wrap-up's pace, the goes a red
+    // check gets, the review window. A manifest cannot know any of the three
+    // — see [`crate::activities::wrap_up::pacing`].
+    let mut options = match declared
+        .activity
+        .activities()
+        .iter()
+        .any(|(_, id)| *id == WRAP_UP)
+    {
+        true => crate::activities::wrap_up::pacing(state),
+        false => Vec::new(),
+    };
+    options.extend(declared.options.clone());
 
     // What the human wrote under the steer into it, as the option its kind
     // names — `instruction`, `follow-up`, `question` — and under its heading

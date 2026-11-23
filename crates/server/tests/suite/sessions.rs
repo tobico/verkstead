@@ -44530,7 +44530,7 @@ async fn a_conversation_on_a_plugins_process_runs_its_states_to_done() {
     assert_eq!(stored_state(&fixture).await, "done");
     assert_eq!(
         entered(&view),
-        ["drafting", "checking", "Done"],
+        ["drafting", "checking", "done"],
         "each move on the Timeline, in order"
     );
     assert_eq!(
@@ -44597,7 +44597,7 @@ async fn a_restart_carries_a_plugins_process_on_from_the_state_it_was_in() {
         "drafting\nchecking\nchecking\n",
         "the state it was in entered again, and the one before it not",
     );
-    assert_eq!(entered(&view), ["drafting", "checking", "Done"]);
+    assert_eq!(entered(&view), ["drafting", "checking", "done"]);
 }
 
 /// An Outcome a plugin's Process maps to `stopped` leaves the Conversation
@@ -44637,7 +44637,7 @@ async fn an_outcome_mapped_to_stopped_stops_it_where_it_stands_until_resumed() {
         "drafting\nchecking\nchecking\n",
         "Resume entered checking again",
     );
-    assert_eq!(entered(&view), ["drafting", "checking", "Done"]);
+    assert_eq!(entered(&view), ["drafting", "checking", "done"]);
 }
 
 /// A Conversation on *Two steps* — whose manifest marks neither state as
@@ -45217,4 +45217,300 @@ async fn until_a_memo(fixture: &Grilling, title: &str, wanted: StatusCode) -> (S
 
         pause(Duration::from_millis(25)).await;
     }
+}
+
+/// The uuid of the design Process's fixture plugin, `plugins/tests/design` —
+/// the manifest and two skills the repository holds, read from the checkout
+/// the way a human installs a local plugin.
+const DESIGN: &str = "0a31fe70-efc0-46eb-86a7-3df4b4fa69b6";
+
+/// Install it, through the presses the Plugins page makes.
+///
+/// From the checkout rather than written into a temporary directory: this one
+/// is the stage's acceptance test, so what runs has to be the plugin that is
+/// in the repository and passes `verkstead plugin check` there — see
+/// `crates/cli/tests/suite/plugin.rs`. A local plugin is read in place and
+/// nothing of it is copied, so the install writes nothing into it.
+async fn installing_design(app: &axum::Router) -> std::path::PathBuf {
+    let plugin = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../plugins/tests/design")
+        .canonicalize()
+        .expect("the design fixture plugin is in the checkout");
+
+    let consent: verkstead_render::PluginConsent = post(
+        app,
+        "/api/ui/plugins/read",
+        &serde_json::json!({ "source": plugin }),
+    )
+    .await;
+    assert!(
+        consent.capabilities.is_empty(),
+        "it asks for nothing: {consent:?}"
+    );
+
+    let view: verkstead_render::PluginsView = post(
+        app,
+        "/api/ui/plugins",
+        &serde_json::json!({ "source": plugin, "granted": consent.capabilities }),
+    )
+    .await;
+    let row = view
+        .installed
+        .iter()
+        .find(|row| row.uuid == DESIGN)
+        .expect("the plugin is listed");
+    assert_eq!(row.trouble, None, "and loads: {row:?}");
+
+    plugin
+}
+
+/// A Conversation on the design Process, with an MCP server and the plugin's
+/// own Skill Pack attached, briefed and started through the presses the
+/// composer makes.
+///
+/// Its building role is `design`, which Verkstead has never heard of, and its
+/// `review` role is answered with the row that runs no session — a picture is
+/// not a branch to read, which is what the manifest marks `away` for.
+async fn designing(spill: tempfile::TempDir, stub: &str) -> Grilling {
+    let bench = bench_at_pace(spill, stub, &gh_about(GREEN, "", ""), *BRISKLY, None).await;
+    let app = bench.app.clone();
+
+    installing_design(&app).await;
+
+    let started: Started = post(
+        &app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    let picked: ProcessPicked = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/process"),
+        &serde_json::json!({ "process": { "plugin": DESIGN, "id": "design" } }),
+    )
+    .await;
+    assert_eq!(picked, ProcessPicked::Picked);
+
+    bench.paired(id, &["design"]).await;
+    bench.unreviewed(id).await;
+
+    // The MCP server the pictures are made through, declared on the settings
+    // page and then picked off the Attach menu — and the plugin's own pack
+    // beside it, which is how a session comes to be able to read the skill the
+    // Process names (ADR-0030, *Skill packs*).
+    std::fs::write(
+        bench.state.path().join("config.yaml"),
+        format!("{THE_AUTHOR}mcp_servers:\n  - name: modeller\n    url: https://mcp.example.com/modeller\n"),
+    )
+    .unwrap();
+
+    let attached: ServerAttached = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/mcp-servers/modeller"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(attached, ServerAttached::Attached);
+
+    let attached: verkstead_render::PackAttached = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/skill-packs/design"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(attached, verkstead_render::PackAttached::Attached);
+
+    let saved: BriefSaved = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": BRIEF }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    let start: GrillingStarted = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/grill"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(start, GrillingStarted::Started);
+
+    bench.holding(id)
+}
+
+/// What a session started under one of the pack's skills is told to read, which
+/// is the opening line `crate::skills::declared` writes over the documents.
+const DRAWING: &str = "Read /verkstead/skills/design/drawing/SKILL.md and do what it says.";
+const EXPORTING: &str = "Read /verkstead/skills/design/exporting/SKILL.md and do what it says.";
+
+/// A stub for the design Process: it writes every prompt it is started on into
+/// `prompts`, and runs whichever of the three sessions this one is.
+///
+/// Which it is, is read off the **opening line** of the prompt rather than off
+/// the skill's path anywhere in it: an attached pack is listed to every session
+/// of the Conversation with each of its skills' paths, so the paths of both of
+/// these are in all three prompts and only the line that says *read this one*
+/// tells them apart.
+fn design_stub(prompts: &Path) -> String {
+    format!(
+        r#"printf '%s\n=====\n' "$2" >> {prompts}
+case "$2" in
+*'Read /verkstead/skills/design/drawing/SKILL.md and'*)
+    printf 'a cube, 40mm\n' >> cube.scad
+    git add -A
+    git commit --quiet -m 'feat: draw the cube'
+    SAYING='drawing it'
+    printf '%s\n' "$SAYING"
+    {WHILE_NOBODY_HAS_ASKED}
+    while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done
+    printf 'nothing else then\n'
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+*'Read /verkstead/skills/design/exporting/SKILL.md and'*)
+    printf 'solid cube\n' >> cube.stl
+    git add -A
+    git commit --quiet -m 'feat: export the cube'
+    : > /tmp/verkstead/done
+    printf 'exported it\n'
+    sleep 300
+    ;;
+*submitting/SKILL.md*)
+    printf 'the branch is pushed and the pull request is open\n'
+    ;;
+*)
+    printf 'nothing asked of this session\n'
+    ;;
+esac
+"#,
+        prompts = quoted(prompts),
+    )
+}
+
+/// The human's design Process, as a plugin that names nothing but the
+/// Activities Verkstead ships and a Skill Pack of its own: a Conversation on
+/// it runs its drawing rounds under that skill, then the export, then the
+/// wrap-up, to Done.
+///
+/// The stage's acceptance test, and the whole of what it is for: no state of
+/// this Process is one Verkstead words, no role of it is one Verkstead knows,
+/// its rounds run under a skill out of its own pack with an MCP server the
+/// human attached, and there is no code anywhere about any of it — the plugin
+/// is `plugins/tests/design`, a manifest and two `SKILL.md` files.
+#[tokio::test]
+async fn a_conversation_on_the_design_process_draws_exports_and_wraps_up_to_done() {
+    let spill = tempfile::tempdir().unwrap();
+    let prompts = spill.path().join("prompts");
+    let stub = design_stub(&prompts);
+    let fixture = designing(spill, &stub).await;
+
+    // Start enters the first state the manifest declares, worded as it words
+    // it rather than as Verkstead would.
+    let view = fixture
+        .until(|view| (view.state == "rounds").then(|| view.clone()))
+        .await;
+    assert_eq!(view.process.plugin, DESIGN);
+
+    // And every word drawn about it is the manifest's: its states, in the order
+    // it declares them, and its roles under the labels it labels them with.
+    let processes: Vec<verkstead_render::ProcessEntry> =
+        get(&fixture.app, "/api/ui/processes").await;
+    let entry = processes
+        .iter()
+        .find(|entry| entry.plugin == DESIGN)
+        .expect("the design Process is listed");
+
+    assert_eq!(entry.name, "Design");
+    assert_eq!(
+        entry
+            .states
+            .iter()
+            .map(|state| (state.id.as_str(), state.word.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("rounds", "Drawing"),
+            ("export", "Exporting"),
+            ("wrapping", "Wrapping"),
+        ],
+    );
+    assert_eq!(
+        entry
+            .roles
+            .iter()
+            .map(|role| (role.role.as_str(), role.label.as_str(), role.building))
+            .collect::<Vec<_>>(),
+        [("design", "Design", true), ("review", "Review", false)],
+        "a building role Verkstead has never heard of, and a review it may run without",
+    );
+
+    // The rounds session is started under the plugin's own skill, at the path
+    // its pack is mounted at — which is what waiting for that line proves —
+    // and with the server the human attached to make the pictures through.
+    let said = fixture
+        .until(|_| {
+            std::fs::read_to_string(&prompts)
+                .ok()
+                .filter(|said| said.contains(DRAWING))
+        })
+        .await;
+    assert!(
+        said.contains("# MCP servers") && said.contains("- `modeller`"),
+        "and the server the human attached is named to it: {said}"
+    );
+    assert!(
+        said.contains("- `design`\n  - `design/drawing`"),
+        "with the pack it came out of listed beside it: {said}"
+    );
+
+    // The round goes to the human, and the mark beside the comment box is what
+    // says the drawing is over.
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    // The rounds committed, so the transition the manifest writes for
+    // `committed` is followed: the export, under the pack's other skill.
+    fixture
+        .until(|view| (view.state == "export").then_some(()))
+        .await;
+
+    fixture
+        .until(|_| {
+            std::fs::read_to_string(&prompts)
+                .ok()
+                .filter(|said| said.contains(EXPORTING))
+        })
+        .await;
+
+    // Its Done signal lands it in the wrap-up, which opens the pull request
+    // and sees it out — nothing to review, green checks, nothing said — and
+    // `settled` is Done.
+    fixture
+        .until(|view| (view.state == "wrapping").then_some(()))
+        .await;
+
+    let view = fixture
+        .until(|view| (view.state == "done").then(|| view.clone()))
+        .await;
+
+    assert_eq!(
+        entered(&view),
+        ["rounds", "export", "wrapping", "done"],
+        "the states its manifest declares, in the order it declares them",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped along the way: {:?}",
+        notices(&view),
+    );
+    assert!(
+        pull_request(&view).is_some(),
+        "the wrap-up's pull request is pinned to it: {:?}",
+        view.pinned,
+    );
 }

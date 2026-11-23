@@ -562,3 +562,23 @@ fn a_process_naming_an_activity_it_does_not_depend_on_is_refused_naming_it() {
         "{stderr}"
     );
 }
+
+/// The design Process's fixture plugin passes as it stands in the repository:
+/// a manifest, two skills and no component at all.
+///
+/// Which is the whole of what stage 11 set out to prove — a Process is data —
+/// so it is checked here as an author's own directory, and run end to end in
+/// the server's suite. See `plugins/tests/design`.
+#[test]
+fn the_design_process_fixture_passes_naming_it() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/tests/design");
+
+    let output = check(&dir);
+
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("providing skills, process — its processes Design."),
+        "{stdout}"
+    );
+}

@@ -48,6 +48,10 @@ pub(crate) mod interview;
 pub(crate) mod one_session;
 pub(crate) mod wrap_up;
 
+/// The option a state names the skill its sessions run under by — see
+/// [`under`], and the `process` block's `options` in `docs/plugins.md`.
+const SKILL: &str = "skill";
+
 /// The built-in Activities plugin, and its Activity whose id is `id`: how
 /// the Conversation's states call Verkstead's own Activities by name, until a
 /// Process names them (stage 11).
@@ -271,6 +275,7 @@ pub(crate) async fn run_seeing(
         .map(|(_, words)| offered(words))
         .unwrap_or_else(|| Direction::ALL.to_vec());
 
+    let declared = under(activity, &options);
     let facts = match facts(state, conversation_id, activity, options).await {
         Ok(facts) => facts,
         Err(error) => {
@@ -295,7 +300,7 @@ pub(crate) async fn run_seeing(
         state: state.clone(),
         conversation_id,
         name: name.clone(),
-        declared: activity.skills.clone(),
+        declared,
         starts: capabilities.contains(&Capability::Conversations),
         building,
         planning: None,
@@ -364,6 +369,7 @@ pub(crate) async fn beside(
 ) -> Option<String> {
     let name = &activity.name;
 
+    let declared = under(activity, &options);
     let facts = match facts(state, conversation_id, activity, options).await {
         Ok(facts) => facts,
         Err(error) => {
@@ -381,7 +387,7 @@ pub(crate) async fn beside(
         state: state.clone(),
         conversation_id,
         name: name.clone(),
-        declared: activity.skills.clone(),
+        declared,
         starts: capabilities.contains(&Capability::Conversations),
         doing: name.clone(),
         building: None,
@@ -482,6 +488,28 @@ async fn already_stopped(state: &AppState, conversation_id: i64) -> bool {
     }
 }
 
+/// The skills `activity` may launch a session under: the ones its block
+/// declares, and the one its `skill` option names where that is another.
+///
+/// **What a Process names, it declares** (Set 1771, Q1), exactly as a block
+/// does: a state's `skill` option is checked against the Process's plugin and
+/// its dependencies by the reader and by the loader, so a skill handed to an
+/// Activity here is one somebody declared, and the Activity may be launched
+/// under it. Which is what lets a Process run Verkstead's own Activities under
+/// a pack of its own — see `docs/plugins.md`'s *A Process* — without every
+/// Activity having to name every skill anybody might ever hand it.
+fn under(activity: &Activity, options: &[(String, String)]) -> Vec<String> {
+    let mut skills = activity.skills.clone();
+
+    if let Some((_, named)) = options.iter().find(|(key, _)| key == SKILL)
+        && !skills.contains(named)
+    {
+        skills.push(named.clone());
+    }
+
+    skills
+}
+
 /// What an Activity starts with, read off the Conversation as it stands.
 async fn facts(
     state: &AppState,
@@ -535,12 +563,11 @@ async fn facts(
         .collect();
 
     let skills = match state.sessions.skills() {
-        Some(skills) => activity
-            .skills
-            .iter()
+        Some(skills) => under(activity, &options)
+            .into_iter()
             .map(|skill| world::Skill {
-                name: skill.clone(),
                 path: skills.named(&format!("{skill}/SKILL.md")),
+                name: skill,
             })
             .collect(),
         None => Vec::new(),
@@ -581,9 +608,10 @@ struct Hosted {
     /// The Activity's drawn name, which a refused launch is said in.
     name: String,
 
-    /// The skills its block declares: **what an Activity names, it declares**
+    /// The skills it may launch under: **what an Activity names, it declares**
     /// (Set 1771, Q1), so a launch under any other is refused, as the loader
-    /// refuses a block naming a skill it cannot reach.
+    /// refuses a block naming a skill it cannot reach. Its block's, and the
+    /// one its options name — see [`under`].
     declared: Vec<String>,
 
     /// Whether its plugin was granted `conversations: start`, without which

@@ -1,0 +1,79 @@
+# The human's design Process, written as data and nothing else: this directory
+# holds a manifest and two skills, no component and no line of Rust, and it is
+# the stage's proof that a Process needs none (ADR-0030, *Process*).
+#
+# Three states over three of the Activities Verkstead ships. `rounds` is
+# Follow-up rounds under this plugin's own `drawing` skill, which is where the
+# pictures are made — through whatever MCP server the human attached to the
+# Conversation, as any session reaches one — asking in rounds until they mark
+# one *Nothing else*. `export` is One session under `exporting`, which turns
+# what the rounds made into the files the repository keeps. Then `wrapping` is
+# the Wrap-up, which opens the pull request and sees it out.
+#
+# Its roles are its own: `design` builds, which is a name Verkstead has never
+# heard and remembers against the Repo the first time something is picked for
+# it, and `review` is offered the row that runs no session — a picture is not
+# a branch to read.
+#
+# **A fixture rather than a built-in**: it is under `plugins/tests/`, so
+# `crates/server/build.rs` embeds nothing of it, and the suites install it from
+# the checkout the way a human installs a local plugin. Its `design` pack is
+# attached through the Attach menu, as any pack is.
+uuid: 0a31fe70-efc0-46eb-86a7-3df4b4fa69b6
+name: Design
+author:
+  name: Ada Lovelace
+  email: ada@example.com
+version: 1.0.0
+interface: 1
+description: Rounds of pictures, exported and sent as a pull request.
+dependencies:
+  - uuid: d7a5e719-8491-46a7-b7d7-8f9f85e57bd6
+    name: Activities
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+  - uuid: 15447a8d-f28d-4573-8b8b-a7226d477755
+    name: Verkstead
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+provides:
+  - category: skills
+    name: design
+    directory: skills
+  - category: process
+    id: design
+    name: Design
+    description: Draw something in rounds, export what it came to, and send it as a pull request
+    roles:
+      - { name: design, label: Design, building: true }
+      - { name: review, label: Review, away: true }
+    states:
+      - id: rounds
+        word: Drawing
+        activity: follow-up-rounds
+        options: { skill: design/drawing }
+        steer: { brief: follow-up }
+      - id: export
+        word: Exporting
+        activity: one-session
+        options: { skill: design/exporting, evidence: nothing }
+        steer: { brief: instruction }
+      # No skill of this plugin's: what the wrap-up launches to open the pull
+      # request is the `submitting` session every wrap-up has always opened one
+      # with, and the option is what gives it the prompt to do it on.
+      - id: wrapping
+        word: Wrapping
+        activity: wrap-up
+        roles: [design, review]
+        options: { skill: verkstead/submitting }
+        steer: { brief: none }
+    transitions:
+      # Rounds that drew nothing have nothing to export and nothing to send.
+      rounds: { committed: export, nothing: done }
+      export: { done: wrapping, refused: stopped }
+      wrapping: { settled: done, merged: done, closed: stopped, given-up: stopped }
+capabilities: []
