@@ -65,7 +65,12 @@ const A_OS: &str = "macOS 15.1";
 /// question any test here is asking.
 ///
 /// What answers nothing in this file is a closed port, refused at once rather
-/// than waited out, so nothing is spent waiting on it either.
+/// than waited out, so nothing is spent waiting on it either — bar the one
+/// member that takes the connection and says nothing, in
+/// `a_member_that_does_not_answer_adds_nothing_and_holds_nothing_up`. That one
+/// is waited out, and what bounds it is the reading rather than this span: the
+/// clonable reading gives any one member three seconds and asks them all at
+/// once.
 const ANSWERED_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// One Verkstead: its store, its identity, and its Peer Listener up behind the
@@ -640,8 +645,15 @@ async fn a_member_that_does_not_answer_adds_nothing_and_holds_nothing_up() {
         vec!["widgets"],
         "the member that answered is read, and the two that did not add nothing",
     );
+    // The bound is the reading's own — three seconds a member, every member
+    // asked at once — and the mute one costs it in full, because a dial that
+    // was taken and not answered is waited out. So this is the span that says
+    // the two dead members were asked alongside each other and alongside A,
+    // and that neither the dial's [`ANSWERED_WITHIN`] nor a second helping of
+    // it is what the dropdown is left waiting on. The slack over three seconds
+    // is for a loaded runner, which is what the span above is sized for too.
     assert!(
-        started.elapsed() < std::time::Duration::from_secs(5),
+        started.elapsed() < std::time::Duration::from_secs(8),
         "and neither held the reading past its bound: {:?}",
         started.elapsed(),
     );
