@@ -251,7 +251,7 @@ pub struct ConversationAcross {
     pub branch_named: bool,
     pub naming: bool,
 
-    /// The state it is in, which is what the far end.s Resume asks its question
+    /// The state it is in, which is what the far end's Resume asks its question
     /// of: the word its `state` column holds, read over there against the
     /// Process below (ADR-0030, *Process*).
     pub state: String,

@@ -1666,10 +1666,10 @@ naming: boolean,
  */
 repo: string, 
 /**
- * The word its `state` column holds, which the row.s word is read off its
+ * The word its `state` column holds, which the row's word is read off its
  * Process by — see [`ProcessEntry::states`].
  *
- * Verkstead.s own three — `draft`, `done` and `closed` — are the viewer.s
+ * Verkstead's own three — `draft`, `done` and `closed` — are the viewer's
  * to word, no Process declaring them. Every other word is one its Process
  * declares, and a row whose Process this server holds nothing for is read
  * aloud as the word it has.
@@ -2007,13 +2007,13 @@ base_commit: string | null,
  */
 companions: Array<CompanionView>, 
 /**
- * The word its `state` column holds, which the card.s word is read off
+ * The word its `state` column holds, which the card's word is read off
  * its Process by — see [`ProcessEntry::states`].
  *
- * All five of Verkstead.s own Processes are plugins whose states are named
+ * All five of Verkstead's own Processes are plugins whose states are named
  * with the words the record holds, so a Grilling reads `grilling` here and
- * is worded *Grilling* off Develop.s manifest; Verkstead.s own three are
- * the viewer.s to word.
+ * is worded *Grilling* off Develop's manifest; Verkstead's own three are
+ * the viewer's to word.
  */
 state: string, 
 /**
@@ -4367,7 +4367,7 @@ export type MovedEvent = { id: number,
 at: string, 
 /**
  * The word the record holds for the state it moved to, which is what the
- * line.s word is read off its Process by.
+ * line's word is read off its Process by.
  */
 state: string, };
 
@@ -7787,7 +7787,7 @@ export type SteerEvent = { id: number,
 at: string, 
 /**
  * The state the human moved it into, by the word the record holds — which
- * is what the card.s word is read off its Process by.
+ * is what the card's word is read off its Process by.
  */
 target: string, 
 /**

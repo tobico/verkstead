@@ -334,13 +334,13 @@ pub(crate) fn runs(
         .unwrap_or(false)
 }
 
-/// Which Activity the state `standing` of `process`.s manifest runs, where it
-/// runs one that does not depend on the Conversation.s Direction.
+/// Which Activity the state `standing` of `process`'s manifest runs, where it
+/// runs one that does not depend on the Conversation's Direction.
 ///
-/// What a host driver dispatches on: a Resume reads the standing state.s
+/// What a host driver dispatches on: a Resume reads the standing state's
 /// Activity and starts that Activity again, which is the restart rule read off
 /// the manifest rather than off a list of states (ADR-0030, *Process*). A state
-/// whose Activity is the Direction.s own answers with every one it may run, so
+/// whose Activity is the Direction's own answers with every one it may run, so
 /// a caller asking whether it builds gets a yes whichever Direction was picked.
 pub(crate) fn activities(
     state: &AppState,
@@ -408,10 +408,10 @@ pub(crate) async fn staging(state: &AppState, conversation_id: i64) -> store::St
         .unwrap_or_else(|| store::State::named("implementing"))
 }
 
-/// And the state `process`.s interview sends a Conversation to once the human
+/// And the state `process`'s interview sends a Conversation to once the human
 /// has picked `direction`, by its id.
 ///
-/// The manifest.s `directions` map, which is where the Outcomes the interview
+/// The manifest's `directions` map, which is where the Outcomes the interview
 /// ends a round in lead (Set 1765, Q27) — Develop maps all three to the one
 /// state that builds. `None` where it offers that Direction nowhere, which is
 /// an interview whose chooser never put it up.
@@ -431,8 +431,8 @@ pub(crate) fn directed(
         .map(|(_, to)| store::State::named(to))
 }
 
-/// What a host driver does with an Outcome of one of Verkstead.s own
-/// Activities, as the Conversation.s Process.s manifest says where it leads:
+/// What a host driver does with an Outcome of one of Verkstead's own
+/// Activities, as the Conversation's Process's manifest says where it leads:
 /// the landing that host already knows for each kind of place.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Leaving {
@@ -559,12 +559,12 @@ pub(crate) fn walks_the_stack(state: &AppState, process: &store::Process) -> boo
 /// record holds.
 ///
 /// Read for the **Wrapping** row on the Steer form and the note under it, which
-/// are Verkstead.s own rows on that form while the five are steered by its own
+/// are Verkstead's own rows on that form while the five are steered by its own
 /// targets — see [`crate::steering`]. Everything else finds the wrap-up by the
 /// Activity it runs, see [`running`].
 pub(crate) const WRAPPING: &str = "wrapping";
 
-/// The id the Wrap-up Activity has in the built-in Activities plugin.s
+/// The id the Wrap-up Activity has in the built-in Activities plugin's
 /// manifest.
 pub(crate) const WRAP_UP: &str = "wrap-up";
 
@@ -654,12 +654,12 @@ async fn standing_under(
     }
 }
 
-/// The id of the state a Conversation stands in, as its Process.s manifest
+/// The id of the state a Conversation stands in, as its Process's manifest
 /// names it — which is the word its `state` column holds.
 ///
 /// The five Verkstead ships name their states with the words that column has
 /// always held, so a Grilling answers `grilling` here and is read against
-/// Develop.s manifest — see [`crate::plugins::built_in`].
+/// Develop's manifest — see [`crate::plugins::built_in`].
 pub(crate) fn standing_in(conversation: &store::Conversation) -> &str {
     conversation.state.stored()
 }

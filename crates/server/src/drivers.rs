@@ -3,7 +3,7 @@
 //!
 //! A Conversation in any state its Process declares — Develop's Grilling,
 //! Implementing, Wrapping, Follow-up — is supposed to have a task of
-//! Verkstead.s own seeing it along:
+//! Verkstead's own seeing it along:
 //! the runner working a backlog, the driver following an inline run or a
 //! roadmap, the set of watchers a wrap-up has going, the one seeing a follow-up
 //! session out. When one of those dies the Conversation is
@@ -125,7 +125,7 @@ impl Drivers {
     /// `by_its_session` is for the one Activity whose session is the driver:
     /// a grilling session running is a grilling being driven, whatever holds
     /// it — see this module's own documentation. Which state that is, is the
-    /// manifest.s to say and the caller.s to have read, see
+    /// manifest's to say and the caller's to have read, see
     /// `processes::runs`.
     pub(crate) fn driven(
         &self,

@@ -1304,7 +1304,7 @@ pub enum Rebuilding {
 /// two ways and lands wherever the transition for the Outcome its rounds ended
 /// in leads — Develop sends either ending back to its wrap-up, and a Tinker
 /// that committed nothing goes straight to Done. So the landing is the
-/// caller.s word, read off the manifest. See [`follow_up_over`].
+/// caller's word, read off the manifest. See [`follow_up_over`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ending {
     /// Landed: the Conversation is where it was sent and the move is on its

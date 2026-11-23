@@ -243,10 +243,10 @@ pub struct ConversationEntry {
     /// What the Repo this Conversation is against is called.
     pub repo: String,
 
-    /// The word its `state` column holds, which the row.s word is read off its
+    /// The word its `state` column holds, which the row's word is read off its
     /// Process by — see [`ProcessEntry::states`].
     ///
-    /// Verkstead.s own three — `draft`, `done` and `closed` — are the viewer.s
+    /// Verkstead's own three — `draft`, `done` and `closed` — are the viewer's
     /// to word, no Process declaring them. Every other word is one its Process
     /// declares, and a row whose Process this server holds nothing for is read
     /// aloud as the word it has.
@@ -699,13 +699,13 @@ pub struct ConversationView {
     /// while the Brief drafts, frozen when grilling starts.
     pub companions: Vec<CompanionView>,
 
-    /// The word its `state` column holds, which the card.s word is read off
+    /// The word its `state` column holds, which the card's word is read off
     /// its Process by — see [`ProcessEntry::states`].
     ///
-    /// All five of Verkstead.s own Processes are plugins whose states are named
+    /// All five of Verkstead's own Processes are plugins whose states are named
     /// with the words the record holds, so a Grilling reads `grilling` here and
-    /// is worded *Grilling* off Develop.s manifest; Verkstead.s own three are
-    /// the viewer.s to word.
+    /// is worded *Grilling* off Develop's manifest; Verkstead's own three are
+    /// the viewer's to word.
     pub state: String,
 
     /// What each role its Process declares will run its sessions under, in the
@@ -2710,7 +2710,7 @@ pub struct SteerEvent {
     pub at: String,
 
     /// The state the human moved it into, by the word the record holds — which
-    /// is what the card.s word is read off its Process by.
+    /// is what the card's word is read off its Process by.
     pub target: String,
 
     /// The instruction they steered it with, rendered and sanitized on the way
@@ -2849,7 +2849,7 @@ pub struct MovedEvent {
     pub at: String,
 
     /// The word the record holds for the state it moved to, which is what the
-    /// line.s word is read off its Process by.
+    /// line's word is read off its Process by.
     pub state: String,
 }
 
@@ -3414,7 +3414,7 @@ pub enum TerminalClosed {
 /// A move as an Event. Nothing to render — see [`MovedEvent`] — but built here
 /// beside the Brief so that one place knows how a Timeline is made.
 ///
-/// `state` is the word the record holds, which is what the line.s word is read
+/// `state` is the word the record holds, which is what the line's word is read
 /// off its Process by: the five Processes Verkstead ships name their states
 /// with those words, so a move into Grilling carries `grilling`.
 pub fn moved_event(id: i64, at: String, state: String) -> TimelineEvent {
@@ -4039,7 +4039,7 @@ pub fn manual_task_event(id: i64, at: String, instruction: &str) -> TimelineEven
 }
 
 /// A Steer as an Event: the state the human sent the Conversation into — by the
-/// word the record holds, which is what the card.s word is read off its Process
+/// word the record holds, which is what the card's word is read off its Process
 /// by — and the instruction they sent it with where they wrote one.
 ///
 /// Rendered the way the Brief is, and for the same reason: it is what the human

@@ -264,8 +264,8 @@ async fn over(
         .await;
     }
 
-    // Where the Process.s manifest says this Outcome goes, for one that is
-    // data: a Tinker.s `committed` is its wrapping state, so the pull request
+    // Where the Process's manifest says this Outcome goes, for one that is
+    // data: a Tinker's `committed` is its wrapping state, so the pull request
     // is sent for, and its `nothing` is Done.
     let outcome = if committed { "committed" } else { "nothing" };
     let leaving = crate::processes::leaving(state, &conversation.process, &standing, outcome);

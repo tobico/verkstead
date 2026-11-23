@@ -648,7 +648,7 @@ async fn upgrades(
     Ok(upgraded)
 }
 
-/// The newest Steer on a Conversation.s Timeline, by the words its rows hold.
+/// The newest Steer on a Conversation's Timeline, by the words its rows hold.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LatestSteer {
     /// The Steer Event's id.
