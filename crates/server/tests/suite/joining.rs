@@ -2123,7 +2123,10 @@ async fn a_failed_repin_leaves_its_line_on_the_row_and_the_old_release() {
         ..Boxed::pinned_before(&annex, KEEPER_AT)
     });
 
-    let devices = keeper.devices().waiting(PATIENCE);
+    // At a running server's deadlines, as the start that boots and links has
+    // them: the link this test asserts is a dial of a live Annex, and nothing
+    // here dials nobody.
+    let devices = keeper.devices();
     let annexed = Annexed::of(boxed.clone(), keeper.settings());
     annexed.started(&devices).await;
 

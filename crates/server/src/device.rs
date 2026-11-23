@@ -1141,10 +1141,14 @@ impl Devices {
     /// The same, giving every dial this section makes `patience` rather than the
     /// deadlines a running server keeps — see [`Peers::waiting`].
     ///
-    /// For a suite standing in front of an address nothing answers at: what is
-    /// being asked there is what the press says when nobody is home, and a test
-    /// that waited out the real deadline would be spending its time on the clock
-    /// rather than on the question.
+    /// A suite overrides the deadlines for one of two reasons, and the span it
+    /// hands in says which. Short, standing in front of an address a dial
+    /// really waits out: what is being asked there is what the press says when
+    /// nobody is home, and a test that waited out the real deadline would be
+    /// spending its time on the clock rather than on the question. Or generous
+    /// — the suites' ten-second `ANSWERED_WITHIN` — where every dial is meant
+    /// to land and a loaded runner does not finish a handshake and a write
+    /// inside the running server's two seconds of reaching.
     pub fn waiting(self, patience: std::time::Duration) -> Devices {
         Devices {
             peers: self.peers.waiting(patience),

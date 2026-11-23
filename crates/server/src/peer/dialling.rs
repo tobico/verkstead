@@ -260,11 +260,13 @@ impl Peers {
     /// The same, giving every address `patience` rather than the two deadlines a
     /// running server keeps.
     ///
-    /// For a suite standing in front of a member whose addresses answer nothing:
-    /// what is being asked there is that the patience is spent per address, and
-    /// a test that waited out the real ones would be a test spending its time on
-    /// the clock rather than on the question. One number for both, because the
-    /// two are the same thing to a test — how long one address costs.
+    /// One number for both, because the two are the same thing to a test — how
+    /// long one address costs. A suite sets it short in front of a member whose
+    /// addresses really are waited out, where a test that waited out the real
+    /// deadlines would be spending its time on the clock rather than on the
+    /// question — or generous, the suites' ten-second `ANSWERED_WITHIN`, where
+    /// every dial is meant to land and a loaded runner does not finish a
+    /// handshake and a write inside the two seconds of reaching.
     pub fn waiting(self, patience: Duration) -> Peers {
         Peers {
             reaching: patience,

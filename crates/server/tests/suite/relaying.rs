@@ -74,14 +74,19 @@ const BRANCH: &str = "solid-viewer";
 /// B's Conversation, which is the first one in a store with nothing else in it.
 const THERE: i64 = 1;
 
-/// How long one address has to answer here, rather than the two seconds a
-/// running server gives one.
+/// How long a dial in this suite gives one address, rather than the two seconds
+/// a running server gives one.
 ///
-/// Spent by the test about a member that is not there: what that is asking is
-/// what the hop says when nobody is home, and a test that waited out the real
-/// deadline would be spending its time on the clock rather than on the
-/// question.
-const PATIENCE: Duration = Duration::from_millis(300);
+/// **Generous, because every dial here is meant to land**, which is what the
+/// span of this name in `advertised.rs` is for as well. Three hundred
+/// milliseconds for a handshake and a write is a span a loaded runner does not
+/// finish inside, and a dial that runs out of one reads exactly as a device
+/// that answered at none of its addresses — which is the flake rather than the
+/// question any test here is asking.
+///
+/// What answers nothing in this file is a closed port, refused at once rather
+/// than waited out, so nothing is spent waiting on it either.
+const ANSWERED_WITHIN: Duration = Duration::from_secs(10);
 
 /// One Verkstead: its store, its identity, where it keeps what it makes, and
 /// where its Peer Listener landed.
@@ -150,7 +155,7 @@ impl Verkstead {
     }
 
     /// The workbench its own browser talks to, with every dial given
-    /// [`PATIENCE`].
+    /// [`ANSWERED_WITHIN`].
     ///
     /// Built afresh on each call and over the same store, the way the other
     /// device suites here build one.
@@ -163,7 +168,7 @@ impl Verkstead {
                 self.members.clone(),
                 Joins::none(),
             )
-            .waiting(PATIENCE),
+            .waiting(ANSWERED_WITHIN),
             Nudges::new(),
         )
     }

@@ -54,9 +54,24 @@ const B: &str = "0011223344556677889900aabbccddee";
 const A_MACHINE: &str = "the-workstation";
 const A_OS: &str = "macOS 15.1";
 
-/// How long one address has to answer here, rather than the two seconds a running
-/// server gives one.
-const PATIENCE: std::time::Duration = std::time::Duration::from_millis(300);
+/// How long a dial in this suite gives one address, rather than the two seconds
+/// a running server gives one.
+///
+/// **Generous, because every dial here is meant to land**, which is what the
+/// span of this name in `advertised.rs` is for as well. Three hundred
+/// milliseconds for a handshake and a write is a span a loaded runner does not
+/// finish inside, and a dial that runs out of one reads exactly as a device
+/// that answered at none of its addresses — which is the flake rather than the
+/// question any test here is asking.
+///
+/// What answers nothing in this file is a closed port, refused at once rather
+/// than waited out, so nothing is spent waiting on it either — bar the one
+/// member that takes the connection and says nothing, in
+/// `a_member_that_does_not_answer_adds_nothing_and_holds_nothing_up`. That one
+/// is waited out, and what bounds it is the reading rather than this span: the
+/// clonable reading gives any one member three seconds and asks them all at
+/// once.
+const ANSWERED_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// One Verkstead: its store, its identity, and its Peer Listener up behind the
 /// Member Gate — the cluster handle beside them, because that is what the reading
@@ -106,7 +121,7 @@ impl Verkstead {
             members.clone(),
             Joins::none(),
         )
-        .waiting(PATIENCE);
+        .waiting(ANSWERED_WITHIN);
 
         let Routers {
             workbench,
@@ -630,8 +645,15 @@ async fn a_member_that_does_not_answer_adds_nothing_and_holds_nothing_up() {
         vec!["widgets"],
         "the member that answered is read, and the two that did not add nothing",
     );
+    // The bound is the reading's own — three seconds a member, every member
+    // asked at once — and the mute one costs it in full, because a dial that
+    // was taken and not answered is waited out. So this is the span that says
+    // the two dead members were asked alongside each other and alongside A,
+    // and that neither the dial's [`ANSWERED_WITHIN`] nor a second helping of
+    // it is what the dropdown is left waiting on. The slack over three seconds
+    // is for a loaded runner, which is what the span above is sized for too.
     assert!(
-        started.elapsed() < std::time::Duration::from_secs(5),
+        started.elapsed() < std::time::Duration::from_secs(8),
         "and neither held the reading past its bound: {:?}",
         started.elapsed(),
     );

@@ -91,9 +91,19 @@ const BRANCH: &str = "pwa-and-push";
 /// The port the workbench is taken to be on, which nothing here asks about.
 const PORT: u16 = 8422;
 
-/// How long one address has to answer here, rather than the two seconds a running
-/// server gives one. Spent only where a dial is meant to reach nobody.
-const PATIENCE: Duration = Duration::from_millis(300);
+/// How long a dial in this suite gives one address, rather than the two seconds
+/// a running server gives one.
+///
+/// **Generous, because every dial here is meant to land**, which is what the
+/// span of this name in `advertised.rs` is for as well. Three hundred
+/// milliseconds for a handshake and a write is a span a loaded runner does not
+/// finish inside, and a dial that runs out of one reads exactly as a device
+/// that answered at none of its addresses — which is the flake rather than the
+/// question any test here is asking.
+///
+/// What answers nothing in this file is a closed port, refused at once rather
+/// than waited out, so nothing is spent waiting on it either.
+const ANSWERED_WITHIN: Duration = Duration::from_secs(10);
 
 /// How long a test will wait for a push to arrive: generous, because it is only
 /// ever paid in full when the assertion is about to fail.
@@ -376,7 +386,7 @@ impl Verkstead {
             members.clone(),
             Joins::none(),
         )
-        .waiting(PATIENCE);
+        .waiting(ANSWERED_WITHIN);
 
         let Routers {
             workbench,
@@ -487,7 +497,8 @@ impl Verkstead {
     /// How it dials, for the one question that is about a call rather than about
     /// a piece of news.
     fn peers(&self) -> Peers {
-        Peers::of(self.device.clone(), Members::recorded(self.pool.clone())).waiting(PATIENCE)
+        Peers::of(self.device.clone(), Members::recorded(self.pool.clone()))
+            .waiting(ANSWERED_WITHIN)
     }
 
     /// Whether the row it holds for `device` is dimmed, which is what a dial that

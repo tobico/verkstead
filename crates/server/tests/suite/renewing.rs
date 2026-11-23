@@ -462,7 +462,7 @@ async fn every_call_works_while_the_changeover_is_in_flight_and_after_it() {
     let outgoing = a.device.fingerprint().to_owned();
 
     a.re_issued().await;
-    a.devices().waiting(PATIENCE).announce_renewal().await;
+    a.devices().announce_renewal().await;
 
     let incoming = a.device.incoming_fingerprint().unwrap().to_owned();
 
@@ -678,7 +678,7 @@ async fn a_member_that_was_not_there_leaves_the_changeover_in_flight() {
 
     let incoming = a.device.incoming_fingerprint().unwrap().to_owned();
 
-    a.devices().waiting(PATIENCE).announce_renewal().await;
+    a.devices().announce_renewal().await;
 
     assert_eq!(
         b.holds(A).await.fingerprint,
@@ -747,7 +747,7 @@ async fn a_member_that_was_not_there_is_told_when_it_answers_and_the_changeover_
 
     let incoming = a.device.incoming_fingerprint().unwrap().to_owned();
 
-    a.devices().waiting(PATIENCE).announce_renewal().await;
+    a.devices().announce_renewal().await;
 
     assert!(
         a.device.incoming_path().exists(),
@@ -831,7 +831,7 @@ async fn a_newcomer_a_member_named_is_told_about_the_changeover_too() {
 
     let incoming = a.device.incoming_fingerprint().unwrap().to_owned();
 
-    a.devices().waiting(PATIENCE).announce_renewal().await;
+    a.devices().announce_renewal().await;
 
     assert!(
         a.device.incoming_path().exists(),
@@ -918,7 +918,7 @@ async fn a_member_that_never_answers_is_one_the_human_unlinks() {
 
     let incoming = a.device.incoming_fingerprint().unwrap().to_owned();
 
-    a.devices().waiting(PATIENCE).announce_renewal().await;
+    a.devices().announce_renewal().await;
 
     assert!(a.device.incoming_path().exists());
 
