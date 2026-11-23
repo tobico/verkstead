@@ -89,8 +89,10 @@ import {
   Match,
   Show,
   Switch,
+  createEffect,
   createSignal,
   createUniqueId,
+  onCleanup,
   type JSX,
 } from "solid-js";
 
@@ -736,6 +738,19 @@ export function RepoRegistration(props: {
   /// repo asks where the repository is*).
   landed: (repo: RepoEntry) => void | Promise<string | null>;
 
+  /// Said as a press goes out and again as it comes back, for a caller drawing
+  /// something of its own that has to be held while one is.
+  ///
+  /// The button holds itself, and nothing above the form could know to: the
+  /// press is this form's mutation, and where it has a second half that is in
+  /// there too. So the choice at the top of **Open repo** on an Annex's draft
+  /// is held off this, there being no moving the form out from under a clone
+  /// that is still running (ADR-0024, *Open repo asks where the repository is*).
+  ///
+  /// Said `false` as the form goes, so a caller is never left holding something
+  /// for a press that went with it.
+  pressing?: (out: boolean) => void;
+
   /// What else the form draws, under the button: the modal's way out.
   children?: JSX.Element;
 }): JSX.Element {
@@ -808,6 +823,13 @@ export function RepoRegistration(props: {
     },
     onSuccess: (said: string | null) => setRefused(said),
   }));
+
+  // And the caller told while that press is out, so that whatever it draws
+  // around this form is held for the whole of it — the registration and the
+  // caller's own half alike, one mutation covering both. Said `false` as the
+  // form goes, there being no further word about a press that went with it.
+  createEffect(() => props.pressing?.(register.isPending));
+  onCleanup(() => props.pressing?.(false));
 
   const add = (ev: SubmitEvent) => {
     ev.preventDefault();
@@ -980,6 +1002,25 @@ export function OpenRepo(props: {
   // so the choice asks a question without changing an answer.
   const [side, setSide] = createSignal<Side>("annex");
 
+  // Whether a press is out, said by the form the choice sits above — see
+  // `pressing` on `RepoRegistration`. The choice is held while one is: the
+  // Keeper's press ends in a clone that takes as long as the repository is big,
+  // and moving the form out from under it is the one gesture that would leave
+  // the press running with nothing drawing it.
+  const [out, setOut] = createSignal(false);
+
+  /// Which press the card is on, bumped as the Keeper's form goes — the choice
+  /// moving, or the card closing, both of which dispose it.
+  ///
+  /// What it is for is the landing of a press the human has walked away from:
+  /// the clone stands and the Repo is registered on the Annex either way, and
+  /// what is dropped is the *move of the draft onto it*, which would otherwise
+  /// arrive minutes later on top of whatever they did instead.
+  ///
+  /// A plain count rather than a signal: nothing is drawn off it, and what reads
+  /// it is the clone's own continuation (see `cloneOnTheAnnex`).
+  let press = 0;
+
   // Where a clone on the Annex goes, and the clone itself. Both read the device
   // the page around this card is about, which is the Annex's own wherever there
   // is a side to pick: the clone is made there whichever machine the form in
@@ -998,13 +1039,21 @@ export function OpenRepo(props: {
   ///
   /// And `submit` with it, for the side whose press has a second half: the words
   /// on the button are what says which of the two is going.
+  ///
+  /// Whichever side is drawn says when its press is out, because the choice
+  /// above it is held for that — and it is one signal because only one of the
+  /// two forms is ever built.
   const registration = (
     on: () => Device,
     landed: (repo: RepoEntry) => void | Promise<string | null>,
     submit?: () => string,
   ) => (
     <Reaching.Provider value={on}>
-      <RepoRegistration submit={submit?.() ?? "Open"} landed={landed}>
+      <RepoRegistration
+        submit={submit?.() ?? "Open"}
+        landed={landed}
+        pressing={setOut}
+      >
         {/* Drawn as well as the ways out the modal already has: Escape and a
             press on the backdrop are for a keyboard and a cursor, and this is
             the one a thumb has. */}
@@ -1031,10 +1080,18 @@ export function OpenRepo(props: {
   /// **A refusal leaves the Keeper's registration standing**, which is true,
   /// harmless and a shorter retry: the repository is registered there either
   /// way, and that is what makes it clonable from the dropdown as well.
+  ///
+  /// **And a card left while the clone was out keeps the clone and loses the
+  /// move**: the choice is held while a press is out, so the only way to walk
+  /// away from one is to close the card — and a draft moved onto this Repo
+  /// minutes afterwards would land on top of whatever was done instead. The
+  /// Repo is registered on the Annex and the dropdown lists it, which is where
+  /// it is picked up from. See `press` above.
   const cloneOnTheAnnex = async (
     pair: Sides,
     keeper: RepoEntry,
   ): Promise<string | null> => {
+    const mine = press;
     const origin = keeper.origin;
     if (origin === null) {
       return noOrigin(pair);
@@ -1055,6 +1112,10 @@ export function OpenRepo(props: {
 
     if ("refused" in landing) {
       return landing.refused;
+    }
+
+    if (press !== mine) {
+      return null;
     }
 
     props.landed(landing.repo);
@@ -1085,13 +1146,19 @@ export function OpenRepo(props: {
                 {(which) => (
                   /* The row answers its own press rather than the one a label
                      would have forwarded to the radio, which a hand that slid a
-                     pixel never got — see `rowPress`. */
+                     pixel never got — see `rowPress`.
+
+                     And it is held while a press is out, as the dropdown holds
+                     its clonable group for the same reason: a radio that will
+                     not take a press takes none from its row either, which is
+                     `rowPress`'s own rule. */
                   <label onClick={rowPress(() => setSide(which))}>
                     <input
                       type="radio"
                       name={`${id}-where`}
                       value={which}
                       checked={side() === which}
+                      disabled={out()}
                       onChange={() => setSide(which)}
                     />
                     On {pair()[which].platform}
@@ -1104,10 +1171,24 @@ export function OpenRepo(props: {
                 machine is nothing on the other, and a refusal about one says
                 nothing about the other either. */}
             <Show when={side()} keyed>
-              {(side) =>
-                side === "annex" ? (
-                  registration(() => pair().annex.device, props.landed)
-                ) : (
+              {(side) => {
+                if (side === "annex") {
+                  return registration(
+                    () => pair().annex.device,
+                    props.landed,
+                  );
+                }
+
+                // The one place `press` is bumped, and it covers both ways the
+                // card is left: the choice moving disposes this branch, and the
+                // card closing disposes the whole of it. A clone still out when
+                // that happens lands with nothing to move — see
+                // `cloneOnTheAnnex`.
+                onCleanup(() => {
+                  press += 1;
+                });
+
+                return (
                   <>
                     {/* What the press is about to do on the other machine, and
                         the one thing a clone from the origin leaves behind. Said
@@ -1124,8 +1205,8 @@ export function OpenRepo(props: {
                       () => (cloning.isPending ? "Cloning…" : "Open"),
                     )}
                   </>
-                )
-              }
+                );
+              }}
             </Show>
           </>
         )}

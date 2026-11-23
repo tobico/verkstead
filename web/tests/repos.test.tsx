@@ -36,7 +36,7 @@
 
 import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
-import type { JSX } from "solid-js";
+import { Show, createSignal, type JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -1012,8 +1012,14 @@ describe("the choice an Annex's draft asks first", () => {
   };
 
   /// The card as a draft on `device` draws it, with the cluster `view` says.
+  ///
+  /// Behind a `Show` the way the dropdown draws it — see `repoRows` in
+  /// `src/workbench/Setup.tsx` — so that a way out takes the card away rather
+  /// than only being counted: what a press still running does once the card has
+  /// gone is one of the things asked about below.
   function mountOn(device: Device, view: DevicesView, ...answers: Array<Answer>) {
-    const close = vi.fn();
+    const [up, setUp] = createSignal(true);
+    const close = vi.fn(() => setUp(false));
     const landed = vi.fn();
     const fetching = serving(
       whenever("/api/ui/devices", json(view)),
@@ -1028,9 +1034,11 @@ describe("the choice an Annex's draft asks first", () => {
 
     return {
       ...mounting(() => (
-        <Reaching.Provider value={() => device}>
-          <OpenRepo close={close} landed={landed} />
-        </Reaching.Provider>
+        <Show when={up()}>
+          <Reaching.Provider value={() => device}>
+            <OpenRepo close={close} landed={landed} />
+          </Reaching.Provider>
+        </Show>
       )),
       fetching,
       close,
@@ -1046,6 +1054,42 @@ describe("the choice an Annex's draft asks first", () => {
     ].map((row) => row.textContent!.trim());
   }
 
+  /// The radios themselves, for the one thing about them that is not their
+  /// words: whether they will take a press at all.
+  function radios(): HTMLInputElement[] {
+    return [
+      ...document.querySelectorAll<HTMLInputElement>(
+        `.${styles.where} input`,
+      ),
+    ];
+  }
+
+  /// An answer the test lets go when it chooses, which is what a clone that is
+  /// still out looks like from here. `hangs` never answers at all, and what is
+  /// asked below is both halves: the card while the press is running, and what
+  /// it does with the answer when it lands.
+  function outstanding(body: unknown): {
+    answer: () => Promise<Response>;
+    settle: () => void;
+  } {
+    let letGo = () => {};
+    const waiting = new Promise<void>((settle) => {
+      letGo = settle;
+    });
+
+    return {
+      answer: () =>
+        waiting.then(
+          () =>
+            new Response(JSON.stringify(body), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            }),
+        ),
+      settle: () => letGo(),
+    };
+  }
+
   /// And which of them is picked.
   function picked(): string | null {
     const on = [
@@ -1058,7 +1102,7 @@ describe("the choice an Annex's draft asks first", () => {
   }
 
   /// Press one of them, as a row is pressed — see `rowPress`.
-  function pick(reading: string): void {
+  function pressing(reading: string): HTMLElement {
     const row = [
       ...document.querySelectorAll<HTMLElement>(`.${styles.where} label`),
     ].find((label) => label.textContent!.trim() === reading);
@@ -1068,6 +1112,23 @@ describe("the choice an Annex's draft asks first", () => {
     }
 
     fireEvent.click(row);
+    return row;
+  }
+
+  /// And the same press where it is meant to take, which is every case but the
+  /// one about the choice being held.
+  ///
+  /// It refuses a row that is holding rather than pressing it, because a held
+  /// row answers a press by doing nothing — see `rowPress` — and a case that
+  /// pressed one a tick too early would pass whatever the card did. The choice
+  /// is held for as long as a press is out, and comes back a tick after the
+  /// refusal that ended one is drawn.
+  function pick(reading: string): void {
+    const row = pressing(reading);
+
+    if (row.querySelector("input")!.disabled) {
+      throw new Error(`the ${reading} row is held: a press is still out`);
+    }
   }
 
   /// Type a path into the field and send it.
@@ -1280,6 +1341,80 @@ describe("the choice an Annex's draft asks first", () => {
 
   /// Moving the choice draws the form afresh: a path on one machine is nothing
   /// on the other, and a refusal about one says nothing about the other either.
+  /// The choice is held while a press is out, as the dropdown holds its
+  /// clonable group while a clone runs — see `repoRows` in
+  /// `src/workbench/Setup.tsx`. The Keeper's press ends in a clone that takes
+  /// as long as the repository is big, and the choice is what the form is drawn
+  /// off: moving it under a running clone is the one gesture that would leave
+  /// the press with nothing drawing it.
+  it("holds the choice while a press is out", async () => {
+    const clone = outstanding({ Cloned: CLONE });
+    const { landed } = mountOn(
+      BOX.device,
+      PAIR,
+      whenever("/api/ui/repos", json({ Added: KEEPERS }), "POST"),
+      whenever(onTheBox("/repos/clone"), clone.answer, "POST"),
+    );
+
+    await waitFor(() => expect(sides()).toHaveLength(2));
+    pick("On Windows");
+    await waitFor(() => expect(picked()).toBe("On Windows"));
+
+    register("C:\\Users\\ada\\src\\widgets");
+
+    await waitFor(() =>
+      expect(radios().every((radio) => radio.disabled)).toBe(true),
+    );
+
+    // And the row takes none either, a row offering nothing its control
+    // refuses — see `rowPress`. Pressed raw, this being the one case about a
+    // press that is meant not to take.
+    pressing("On Linux");
+    expect(picked()).toBe("On Windows");
+
+    // Let go, and the press finishes as it always did.
+    clone.settle();
+    await waitFor(() => expect(landed).toHaveBeenCalledWith(CLONE));
+    await waitFor(() =>
+      expect(radios().every((radio) => radio.disabled)).toBe(false),
+    );
+  });
+
+  /// And the one way out a press is not held off is closing the card, which
+  /// leaves the clone running. What lands then is kept and what it would have
+  /// moved is dropped: the Repo is registered on the Annex and the dropdown
+  /// lists it, but the draft is not moved onto it minutes later, on top of
+  /// whatever was done instead.
+  it("keeps a clone the card was closed under and drops the draft's move", async () => {
+    const clone = outstanding({ Cloned: CLONE });
+    const { fetching, close, landed } = mountOn(
+      BOX.device,
+      PAIR,
+      whenever("/api/ui/repos", json({ Added: KEEPERS }), "POST"),
+      whenever(onTheBox("/repos/clone"), clone.answer, "POST"),
+    );
+
+    await waitFor(() => expect(sides()).toHaveLength(2));
+    pick("On Windows");
+    await waitFor(() => expect(picked()).toBe("On Windows"));
+
+    register("C:\\Users\\ada\\src\\widgets");
+    await waitFor(() => expect(writes(fetching, "/api/ui/repos")).toBe(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(close).toHaveBeenCalled());
+
+    // The clone was sent and is answered after the card has gone.
+    expect(writes(fetching, onTheBox("/repos/clone"))).toBe(1);
+    clone.settle();
+
+    // Nothing to assert the absence of but the absence: the landing is given
+    // every chance to arrive before it is said not to have.
+    await new Promise((settle) => setTimeout(settle, 0));
+    await new Promise((settle) => setTimeout(settle, 0));
+    expect(landed).not.toHaveBeenCalled();
+  });
+
   it("empties the field when the choice moves", async () => {
     mountOn(BOX.device, PAIR, json("NotARepository"));
 
@@ -1287,6 +1422,11 @@ describe("the choice an Annex's draft asks first", () => {
     register("/home/verkstead/notes");
     await waitFor(() => screen.getByText(/isn't a git repository/i));
 
+    // The refusal ended the press, and the choice comes back a tick after it is
+    // drawn — so it is waited for rather than pressed through.
+    await waitFor(() =>
+      expect(radios().every((radio) => radio.disabled)).toBe(false),
+    );
     pick("On Windows");
 
     await waitFor(() => expect(held(FIELD)).toBe(""));
