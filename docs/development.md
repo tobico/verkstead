@@ -1330,6 +1330,16 @@ silently does not happen, or a toolchain that exits `159` having printed
 nothing, is this shape — and `grep Seccomp /proc/self/status` says whether a
 filter is in force at all.
 
+**It killed the agent's own `grep` as well**, which is how far one group goes:
+`~@resources` took `sched_setaffinity` with it, the bundled `ugrep` pins its
+thread pool with that call, and a recursive search died the same way — looking
+from inside like a search that found nothing, which is the one failure worse
+than a crash. Both calls are named back in, and the module now says
+`SystemCallErrorNumber = "EPERM"` as well, so the next call it refuses is an
+error a tool can report rather than a death nobody is told about. The shape
+above is still worth knowing: the exit `159` is what a filter that says nothing
+does, and a session inherits whatever the host it is on has set.
+
 **A NixOS shell rebuilds the environment, login shell or not.** `/etc/bashrc`
 and the wrapped `/bin/sh` that stands in for it each source
 `/etc/set-environment` unless `__NIXOS_SET_ENVIRONMENT_DONE` is already in the
