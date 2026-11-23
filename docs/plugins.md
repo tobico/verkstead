@@ -550,7 +550,11 @@ end. Unticking *Develop* takes the ladder off the picker too, and a new draft
 is then prefilled with the first Process still offered. Their states are named
 with the words a conversation's record already held — `grilling`,
 `implementing`, `wrapping`, `follow-up`, `investigating` — so one stored
-before they were data reads on. *Develop* is the one that runs an Activity per
+before they were data reads on. **Their Steer forms are their marks too**,
+drawn through Verkstead's own targets since those are what still drives them:
+*Investigate* marks only its `investigating`, so that row with **Done** and
+**Close** is the whole of its form, and neither *Review*'s nor *Tinker*'s
+offers a Grilling. *Develop* is the one that runs an Activity per
 Direction: its interview offers all three, each leading to `implementing`,
 whose Activity is *One session* inline, the *Backlog runner* for a task list
 and the *Stage runner* for a roadmap.

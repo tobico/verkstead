@@ -5443,16 +5443,22 @@ _Avoid_: retry, remedy, restart (that is the server's), continue, unblock
 **Steer**:
 The human saying where the work goes, from wherever it has got to: a row in the
 Conversation's own menu beside **Stop**, and a form over one question — where
-does this go? Targets are **Grilling**, **Implementing**, **Wrapping**,
-**Investigating**, **Follow-up** and **Done** — the states the work is done in,
-Investigating among them because a question about the work can arise in any
-state and it takes a brief the way Follow-up does; Draft and Closed are
-not among them, each having a way in of its own. **What state it was steered
-from is written down beside the Steer**, because one target reads it back:
-Investigating ends in the state it left rather than at Done — see
-**Investigating**. So is **what each checkout was already holding uncommitted**,
-for the same target and the same ending: what the investigation wrote comes out
-on the way back to work, and what the human had left half done stays.
+does this go? **The targets are the states the Conversation's Process marks as
+taking one** (2026-11-23), each with the kind of brief it takes, and beside them
+**Done**, which is Verkstead's own and a word no Process declares, and **Close**,
+which is on every form at all. The five Verkstead ships mark the states the work
+is done in — **Grilling**, **Implementing**, **Wrapping**, **Follow-up** and
+**Investigating**, the last of them among the targets because a question about
+the work can arise in any state and it takes a brief the way Follow-up does —
+and each marks only the states it has, so an Investigate's form is its
+Investigating alone and a Review's offers no Grilling. Draft and Closed are
+never targets, each having a way in of its own. **What state it was steered
+from is written down beside the Steer**, because a **detour** reads it back: a
+state marked as one ends in the state it left rather than at Done — see
+**Investigating**, which is the detour all five of them mark. So is **what each
+checkout was already holding uncommitted**, for every detour and the same
+ending: what its session wrote comes out on the way back to work, and what the
+human had left half done stays.
 Sources are every state there
 is — a Draft nothing has run in, a run in flight, work Verkstead has finished
 with — because a steer is the human stepping outside the pipeline's path rather

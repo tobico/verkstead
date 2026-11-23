@@ -59,22 +59,6 @@
   "state": "draft",
   "steer_rows": [
     {
-      "brief": "Round",
-      "detour": false,
-      "role": "grilling",
-      "state": null,
-      "target": "Grilling",
-      "word": "Grilling"
-    },
-    {
-      "brief": "Instruction",
-      "detour": false,
-      "role": "implementation",
-      "state": null,
-      "target": "Implementing",
-      "word": "Implementing"
-    },
-    {
       "brief": "None",
       "detour": false,
       "role": "implementation",

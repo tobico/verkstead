@@ -29,7 +29,8 @@ use verkstead_render::{
     PinnedEvent, ProcessPicked, ProfileChosen, ProfileSaved, ProfileTrouble, ProvidedProcess,
     Registered, RepoEntry, RepoSwitched, Resolved, Resumed, RoadmapPane, RoleWanted,
     ShowingArchived, StageState, Standing, Started, SteerCancelled, SteerCompanionRefusal,
-    SteerOpened, SteerPairingView, SteerSaved, TakenUp, TargetRecorded, TimelineEvent, Uncommitted,
+    SteerOpened, SteerPairingView, SteerSaved, SteerTarget, TakenUp, TargetRecorded, TimelineEvent,
+    Uncommitted,
 };
 use verkstead_server::plugins::built_in::DEVELOP;
 use verkstead_server::settings::{Author, Recorded, Settings};
@@ -2358,6 +2359,80 @@ async fn an_investigate_waits_on_one_role_and_a_brief_and_nothing_else() {
          with the two pickers nobody drew never among them",
     );
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+}
+
+/// **The Steer form of one of the five is the states its manifest marks**
+/// (Set 1765, Q28), drawn through Verkstead's own targets: Investigate marks
+/// its Investigating and nothing else, so that row and Verkstead's own Done and
+/// Close are the whole of its form — and a steer into a state it never declared
+/// is refused naming the state, as one into an undeclared state of a plugin's
+/// Process is.
+///
+/// Develop beside it, which marks all five, so what this narrows is the four
+/// Processes that never had a Grilling or an Implementing to be steered into.
+#[tokio::test]
+async fn the_steer_form_of_one_of_the_five_is_the_states_its_manifest_marks() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = investigate(&app, elsewhere.path(), repo_id).await;
+
+    let rows: Vec<_> = opened(&app, id)
+        .await
+        .steer_rows
+        .into_iter()
+        .map(|row| (row.target, row.word))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (SteerTarget::Investigating, "Investigating".to_owned()),
+            (SteerTarget::Done, "Done".to_owned()),
+            (SteerTarget::Close, "Close".to_owned()),
+        ],
+        "an Investigate marks one state, and the other two rows are Verkstead's",
+    );
+
+    for (target, named) in [
+        ("Grilling", "grilling"),
+        ("Implementing", "implementing"),
+        ("Wrapping", "wrapping"),
+        ("FollowUp", "follow-up"),
+    ] {
+        let refused: ConversationSteered = post(
+            &app,
+            &format!("/api/ui/conversations/{id}/steer/submit"),
+            &serde_json::json!({ "target": target, "interrupt": false }),
+        )
+        .await;
+        assert_eq!(
+            refused,
+            ConversationSteered::NotSteerable {
+                state: named.to_owned()
+            },
+            "{target}",
+        );
+    }
+
+    // And Develop, which marks all five of them, draws all five — each worded
+    // off its manifest, and in the order its states are written.
+    let develop = started(&app, repo_id).await;
+    let drawn: Vec<_> = opened(&app, develop)
+        .await
+        .steer_rows
+        .into_iter()
+        .map(|row| (row.target, row.word))
+        .collect();
+    assert_eq!(
+        drawn,
+        [
+            (SteerTarget::Grilling, "Grilling".to_owned()),
+            (SteerTarget::Implementing, "Implementing".to_owned()),
+            (SteerTarget::Wrapping, "Wrapping".to_owned()),
+            (SteerTarget::FollowUp, "Follow-up".to_owned()),
+            (SteerTarget::Investigating, "Investigating".to_owned()),
+            (SteerTarget::Done, "Done".to_owned()),
+            (SteerTarget::Close, "Close".to_owned()),
+        ],
+    );
 }
 
 /// And the press does the grill start's own sequence, landing Investigating: the
@@ -4999,17 +5074,23 @@ async fn steering_into_grilling_settles_the_grilling_pairing() {
     );
 }
 
-/// And so does a steer into a Grilling on a Process whose manifest declares no
-/// state for one: a **Tinker** is never interviewed, so there is no `grilling`
-/// state for the roles to be read off — and the round the steer opens runs an
-/// interview all the same, under the grilling role (see `roles` in the server's
-/// `steering`).
+/// **And a steer into a Grilling on a Process that declares no state for one
+/// is refused naming the state**: every target is a state the manifest marks
+/// (Set 1765, Q28), and a **Tinker** is never interviewed, so it has no
+/// `grilling` to be steered into. The form draws no such row — see `rows` in
+/// the server's `steering` — and this is that same rule asked again on
+/// arrival, for a body no form of this build's could have sent.
+///
+/// **And the pick it carried settles nothing.** A refusal is a press that did
+/// not happen, so the Pairing the form offered beside the target is left
+/// exactly where the setup card put it rather than written through on the way
+/// out.
 ///
 /// Read off the record rather than off the view, because the view draws a
 /// picker per role the Process *declares*: a Tinker's Agent control has no
-/// Grilling picker, which is the whole reason the form is where this is picked.
+/// Grilling picker, which is why the form was ever where this got picked.
 #[tokio::test]
-async fn steering_a_tinker_into_grilling_settles_the_grilling_pairing() {
+async fn steering_a_tinker_into_grilling_is_refused_naming_the_state() {
     let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
     let id = ready(&app, elsewhere.path(), repo_id).await;
 
@@ -5033,7 +5114,12 @@ async fn steering_a_tinker_into_grilling_settles_the_grilling_pairing() {
     )
     .await;
 
-    assert_eq!(steered, ConversationSteered::Steered);
+    assert_eq!(
+        steered,
+        ConversationSteered::NotSteerable {
+            state: "grilling".to_owned()
+        },
+    );
 
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
@@ -5043,14 +5129,15 @@ async fn steering_a_tinker_into_grilling_settles_the_grilling_pairing() {
         .unwrap()
         .expect("the Conversation is still there");
 
-    assert_eq!(
+    assert_ne!(
         conversation
             .pairings
             .under(&store::Role::grilling())
             .map(|pairing| pairing.profile.id),
         Some(picked),
-        "the role the interview runs under, settled by the one pick",
+        "the refused pick was not written over what the setup card settled",
     );
+    assert_eq!(conversation.state.stored(), "draft", "and nothing moved",);
 }
 
 /// A wrap-up both builds and reviews, and the one Pairing picked for a steer
