@@ -219,6 +219,9 @@ mod own_sets;
 /// What a Repo nothing has grilled arrives with in its pickers when there is no
 /// last start to copy: one account per harness order and a model per role.
 mod pairing_defaults;
+/// The passwd database, asked about the user this server runs as: the login
+/// shell a **Terminal** comes up in, and the home a browse opens on.
+mod passwd;
 /// Every Sandbox Configuration bind as the settings page reads them: which of
 /// the two places said each one, and whether the server can see it.
 mod paths;

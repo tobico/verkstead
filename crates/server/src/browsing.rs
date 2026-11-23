@@ -17,6 +17,14 @@
 //! out of it like any other directory — see [`list`], and [`topmost`] for what a
 //! server with no home to read opens on instead.
 //!
+//! **On an Annex it is the login user's home instead**, read off the box's
+//! own user rather than written down here: the box logs in as the service's own
+//! user, so a repository the human cloned by hand in that shell is in the home
+//! passwd gives it, while the `HOME` the service runs with is a state directory
+//! holding none of them (ADR-0024, *Open repo asks where the repository is*).
+//! See [`opening_on`], which is that one rule, and [`crate::passwd`], which is
+//! the reading.
+//!
 //! Nothing here refuses by status code. A path that is relative, missing, not a
 //! directory or unreadable is a named outcome the dropdown draws where its rows
 //! would be — see [`DirectoryListing`]. A field is typed into a character at a
@@ -32,9 +40,14 @@ use crate::resolved::{Resolved, resolve};
 
 /// What `path` holds, or the named reason it holds nothing.
 ///
-/// No path at all is the field standing empty, and what that opens on is the
-/// server's own home — see [`opening`], which is also where a server with no
-/// home to read falls back to the top of the machine.
+/// No path at all is the field standing empty, and what that opens on is a
+/// home — see [`opening_on`], which is which of the two homes this device has,
+/// and [`opening`], which is where a server with no home to read falls back to
+/// the top of the machine.
+///
+/// `kept` is whether this device is an **Annex**, which is the whole of what
+/// decides between them: the caller reads it off the configuration a Keeper
+/// wrote, there being nothing about a directory that could say so.
 ///
 /// Resolved through [`crate::resolved`], which is what the save behind the
 /// field resolves through: *absolute* and *there* are one pair of questions
@@ -42,9 +55,9 @@ use crate::resolved::{Resolved, resolve};
 /// differently from the save it is filling a field in for.
 ///
 /// Blocking: the directory is opened, and every entry in it is asked what it is.
-pub(crate) fn list(path: Option<PathBuf>) -> DirectoryListing {
+pub(crate) fn list(path: Option<PathBuf>, kept: bool) -> DirectoryListing {
     let Some(path) = path else {
-        return opening(home());
+        return opening(opening_on(kept, crate::passwd::login_home(), home()));
     };
 
     match resolve(&path) {
@@ -60,6 +73,33 @@ pub(crate) fn list(path: Option<PathBuf>) -> DirectoryListing {
 /// read instead of `$HOME`.
 fn home() -> Option<PathBuf> {
     crate::platform::home_dir(Platform::HERE, &Environment::of_the_process())
+}
+
+/// Which home a browse with nothing typed opens on: the service's own, and the
+/// login user's on an **Annex**.
+///
+/// `login` is what the passwd database gives the user the server runs as and
+/// `service` is the `HOME` it runs with. They are the same directory on every
+/// machine where the server is the human's own login — a desktop, a checkout —
+/// and they part company on an Annex, whose service keeps its `HOME` under the
+/// state directory while the shell `wsl -d Verkstead` opens lands in the home
+/// passwd names. That home is where the human's own clones are, so it is where
+/// the browse starts (ADR-0024, *Open repo asks where the repository is*).
+///
+/// The service's own where the database names none, which is every Windows
+/// machine and any Annex whose entry cannot be read: a browse that opened
+/// nowhere would be a field nobody could fill in.
+///
+/// Nothing but an Annex asks for the login home at all. A packaged install's
+/// `verkstead` is a system user whose passwd home is `/var/empty` — a
+/// directory, and one with nothing in it — so a browse that preferred it
+/// everywhere would open on nothing on exactly the installs that have the most
+/// to list.
+fn opening_on(kept: bool, login: Option<PathBuf>, service: Option<PathBuf>) -> Option<PathBuf> {
+    match kept {
+        true => login.or(service),
+        false => service,
+    }
 }
 
 /// Where a browse with nothing typed in the field opens.
@@ -267,7 +307,7 @@ mod tests {
         std::fs::write(dir.path().join("README.md"), "# a directory\n").unwrap();
         repository(&dir.path().join("verkstead"));
 
-        let listing = list(Some(dir.path().to_owned()));
+        let listing = list(Some(dir.path().to_owned()), false);
 
         assert_eq!(
             listed(listing)
@@ -294,7 +334,7 @@ mod tests {
             std::fs::write(dir.path().join(written), "\n").unwrap();
         }
 
-        let listing = list(Some(dir.path().to_owned()));
+        let listing = list(Some(dir.path().to_owned()), false);
 
         assert_eq!(names(listing), ["alpaca", "zebra", "alpaca.md", "zebra.md"]);
     }
@@ -306,7 +346,7 @@ mod tests {
         std::fs::create_dir(dir.path().join(".claude")).unwrap();
         std::fs::write(dir.path().join(".claude.json"), "{}\n").unwrap();
 
-        let listing = list(Some(dir.path().to_owned()));
+        let listing = list(Some(dir.path().to_owned()), false);
 
         assert_eq!(names(listing), [".claude", ".claude.json"]);
     }
@@ -318,7 +358,10 @@ mod tests {
         let elsewhere = tempfile::tempdir().unwrap();
         std::fs::create_dir(elsewhere.path().join("src")).unwrap();
 
-        assert_eq!(names(list(Some(elsewhere.path().to_owned()))), ["src"]);
+        assert_eq!(
+            names(list(Some(elsewhere.path().to_owned()), false)),
+            ["src"]
+        );
     }
 
     /// Where a browse with nothing typed opens: the server's own home, listed
@@ -364,6 +407,36 @@ mod tests {
         ] {
             assert_eq!(opening(home), topmost());
         }
+    }
+
+    /// And which of this device's two homes that is: the service's own
+    /// everywhere, and the login user's on an **Annex** — where the box logs in
+    /// as the service's own user, so the home passwd names is where a
+    /// repository the human cloned by hand is.
+    ///
+    /// A value rather than the machine, for the reason the shells are: what is
+    /// asked about is each kind of device, rather than whichever one the suite
+    /// happens to be running on.
+    #[test]
+    fn an_annex_opens_on_the_login_users_home_and_every_other_device_on_the_services() {
+        let login = Some(PathBuf::from("/home/verkstead"));
+        let service = Some(PathBuf::from("/var/lib/verkstead/home"));
+
+        assert_eq!(
+            opening_on(true, login.clone(), service.clone()),
+            login,
+            "an Annex opens where the human's own clones land",
+        );
+        assert_eq!(
+            opening_on(false, login.clone(), service.clone()),
+            service,
+            "and nothing else prefers a passwd home, `/var/empty` being one",
+        );
+
+        // A machine whose database names none — every Windows one, and an Annex
+        // whose entry cannot be read: the service's own rather than nowhere.
+        assert_eq!(opening_on(true, None, service.clone()), service);
+        assert_eq!(opening_on(true, None, None), None);
     }
 
     /// The topmost listing on a Unix is `/`, which is where a browse with
@@ -412,7 +485,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         assert_eq!(
-            list(Some(dir.path().join("never-made"))),
+            list(Some(dir.path().join("never-made")), false),
             DirectoryListing::Missing
         );
     }
@@ -420,7 +493,7 @@ mod tests {
     #[test]
     fn a_relative_path_is_refused_without_being_resolved() {
         assert_eq!(
-            list(Some(PathBuf::from("src"))),
+            list(Some(PathBuf::from("src")), false),
             DirectoryListing::NotAbsolute
         );
     }
@@ -431,7 +504,7 @@ mod tests {
         let file = dir.path().join("notes.md");
         std::fs::write(&file, "# notes\n").unwrap();
 
-        assert_eq!(list(Some(file)), DirectoryListing::NotADirectory);
+        assert_eq!(list(Some(file), false), DirectoryListing::NotADirectory);
     }
 
     /// A directory that is there and will not open. Drawn as a row rather than
@@ -447,7 +520,7 @@ mod tests {
         std::fs::create_dir(&shut).unwrap();
         std::fs::set_permissions(&shut, std::fs::Permissions::from_mode(0o000)).unwrap();
 
-        let listing = list(Some(shut.clone()));
+        let listing = list(Some(shut.clone()), false);
 
         // Root reads it whatever the mode says, and CI runs as somebody. Both
         // answers are the endpoint behaving — what this refuses to be is a

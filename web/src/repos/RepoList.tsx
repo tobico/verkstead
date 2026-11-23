@@ -116,11 +116,11 @@ import type {
   RepoView,
   Repointed,
 } from "../api/types";
-import { useRepoParent } from "../devices";
+import { deviceShown, platformWord, useDevices, useRepoParent } from "../devices";
 import { setRepoParent } from "../remembered";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
-import { keyOf, useDevice, type Device } from "../reaching";
+import { Reaching, keyOf, useDevice, type Device } from "../reaching";
 import { Picker } from "../picking";
 import { rowPress } from "../rows";
 import { authorLabel, useAuthors } from "../authors";
@@ -842,6 +842,26 @@ export function RepoRegistration(props: {
   );
 }
 
+/// Which machine of an **Annex**'s pair a repository is on: the Annex itself,
+/// or its **Keeper**.
+///
+/// The two sides of the choice at the top of **Open repo** on an Annex's draft
+/// (ADR-0024, *Open repo asks where the repository is*). Named for the devices
+/// rather than for the platforms, because the platforms are what the labels are
+/// read off rather than what the sides *are*: the Annex beside a Mac is the same
+/// two sides with two other words on them.
+type Side = "keeper" | "annex";
+
+/// What each side of that choice is: the device whose filesystem its field
+/// browses and whose registry its press lands on, and the platform it is
+/// labelled by.
+type Sides = Record<Side, { device: Device; platform: string }>;
+
+/// The order the two are drawn in, the Keeper's first: a repository cloned on
+/// Windows is the case the choice was added for, and the Annex's own side is
+/// what the card has always done.
+const SIDES: readonly Side[] = ["keeper", "annex"];
+
 /// The registration as the Repo dropdown asks it: **Open repo**, on the modal
 /// every other card in front of the page is drawn on.
 ///
@@ -851,6 +871,13 @@ export function RepoRegistration(props: {
 ///
 /// A refusal keeps the modal up: a refused path is the one about to be
 /// corrected, and taking the card away would take the field with it.
+///
+/// **On an Annex's draft it asks where the repository is first** (ADR-0024), and
+/// on every other device it is the card it has always been. The field a draft on
+/// a genuinely remote member draws still browses that member and lands there,
+/// which is `RepoRegistration`'s own doing and needs no question: the human
+/// knows it is another computer, and a WSL beside the machine they are sitting at
+/// is the one pair where they would not.
 export function OpenRepo(props: {
   /// Said when the modal has closed itself — Escape, a press on the backdrop,
   /// or the Cancel beside the press.
@@ -864,11 +891,63 @@ export function OpenRepo(props: {
   // page and an id being the page's to keep unique.
   const id = createUniqueId();
 
-  return (
-    <Modal class={styles.openRepo!} open close={props.close} labelledBy={id}>
-      <h3 id={id}>Open a Repo</h3>
+  /// Which device the draft this was opened from is on, which is the Annex's
+  /// own wherever there is a choice to make at all.
+  const device = useDevice();
 
-      <RepoRegistration submit="Open" landed={props.landed}>
+  // This device's own reading of its cluster, which is where whose a device is
+  // comes from — see `useDevices`.
+  const devices = useDevices();
+
+  /// The two sides, where the draft's device is an **Annex** — and `null` on
+  /// every other device, which is what leaves the card unchanged there.
+  ///
+  /// Read off the member rows and nothing else: which device is kept, and by
+  /// which, is the cluster's own finding (see `keeperOf` in `../AnnexMark.tsx`),
+  /// and each label is that row's OS word put through [`platformWord`]. So a
+  /// Docker box beside a Mac labels itself with no new copy here.
+  ///
+  /// A cluster that has not answered yet, and a Keeper whose row has not
+  /// arrived, are both no pair to draw: the card browses the Annex as it always
+  /// did until the reading lands, rather than naming a device by its id.
+  const sides = (): Sides | null => {
+    const view = devices.data;
+    if (view === undefined) return null;
+
+    const annex = deviceShown(view, device());
+    const keeper = annex?.kept_by ?? null;
+    if (annex === null || keeper === null) return null;
+
+    // This device's own id back to `null`, so that the Keeper is the `Device`
+    // it is everywhere else — a browser opened on the Keeper is the ordinary
+    // case here, and its calls are the local ones.
+    const on = keeper === view.this.device ? null : keeper;
+    const kept = deviceShown(view, on);
+    if (kept === null) return null;
+
+    return {
+      keeper: { device: on, platform: platformWord(kept.os) },
+      annex: { device: device(), platform: platformWord(annex.os) },
+    };
+  };
+
+  // Which side the field is about. The Annex's own to begin with: it is the
+  // device the dropdown is for and the filesystem this card has always browsed,
+  // so the choice asks a question without changing an answer.
+  const [side, setSide] = createSignal<Side>("annex");
+
+  /// The registration itself, pointed at one device: its field browses there,
+  /// its author picker reads that machine's list, and its press lands on that
+  /// registry — all of which `RepoRegistration` takes off the device the page
+  /// around it is about, so pointing it is providing that one value.
+  ///
+  /// `landed` is the caller's rather than fixed, because the two sides end
+  /// differently: a Repo on the Annex is the draft's from the moment it lands,
+  /// and one registered on the Keeper is a repository the Annex can now clone
+  /// rather than one it holds.
+  const registration = (on: () => Device, landed: (repo: RepoEntry) => void) => (
+    <Reaching.Provider value={on}>
+      <RepoRegistration submit="Open" landed={landed}>
         {/* Drawn as well as the ways out the modal already has: Escape and a
             press on the backdrop are for a keyboard and a cursor, and this is
             the one a thumb has. */}
@@ -880,6 +959,65 @@ export function OpenRepo(props: {
           Cancel
         </button>
       </RepoRegistration>
+    </Reaching.Provider>
+  );
+
+  return (
+    <Modal class={styles.openRepo!} open close={props.close} labelledBy={id}>
+      <h3 id={id}>Open a Repo</h3>
+
+      {/* Two Shows rather than one with a fallback, so that whichever card is
+          not drawn is not built either: a form that was built would read the
+          machine's Authors and hold a field of its own, and two fields with one
+          label is a card nothing could be found on. */}
+      <Show when={sides() === null}>
+        {registration(device, props.landed)}
+      </Show>
+
+      <Show when={sides()}>
+        {(pair) => (
+          <>
+            {/* A group of radios with the field under it, rather than two rows
+                in the dropdown: the dropdown's foot keeps its two rows, and the
+                question is about the one card. */}
+            <fieldset class={styles.where}>
+              <legend>Where the repository is</legend>
+              <For each={SIDES}>
+                {(which) => (
+                  /* The row answers its own press rather than the one a label
+                     would have forwarded to the radio, which a hand that slid a
+                     pixel never got — see `rowPress`. */
+                  <label onClick={rowPress(() => setSide(which))}>
+                    <input
+                      type="radio"
+                      name={`${id}-where`}
+                      value={which}
+                      checked={side() === which}
+                      onChange={() => setSide(which)}
+                    />
+                    On {pair()[which].platform}
+                  </label>
+                )}
+              </For>
+            </fieldset>
+
+            {/* Keyed, so moving the choice draws the form afresh: a path on one
+                machine is nothing on the other, and a refusal about one says
+                nothing about the other either. */}
+            <Show when={side()} keyed>
+              {(side) =>
+                side === "annex"
+                  ? registration(() => pair().annex.device, props.landed)
+                  : /* The Keeper's registration is where this press stops for
+                       now. What it leaves is a repository the Annex's dropdown
+                       can clone, which is the route this choice was drawn to
+                       make findable. */
+                    registration(() => pair().keeper.device, props.close)
+              }
+            </Show>
+          </>
+        )}
+      </Show>
     </Modal>
   );
 }

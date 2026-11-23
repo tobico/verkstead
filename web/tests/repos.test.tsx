@@ -40,11 +40,13 @@ import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  DevicesView,
   DirectoryListing,
   RepoEntry,
   SettingsView,
 } from "../src/api/types";
 import card from "../src/CardButton.module.css";
+import { Reaching, type Device } from "../src/reaching";
 import {
   OpenRepo,
   ReposCard,
@@ -73,6 +75,7 @@ import {
 import { CLIENT, oneList } from "./authors";
 import repos from "./fixtures/repos.json" with { type: "json" };
 import listing from "./fixtures/directories.json" with { type: "json" };
+import keeping from "./fixtures/devices-keeping.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
 
 const REPOS = repos as RepoEntry[];
@@ -905,4 +908,280 @@ describe("browsing for one", () => {
     await waitFor(() => screen.getByText(/isn't a git repository/i));
     expect(held(FIELD)).toBe("/home/ada/src/verkstead");
   });
+});
+
+/// And the question the card asks first on a draft whose device is an
+/// **Annex**: which machine of the pair the repository is on (ADR-0024, *Open
+/// repo asks where the repository is*).
+///
+/// What is worth proving here is the three things the card decides for itself.
+/// That the two options are labelled off the member rows rather than out of a
+/// constant, because a Docker box beside a Mac has to name itself with no new
+/// copy. That each side points the whole form at its own device — the browse,
+/// and the registration behind it — since that is the one thing the choice
+/// does. And that a draft on anything but an Annex is asked nothing at all,
+/// which is every other Open repo card in the app.
+describe("the choice an Annex's draft asks first", () => {
+  /// A Windows machine keeping a WSL box, which is the pair this was drawn for:
+  /// this device's own row is the Keeper, and the member wearing `kept_by` is
+  /// the Annex beside it.
+  const KEEPER = (keeping as DevicesView).this;
+  const BOX = (keeping as DevicesView).members.find(
+    (member) => member.identity.kept_by !== null,
+  )!.identity;
+
+  /// The reading as those two platforms, which is what the labels are read off:
+  /// the words themselves are the fixture's to say, and nothing here holds a
+  /// platform name against a device by name.
+  const PAIR: DevicesView = {
+    ...(keeping as DevicesView),
+    this: { ...KEEPER, os: "Windows" },
+    members: (keeping as DevicesView).members.map((member) =>
+      member.identity.device === BOX.device
+        ? { ...member, identity: { ...BOX, os: "Linux (WSL)" } }
+        : member,
+    ),
+  };
+
+  /// And the same cluster with nothing kept: two linked devices and no Annex
+  /// anywhere, which is what every other draft is on.
+  const LINKED: DevicesView = {
+    ...PAIR,
+    members: PAIR.members.map((member) => ({
+      ...member,
+      identity: { ...member.identity, kept_by: null },
+    })),
+  };
+
+  /// Where a call for the Annex stands, the prefix taking the place of
+  /// `/api/ui` — see `src/api/client.ts`, which is the one place a path is
+  /// composed.
+  const onTheBox = (path: string) =>
+    `/api/ui/members/${BOX.device}${path}`;
+
+  /// The field's label, which is the one the form has always had.
+  const FIELD = "Absolute path of a git repository";
+
+  /// What each machine's own browse answers with, so that which of them a
+  /// listing came from is readable off the rows.
+  const IN_THE_BOX: DirectoryListing = {
+    Listed: {
+      path: "/home/verkstead",
+      entries: [
+        { name: "widgets", path: "/home/verkstead/widgets", kind: "Repository" },
+      ],
+    },
+  };
+
+  const ON_WINDOWS: DirectoryListing = {
+    Listed: {
+      path: "C:\\Users\\ada",
+      entries: [
+        { name: "src", path: "C:\\Users\\ada\\src", kind: "Directory" },
+      ],
+    },
+  };
+
+  /// The Repo each side's press lands.
+  const OPENED: RepoEntry = { ...FIRST, id: 71, name: "widgets" };
+
+  /// The card as a draft on `device` draws it, with the cluster `view` says.
+  function mountOn(device: Device, view: DevicesView, ...answers: Array<Answer>) {
+    const close = vi.fn();
+    const landed = vi.fn();
+    const fetching = serving(
+      whenever("/api/ui/devices", json(view)),
+      whenever(listingAt(null), json(ON_WINDOWS)),
+      whenever(listingAt(null, BOX.device), json(IN_THE_BOX)),
+      // And the box's own list of Authors, which neither side draws a picker
+      // off: who a repo is committed as is `the author of a repo` above, and
+      // what is asked here is which machine the form is pointed at.
+      whenever(onTheBox("/authors"), json([])),
+      ...answers,
+    );
+
+    return {
+      ...mounting(() => (
+        <Reaching.Provider value={() => device}>
+          <OpenRepo close={close} landed={landed} />
+        </Reaching.Provider>
+      )),
+      fetching,
+      close,
+      landed,
+    };
+  }
+
+  /// The rows of the choice, by the words each reads as — none at all where
+  /// there is no choice drawn.
+  function sides(): string[] {
+    return [
+      ...document.querySelectorAll<HTMLElement>(`.${styles.where} label`),
+    ].map((row) => row.textContent!.trim());
+  }
+
+  /// And which of them is picked.
+  function picked(): string | null {
+    const on = [
+      ...document.querySelectorAll<HTMLInputElement>(
+        `.${styles.where} input`,
+      ),
+    ].find((radio) => radio.checked);
+
+    return on?.closest("label")?.textContent?.trim() ?? null;
+  }
+
+  /// Press one of them, as a row is pressed — see `rowPress`.
+  function pick(reading: string): void {
+    const row = [
+      ...document.querySelectorAll<HTMLElement>(`.${styles.where} label`),
+    ].find((label) => label.textContent!.trim() === reading);
+
+    if (!row) {
+      throw new Error(`no ${reading} row: ${sides().join(", ")}`);
+    }
+
+    fireEvent.click(row);
+  }
+
+  /// Type a path into the field and send it.
+  function register(path: string): void {
+    fireEvent.input(screen.getByLabelText(FIELD), { target: { value: path } });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+  }
+
+  /// And how many registrations landed on one path, which is what says a side
+  /// wrote to its own machine and to no other.
+  function writes(
+    fetching: ReturnType<typeof serving>,
+    path: string,
+  ): number {
+    return fetching.mock.calls.filter(
+      ([asked, init]) => String(asked) === path && init?.method === "POST",
+    ).length;
+  }
+
+  /// The two options, each named by its own machine's platform, with the
+  /// Keeper's first — a repository cloned on Windows being the case the choice
+  /// was added for.
+  it("names the two machines by the platforms the member rows say", async () => {
+    mountOn(BOX.device, PAIR);
+
+    await waitFor(() => expect(sides()).toEqual(["On Windows", "On Linux"]));
+    // The parenthesis on the Annex's OS word tells two rows of one hostname
+    // apart on the Devices list; it is not a platform, so it is not a label.
+    expect(sides()).not.toContain("On Linux (WSL)");
+  });
+
+  /// And the Annex's own side is where the card stands: it is the device the
+  /// dropdown is for and the filesystem this card has always browsed, so the
+  /// question is added without an answer being changed.
+  it("stands on the Annex's own side", async () => {
+    mountOn(BOX.device, PAIR);
+
+    await waitFor(() => expect(picked()).toBe("On Linux"));
+  });
+
+  /// The Linux side, which is the whole of this half: the browse is the box's
+  /// own filesystem — and, through the server, the login user's home, which is
+  /// where a repository the human cloned by hand in that shell is — the
+  /// registration lands on the box's registry, and the Repo is the draft's.
+  it("browses the Annex and lands the repo on its registry", async () => {
+    const { fetching, landed } = mountOn(
+      BOX.device,
+      PAIR,
+      whenever(onTheBox("/repos"), json({ Added: OPENED }), "POST"),
+    );
+
+    await waitFor(() => expect(sides()).toHaveLength(2));
+
+    browse(FIELD);
+    await waitFor(() => expect(offered(FIELD)).toContain("widgets"));
+    tap(FIELD, "widgets");
+    expect(held(FIELD)).toBe("/home/verkstead/widgets");
+
+    // The box's own directories and nothing of this machine's.
+    expect(askedFor(fetching, listingAt(null, BOX.device))).toBe(1);
+    expect(askedFor(fetching, listingAt(null))).toBe(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+
+    await waitFor(() => expect(landed).toHaveBeenCalledWith(OPENED));
+    expect(fetching).toHaveBeenCalledWith(
+      onTheBox("/repos"),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ path: "/home/verkstead/widgets" }),
+      }),
+    );
+  });
+
+  /// And the Windows side the other way: the field is the Keeper's filesystem
+  /// and the press registers there, which is what makes the repository one the
+  /// Annex's dropdown can clone. The draft is not moved onto it — a Repo id is
+  /// one Verkstead's own, and the one that landed is the Keeper's.
+  it("browses the Keeper and registers the path there", async () => {
+    const { fetching, close, landed } = mountOn(
+      BOX.device,
+      PAIR,
+      whenever("/api/ui/repos", json({ Added: OPENED }), "POST"),
+    );
+
+    await waitFor(() => expect(sides()).toHaveLength(2));
+    pick("On Windows");
+    await waitFor(() => expect(picked()).toBe("On Windows"));
+
+    browse(FIELD);
+    await waitFor(() => expect(offered(FIELD)).toContain("src"));
+
+    expect(askedFor(fetching, listingAt(null))).toBe(1);
+    expect(askedFor(fetching, listingAt(null, BOX.device))).toBe(0);
+
+    register("C:\\Users\\ada\\src\\widgets");
+
+    await waitFor(() => expect(close).toHaveBeenCalled());
+    expect(fetching).toHaveBeenCalledWith(
+      "/api/ui/repos",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ path: "C:\\Users\\ada\\src\\widgets" }),
+      }),
+    );
+    expect(writes(fetching, onTheBox("/repos"))).toBe(0);
+    expect(landed).not.toHaveBeenCalled();
+  });
+
+  /// Moving the choice draws the form afresh: a path on one machine is nothing
+  /// on the other, and a refusal about one says nothing about the other either.
+  it("empties the field when the choice moves", async () => {
+    mountOn(BOX.device, PAIR, json("NotARepository"));
+
+    await waitFor(() => expect(sides()).toHaveLength(2));
+    register("/home/verkstead/notes");
+    await waitFor(() => screen.getByText(/isn't a git repository/i));
+
+    pick("On Windows");
+
+    await waitFor(() => expect(held(FIELD)).toBe(""));
+    expect(screen.queryByText(/isn't a git repository/i)).toBeNull();
+  });
+
+  /// And every other draft is asked nothing: a device that is nobody's Annex,
+  /// and a device in no cluster at all, each draw the card they always did.
+  it.each([
+    ["a member that is nobody's annex", BOX.device, LINKED],
+    ["the device the browser opened", null, LINKED],
+  ] satisfies Array<[string, Device, DevicesView]>)(
+    "asks nothing on %s",
+    async (_, device, view) => {
+      mountOn(device, view);
+
+      await waitFor(() => expect(screen.getByLabelText(FIELD)).toBeTruthy());
+      // Read the cluster before saying nothing is drawn off it.
+      await new Promise((settle) => setTimeout(settle, 0));
+
+      expect(sides()).toEqual([]);
+      expect(document.querySelector(`.${styles.where}`)).toBeNull();
+    },
+  );
 });

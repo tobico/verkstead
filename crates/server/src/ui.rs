@@ -8016,17 +8016,25 @@ struct Browsing {
 /// into.
 ///
 /// Nothing bounds where the ask may look but what the server can read, and an
-/// ask with no path at all opens on the server's own home — see
-/// [`crate::browsing`].
-async fn directories(Query(browsing): Query<Browsing>) -> HttpResponse {
+/// ask with no path at all opens on a home: the service's own, or the login
+/// user's on an **Annex** — see [`crate::browsing`], where that one rule is.
+async fn directories(
+    State(state): State<AppState>,
+    Query(browsing): Query<Browsing>,
+) -> HttpResponse {
     let path = browsing
         .path
         .filter(|path| !path.is_empty())
         .map(std::path::PathBuf::from);
 
+    // Whether this device is an Annex, which is the whole of what the browse
+    // wants state for: an Annex is told so in its own `config.yaml` by the
+    // Keeper that wrote it, and nothing about a directory could say it.
+    let kept = state.settings.config().kept_by().is_some();
+
     // Off the runtime: opening a directory is a read, and so is asking each of
     // its entries what it is.
-    match tokio::task::spawn_blocking(move || crate::browsing::list(path)).await {
+    match tokio::task::spawn_blocking(move || crate::browsing::list(path, kept)).await {
         Ok(listing) => Json(listing).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "listing a directory failed");

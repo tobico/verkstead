@@ -269,6 +269,39 @@
   font-size: 1rem;
 }
 
+/* And the question the card asks first on an Annex's draft: which machine of the
+   pair the repository is on, as a group of radios above the field — the
+   arrangement Steer's targets take, without the line under each, because the
+   two labels are a platform apiece and there is nothing to add to one. */
+.where {
+  margin: 0 0 0.85rem;
+  padding: 0;
+  border: 0;
+}
+
+.where legend {
+  padding: 0;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.where label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-weight: 600;
+
+  /* Each is a row to press anywhere on, so it says so and takes no selection —
+     see `rowPress` in `src/rows.ts`. */
+  cursor: pointer;
+  user-select: none;
+}
+
+.where label + label {
+  margin-top: 0.4rem;
+}
+
 /* The press that undoes rather than does, on both modals. What it looks like is
    `.secondary` in `styles/base.css`, which every quiet press in the app is
    painted by; the class is kept here so that the filled rule above knows which
