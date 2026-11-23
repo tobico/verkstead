@@ -2791,8 +2791,10 @@ describe("the agent dropdown on a compose page", () => {
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/pairings/implementation`),
       ).toEqual({
-        profile_id: PROFILES[2]!.id,
-        model: PROFILES[2]!.models[0]!,
+        pairing: {
+          profile_id: PROFILES[2]!.id,
+          model: PROFILES[2]!.models[0]!,
+        },
       }),
     );
 

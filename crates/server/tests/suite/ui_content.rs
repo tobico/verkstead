@@ -5017,37 +5017,38 @@ async fn numbered(pool: &SqlitePool, profiles: Vec<store::Profile>) -> Vec<store
 /// Readiness is pinned to what it would be with the pairs mended rather than to
 /// `true`: it turns on the Conversation still drafting as well, and a
 /// Conversation that has started is not ready to start again.
+///
+/// **The Pairings are read as the view sends them** — one row per role the
+/// Conversation's Process declares, each carrying what was picked for it
+/// (ADR-0030, *Process*). So is the state, which is the word the record holds
+/// rather than a variant: a payload read against the three role fields and the
+/// spelling `Draft` is a payload nothing is pinned in, which is a fixture of
+/// broken accounts that is never ready to start.
 fn pin_health(json: &str) -> String {
     let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
 
-    // A list of Profiles, or one Conversation carrying the three Pairings it
-    // has chosen — whose Profile half is the one the filesystem has an opinion
-    // of.
+    // A list of Profiles, or one Conversation carrying a Pairing per role —
+    // whose Profile half is the one the filesystem has an opinion of.
     match payload.as_array_mut() {
         Some(rows) => rows.iter_mut().for_each(mend),
         None => {
-            let mut ready = payload["state"] == "Draft";
+            let mut ready = payload["state"] == store::State::DRAFT;
 
-            for role in [
-                "grilling_pairing",
-                "implementation_pairing",
-                "review_pairing",
-            ] {
-                match payload.get_mut(role) {
-                    // The row that runs no session, which the grilling role has
-                    // one of: a choice made, so readiness stands, and nothing
-                    // the filesystem has an opinion of.
-                    Some(picked) if *picked == "Skipped" => {}
+            for role in payload["pairings"].as_array_mut().into_iter().flatten() {
+                let picked = &mut role["picked"];
 
-                    // A Pairing under such a role, which arrives wrapped in
-                    // which of the three rows was picked.
-                    Some(picked) if picked.get("Under").is_some() => {
-                        mend(&mut picked["Under"]["profile"])
+                // What `profiles::every_role_settled` asks of each row, with
+                // the one thing the filesystem decides mended first: a row that
+                // runs no session at all is settled, a Pairing is settled once
+                // it names a model and its account is where it was left, and a
+                // role nothing was picked for is what a Start waits on.
+                match picked {
+                    _ if *picked == "Skipped" => {}
+
+                    _ if picked.get("Under").is_some() => {
+                        mend(&mut picked["Under"]["profile"]);
+                        ready &= !picked["Under"]["model"].is_null();
                     }
-
-                    // And one under a role with no such row, which is the
-                    // Pairing on its own.
-                    Some(picked) if picked.is_object() => mend(&mut picked["profile"]),
 
                     // Nothing picked, however it is spelled.
                     _ => ready = false,

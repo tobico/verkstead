@@ -78,7 +78,9 @@ describe("a press on a member's conversation", () => {
       reread: () => Promise.resolve(),
     });
 
-    expect(pressed(MEMBER, BOTH).state).toBe("Closed");
+    // The word the record holds, which is what everything reading a state
+    // reads: `Closed` above is the answer the route gives, not a state.
+    expect(pressed(MEMBER, BOTH).state).toBe("closed");
     expect(pressed(null, BOTH).state).toBe(BOTH.state);
   });
 });

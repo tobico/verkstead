@@ -19,8 +19,10 @@ import type {
   ProcessChoice,
   ProcessEntry,
   ProvidedProcess,
+  RolePairingView,
 } from "../src/api/types";
 import { knowProvidedProcesses, stateWord } from "../src/workbench/provided";
+import { settledFor } from "../src/workbench/roles";
 import listed from "./fixtures/processes.json" with { type: "json" };
 import { json, whenever, type Answer } from "./serving";
 
@@ -102,6 +104,30 @@ export function stateOf(state: string): string {
 /// its own, so a test factory spreads this beside the state it sets.
 export function rowProcess(): { process: ProvidedProcess } {
   return { process: whose("develop") };
+}
+
+/// The Pairings a Conversation on `process` is sent with: one row per role its
+/// manifest declares, in that order, each carrying whatever `settled` holds for
+/// a role of that name.
+///
+/// Which is what the server sends — the rows are read off the Process and the
+/// record is asked only what was picked under each name (ADR-0030, *Process*),
+/// so a Conversation's rows cannot say one thing while its Process says
+/// another. A test that moves a Conversation onto another Process therefore
+/// does not have to write that Process's roles out beside it: a Review has two
+/// and an Investigate one, and what the fixture picked under those names
+/// follows them. Everything else about a role — its label, whether it builds,
+/// and whether its picker offers the row that runs no session at all — is the
+/// manifest's and comes from here rather than from the fixture it was spread
+/// over.
+export function pairingsOn(
+  process: ProvidedProcess,
+  settled: RolePairingView[],
+): RolePairingView[] {
+  return processEntry(process.id).roles.map((role) => ({
+    ...role,
+    picked: settledFor(settled, role.role),
+  }));
 }
 
 /// The five with only the ones `offered` names offered, for a test about a

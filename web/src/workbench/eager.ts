@@ -126,8 +126,15 @@ const running = new Map<string, Promise<number | null>>();
 /// a fact the server computes and something on the page keys off, and a
 /// half-closed Conversation is one whose menu offers rows nothing could answer:
 /// a stop for a session that has ended, a resume for work that is over.
+///
+/// **The state is the word the record holds**, which is `closed` — one of the
+/// three that are Verkstead's own rather than any Process's (ADR-0030,
+/// *Process*). Drawn as *Closed* by `stateWord`, and read as `closed` by
+/// everything that asks whether the work has ended: a press that wrote the
+/// drawn word here instead would read right on the status line and be a state
+/// nothing recognised everywhere else — the menu would keep offering Close.
 const CLOSED = {
-  state: "Closed",
+  state: "closed",
   working: false,
   driven: false,
   ready_to_resume: false,
@@ -145,7 +152,7 @@ const CLOSED = {
 /// readiness: a closed Conversation has no session running, nothing waiting on
 /// anybody and no checks to wait for.
 const CLOSED_ROW = {
-  state: "Closed",
+  state: "closed",
   working: false,
   idle: false,
   waiting: false,

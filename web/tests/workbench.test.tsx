@@ -303,6 +303,7 @@ import {
   named,
   OFFERED,
   offeringOnly,
+  pairingsOn,
   PROCESSES,
   rowProcess,
   saying,
@@ -6227,8 +6228,12 @@ describe("a conversation's pairings", () => {
     await theAgent();
     await waitFor(() => picker("Implementation"));
 
+    // Each pick as the route takes it: the Pairing under `pairing`, which is
+    // the key that tells a choice made from the row that picks the role away.
     const wire = PROFILES.flatMap((profile) =>
-      profile.models.map((model) => ({ profile_id: profile.id, model })),
+      profile.models.map((model) => ({
+        pairing: { profile_id: profile.id, model },
+      })),
     );
 
     for (const [index, reading] of READINGS.entries()) {
@@ -6344,8 +6349,10 @@ describe("a conversation's pairings", () => {
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/pairings/grilling`),
       ).toEqual({
-        profile_id: PROFILES[0]!.id,
-        model: PROFILES[0]!.models[0],
+        pairing: {
+          profile_id: PROFILES[0]!.id,
+          model: PROFILES[0]!.models[0],
+        },
       }),
     );
 
@@ -6359,8 +6366,10 @@ describe("a conversation's pairings", () => {
           `/api/ui/conversations/${OPEN.id}/pairings/implementation`,
         ),
       ).toEqual({
-        profile_id: PROFILES[1]!.id,
-        model: PROFILES[1]!.models[1],
+        pairing: {
+          profile_id: PROFILES[1]!.id,
+          model: PROFILES[1]!.models[1],
+        },
       }),
     );
   });
@@ -6901,7 +6910,9 @@ describe("the agent dropdown on a conversation", () => {
     await waitFor(() =>
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/pairings/implementation`),
-      ).toEqual({ profile_id: PROFILES[0]!.id, model: PROFILES[0]!.models[0]! }),
+      ).toEqual({
+        pairing: { profile_id: PROFILES[0]!.id, model: PROFILES[0]!.models[0]! },
+      }),
     );
 
     for (const role of ["grilling", "review"]) {
@@ -7442,10 +7453,21 @@ function lay(element: Element, box: { at: number; wide: number }): void {
 ///
 /// The state's own id travels with the state, as the server sends the two
 /// together — which is what the card's word is read off its Process by.
+///
+/// And so do the Pairings: a Conversation put on another Process is sent the
+/// rows *that* Process declares, which is what the server reads off its
+/// manifest (ADR-0030, *Process*). Spread over the Develop fixture alone, a
+/// `process:` override would leave Develop's three rows under a Review's two —
+/// a payload no server sends, and one whose Start would say it waits on *every
+/// role* where a Review waits on both. What the fixture picked under each name
+/// follows the rows it still has; a role the Process declares and the fixture
+/// never picked for reads as nothing chosen, which is a Start waiting.
 function theWorkbenchWith(
   over: Partial<ConversationView>,
   ...answers: Parameters<typeof serving>
 ) {
+  const conversation = { ...OPEN, ...over };
+
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
     whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
@@ -7453,7 +7475,10 @@ function theWorkbenchWith(
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(
       `/api/ui/conversations/${OPEN.id}`,
-      json({ ...OPEN, ...over }),
+      json({
+        ...conversation,
+        pairings: pairingsOn(conversation.process, conversation.pairings),
+      }),
     ),
     ...answers,
   );
