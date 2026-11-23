@@ -68,7 +68,19 @@ const TOKENS: &str = "/api/peer/v1/authors/";
 const WORK: &str = "6f1c2a52-7d0e-4c55-9a43-0d6b8f3e2a11";
 const PERSONAL: &str = "0b7e5f3a-2c41-4d8e-b6a9-5e3f1c7d9a20";
 
-const PATIENCE: std::time::Duration = std::time::Duration::from_millis(300);
+/// How long a dial in this suite gives one address, rather than the two seconds
+/// a running server gives one.
+///
+/// **Generous, because every dial here is meant to land**, which is what the
+/// span of this name in `advertised.rs` is for as well. Three hundred
+/// milliseconds for a handshake and a write is a span a loaded runner does not
+/// finish inside, and a dial that runs out of one reads exactly as a device
+/// that answered at none of its addresses — which is the flake rather than the
+/// question any test here is asking.
+///
+/// What answers nothing in this file is a closed port, refused at once rather
+/// than waited out, so nothing is spent waiting on it either.
+const ANSWERED_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
 const WAITING: std::time::Duration = std::time::Duration::from_secs(10);
 const LOOKING: std::time::Duration = std::time::Duration::from_millis(50);
 
@@ -158,7 +170,7 @@ impl Verkstead {
             members.clone(),
             Joins::none(),
         )
-        .waiting(PATIENCE);
+        .waiting(ANSWERED_WITHIN);
 
         let Routers {
             workbench,

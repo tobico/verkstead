@@ -66,8 +66,19 @@ const RAVEN: &str = "ffeeddccbbaa99887766554433221100";
 /// The branches crow's two sessions are running on.
 const RUNNING_THERE: [&str; 2] = ["rate-limiting", "solid-viewer"];
 
-/// How long one address has to answer here.
-const PATIENCE: Duration = Duration::from_millis(300);
+/// How long a dial in this suite gives one address, rather than the two seconds
+/// a running server gives one.
+///
+/// **Generous, because every dial here is meant to land**, which is what the
+/// span of this name in `advertised.rs` is for as well. Three hundred
+/// milliseconds for a handshake and a write is a span a loaded runner does not
+/// finish inside, and a dial that runs out of one reads exactly as a device
+/// that answered at none of its addresses — which is the flake rather than the
+/// question any test here is asking.
+///
+/// What answers nothing in this file is a closed port, refused at once rather
+/// than waited out, so nothing is spent waiting on it either.
+const ANSWERED_WITHIN: Duration = Duration::from_secs(10);
 
 /// How long a test waits for a row to come to read what it expects. Generous,
 /// because it is only ever paid when the assertion is about to fail — and a
@@ -475,7 +486,7 @@ impl Pressing {
             Members::recorded(pool.clone()),
             Joins::none(),
         )
-        .waiting(PATIENCE)
+        .waiting(ANSWERED_WITHIN)
         .coming_back_within(within)
         .installed_as(InstallKind::AppImage)
         .asking_the_app(asking.clone());

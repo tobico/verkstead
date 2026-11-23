@@ -67,9 +67,19 @@ const BRANCH: &str = "solid-viewer";
 /// else in it — the same number on both devices, ids being each device's own.
 const THERE: i64 = 1;
 
-/// How long one address has to answer here, rather than the two seconds a
-/// running server gives one.
-const PATIENCE: Duration = Duration::from_millis(300);
+/// How long a dial in this suite gives one address, rather than the two seconds
+/// a running server gives one.
+///
+/// **Generous, because every dial here is meant to land**, which is what the
+/// span of this name in `advertised.rs` is for as well. Three hundred
+/// milliseconds for a handshake and a write is a span a loaded runner does not
+/// finish inside, and a dial that runs out of one reads exactly as a device
+/// that answered at none of its addresses — which is the flake rather than the
+/// question any test here is asking.
+///
+/// What answers nothing in this file is a closed port, refused at once rather
+/// than waited out, so nothing is spent waiting on it either.
+const ANSWERED_WITHIN: Duration = Duration::from_secs(10);
 
 /// How long a test will wait for a Nudge it expects. Generous, because it is
 /// only ever paid when the assertion is about to fail.
@@ -189,7 +199,7 @@ impl Verkstead {
         }
     }
 
-    /// This device's cluster, with every dial given [`PATIENCE`].
+    /// This device's cluster, with every dial given [`ANSWERED_WITHIN`].
     fn cluster(&self) -> Devices {
         Devices::of(
             self.device.clone(),
@@ -197,7 +207,7 @@ impl Verkstead {
             self.members.clone(),
             Joins::none(),
         )
-        .waiting(PATIENCE)
+        .waiting(ANSWERED_WITHIN)
     }
 
     /// The workbench its own browser talks to, over the same Nudge channel the

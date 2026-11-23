@@ -54,9 +54,19 @@ const B: &str = "0011223344556677889900aabbccddee";
 const A_MACHINE: &str = "the-workstation";
 const A_OS: &str = "macOS 15.1";
 
-/// How long one address has to answer here, rather than the two seconds a running
-/// server gives one.
-const PATIENCE: std::time::Duration = std::time::Duration::from_millis(300);
+/// How long a dial in this suite gives one address, rather than the two seconds
+/// a running server gives one.
+///
+/// **Generous, because every dial here is meant to land**, which is what the
+/// span of this name in `advertised.rs` is for as well. Three hundred
+/// milliseconds for a handshake and a write is a span a loaded runner does not
+/// finish inside, and a dial that runs out of one reads exactly as a device
+/// that answered at none of its addresses — which is the flake rather than the
+/// question any test here is asking.
+///
+/// What answers nothing in this file is a closed port, refused at once rather
+/// than waited out, so nothing is spent waiting on it either.
+const ANSWERED_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// One Verkstead: its store, its identity, and its Peer Listener up behind the
 /// Member Gate — the cluster handle beside them, because that is what the reading
@@ -106,7 +116,7 @@ impl Verkstead {
             members.clone(),
             Joins::none(),
         )
-        .waiting(PATIENCE);
+        .waiting(ANSWERED_WITHIN);
 
         let Routers {
             workbench,
