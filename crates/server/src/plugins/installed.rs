@@ -271,6 +271,23 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
         troubles.insert(uuid, trouble);
     }
 
+    for (uuid, why) in unreached(&manifests) {
+        tracing::warn!(
+            uuid,
+            trouble = why,
+            "an installed plugin's Activity launches a skill it can't reach, and it counts as \
+             disabled",
+        );
+        manifests.remove(&uuid);
+        troubles.insert(
+            uuid,
+            Trouble {
+                why,
+                needs: Vec::new(),
+            },
+        );
+    }
+
     let placing: Vec<crate::skills::Placing<'_>> = manifests
         .iter()
         .filter_map(|(uuid, manifest)| Some((dirs.get(uuid)?, manifest)))
@@ -489,6 +506,58 @@ fn resolved(
             troubles.insert(uuid, trouble);
         }
     }
+}
+
+/// Every plugin in `loaded` with an Activity launching a skill from a pack
+/// that neither it nor any of its dependencies provides, and why, naming the
+/// skill (Set 1771, Q1). The manifest reader has refused what it could know
+/// alone — the plugin's own packs, a built-in's — and this is the rest: a pack
+/// of an installed dependency, known once that dependency has loaded.
+fn unreached(loaded: &BTreeMap<String, Manifest>) -> Vec<(String, String)> {
+    let built_ins: Vec<Manifest> = BUILT_INS
+        .iter()
+        .filter_map(|built_in| built_in.manifest(Platform::HERE).ok())
+        .collect();
+
+    loaded
+        .iter()
+        .filter_map(|(uuid, manifest)| {
+            let reachable: Vec<&super::manifest::Pack> = manifest
+                .packs
+                .iter()
+                .chain(manifest.dependencies.iter().flat_map(|dependency| {
+                    loaded
+                        .get(&dependency.uuid)
+                        .into_iter()
+                        .chain(
+                            built_ins
+                                .iter()
+                                .filter(|built_in| built_in.uuid == dependency.uuid),
+                        )
+                        .flat_map(|theirs| theirs.packs.iter())
+                }))
+                .collect();
+
+            manifest.activities.iter().find_map(|activity| {
+                activity.skills.iter().find_map(|skill| {
+                    let (pack, name) = skill.split_once('/')?;
+                    let held = reachable.iter().any(|reached| {
+                        reached.name == pack && reached.skills.iter().any(|known| known == name)
+                    });
+                    (!held).then(|| {
+                        (
+                            uuid.clone(),
+                            format!(
+                                "Its activity {} launches `{skill}`, and neither it nor a \
+                                 plugin it depends on provides that skill.",
+                                activity.name
+                            ),
+                        )
+                    })
+                })
+            })
+        })
+        .collect()
 }
 
 /// How a dependency isn't there.
@@ -720,6 +789,16 @@ fn provides(manifest: &Manifest) -> Vec<String> {
     words
 }
 
+/// The drawn names of the Activities a manifest provides, in the order
+/// written.
+fn activities(manifest: &Manifest) -> Vec<String> {
+    manifest
+        .activities
+        .iter()
+        .map(|activity| activity.name.clone())
+        .collect()
+}
+
 fn consent(manifest: &Manifest) -> PluginConsent {
     PluginConsent {
         uuid: manifest.uuid.clone(),
@@ -729,6 +808,7 @@ fn consent(manifest: &Manifest) -> PluginConsent {
         email: manifest.author.email.clone(),
         description: manifest.description.clone(),
         provides: provides(manifest),
+        activities: activities(manifest),
         capabilities: capabilities(manifest),
     }
 }
@@ -743,6 +823,7 @@ fn fields(manifest: &Manifest, source: Source, enabled: bool) -> Fields {
         version: manifest.version.to_string(),
         author: manifest.author.name.clone(),
         provides: provides(manifest),
+        activities: activities(manifest),
         dependencies: manifest
             .dependencies
             .iter()
@@ -846,6 +927,7 @@ pub(crate) fn installer_fields(
         version: String::new(),
         author: String::new(),
         provides: vec![super::manifest::Category::Language.word().to_owned()],
+        activities: Vec::new(),
         dependencies: Vec::new(),
         declared,
         values: kept.map(|kept| kept.values.clone()).unwrap_or_default(),
@@ -948,6 +1030,7 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
                 dependents: Vec::new(),
                 settings: u32::try_from(fields.declared.len()).unwrap_or(u32::MAX),
                 languages: vec![fields.name.clone()],
+                activities: Vec::new(),
                 uuid,
                 name: fields.name,
                 version: fields.version,
@@ -1032,6 +1115,7 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
                             .to_owned()
                     })
                     .collect(),
+                activities: record.fields.activities,
                 enabled: record.fields.enabled,
             }
         })
@@ -1045,10 +1129,11 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
 }
 
 /// The Built-in group's rows: every built-in this binary ships but the fixture,
-/// which is not listed, the Skill Pack `verkstead` first. A built-in has no
-/// Remove and no Update, and is always on but for a Language plugin, whose
-/// tick is read off its record — on where it has none — and whose trouble is
-/// an override of one of its languages that won't load.
+/// which is not listed, the Skill Pack `verkstead` first and the rest as their
+/// directories sort. A built-in has no Remove and no Update, and is always on
+/// but for a Language plugin, whose tick is read off its record — on where it
+/// has none — and whose trouble is an override of one of its languages that
+/// won't load.
 fn built_ins(
     records: &[Record<Fields>],
     config: &crate::settings::Config,
@@ -1065,6 +1150,7 @@ fn built_ins(
                 author: manifest.author.name.clone(),
                 provides: provides(&manifest),
                 languages: languages(&manifest),
+                activities: activities(&manifest),
                 source: PluginSource::BuiltIn,
                 enabled: !built_in::switched(&manifest)
                     || records
@@ -1092,6 +1178,7 @@ fn built_ins(
                 author: String::new(),
                 provides: Vec::new(),
                 languages: Vec::new(),
+                activities: Vec::new(),
                 source: PluginSource::BuiltIn,
                 enabled: true,
                 trouble: Some(refusal.why),
@@ -1419,7 +1506,7 @@ enum Granting {
     /// More, and the press carried the grant the card showed for it.
     Grants,
     /// More, and the card is to be shown first.
-    Shows(PluginConsent),
+    Shows(Box<PluginConsent>),
     /// More than even the card the press carried showed.
     Short,
 }
@@ -1427,7 +1514,7 @@ enum Granting {
 fn granting(manifest: &Manifest, granted: &[PluginCapability], press: &PluginUpdate) -> Granting {
     match &press.granted {
         _ if within(manifest, granted) => Granting::Stands,
-        None => Granting::Shows(consent(manifest)),
+        None => Granting::Shows(Box::new(consent(manifest))),
         Some(granted) if within(manifest, granted) => Granting::Grants,
         Some(_) => Granting::Short,
     }
@@ -1530,7 +1617,7 @@ async fn update_local(
 
     let granting = match granting(&manifest, &record.fields.granted, press) {
         Granting::Shows(consent) => {
-            return Some(Json(PluginUpdated::Consent { consent }).into_response());
+            return Some(Json(PluginUpdated::Consent { consent: *consent }).into_response());
         }
         Granting::Short => return Some(short_of_the_card()),
         granting => granting,
@@ -1613,7 +1700,8 @@ async fn update_git(
 
     let granting = match granting(&manifest, &record.fields.granted, press) {
         Granting::Shows(consent) => {
-            return put_back(Json(PluginUpdated::Consent { consent }).into_response()).await;
+            return put_back(Json(PluginUpdated::Consent { consent: *consent }).into_response())
+                .await;
         }
         Granting::Short => return put_back(short_of_the_card()).await,
         granting => granting,

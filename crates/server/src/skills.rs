@@ -128,6 +128,11 @@ const INSTRUCTION: &str = "verkstead/instruction/SKILL.md";
 /// and then rounds of ordinary Question Sets go back and forth until they have
 /// nothing else. What ends one is the system's business rather than the
 /// session's, so the skill says nothing about it.
+///
+/// Named here for the tests alone: the **Follow-up rounds** Activity writes
+/// its session's prompt itself, naming the skill by the path its start facts
+/// carry.
+#[cfg(test)]
 const FOLLOWING_UP: &str = "verkstead/following-up/SKILL.md";
 
 /// And the investigating skill's, which the one session an **Investigate**
@@ -922,75 +927,6 @@ pub(crate) fn instruction(
         "{prompt}\n# What I have asked for\n\n{}\n",
         instruction.trim()
     )
-}
-
-/// What a follow-up session is started on: the documents the work is written
-/// down in, and under them the brief the human steered it into Follow-up with.
-///
-/// The instruction session's shape, and for the same reason — this is a session
-/// the human set going by hand, so it is told what the work is and then told
-/// what they want taken up about it. What differs is that the brief opens a
-/// conversation rather than naming one job: the session answers it, does what it
-/// asks, and goes on asking until they are done.
-///
-/// The brief goes *last*, under the documents rather than over them, for the
-/// reason everything written under them goes there: it is the newest thing said
-/// and the least general. The documents say what the work is; this says what
-/// they want to follow up about it now.
-///
-/// **Except where the follow-up is being picked up again**, which is what
-/// `settled` carries: the rounds it has already been through, under the brief
-/// they were about. A follow-up that lost its session lost the conversation it
-/// was having — see [`crate::follow_ups`] — so the relaunch is a fresh session
-/// on the same brief, and what the digest adds is the one part of that
-/// conversation the Timeline kept. Every follow-up a steer starts hands in
-/// nothing here: a heading over an empty digest would tell the session that
-/// something had already been said.
-///
-/// **And an empty `brief` is a session with no documents at all**, which is the
-/// one a **Tinker** start opens: nothing has been built, so what the work is and
-/// what is being followed up on are the same words — and they are said once,
-/// under the heading that says act on them, rather than twice under two headings
-/// that would have the session reading the second as news.
-///
-/// **Which is also the one whose branch is on no pull request**, and that is
-/// what the opening line has to be true about. A steered follow-up is about work
-/// that has been submitted, so it is sent to follow the pull request up; a
-/// Tinker's branch was cut a moment ago and has none, so its session is sent to
-/// the branch it is standing on and promised nothing that is not there. What to
-/// do with either is the skill's, which asks the branch rather than assuming.
-pub(crate) fn following_up(
-    skills: &Skills,
-    brief: &str,
-    handoff: Option<&str>,
-    follow_up: &str,
-    settled: &str,
-) -> String {
-    let skill = skills.named(FOLLOWING_UP);
-
-    let prompt = match brief.trim().is_empty() {
-        true => alone(&format!(
-            "Read {skill} and follow up on the work on this branch, the way it says."
-        )),
-        false => on_the_documents(
-            &format!("Read {skill} and follow up on this branch's pull request, the way it says."),
-            brief,
-            handoff,
-        ),
-    };
-
-    let prompt = format!(
-        "{prompt}\n# What I want to follow up on\n\n{}\n",
-        follow_up.trim()
-    );
-
-    let settled = settled.trim();
-
-    if settled.is_empty() {
-        return prompt;
-    }
-
-    format!("{prompt}\n# What you have already asked, and what I said\n\n{settled}\n")
 }
 
 /// What an investigating session is started on: the question to find out about,
@@ -4869,101 +4805,6 @@ mod tests {
         );
     }
 
-    /// A follow-up session is put inside the skill by its prompt, primed with the
-    /// two documents, and told last what the human wants followed up.
-    #[test]
-    fn a_follow_up_session_is_started_on_the_documents_and_the_brief() {
-        let prompt = following_up(
-            &mounted(),
-            "# Rate limiting\n\nThe API has none.\n",
-            Some("# What we settled\n\nIn-process counter.\n"),
-            "Why is the window a minute? And add a header saying when it resets.\n",
-            "",
-        );
-
-        assert!(
-            prompt.contains(&at(FOLLOWING_UP)),
-            "the skill is named by the path it is mounted at: {prompt:?}"
-        );
-        assert!(
-            !prompt.contains(&at(INSTRUCTION)) && !prompt.contains(&at(RESPONDING)),
-            "and no other skill is named: a follow-up is neither a one-shot \
-             instruction nor a batch of comments — {prompt:?}"
-        );
-        assert!(
-            prompt.contains("The API has none.") && prompt.contains("In-process counter."),
-            "both documents go in whole, this being a session on the same work as \
-             every other: {prompt:?}"
-        );
-        assert!(
-            prompt.ends_with(
-                "# What I want to follow up on\n\nWhy is the window a minute? And add a \
-                 header saying when it resets.\n"
-            ),
-            "and the follow-up brief is the last thing said, under them: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("follow up on this branch's pull request"),
-            "and the work is on one, so that is what it is sent to follow up: \
-             {prompt:?}"
-        );
-    }
-
-    /// And the one a **Tinker** start opens says the Brief once, under the
-    /// heading that says act on it.
-    ///
-    /// Nothing has been built, so there are no documents to be told the work in:
-    /// a session handed the same words twice under two headings would read the
-    /// second as something new the human had said about the first.
-    #[test]
-    fn a_tinkers_session_is_primed_with_the_brief_as_what_to_follow_up_on() {
-        let prompt = following_up(
-            &mounted(),
-            "",
-            None,
-            "# Rate limiting\n\nThe API has none.\n",
-            "",
-        );
-
-        assert!(
-            prompt.contains(&at(FOLLOWING_UP)),
-            "it is the follow-up's own session, in the follow-up's own skill: \
-             {prompt:?}"
-        );
-        assert!(
-            !prompt.contains("# The Brief this started from"),
-            "and there are no documents over it: {prompt:?}"
-        );
-        assert!(
-            !prompt.contains("# What the grilling settled"),
-            "nor a handoff, a Tinker never having been grilled: {prompt:?}"
-        );
-        assert_eq!(
-            prompt.matches("The API has none.").count(),
-            1,
-            "the Brief is said once, and it is said here: {prompt:?}"
-        );
-        assert!(
-            prompt.ends_with(
-                "# What I want to follow up on\n\n# Rate limiting\n\nThe API has none.\n"
-            ),
-            "under the heading that says act on it: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("Nothing else in this session tells you how to reach me."),
-            "with the one thing every session is told beside the skill: {prompt:?}"
-        );
-        assert!(
-            !prompt.contains("pull request"),
-            "and nothing promising a pull request the branch does not have: \
-             {prompt:?}"
-        );
-        assert!(
-            prompt.contains("follow up on the work on this branch"),
-            "what it is sent to is the branch it is standing on: {prompt:?}"
-        );
-    }
-
     /// The investigating skill is the follow-up's shape with the commit
     /// obligation inverted: nothing is committed, nothing is pushed, and no
     /// pull request is opened — which is the one thing about this session that
@@ -5142,83 +4983,6 @@ mod tests {
         assert!(
             prompt.contains("`git branch -m <name>`") && prompt.contains("kebab-case"),
             "said as the command and the shape, as it is everywhere: {prompt:?}"
-        );
-    }
-
-    /// And the naming instruction goes on it as it goes on every first session:
-    /// a Tinker is cut on a name Verkstead invented, exactly as a grilling is.
-    #[test]
-    fn a_tinkers_session_is_told_to_name_the_branch() {
-        let prompt = naming(
-            &following_up(
-                &mounted(),
-                "",
-                None,
-                "# Rate limiting\n\nThe API has none.\n",
-                "",
-            ),
-            true,
-        );
-
-        assert!(
-            prompt.contains("# This branch has no name yet"),
-            "the branch is still carrying the name nobody read: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("`git branch -m <name>`") && prompt.contains("kebab-case"),
-            "said as the command and the shape, as it is everywhere: {prompt:?}"
-        );
-    }
-
-    /// And a follow-up picked up again is the same session over: the same skill
-    /// and the same brief, with the rounds it has already been through under
-    /// them, so that it does not open by asking what was answered an hour ago.
-    #[test]
-    fn a_relaunched_follow_up_is_told_what_it_has_already_asked() {
-        let prompt = following_up(
-            &mounted(),
-            "# Rate limiting\n\nThe API has none.\n",
-            None,
-            "Why is the window a minute?\n",
-            "## About the window\n\n**Q9** Is a minute right?\n\nYes\n",
-        );
-
-        assert!(
-            prompt.contains("# What I want to follow up on\n\nWhy is the window a minute?"),
-            "the brief it was opened with is what it is still about: {prompt:?}"
-        );
-        assert!(
-            prompt.ends_with(
-                "# What you have already asked, and what I said\n\n## About the window\n\n\
-                 **Q9** Is a minute right?\n\nYes\n"
-            ),
-            "and the rounds already answered come last, under it: {prompt:?}"
-        );
-    }
-
-    /// A Conversation steered into Follow-up may have Deferred Answers nothing
-    /// has been told about yet, and they fold in here as they do everywhere.
-    #[test]
-    fn deferred_answers_fold_into_a_following_up_prompt() {
-        let prompt = folded(
-            &following_up(
-                &mounted(),
-                "# Rate limiting\n\nThe API has none.\n",
-                None,
-                "Add a header saying when the window resets.\n",
-                "",
-            ),
-            "## The wording\n\n**Q9** Which status?\n\n429 Too Many Requests\n",
-        );
-
-        assert!(
-            prompt.contains("# What I want to follow up on"),
-            "the brief the follow-up was steered with is still there: {prompt:?}"
-        );
-        assert!(
-            prompt.ends_with("**Q9** Which status?\n\n429 Too Many Requests\n"),
-            "and what the human has since decided comes last, as in every other \
-             prompt: {prompt:?}"
         );
     }
 

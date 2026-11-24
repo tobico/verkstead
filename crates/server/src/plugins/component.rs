@@ -28,14 +28,14 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
-use wasmtime::component::{Component, Instance, InstancePre, Linker, ResourceTable};
+use wasmtime::component::{Component, HasData, Instance, InstancePre, Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store, Trap};
 use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{
     WasiHttpCtx, WasiHttpCtxView, WasiHttpHooks, WasiHttpView, default_hooks,
 };
 
-use super::manifest::{Access, Capability, Category, Files, Manifest};
+use super::manifest::{Access, Activity, Capability, Category, Files, Manifest};
 
 /// The bindings to `wit/plugin.wit`: the base world every component is checked
 /// against, and one world per Category, each filled in by the stage that gives
@@ -64,8 +64,16 @@ pub mod worlds {
         pub mod language {
             wasmtime::component::bindgen!({ path: "wit", world: "language" });
         }
+        /// An Activity's world: the host functions it imports, which the
+        /// host implements as async and may trap a component through, and the
+        /// `run` it exports, called async.
         pub mod activity {
-            wasmtime::component::bindgen!({ path: "wit", world: "activity" });
+            wasmtime::component::bindgen!({
+                path: "wit",
+                world: "activity",
+                imports: { default: async | trappable },
+                exports: { default: async },
+            });
         }
         pub mod skills {
             wasmtime::component::bindgen!({ path: "wit", world: "skills" });
@@ -267,12 +275,18 @@ static ENGINE: LazyLock<Engine> = LazyLock::new(|| {
 /// Instantiate `manifest`'s component, read out of `files` — an installed
 /// plugin's directory or a built-in's embedded files, the one loader for both —
 /// under its capabilities, with `home` as what a leading `~` in a granted path
-/// means. `Ok(None)` is a plugin with no component, which has nothing to load.
+/// means, and check each of its Activities' components against the
+/// `activity` world. `Ok(None)` is a plugin with no component of its own,
+/// which has nothing to load.
 pub async fn load(
     files: Files<'_>,
     manifest: &Manifest,
     home: Option<&Path>,
 ) -> Result<Option<Loaded>, Trouble> {
+    for activity in &manifest.activities {
+        checked(files, activity)?;
+    }
+
     let Some(file) = &manifest.component else {
         return Ok(None);
     };
@@ -406,6 +420,225 @@ async fn started(again: Again, grant: Grant, within: Duration) -> Result<Loaded,
         instance,
         again,
     })
+}
+
+/// Check an Activity's component, read out of `files`, against the `activity`
+/// world: that it is a component, that it imports nothing the host does not
+/// give an Activity, and that it exports what the world asks. Nothing of it
+/// runs — an Activity is started per Conversation, with that Conversation's
+/// facts, and never at load.
+pub fn checked(files: Files<'_>, activity: &Activity) -> Result<(), Trouble> {
+    let file = &activity.component;
+    let name = &activity.name;
+    let bytes = files.read(file).ok_or_else(|| {
+        Trouble::of(format!(
+            "The component `{}`, for {name}, couldn't be read.",
+            file.display()
+        ))
+    })?;
+
+    let component = Component::new(&ENGINE, &bytes).map_err(|error| {
+        Trouble::of(format!(
+            "The component for {name} isn't a WebAssembly component Verkstead can load: {}.",
+            worded(&error)
+        ))
+    })?;
+
+    let mut linker = Linker::<Host>::new(&ENGINE);
+    wasmtime_wasi::p2::add_to_linker_async(&mut linker).map_err(internal)?;
+    wasmtime_wasi_http::p2::add_only_http_to_linker_async(&mut linker).map_err(internal)?;
+    worlds::category::activity::Activity::add_to_linker::<Host, Unlent>(&mut linker, |_| Unlent)
+        .map_err(internal)?;
+
+    let pre = linker.instantiate_pre(&component).map_err(|error| {
+        Trouble::of(format!(
+            "The component for {name} needs something Verkstead doesn't provide: {}.",
+            worded(&error)
+        ))
+    })?;
+
+    worlds::category::activity::ActivityPre::new(pre).map_err(|error| {
+        Trouble::of(format!(
+            "The component for {name} isn't written against Verkstead's activity world: {}.",
+            worded(&error)
+        ))
+    })?;
+
+    Ok(())
+}
+
+/// What a running Activity's store holds: the WASI context its manifest
+/// granted, as any component's, and what the host lends it.
+pub(crate) struct Lending<T> {
+    host: Host,
+    lent: T,
+}
+
+impl<T: Send> WasiView for Lending<T> {
+    fn ctx(&mut self) -> WasiCtxView<'_> {
+        self.host.ctx()
+    }
+}
+
+impl<T: Send> WasiHttpView for Lending<T> {
+    fn http(&mut self) -> WasiHttpCtxView<'_> {
+        self.host.http()
+    }
+}
+
+/// Run an Activity's component, read out of `files`, under `capabilities`,
+/// with `lent` as its host functions, to the Outcome word it answers.
+///
+/// What fails is a [`Trouble`] saying so, as at load: a component that
+/// cannot be read or started, and one that traps — a host function trapping
+/// it included — while it runs. A running Activity has no deadline, its
+/// sessions taking as long as they take, but it yields to the runtime on every
+/// tick, so one spinning in a loop of its own holds up nothing else.
+pub(crate) async fn run_activity<T>(
+    files: Files<'_>,
+    activity: &Activity,
+    capabilities: &[Capability],
+    home: Option<&Path>,
+    lent: T,
+    facts: &worlds::category::activity::verkstead::plugin::activity_types::Facts,
+) -> Result<String, Trouble>
+where
+    T: worlds::category::activity::verkstead::plugin::host::Host
+        + worlds::category::activity::verkstead::plugin::activity_types::Host
+        + Send
+        + 'static,
+{
+    use worlds::category::activity::Activity as World;
+
+    let name = &activity.name;
+    let bytes = files.read(&activity.component).ok_or_else(|| {
+        Trouble::of(format!(
+            "The component `{}`, for {name}, couldn't be read.",
+            activity.component.display()
+        ))
+    })?;
+
+    let component = Component::new(&ENGINE, &bytes).map_err(|error| {
+        Trouble::of(format!(
+            "The component for {name} isn't a WebAssembly component Verkstead can load: {}.",
+            worded(&error)
+        ))
+    })?;
+
+    let mut linker = Linker::<Lending<T>>::new(&ENGINE);
+    wasmtime_wasi::p2::add_to_linker_async(&mut linker).map_err(internal)?;
+    wasmtime_wasi_http::p2::add_only_http_to_linker_async(&mut linker).map_err(internal)?;
+    World::add_to_linker::<Lending<T>, wasmtime::component::HasSelf<T>>(&mut linker, |lending| {
+        &mut lending.lent
+    })
+    .map_err(internal)?;
+
+    let mut store = Store::new(
+        &ENGINE,
+        Lending {
+            host: grant(capabilities, home)?.host(),
+            lent,
+        },
+    );
+    store.epoch_deadline_trap();
+    store.set_epoch_deadline(STARTING.div_duration_f64(TICK).ceil() as u64);
+
+    let world = World::instantiate_async(&mut store, &component, &linker)
+        .await
+        .map_err(|error| {
+            Trouble::of(format!(
+                "{name} couldn't be started: {}.",
+                trapped(&error).unwrap_or_else(|| worded(&error))
+            ))
+        })?;
+
+    store.epoch_deadline_async_yield_and_update(1);
+
+    world.call_run(&mut store, facts).await.map_err(|error| {
+        Trouble::of(format!(
+            "{name} stopped while it was running: {}.",
+            trapped(&error).unwrap_or_else(|| worded(&error))
+        ))
+    })
+}
+
+/// A trap worded as the trap alone, the backtrace wasmtime wraps around it
+/// left out — or, where a host function trapped the component, what that
+/// function said. `None` where the error is not a trap.
+fn trapped(error: &wasmtime::Error) -> Option<String> {
+    match error.downcast_ref::<Trap>() {
+        Some(trap) => Some(trap.to_string()),
+        None => error
+            .downcast_ref::<Ended>()
+            .map(|ended| ended.0.trim_end_matches('.').to_owned()),
+    }
+}
+
+/// What a host function traps a running Activity with, in the sentence that
+/// says why.
+#[derive(Debug)]
+pub(crate) struct Ended(pub(crate) String);
+
+impl std::fmt::Display for Ended {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Ended {}
+
+/// The host functions an Activity's component is checked against: every one
+/// linked, and none lent, since a check never runs the component.
+struct Unlent;
+
+impl HasData for Unlent {
+    type Data<'a> = Unlent;
+}
+
+mod unlent {
+    use super::Unlent;
+    use super::worlds::category::activity::verkstead::plugin::{activity_types, host};
+
+    fn refused() -> wasmtime::Error {
+        wasmtime::Error::msg("an Activity being checked is lent nothing")
+    }
+
+    impl activity_types::Host for Unlent {}
+
+    impl host::Host for Unlent {
+        async fn launch(
+            &mut self,
+            _skill: String,
+            _role: String,
+            _prompt: String,
+            _evidence: activity_types::Evidence,
+            _ends: activity_types::Ends,
+        ) -> wasmtime::Result<Result<activity_types::Session, String>> {
+            Err(refused())
+        }
+
+        async fn wait(
+            &mut self,
+            _session: activity_types::Session,
+        ) -> wasmtime::Result<activity_types::Waited> {
+            Err(refused())
+        }
+
+        async fn git_facts(
+            &mut self,
+            _repo: String,
+        ) -> wasmtime::Result<Result<activity_types::BranchFacts, String>> {
+            Err(refused())
+        }
+
+        async fn notice(&mut self, _text: String) -> wasmtime::Result<()> {
+            Err(refused())
+        }
+
+        async fn stop(&mut self, _reason: String) -> wasmtime::Result<()> {
+            Err(refused())
+        }
+    }
 }
 
 /// What a store is to be made holding: the WASI context a grant builds, and
@@ -957,6 +1190,85 @@ world reader {
             path: dir.to_string_lossy().into_owned(),
             access: Access::ReadOnly,
         }]
+    }
+
+    /// The least that is an Activity, a core module: see the file.
+    const ACTIVITY: &str = include_str!("../../tests/fixtures/activity.wat");
+
+    /// [`ACTIVITY`], made into a component against `wit/plugin.wit`'s
+    /// `activity` world.
+    fn activity_component() -> Vec<u8> {
+        let mut resolve = wit_parser::Resolve::default();
+        let (package, _) = resolve
+            .push_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("wit"))
+            .expect("the plugin WIT should parse");
+        let world = resolve
+            .select_world(&[package], Some("activity"))
+            .expect("the activity world should be there");
+
+        let mut module = assembled(ACTIVITY);
+        wit_component::embed_component_metadata(
+            &mut module,
+            &resolve,
+            world,
+            wit_component::StringEncoding::UTF8,
+            false,
+        )
+        .expect("the activity world should embed");
+
+        wit_component::ComponentEncoder::default()
+            .module(&module)
+            .expect("the activity should be a module wit-component reads")
+            .validate(true)
+            .encode()
+            .expect("the activity should encode as a component")
+    }
+
+    /// An Activity named `Rounds` whose component is `bytes`.
+    fn checking(bytes: Vec<u8>) -> Result<(), Trouble> {
+        let bytes: &'static [u8] = bytes.leak();
+        let files: &'static [(&'static str, &'static [u8])] =
+            Vec::from([("rounds.wasm", bytes)]).leak();
+        checked(
+            Files::Embedded(files),
+            &Activity {
+                id: "rounds".to_owned(),
+                name: "Rounds".to_owned(),
+                component: PathBuf::from("rounds.wasm"),
+                outcomes: vec!["committed".to_owned()],
+                skills: Vec::new(),
+            },
+        )
+    }
+
+    #[test]
+    fn a_component_exporting_the_activity_world_passes() {
+        assert_eq!(checking(activity_component()), Ok(()));
+    }
+
+    #[test]
+    fn a_component_lacking_the_activity_worlds_exports_is_trouble() {
+        let trouble = checking(assembled(EMPTY)).expect_err("an empty component is no Activity");
+
+        assert!(
+            trouble.why.starts_with(
+                "The component for Rounds isn't written against Verkstead's activity world"
+            ),
+            "{trouble}"
+        );
+    }
+
+    #[test]
+    fn an_activity_importing_what_isnt_provided_is_trouble() {
+        let trouble = checking(assembled(r#"(component (import "nowhere" (func)))"#))
+            .expect_err("an unsatisfied import should not load");
+
+        assert!(
+            trouble
+                .why
+                .starts_with("The component for Rounds needs something Verkstead doesn't provide"),
+            "{trouble}"
+        );
     }
 
     #[tokio::test]

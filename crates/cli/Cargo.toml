@@ -61,8 +61,9 @@ tokio = { workspace = true, features = ["net", "time"] }
 # crate the server's loader tests assemble theirs with.
 wat = "1"
 # And an agent's component, which has to export what the server's `agent` world
-# asks for: `wit-parser` reads that world out of the server's `wit/`, and
-# `wit-component` writes a module exporting it and wraps it as a component.
+# asks for, and an Activity's against its `activity` world: `wit-parser` reads
+# the world out of the server's `wit/`, and `wit-component` writes a module
+# exporting it (or wraps a core module) as a component.
 wit-component = { version = "0.263", features = ["dummy-module"] }
 wit-parser = "0.263"
 # Asking the Router a question without a socket under it, which is what the

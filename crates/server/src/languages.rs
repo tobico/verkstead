@@ -2214,11 +2214,12 @@ mod tests {
         let plugins = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins");
         let mut providing = Vec::new();
 
-        // The fixture's component is built rather than checked in, so it is
-        // not in its directory to be checked.
+        // The fixture's component and the Activities' are built rather than
+        // checked in, so they are not in their directories to be checked —
+        // the CLI suite checks the Activities with what the binary embeds.
         for plugin in crate::plugins::built_in::BUILT_INS
             .iter()
-            .filter(|plugin| plugin.directory != "fixture")
+            .filter(|plugin| !["fixture", "activities"].contains(&plugin.directory))
         {
             let manifest = Manifest::check(&plugins.join(plugin.directory))
                 .unwrap_or_else(|refusals| panic!("{}: {refusals:?}", plugin.directory));

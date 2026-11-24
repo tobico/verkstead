@@ -13,8 +13,9 @@
 //! is a plugin quietly doing less than its author wrote, which is the gap the
 //! interface version exists to stop. A `provides:` entry's body beyond its
 //! `category` is read here once a stage has given that Category its grammar —
-//! [`agent`], `skills` in [`Walk::packs`], and `language` in the descriptor
-//! grammar, see [`crate::languages::provided`] — and kept as written until then.
+//! [`agent`], `skills` in [`Walk::packs`], `activity` in [`Walk::activities`],
+//! and `language` in the descriptor grammar, see [`crate::languages::provided`]
+//! — and kept as written until then.
 //!
 //! **Per-platform overrides replace, key by key.** A top-level `linux:`,
 //! `macos:` or `windows:` holds keys of the common declaration, and reading for
@@ -100,6 +101,8 @@ pub struct Manifest {
     pub provides: Vec<Provision>,
     /// The Skill Packs its `skills` entries are, in the order written.
     pub packs: Vec<Pack>,
+    /// The Activities its `activity` entries are, in the order written.
+    pub activities: Vec<Activity>,
     pub capabilities: Vec<Capability>,
     pub settings: Vec<Setting>,
     /// A `.wasm` inside the plugin's directory, relative to it.
@@ -178,6 +181,30 @@ pub struct Pack {
     /// Its skills' names, which are their directories', in order.
     pub skills: Vec<String>,
 }
+
+/// An **Activity**: a `provides:` entry of the `activity` Category, read.
+///
+/// Each names a wasm component of its own, checked against the `activity`
+/// world as the plugin loads, the Outcomes it may end in, and every skill it
+/// launches a session under — each from a pack the plugin provides or depends
+/// on (Set 1771, Q1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Activity {
+    /// What a Process names it by: lowercase letters, digits and hyphens.
+    pub id: String,
+    /// What is drawn, *Follow-up rounds*.
+    pub name: String,
+    /// A `.wasm` inside the plugin's directory, relative to it.
+    pub component: PathBuf,
+    /// The words it may end in, `steered` aside, which every Activity has.
+    pub outcomes: Vec<String>,
+    /// The skills it launches sessions under, each `<pack>/<skill>`.
+    pub skills: Vec<String>,
+}
+
+/// The Outcome every Activity has without declaring it: the human steered the
+/// Conversation elsewhere while it ran.
+pub const STEERED: &str = "steered";
 
 /// The pack only the Skill Pack Verkstead ships may be named: its plugin's
 /// uuid is [`super::built_in::VERKSTEAD`].
@@ -368,6 +395,8 @@ impl Manifest {
         let packs = walk.packs(&provides, &uuid)?;
         let settings = settings(&fields)?;
         sized(&provides, &settings)?;
+        let dependencies = list(&fields, "dependencies", dependency)?;
+        let activities = walk.activities(&provides, &packs, &dependencies, platform)?;
 
         let manifest = Manifest {
             uuid,
@@ -378,9 +407,10 @@ impl Manifest {
             interface,
             description: optional_text(&fields, "description", "description")?,
             mark: walk.mark(&fields, "mark", "mark")?,
-            dependencies: list(&fields, "dependencies", dependency)?,
+            dependencies,
             provides,
             packs,
+            activities,
             capabilities: list(&fields, "capabilities", capability)?,
             settings,
             component: walk.component(&fields)?,
@@ -665,8 +695,13 @@ impl Walk<'_> {
         let Some(component) = optional_text(fields, field, field)? else {
             return Ok(None);
         };
+        self.wasm(&component, field).map(Some)
+    }
 
-        let path = self.inside(&component, field)?;
+    /// `component`, written at `field`, as the path of a `.wasm` file in the
+    /// plugin's directory.
+    fn wasm(&self, component: &str, field: &str) -> Result<PathBuf, Refusal> {
+        let path = self.inside(component, field)?;
         if path.extension().is_none_or(|extension| extension != "wasm") {
             return Err(Refusal::of(
                 field,
@@ -679,7 +714,126 @@ impl Walk<'_> {
                 format!("`{component}` isn't a file in the plugin's directory."),
             ));
         }
-        Ok(Some(path))
+        Ok(path)
+    }
+
+    /// Every `activity` entry of `provides` read as an [`Activity`], refused at
+    /// the first that is wrong. A skill it launches is checked against `packs`,
+    /// the plugin's own, and the packs of the built-ins among `dependencies`;
+    /// a pack of an installed dependency is the loader's to check, once that
+    /// dependency has loaded.
+    fn activities(
+        &self,
+        provides: &[Provision],
+        packs: &[Pack],
+        dependencies: &[Dependency],
+        platform: Platform,
+    ) -> Result<Vec<Activity>, Refusal> {
+        let mut activities: Vec<Activity> = Vec::new();
+        for (index, provision) in provides.iter().enumerate() {
+            if provision.category != Category::Activity {
+                continue;
+            }
+            let Body::Unread(body) = &provision.body else {
+                continue;
+            };
+            let field = format!("provides[{index}]");
+            let activity = self.activity(body, &field, packs, dependencies, platform)?;
+            if activities.iter().any(|seen| seen.id == activity.id) {
+                let field = format!("{field}.id");
+                return Err(Refusal::of(
+                    &field,
+                    format!(
+                        "`{field}` is `{}`, which an earlier entry already uses.",
+                        activity.id
+                    ),
+                ));
+            }
+            activities.push(activity);
+        }
+        Ok(activities)
+    }
+
+    fn activity(
+        &self,
+        body: &Map<String, Value>,
+        field: &str,
+        packs: &[Pack],
+        dependencies: &[Dependency],
+        platform: Platform,
+    ) -> Result<Activity, Refusal> {
+        const KEYS: [&str; 5] = ["id", "name", "component", "outcomes", "skills"];
+        if let Some(key) = body.keys().find(|key| !KEYS.contains(&key.as_str())) {
+            return Err(Refusal::unknown(&format!("{field}.{key}")));
+        }
+
+        let id_field = format!("{field}.id");
+        let id = text_of(within(body, field, "id")?, &id_field)?;
+        if !is_word(&id) {
+            return Err(Refusal::of(
+                &id_field,
+                format!(
+                    "`{id_field}` should be lowercase letters, digits and hyphens, like \
+                     `follow-up-rounds`."
+                ),
+            ));
+        }
+
+        let name = text_of(within(body, field, "name")?, &format!("{field}.name"))?;
+
+        let component_field = format!("{field}.component");
+        let written = text_of(within(body, field, "component")?, &component_field)?;
+        let component = self.wasm(&written, &component_field)?;
+
+        within(body, field, "outcomes")?;
+        let outcomes = words(body, field, "outcomes")?;
+        if outcomes.is_empty() {
+            return Err(Refusal::of(
+                &format!("{field}.outcomes"),
+                format!("`{field}.outcomes` is empty. Name every way the Activity can end."),
+            ));
+        }
+        for (index, outcome) in outcomes.iter().enumerate() {
+            let at = format!("{field}.outcomes[{index}]");
+            if !is_word(outcome) {
+                return Err(Refusal::of(
+                    &at,
+                    format!(
+                        "`{at}` should be lowercase letters, digits and hyphens, like \
+                         `committed`."
+                    ),
+                ));
+            }
+            if outcome == STEERED {
+                return Err(Refusal::of(
+                    &at,
+                    format!(
+                        "`{at}` is `{STEERED}`, which every Activity has without saying. \
+                         Take it out."
+                    ),
+                ));
+            }
+            if outcomes[..index].contains(outcome) {
+                return Err(Refusal::of(
+                    &at,
+                    format!("`{at}` is `{outcome}`, which the list already names."),
+                ));
+            }
+        }
+
+        let skills = words(body, field, "skills")?;
+        for (index, skill) in skills.iter().enumerate() {
+            let at = format!("{field}.skills[{index}]");
+            skilled(skill, &at, packs, dependencies, platform)?;
+        }
+
+        Ok(Activity {
+            id,
+            name,
+            component,
+            outcomes,
+            skills,
+        })
     }
 
     /// Every `skills` entry of `provides` read as a [`Pack`], each of its skills'
@@ -809,6 +963,98 @@ impl Walk<'_> {
                 format!("`{field}` should be a path inside the plugin's directory."),
             ))
         }
+    }
+}
+
+/// Refused where `skill`, written at `field`, isn't `<pack>/<skill>`, or names a
+/// pack the plugin can't reach: neither one of its own `packs` nor any of its
+/// `dependencies`'. A pack whose skills are known here — the plugin's own, a
+/// built-in's — is held to them too.
+fn skilled(
+    skill: &str,
+    field: &str,
+    packs: &[Pack],
+    dependencies: &[Dependency],
+    platform: Platform,
+) -> Result<(), Refusal> {
+    let Some((pack, name)) = skill
+        .split_once('/')
+        .filter(|(pack, name)| is_word(pack) && is_word(name))
+    else {
+        return Err(Refusal::of(
+            field,
+            format!(
+                "`{field}` is `{skill}`, which isn't `<pack>/<skill>`, like \
+                 `verkstead/following-up`."
+            ),
+        ));
+    };
+
+    let known = |skills: &[String]| {
+        if skills.iter().any(|known| known == name) {
+            Ok(())
+        } else {
+            Err(Refusal::of(
+                field,
+                format!("`{field}` is `{skill}`, and the pack `{pack}` has no skill `{name}`."),
+            ))
+        }
+    };
+
+    if let Some(own) = packs.iter().find(|own| own.name == pack) {
+        return known(&own.skills);
+    }
+
+    // A built-in dependency's packs are in this binary, so they are read here;
+    // an installed one's are not known until it loads.
+    let mut unknown = false;
+    for dependency in dependencies {
+        let built_in = super::built_in::BUILT_INS
+            .iter()
+            .filter(|built_in| built_in.is(&dependency.uuid))
+            .find_map(|built_in| built_in.manifest(platform).ok());
+        match built_in {
+            Some(manifest) => {
+                if let Some(theirs) = manifest.packs.iter().find(|theirs| theirs.name == pack) {
+                    return known(&theirs.skills);
+                }
+            }
+            None => unknown = true,
+        }
+    }
+    if unknown {
+        return Ok(());
+    }
+
+    Err(Refusal::of(
+        field,
+        format!(
+            "`{field}` is `{skill}`, from the pack `{pack}`, which the plugin neither provides \
+             nor depends on. Add a dependency on the plugin that provides it."
+        ),
+    ))
+}
+
+/// Whether `text` is lowercase letters, digits and hyphens, and not empty.
+fn is_word(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+/// The list of text at `key` in `map`, `field.key[i]` naming each. Absent is
+/// empty.
+fn words(map: &Map<String, Value>, field: &str, key: &str) -> Result<Vec<String>, Refusal> {
+    let at = format!("{field}.{key}");
+    match map.get(key) {
+        Some(Value::Null) | None => Ok(Vec::new()),
+        Some(Value::Array(entries)) => entries
+            .iter()
+            .enumerate()
+            .map(|(index, value)| text_of(value, &format!("{at}[{index}]")))
+            .collect(),
+        Some(_) => Err(Refusal::of(&at, format!("`{at}` should be a list."))),
     }
 }
 
@@ -1901,6 +2147,148 @@ windows:
         let refusal = Manifest::read(dir.path(), Platform::Linux).unwrap_err();
 
         assert_eq!(refusal.field.as_deref(), Some("provides[0].directory"));
+    }
+
+    /// A plugin directory holding `MINIMAL` with the Skill Pack `rust-review`
+    /// of one skill, `reviewing`, an empty `rounds.wasm`, and `entry` written
+    /// under `provides:` after the pack — with `dependencies` where given.
+    fn acting(entry: &str, dependencies: &str) -> tempfile::TempDir {
+        let dir = packed(&format!("{PACK}{entry}"), &[REVIEWING]);
+        std::fs::write(dir.path().join("rounds.wasm"), b"\0asm").unwrap();
+        let text = std::fs::read_to_string(dir.path().join(FILE)).unwrap();
+        std::fs::write(dir.path().join(FILE), format!("{text}{dependencies}")).unwrap();
+        dir
+    }
+
+    /// One `activity` entry, its `skills` and `outcomes` lists written in.
+    fn activity(skills: &str, outcomes: &str) -> String {
+        format!(
+            "  - category: activity\n    id: rounds\n    name: Rounds\n    \
+             component: rounds.wasm\n    outcomes: {outcomes}\n    skills: {skills}\n"
+        )
+    }
+
+    /// A dependency on the built-in that is the pack `verkstead`.
+    fn on_verkstead() -> String {
+        format!(
+            "dependencies:\n  - uuid: {}\n    name: Verkstead\n    author:\n      \
+             name: Tobias Cohen\n      email: tobi@tobico.net\n    version: ^0.1\n",
+            super::super::built_in::VERKSTEAD
+        )
+    }
+
+    fn refused(dir: &tempfile::TempDir) -> Refusal {
+        Manifest::read(dir.path(), Platform::Linux).expect_err("the manifest should be refused")
+    }
+
+    #[test]
+    fn an_activity_is_read_with_its_outcomes_and_skills() {
+        let dir = acting(
+            &activity(
+                "[rust-review/reviewing, verkstead/following-up]",
+                "[committed, nothing]",
+            ),
+            &on_verkstead(),
+        );
+
+        let manifest = Manifest::read(dir.path(), Platform::Linux).unwrap();
+
+        assert_eq!(
+            manifest.activities,
+            [Activity {
+                id: "rounds".to_owned(),
+                name: "Rounds".to_owned(),
+                component: PathBuf::from("rounds.wasm"),
+                outcomes: vec!["committed".to_owned(), "nothing".to_owned()],
+                skills: vec![
+                    "rust-review/reviewing".to_owned(),
+                    "verkstead/following-up".to_owned()
+                ],
+            }]
+        );
+    }
+
+    #[test]
+    fn a_skill_from_a_pack_neither_provided_nor_depended_on_is_refused_naming_it() {
+        let dir = acting(&activity("[verkstead/following-up]", "[committed]"), "");
+
+        let refusal = refused(&dir);
+
+        assert_eq!(refusal.field.as_deref(), Some("provides[1].skills[0]"));
+        assert!(
+            refusal.why.contains("`verkstead/following-up`")
+                && refusal.why.contains("neither provides nor depends on"),
+            "{refusal}"
+        );
+    }
+
+    #[test]
+    fn a_skill_from_an_installed_dependency_is_left_to_the_loader() {
+        let installed = "dependencies:\n  - uuid: 7c1d2a43-0f5e-4b9a-8c6d-3e2f1a0b9c8d\n    \
+                         name: Shared skills\n    author:\n      name: Grace Hopper\n      \
+                         email: grace@example.com\n    version: ^2\n";
+        let dir = acting(&activity("[shared/reviewing]", "[committed]"), installed);
+
+        assert!(Manifest::read(dir.path(), Platform::Linux).is_ok());
+    }
+
+    #[test]
+    fn a_skill_a_known_pack_lacks_is_refused() {
+        let dir = acting(
+            &activity("[verkstead/juggling]", "[committed]"),
+            &on_verkstead(),
+        );
+
+        let refusal = refused(&dir);
+
+        assert_eq!(refusal.field.as_deref(), Some("provides[1].skills[0]"));
+        assert!(refusal.why.contains("no skill `juggling`"), "{refusal}");
+    }
+
+    #[test]
+    fn a_skill_not_written_pack_slash_skill_is_refused() {
+        let dir = acting(&activity("[reviewing]", "[committed]"), "");
+
+        assert_eq!(
+            refused(&dir).field.as_deref(),
+            Some("provides[1].skills[0]")
+        );
+    }
+
+    #[test]
+    fn an_outcome_repeated_or_steered_written_out_is_refused() {
+        for (outcomes, at) in [
+            ("[committed, nothing, committed]", "provides[1].outcomes[2]"),
+            ("[committed, steered]", "provides[1].outcomes[1]"),
+            ("[]", "provides[1].outcomes"),
+        ] {
+            let dir = acting(&activity("[rust-review/reviewing]", outcomes), "");
+
+            assert_eq!(refused(&dir).field.as_deref(), Some(at), "{outcomes}");
+        }
+    }
+
+    #[test]
+    fn an_activity_entry_with_an_unknown_key_is_refused() {
+        let entry = format!(
+            "{}    states: [done]\n",
+            activity("[rust-review/reviewing]", "[committed]")
+        );
+        let dir = acting(&entry, "");
+
+        assert_eq!(refused(&dir).field.as_deref(), Some("provides[1].states"));
+    }
+
+    #[test]
+    fn an_activitys_component_is_a_wasm_file_in_the_directory() {
+        let entry = activity("[rust-review/reviewing]", "[committed]")
+            .replace("rounds.wasm", "elsewhere.wasm");
+        let dir = acting(&entry, "");
+
+        assert_eq!(
+            refused(&dir).field.as_deref(),
+            Some("provides[1].component")
+        );
     }
 
     #[test]

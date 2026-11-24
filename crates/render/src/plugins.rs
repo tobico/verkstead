@@ -48,6 +48,8 @@ pub struct PluginRow {
     /// The languages it provides, by label — `Rust`, `C/C++` — in the order
     /// its manifest lists them. Empty for one providing none.
     pub languages: Vec<String>,
+    /// The drawn name of each Activity it provides, in the order written.
+    pub activities: Vec<String>,
     pub source: PluginSource,
     /// Its checkbox: whether the cluster has it on.
     pub enabled: bool,
@@ -158,6 +160,8 @@ pub struct PluginConsent {
     pub email: String,
     pub description: Option<String>,
     pub provides: Vec<String>,
+    /// The drawn name of each Activity it provides.
+    pub activities: Vec<String>,
     pub capabilities: Vec<PluginCapability>,
 }
 

@@ -83,11 +83,39 @@ describe("a row", () => {
     const row = await theRow("GitLab");
 
     expect(row.textContent).toContain("1.4.0 · Ada Lovelace");
-    expect(row.textContent).toContain("Provides forge, activity.");
+    expect(row.textContent).toContain("Provides forge, process, activity.");
+    expect(row.textContent).toContain("Its activity is Review rounds.");
     expect(row.textContent).toContain("/home/you/src/gitlab");
     expect(row.querySelector("input[type=checkbox]")).toHaveProperty(
       "checked",
       true,
+    );
+  });
+
+  it("lists several activities as a sentence does", async () => {
+    const gitlab = PLUGINS.installed.find((row) => row.name === "GitLab")!;
+    serving(
+      whenever(
+        "/api/ui/plugins",
+        json({
+          ...PLUGINS,
+          installed: PLUGINS.installed.map((row) =>
+            row === gitlab
+              ? {
+                  ...row,
+                  activities: ["Review rounds", "Triage", "Merge watch"],
+                }
+              : row,
+          ),
+        }),
+      ),
+    );
+    pane();
+
+    const row = await theRow("GitLab");
+
+    expect(row.textContent).toContain(
+      "Its activities are Review rounds, Triage, and Merge watch.",
     );
   });
 
@@ -98,7 +126,7 @@ describe("a row", () => {
     const row = await theRow("Shared skills");
 
     expect(row.textContent).toContain(
-      "file:///home/you/src/sources/skills at eb22087",
+      "file:///home/you/src/sources/skills at d9327cd",
     );
     expect(row.textContent).toContain("Update");
   });
@@ -205,6 +233,7 @@ describe("the Built-in group", () => {
     ).toEqual(["Installed", "Built-in"]);
     expect(PLUGINS.built_in.map((row) => row.name)).toEqual([
       "Verkstead",
+      "Activities",
       ".NET",
       "Go",
       "JVM",

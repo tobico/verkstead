@@ -136,7 +136,7 @@ pub use conversations::{
     stage_roadmap, stage_standings, start_adoption, start_conversation, start_grilling,
     start_implementing, start_investigating, start_stage, start_tinkering,
     start_unnamed_conversation, state, steer_conversation, switch_repo, take_up, target, timeline,
-    unfinished_conversations, waiting, work_on_repo,
+    timeline_as_held, unfinished_conversations, waiting, work_on_repo,
 };
 pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, unfolded};
 pub use deliveries::{delivered, record_delivery};
