@@ -2832,11 +2832,10 @@ pub(crate) async fn conversation_view(
     // if they were read at different times.
     let now = OffsetDateTime::now_utc();
 
-    // And the Forge its Repo is on, read off the remote now — what the card
-    // says *No forge for* where a pull request would have been.
-    let forge = crate::forges::of(state, &conversation.repo.path)
-        .await
-        .drawn();
+    // And what its Repo's `origin` remote is, read now — the Forge it is on,
+    // which is what the card says *No forge for* where a pull request would
+    // have been.
+    let forge = crate::forges::drawn_of(state, &conversation.repo.path).await;
 
     let view = ConversationView {
         id: conversation.id,

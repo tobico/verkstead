@@ -66,17 +66,14 @@ pub(crate) async fn register(
         Err(refusal) => return Ok(refusal.into()),
     };
 
-    // And this is the one caller that answers with the repository's `origin` —
-    // see [`Registration::reported`], which is where it is put in.
-    Ok(registering(
+    registering(
         pool,
         enabled,
         config.authors(),
         author.map(Author::id),
         PathBuf::from(asked),
     )
-    .await?
-    .reported())
+    .await
 }
 
 /// Which Author a Repo registered now is recorded as, out of the uuid the
@@ -145,15 +142,10 @@ async fn registering(
     authors: &[Author],
     author: Option<&str>,
     asked: PathBuf,
-) -> Result<Registration> {
+) -> Result<Registered> {
     let facts = match tokio::task::spawn_blocking(move || inspect(&asked)).await? {
         Ok(facts) => facts,
-        Err(refusal) => {
-            return Ok(Registration {
-                outcome: *refusal,
-                origin: None,
-            });
-        }
+        Err(refusal) => return Ok(*refusal),
     };
 
     // The Repo goes back either way, because both of these leave one registered
@@ -161,75 +153,36 @@ async fn registering(
     // second read is the price of the insert deciding for itself whether the
     // path was taken: it is asked after the write rather than before it, so
     // nothing here looks first.
-    let outcome = match store::register_repo_as(
-        pool,
-        &facts.path,
-        &facts.name,
-        &facts.default_branch,
-        author,
-    )
-    .await?
-    {
-        Some(repo) => Registered::Added(forged(enabled, entry(repo, authors)).await),
-        None => {
-            let held = store::registered_repo_at(pool, &facts.path)
-                .await?
-                // The insert refused because a row that nobody has flagged
-                // holds this path, and unregistering flags rather than
-                // deletes — so the row is there. Nothing left to answer with
-                // if it is not, which is a broken store rather than an
-                // outcome to put in front of anybody.
-                .with_context(|| {
-                    format!(
-                        "the Repo at {} is registered but could not be read back",
-                        facts.path.display()
-                    )
-                })?;
+    Ok(
+        match store::register_repo_as(
+            pool,
+            &facts.path,
+            &facts.name,
+            &facts.default_branch,
+            author,
+        )
+        .await?
+        {
+            Some(repo) => Registered::Added(forged(enabled, entry(repo, authors)).await),
+            None => {
+                let held = store::registered_repo_at(pool, &facts.path)
+                    .await?
+                    // The insert refused because a row that nobody has flagged
+                    // holds this path, and unregistering flags rather than
+                    // deletes — so the row is there. Nothing left to answer with
+                    // if it is not, which is a broken store rather than an
+                    // outcome to put in front of anybody.
+                    .with_context(|| {
+                        format!(
+                            "the Repo at {} is registered but could not be read back",
+                            facts.path.display()
+                        )
+                    })?;
 
-            Registered::AlreadyRegistered(forged(enabled, entry(held, authors)).await)
-        }
-    };
-
-    Ok(Registration {
-        outcome,
-        origin: facts.origin,
-    })
-}
-
-/// What a registration came to, and the URL of the `origin` remote git named
-/// while it was being asked about the repository.
-///
-/// **The origin travels beside the outcome rather than inside it**, because
-/// [`registering`] is where a create and a clone register as well and neither of
-/// those answers with an origin — only the registration endpoint does, for the
-/// press that registers on the Keeper and clones on the Annex (see
-/// [`RepoEntry::origin`]). So it is put into the Repo by the one caller that
-/// reports it, and the other two take the outcome and leave it.
-struct Registration {
-    outcome: Registered,
-    origin: Option<String>,
-}
-
-impl Registration {
-    /// The outcome with that origin filled into the Repo it carries — both
-    /// outcomes that carry one, a path registered already being the repository
-    /// somebody named and the same clone to make.
-    ///
-    /// Off the reading [`inspect`] already made rather than a second
-    /// `git remote get-url`: the registration has just been over this
-    /// repository, and the origin is one more thing git was asked about while it
-    /// was there.
-    fn reported(self) -> Registered {
-        let origin = self.origin;
-
-        match self.outcome {
-            Registered::Added(repo) => Registered::Added(RepoEntry { origin, ..repo }),
-            Registered::AlreadyRegistered(repo) => {
-                Registered::AlreadyRegistered(RepoEntry { origin, ..repo })
+                Registered::AlreadyRegistered(forged(enabled, entry(held, authors)).await)
             }
-            refused => refused,
-        }
-    }
+        },
+    )
 }
 
 /// A stored Repo as the viewer's list draws one.
@@ -252,20 +205,19 @@ pub(crate) fn entry(repo: store::Repo, authors: &[Author]) -> RepoEntry {
         author_unpicked: unpicked(repo.author.as_deref(), authors),
         author: repo.author,
         github: None,
-        origin: None,
         forge: None,
     }
 }
 
-/// And the same row with the GitHub repository its origin is filled in: what
-/// the list of Repos draws, and nothing else.
+/// And the same row with its `origin` remote read in: the GitHub repository it
+/// is, and the Forge its host matches.
 ///
-/// One `git remote get-url` per Repo, which is the list's cost and no other
-/// page's — see [`RepoEntry::github`].
+/// **One `git remote get-url` per Repo answers both** — the list's cost and no
+/// other page's, which is why the two are read together rather than each
+/// asking git for the same URL. See [`RepoEntry::forge`].
 ///
-/// And the Forge that origin is on, matched against `enabled` — the Forges
-/// enabled as the list is read — which is what the row says *No forge for*
-/// where none answers.
+/// The Forge is matched against `enabled` — the Forges enabled as the list is
+/// read — which is what the row says *No forge for* where none answers.
 pub(crate) fn listed(
     repo: store::Repo,
     authors: &[Author],
@@ -280,18 +232,20 @@ pub(crate) fn listed(
 
     RepoEntry {
         github,
-        forge: Some(matched.drawn()),
+        forge: Some(matched.drawn(origin)),
         ..entry(repo, authors)
     }
 }
 
-/// The same row with the Forge its origin is on read in — what the registry's
-/// own pane is handed back after a press on it, so the row it redraws says
-/// what the list does.
+/// The same row with its `origin` remote read in — what the registry's own
+/// pane is handed back after a press on it, so the row it redraws says what
+/// the list does.
+///
+/// One reading here too, the URL the match was made against going back with
+/// it: a registration's answer is what the press that clones on an Annex
+/// clones from — see [`RepoForge::origin`].
 async fn forged(enabled: &[crate::forges::Enabled], entry: RepoEntry) -> RepoEntry {
-    let forge = crate::forges::among(enabled, Path::new(&entry.path))
-        .await
-        .drawn();
+    let forge = crate::forges::drawn_for(enabled, Path::new(&entry.path)).await;
 
     RepoEntry {
         forge: Some(forge),
@@ -436,12 +390,8 @@ pub(crate) async fn create(
     // what was just made is a repository like any other, and a second way of
     // taking one on would be a second chance for the two to come apart.
     //
-    // The outcome alone: a repository made a moment ago has no remote yet, and a
-    // create answers with the Repo rather than with what git would clone it from
-    // — see [`Registration`].
-    let registered = registering(pool, enabled, authors, picked.map(Author::id), path.clone())
-        .await?
-        .outcome;
+    let registered =
+        registering(pool, enabled, authors, picked.map(Author::id), path.clone()).await?;
 
     let (Registered::Added(repo) | Registered::AlreadyRegistered(repo)) = registered else {
         // A repository this call made a moment ago, with a commit on `main`,
@@ -730,12 +680,7 @@ pub(crate) async fn clone(
     }
 
     Ok(
-        // The origin is the registration endpoint's to report and not this
-        // one's, so the outcome is taken and it is left — see [`Registration`].
-        match registering(pool, enabled, authors, picked.map(Author::id), path.clone())
-            .await?
-            .outcome
-        {
+        match registering(pool, enabled, authors, picked.map(Author::id), path.clone()).await? {
             Registered::Added(repo) => Cloned::Cloned(repo),
             Registered::AlreadyRegistered(repo) => Cloned::AlreadyRegistered(repo),
             refusal => {
@@ -868,11 +813,6 @@ struct Facts {
     path: PathBuf,
     name: String,
     default_branch: String,
-
-    /// The `origin` remote's URL, where there is one: not recorded anywhere, and
-    /// handed back on the registration's answer for the press that clones from
-    /// it on another machine — see [`RepoEntry::origin`].
-    origin: Option<String>,
 }
 
 /// Everything the filesystem and git have to say about a path someone wants
@@ -895,7 +835,6 @@ fn inspect(asked: &Path) -> Result<Facts, Box<Registered>> {
     Ok(Facts {
         name: name(&path),
         default_branch,
-        origin: origin(&path),
         path,
     })
 }

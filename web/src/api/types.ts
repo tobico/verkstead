@@ -3508,6 +3508,16 @@ path: string, entries: Array<FolderEntry>, } } | "Outside" | "UnderGit" | "RootG
 export type ForgeCapability = "checks" | "review" | "publish" | "stacks" | "create";
 
 /**
+ * Which Forge a Repo is on, by its remote's host (ADR-0030, *Forge*).
+ */
+export type ForgeMatch = { "kind": "On", uuid: string, name: string, noun: string, 
+/**
+ * What it can do, as its manifest declares — where one is absent,
+ * the viewer draws nothing that would ask for it, and says so.
+ */
+capabilities: Array<ForgeCapability>, } | { "kind": "Unmatched", host: string | null, };
+
+/**
  * One Author's token for one Forge, as everything but the token.
  */
 export type ForgeToken = { 
@@ -6086,38 +6096,40 @@ author_unpicked: boolean,
  */
 github: string | null, 
 /**
- * And the URL of that `origin` remote itself, as git spelled it, where the
- * repository has one.
+ * What its `origin` remote is: the URL git spells for it, and the Forge
+ * that remote's host matches — or `None` where the remote was not read,
+ * which is the rows nothing draws a pull request beside.
  *
- * **Only a registration's answer says it**, the way `github` is only the
- * list's: everywhere else a Repo is drawn it is `None`, a create's answer
- * and a clone's among them. It is there for the one press that registers on
- * one machine and clones on another — **Open repo** on an Annex's draft,
- * told the repository is on the Keeper (ADR-0024, *Open repo asks where the
- * repository is*). The clone is made from this, and it is read off the
- * repository the registration has just been over rather than asked for a
- * second time.
+ * **One `git remote get-url` answers both.** The list of Repos reads the
+ * remote as a row is drawn and a registration's answer carries what the
+ * registration has just been over, so the URL and the Forge are the one
+ * reading rather than two. A create's answer and a clone's say `None`,
+ * there being no remote on a repository just made.
+ */
+forge: RepoForge | null, };
+
+/**
+ * What a Repo's `origin` remote is: the URL, and the Forge its host matches
+ * (ADR-0030, *Forge*).
+ */
+export type RepoForge = { 
+/**
+ * The URL of the `origin` remote, as git spelled it, where the repository
+ * has one.
+ *
+ * **What the one press that registers on one machine and clones on
+ * another clones from** — **Open repo** on an Annex's draft, told the
+ * repository is on the Keeper (ADR-0024, *Open repo asks where the
+ * repository is*).
  *
  * `None` is a repository with no origin, which is one there is nothing to
  * clone from: refused on the card, with a sentence saying what to do.
  */
 origin: string | null, 
 /**
- * The Forge its `origin` remote is on, or that it is on none — read off
- * the remote's host as the Repo is drawn, and kept nowhere. `None` where
- * it was not read, which is the rows nothing draws a pull request beside.
+ * Which Forge answers for that remote's host.
  */
-forge: RepoForge | null, };
-
-/**
- * Which Forge a Repo is on, by its remote's host (ADR-0030, *Forge*).
- */
-export type RepoForge = { "kind": "On", uuid: string, name: string, noun: string, 
-/**
- * What it can do, as its manifest declares — where one is absent,
- * the viewer draws nothing that would ask for it, and says so.
- */
-capabilities: Array<ForgeCapability>, } | { "kind": "Unmatched", host: string | null, };
+on: ForgeMatch, };
 
 /**
  * What a Repo was last grilled with, as a Conversation started on it would
@@ -6243,6 +6255,14 @@ roadmaps: Array<AbandonedRoadmap>, };
  * Refused while work that is neither Done nor Closed has the Repo in it, the
  * rule unregistering follows and for the reason ADR-0025 gives: a branch half
  * committed as one Author would carry on as another.
+ *
+ * One variant carries a whole Repo and the other three carry little or
+ * nothing, which is what the size lint is about — the row's `origin` and the
+ * Forge its remote is on are what make it big. Left as it is for
+ * [`crate::PickedView`]'s reason: these are made one at a time on the way to
+ * being serialized, none of them is held in a collection, and a `Box` in a
+ * view type would be a pointer written into the shape the viewer is generated
+ * from.
  */
 export type Repointed = { "Repointed": RepoEntry } | "NoSuchRepo" | "NoSuchAuthor" | { "InUse": { on: Array<string>, beside: Array<string>, } };
 

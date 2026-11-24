@@ -16,13 +16,23 @@ export function holdsToken(author: AuthorEntry, forge: string): boolean {
   return author.tokens.includes(forge);
 }
 
+/// The URL of the Repo's `origin` remote — what a press that clones it on
+/// another machine clones from.
+///
+/// It sits beside the Forge because the two are the one reading of the remote:
+/// `null` is a Repo whose remote was not read, or one with no origin, which is
+/// a repository there is nothing to clone from either way.
+export function originOf(repo: RepoEntry | null | undefined): string | null {
+  return repo?.forge?.origin ?? null;
+}
+
 /// What is said where a pull request would have been drawn, for a Repo on no
 /// Forge — *No forge for git.example.org* — and `null` for one on a Forge, or
 /// one whose Forge was not read.
 export function unforged(repo: RepoEntry): string | null {
-  const forge = repo.forge;
-  if (forge === null || forge.kind === "On") return null;
-  return forge.host === null ? "No forge" : `No forge for ${forge.host}`;
+  const on = repo.forge?.on ?? null;
+  if (on === null || on.kind === "On") return null;
+  return on.host === null ? "No forge" : `No forge for ${on.host}`;
 }
 
 /// Why a Share on a Repo on no Forge has no Publish — the server's own
@@ -37,12 +47,10 @@ export function unpublishable(host: string | null): string {
 /// no `publish` — in the server's own sentence for the refusal, and `null`
 /// where it has one.
 export function unpublished(repo: RepoEntry): string | null {
-  const forge = repo.forge;
-  if (forge === null) return null;
-  if (forge.kind === "Unmatched") return unpublishable(forge.host);
-  return forge.capabilities.includes("publish")
-    ? null
-    : publishless(forge.name);
+  const on = repo.forge?.on ?? null;
+  if (on === null) return null;
+  if (on.kind === "Unmatched") return unpublishable(on.host);
+  return on.capabilities.includes("publish") ? null : publishless(on.name);
 }
 
 /// Why a Share on a Repo whose Forge declares no `publish` has no Publish.
@@ -60,8 +68,8 @@ export function untokened(
   repo: RepoEntry,
   authors: AuthorEntry[] | undefined,
 ): string | null {
-  const forge = repo.forge;
-  if (forge === null || forge.kind !== "On" || authors === undefined) {
+  const on = repo.forge?.on ?? null;
+  if (on === null || on.kind !== "On" || authors === undefined) {
     return null;
   }
 
@@ -72,17 +80,17 @@ export function untokened(
         : undefined
       : authors.find(({ id }) => id === repo.author);
 
-  if (author === undefined || holdsToken(author, forge.uuid)) return null;
+  if (author === undefined || holdsToken(author, on.uuid)) return null;
 
-  return `No ${forge.name} token for ${authorLabel(author)}`;
+  return `No ${on.name} token for ${authorLabel(author)}`;
 }
 
 /// What the Repo's Forge calls a pull request — *pull request*, *merge
 /// request* — lowercase, as it sits in a sentence. GitHub's word, and the
 /// documents', where the Forge was not read or the Repo is on none.
 export function nounOf(repo: RepoEntry | null | undefined): string {
-  const forge = repo?.forge;
-  return forge && forge.kind === "On" ? forge.noun : "pull request";
+  const on = repo?.forge?.on;
+  return on && on.kind === "On" ? on.noun : "pull request";
 }
 
 /// The noun at the head of a sentence or a label: *Merge request*.
@@ -108,8 +116,8 @@ export function nouns(noun: string): string {
 /// The name of the Repo's Forge — *GitHub* — and GitHub's where it was not
 /// read or the Repo is on none.
 export function forgeName(repo: RepoEntry | null | undefined): string {
-  const forge = repo?.forge;
-  return forge && forge.kind === "On" ? forge.name : "GitHub";
+  const on = repo?.forge?.on;
+  return on && on.kind === "On" ? on.name : "GitHub";
 }
 
 /// `text`, written about a pull request, said in the word the Repo's Forge

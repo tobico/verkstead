@@ -112,8 +112,9 @@ pub use profiles::{
 pub use push::{PushKey, RelayedNews, Subscribed, Subscription, Unsubscribe};
 pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};
 pub use repos::{
-    AuthorThere, ClonableRepo, Cloned, Cloning, Created, Creation, ForgeCapability, Registered,
-    Registration, RepoAcross, RepoEntry, RepoForge, RepoRemoved, RepoView, Repointed, Repointing,
+    AuthorThere, ClonableRepo, Cloned, Cloning, Created, Creation, ForgeCapability, ForgeMatch,
+    Registered, Registration, RepoAcross, RepoEntry, RepoForge, RepoRemoved, RepoView, Repointed,
+    Repointing,
 };
 pub use settings::{
     AtOnceEdit, AtOnceView, Author, AuthorEdit, AuthorEdited, AuthorEntry, AuthorRemoved,

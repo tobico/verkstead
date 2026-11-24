@@ -785,22 +785,27 @@ pub(crate) enum Matched {
 }
 
 impl Matched {
-    /// What the viewer is handed of it.
-    pub(crate) fn drawn(&self) -> verkstead_render::RepoForge {
-        match self {
-            Matched::On(forge) => verkstead_render::RepoForge::On {
-                uuid: forge.uuid.clone(),
-                name: forge.name.clone(),
-                noun: forge.noun.clone(),
-                capabilities: forge
-                    .capabilities
-                    .iter()
-                    .map(|capability| drawn(*capability))
-                    .collect(),
+    /// What the viewer is handed of it, beside the `origin` the match was read
+    /// off — the one reading answering both, which is why the URL comes in
+    /// rather than being asked for again here.
+    pub(crate) fn drawn(&self, origin: Option<String>) -> verkstead_render::RepoForge {
+        verkstead_render::RepoForge {
+            origin,
+            on: match self {
+                Matched::On(forge) => verkstead_render::ForgeMatch::On {
+                    uuid: forge.uuid.clone(),
+                    name: forge.name.clone(),
+                    noun: forge.noun.clone(),
+                    capabilities: forge
+                        .capabilities
+                        .iter()
+                        .map(|capability| drawn(*capability))
+                        .collect(),
+                },
+                Matched::Unmatched { host } => {
+                    verkstead_render::ForgeMatch::Unmatched { host: host.clone() }
+                }
             },
-            Matched::Unmatched { host } => {
-                verkstead_render::RepoForge::Unmatched { host: host.clone() }
-            }
         }
     }
 }
@@ -893,6 +898,26 @@ pub(crate) async fn built_in(pool: &sqlx::SqlitePool) -> anyhow::Result<Vec<Enab
             })
         })
         .collect())
+}
+
+/// What the viewer is handed of the Repo at `repo`: the URL of its `origin`
+/// remote, and the Forge that remote's host matches among `enabled`.
+///
+/// **One `git remote get-url` answers both**, which is the whole reason this
+/// exists beside [`among`]: a row that carried the two separately asked git
+/// for the same URL twice.
+pub(crate) async fn drawn_for(enabled: &[Enabled], repo: &Path) -> verkstead_render::RepoForge {
+    let repo = repo.to_owned();
+    let origin = tokio::task::spawn_blocking(move || crate::repos::origin(&repo))
+        .await
+        .unwrap_or_default();
+
+    matched(enabled, origin.as_deref()).drawn(origin)
+}
+
+/// The same, against the Forges enabled at this moment — see [`enabled_now`].
+pub(crate) async fn drawn_of(state: &crate::AppState, repo: &Path) -> verkstead_render::RepoForge {
+    drawn_for(&enabled_now(state).await, repo).await
 }
 
 /// The Forge of the Repo whose `origin` remote is this, among `enabled`.

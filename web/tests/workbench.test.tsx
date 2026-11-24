@@ -11805,7 +11805,7 @@ describe("the share pane", () => {
     theGrillingStanding({
       repo: {
         ...GRILLING.repo,
-        forge: { kind: "Unmatched", host: "git.example.org" },
+        forge: { origin: null, on: { kind: "Unmatched", host: "git.example.org" } },
       },
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -11828,11 +11828,14 @@ describe("the share pane", () => {
       repo: {
         ...GRILLING.repo,
         forge: {
-          kind: "On",
-          uuid: "x",
-          name: "Workshop",
-          noun: "pull request",
-          capabilities: ["checks", "review"],
+          origin: null,
+          on: {
+            kind: "On",
+            uuid: "x",
+            name: "Workshop",
+            noun: "pull request",
+            capabilities: ["checks", "review"],
+          },
         },
       },
     });
@@ -11857,7 +11860,7 @@ describe("a repo on no forge", () => {
     theGrillingStanding({
       repo: {
         ...GRILLING.repo,
-        forge: { kind: "Unmatched", host: "git.example.org" },
+        forge: { origin: null, on: { kind: "Unmatched", host: "git.example.org" } },
       },
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -18715,17 +18718,20 @@ describe("a forge that calls it a merge request", () => {
   const MERGING_REPO = {
     ...WRAPPING.repo,
     forge: {
-      kind: "On" as const,
-      uuid: "7a3d1f20-5b4e-4c8a-9e61-2d0f4b7c9a35",
-      name: "GitLab",
-      noun: "merge request",
-      capabilities: [
+      origin: null,
+      on: {
+        kind: "On" as const,
+        uuid: "7a3d1f20-5b4e-4c8a-9e61-2d0f4b7c9a35",
+        name: "GitLab",
+        noun: "merge request",
+        capabilities: [
         "checks",
         "review",
         "publish",
         "stacks",
         "create",
-      ] as ForgeCapability[],
+        ] as ForgeCapability[],
+      },
     },
   };
 
@@ -20611,7 +20617,6 @@ describe("the configuration on the brief's pane", () => {
       author: null,
       author_unpicked: false,
       github: null,
-      origin: null,
       forge: null,
     },
     mode: "ReadOnly",
@@ -20633,7 +20638,6 @@ describe("the configuration on the brief's pane", () => {
       author: null,
       author_unpicked: false,
       github: null,
-      origin: null,
       forge: null,
     },
     mode: "ReadWrite",

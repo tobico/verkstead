@@ -293,7 +293,6 @@ describe("a press on a conversation that lives on another device", () => {
       author: null,
       author_unpicked: false,
       github: null,
-      origin: null,
       forge: null,
     };
     const fetching = theMember(
@@ -355,7 +354,6 @@ describe("a press on a conversation that lives on another device", () => {
       author: null,
       author_unpicked: false,
       github: null,
-      origin: null,
       forge: null,
     };
     const fetching = theMember(
@@ -423,7 +421,6 @@ describe("a press on a conversation that lives on another device", () => {
       author: null,
       author_unpicked: false,
       github: null,
-      origin: null,
       forge: null,
     };
     const fetching = theMember(

@@ -3926,7 +3926,6 @@ describe("registering a repo from the Repo dropdown", () => {
     author: null,
     author_unpicked: false,
     github: null,
-    origin: null,
     forge: null,
   };
 
@@ -4663,7 +4662,6 @@ describe("the two repo rows on the picked device", () => {
     author: null,
     author_unpicked: false,
     github: null,
-    origin: null,
     forge: null,
   };
 
@@ -6705,7 +6703,6 @@ describe("the repositories the cluster could clone", () => {
     author: "work",
     author_unpicked: false,
     github: null,
-    origin: null,
     forge: null,
   };
 
@@ -6867,7 +6864,6 @@ describe("a brief that is one pull request url", () => {
     author: null,
     author_unpicked: false,
     github,
-    origin: null,
     forge: null,
   });
   const LISTED = [

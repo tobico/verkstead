@@ -230,7 +230,7 @@ describe("the card", () => {
     const hosted: RepoEntry[] = [
       {
         ...FIRST,
-        forge: { kind: "Unmatched", host: "git.example.org" },
+        forge: { origin: null, on: { kind: "Unmatched", host: "git.example.org" } },
       },
     ];
     serving(whenever("/api/ui/repos", json(hosted)));
@@ -332,17 +332,20 @@ describe("the pane it opens", () => {
       ...FIRST,
       author: null,
       forge: {
-        kind: "On",
-        uuid: GITHUB,
-        name: "GitHub",
-        noun: "pull request",
-        capabilities: [
+        origin: null,
+        on: {
+          kind: "On",
+          uuid: GITHUB,
+          name: "GitHub",
+          noun: "pull request",
+          capabilities: [
           "checks",
           "review",
           "publish",
           "stacks",
           "create",
-        ] as ForgeCapability[],
+          ] as ForgeCapability[],
+        },
       },
     };
     const author = {
@@ -366,11 +369,14 @@ describe("the pane it opens", () => {
       ...FIRST,
       author: null,
       forge: {
-        kind: "On",
-        uuid: GITHUB,
-        name: "GitHub",
-        noun: "pull request",
-        capabilities: ["checks", "review", "publish", "stacks", "create"],
+        origin: null,
+        on: {
+          kind: "On",
+          uuid: GITHUB,
+          name: "GitHub",
+          noun: "pull request",
+          capabilities: ["checks", "review", "publish", "stacks", "create"],
+        },
       },
     };
     serving(
@@ -403,8 +409,8 @@ describe("the pane it opens", () => {
   /// would be a press somebody could only get right by luck.
   it("tells two repos of one name apart", async () => {
     const twins: RepoEntry[] = [
-      { id: 3, name: "api", path: "/srv/repos/api", default_branch: "main", author: null, author_unpicked: false, github: null, origin: null, forge: null },
-      { id: 4, name: "api", path: "/work/api", default_branch: "main", author: null, author_unpicked: false, github: null, origin: null, forge: null },
+      { id: 3, name: "api", path: "/srv/repos/api", default_branch: "main", author: null, author_unpicked: false, github: null, forge: null },
+      { id: 4, name: "api", path: "/work/api", default_branch: "main", author: null, author_unpicked: false, github: null, forge: null },
     ];
     serving(whenever("/api/ui/repos", json(twins)));
     const { container } = mountPane();
@@ -1083,13 +1089,19 @@ describe("the choice an Annex's draft asks first", () => {
   /// carrying the `origin` the server read off the repository, which is what the
   /// clone is made from — and the Author it is recorded as, which the clone
   /// follows.
+  ///
+  /// The origin sits beside the Forge it was matched against, the two being the
+  /// one reading of the remote.
   const KEEPERS: RepoEntry = {
     ...FIRST,
     id: 12,
     name: "widgets",
     path: "C:\\Users\\ada\\src\\widgets",
     author: "7a1f",
-    origin: "https://github.com/you/widgets.git",
+    forge: {
+      origin: "https://github.com/you/widgets.git",
+      on: { kind: "Unmatched", host: "github.com" },
+    },
   };
 
   /// And the Repo the clone leaves on the Annex, which is the draft's: a Repo id
@@ -1338,7 +1350,7 @@ describe("the choice an Annex's draft asks first", () => {
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({
-            origin: KEEPERS.origin,
+            origin: KEEPERS.forge?.origin,
             parent: ANNEX_REPOS,
             author: KEEPERS.author,
           }),
@@ -1360,7 +1372,14 @@ describe("the choice an Annex's draft asks first", () => {
       PAIR,
       whenever(
         "/api/ui/repos",
-        json({ Added: { ...KEEPERS, origin: null } }),
+        json({
+          Added: {
+            ...KEEPERS,
+            // Registered, and nothing to clone from: a repository `git init`
+            // made and nobody has pushed, which names no host either.
+            forge: { origin: null, on: { kind: "Unmatched", host: null } },
+          },
+        }),
         "POST",
       ),
     );

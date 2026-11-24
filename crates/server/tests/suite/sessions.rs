@@ -9405,8 +9405,8 @@ async fn a_backlog_on_a_repo_no_forge_answers_for_lands_done_with_nothing_watchi
         notices(&view),
     );
     assert_eq!(
-        view.repo.forge,
-        Some(verkstead_render::RepoForge::Unmatched {
+        view.repo.forge.map(|forge| forge.on),
+        Some(verkstead_render::ForgeMatch::Unmatched {
             host: Some("git.example.invalid".to_owned())
         }),
     );
@@ -10882,8 +10882,8 @@ async fn a_forge_without_publish_or_create_publishes_nothing_and_makes_no_remote
 
     let view = fixture.view().await;
     assert_eq!(
-        view.repo.forge,
-        Some(verkstead_render::RepoForge::On {
+        view.repo.forge.map(|forge| forge.on),
+        Some(verkstead_render::ForgeMatch::On {
             uuid: "5f0c1d8e-6a3b-4f7e-9c2d-1b8a7e6f5d4c".to_owned(),
             name: WORKSHOP.to_owned(),
             noun: "pull request".to_owned(),

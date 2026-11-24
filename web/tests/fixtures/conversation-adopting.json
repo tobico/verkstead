@@ -41,22 +41,24 @@
     "author_unpicked": false,
     "default_branch": "main",
     "forge": {
-      "capabilities": [
-        "checks",
-        "review",
-        "publish",
-        "stacks",
-        "create"
-      ],
-      "kind": "On",
-      "name": "GitHub",
-      "noun": "pull request",
-      "uuid": "b357e557-3716-4ea6-a3a8-d904c92c5eac"
+      "on": {
+        "capabilities": [
+          "checks",
+          "review",
+          "publish",
+          "stacks",
+          "create"
+        ],
+        "kind": "On",
+        "name": "GitHub",
+        "noun": "pull request",
+        "uuid": "b357e557-3716-4ea6-a3a8-d904c92c5eac"
+      },
+      "origin": null
     },
     "github": null,
     "id": 1,
     "name": "verkstead",
-    "origin": null,
     "path": "/srv/repos/verkstead"
   },
   "resets": null,

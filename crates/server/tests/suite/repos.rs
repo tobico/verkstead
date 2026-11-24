@@ -206,7 +206,7 @@ async fn a_repository_registers_and_appears_on_the_list() {
 /// And a Repo on github.com reads as on GitHub throughout the first two.
 #[tokio::test]
 async fn a_repos_forge_is_read_off_its_remote_against_the_enabled_forges() {
-    use verkstead_render::{ForgeCapability, RepoForge};
+    use verkstead_render::{ForgeCapability, ForgeMatch};
     use verkstead_server::plugins::built_in::GITHUB;
 
     let src = tempfile::tempdir().unwrap();
@@ -234,13 +234,13 @@ async fn a_repos_forge_is_read_off_its_remote_against_the_enabled_forges() {
     added(register(&app, &hosted).await);
     added(register(&app, &on_github).await);
 
-    let forges = |repos: Vec<RepoEntry>| -> Vec<(String, Option<RepoForge>)> {
+    let forges = |repos: Vec<RepoEntry>| -> Vec<(String, Option<ForgeMatch>)> {
         repos
             .into_iter()
-            .map(|repo| (repo.name, repo.forge))
+            .map(|repo| (repo.name, repo.forge.map(|forge| forge.on)))
             .collect()
     };
-    let github = Some(RepoForge::On {
+    let github = Some(ForgeMatch::On {
         uuid: GITHUB.to_owned(),
         name: "GitHub".to_owned(),
         noun: "pull request".to_owned(),
@@ -252,7 +252,7 @@ async fn a_repos_forge_is_read_off_its_remote_against_the_enabled_forges() {
             ForgeCapability::Create,
         ],
     });
-    let none = Some(RepoForge::Unmatched {
+    let none = Some(ForgeMatch::Unmatched {
         host: Some("git.example.invalid".to_owned()),
     });
 
@@ -261,6 +261,26 @@ async fn a_repos_forge_is_read_off_its_remote_against_the_enabled_forges() {
         [
             ("hosted".to_owned(), none.clone()),
             ("verkstead".to_owned(), github.clone()),
+        ]
+    );
+
+    // And the URL the match was read off comes back beside it, the one reading
+    // answering both — see [`verkstead_render::RepoForge::origin`].
+    assert_eq!(
+        listed(&app)
+            .await
+            .into_iter()
+            .map(|repo| (repo.name, repo.forge.and_then(|forge| forge.origin)))
+            .collect::<Vec<_>>(),
+        [
+            (
+                "hosted".to_owned(),
+                Some("git@git.example.invalid:tobico/hosted.git".to_owned()),
+            ),
+            (
+                "verkstead".to_owned(),
+                Some("https://github.com/tobico/verkstead.git".to_owned()),
+            ),
         ]
     );
 
@@ -294,7 +314,7 @@ async fn a_repos_forge_is_read_off_its_remote_against_the_enabled_forges() {
             ("hosted".to_owned(), none),
             (
                 "verkstead".to_owned(),
-                Some(RepoForge::Unmatched {
+                Some(ForgeMatch::Unmatched {
                     host: Some("github.com".to_owned())
                 })
             ),
@@ -434,16 +454,19 @@ async fn a_repo_already_registered_is_refused_however_its_path_is_spelled() {
 ///
 /// **Asked of git rather than stored**, as every other reading of a repository
 /// here is, so a remote added after the first registration is on the next
-/// answer rather than nowhere.
+/// answer rather than nowhere — and asked once, the Forge the answer also
+/// carries being read off the same URL.
 #[tokio::test]
 async fn a_registrations_answer_says_where_the_repositorys_origin_is() {
     let src = tempfile::tempdir().unwrap();
     let (_dir, app) = workbench().await;
     let repo = repository(src.path().join("widgets"));
 
+    let origin = |repo: RepoEntry| repo.forge.and_then(|forge| forge.origin);
+
     // Nothing to clone from, which is every repository `git init` made and
     // nobody has pushed.
-    assert_eq!(added(register(&app, &repo).await).origin, None);
+    assert_eq!(origin(added(register(&app, &repo).await)), None);
 
     // Spelled the way git hands it back, which is after whatever `insteadOf` the
     // machine running the test configures: what travels is the URL git would be
@@ -459,7 +482,7 @@ async fn a_registrations_answer_says_where_the_repositorys_origin_is() {
     );
 
     assert_eq!(
-        already(register(&app, &repo).await).origin.as_deref(),
+        origin(already(register(&app, &repo).await)).as_deref(),
         Some("https://github.com/you/widgets.git")
     );
 }

@@ -126,7 +126,7 @@ import { Reaching, keyOf, useDevice, type Device } from "../reaching";
 import { Picker } from "../picking";
 import { rowPress } from "../rows";
 import { authorLabel, useAuthors } from "../authors";
-import { GITHUB, holdsToken, unforged, untokened } from "../forges";
+import { GITHUB, holdsToken, originOf, unforged, untokened } from "../forges";
 import { PaneHead } from "../workbench/PaneHead";
 import styles from "./RepoList.module.css";
 import { SettingsCard } from "../settings/SettingsCard";
@@ -1104,7 +1104,7 @@ export function OpenRepo(props: {
     keeper: RepoEntry,
   ): Promise<string | null> => {
     const mine = press;
-    const origin = keeper.origin;
+    const origin = originOf(keeper);
     if (origin === null) {
       return noOrigin(pair);
     }

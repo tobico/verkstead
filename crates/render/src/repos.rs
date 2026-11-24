@@ -58,35 +58,46 @@ pub struct RepoEntry {
     #[serde(default)]
     pub github: Option<String>,
 
-    /// And the URL of that `origin` remote itself, as git spelled it, where the
-    /// repository has one.
+    /// What its `origin` remote is: the URL git spells for it, and the Forge
+    /// that remote's host matches — or `None` where the remote was not read,
+    /// which is the rows nothing draws a pull request beside.
     ///
-    /// **Only a registration's answer says it**, the way `github` is only the
-    /// list's: everywhere else a Repo is drawn it is `None`, a create's answer
-    /// and a clone's among them. It is there for the one press that registers on
-    /// one machine and clones on another — **Open repo** on an Annex's draft,
-    /// told the repository is on the Keeper (ADR-0024, *Open repo asks where the
-    /// repository is*). The clone is made from this, and it is read off the
-    /// repository the registration has just been over rather than asked for a
-    /// second time.
+    /// **One `git remote get-url` answers both.** The list of Repos reads the
+    /// remote as a row is drawn and a registration's answer carries what the
+    /// registration has just been over, so the URL and the Forge are the one
+    /// reading rather than two. A create's answer and a clone's say `None`,
+    /// there being no remote on a repository just made.
+    #[serde(default)]
+    pub forge: Option<RepoForge>,
+}
+
+/// What a Repo's `origin` remote is: the URL, and the Forge its host matches
+/// (ADR-0030, *Forge*).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct RepoForge {
+    /// The URL of the `origin` remote, as git spelled it, where the repository
+    /// has one.
+    ///
+    /// **What the one press that registers on one machine and clones on
+    /// another clones from** — **Open repo** on an Annex's draft, told the
+    /// repository is on the Keeper (ADR-0024, *Open repo asks where the
+    /// repository is*).
     ///
     /// `None` is a repository with no origin, which is one there is nothing to
     /// clone from: refused on the card, with a sentence saying what to do.
     #[serde(default)]
     pub origin: Option<String>,
 
-    /// The Forge its `origin` remote is on, or that it is on none — read off
-    /// the remote's host as the Repo is drawn, and kept nowhere. `None` where
-    /// it was not read, which is the rows nothing draws a pull request beside.
-    #[serde(default)]
-    pub forge: Option<RepoForge>,
+    /// Which Forge answers for that remote's host.
+    pub on: ForgeMatch,
 }
 
 /// Which Forge a Repo is on, by its remote's host (ADR-0030, *Forge*).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 #[serde(tag = "kind")]
-pub enum RepoForge {
+pub enum ForgeMatch {
     /// An enabled Forge answers for its remote's host: the plugin's uuid, its
     /// name, and the noun it calls a pull request — *pull request*, *merge
     /// request* — which the viewer says wherever this Repo's is drawn. Whether

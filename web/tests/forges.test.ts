@@ -16,13 +16,15 @@ const ON: RepoEntry = {
   author: null,
   author_unpicked: false,
   github: null,
-  origin: null,
   forge: {
-    kind: "On",
-    uuid: "x",
-    name: "GitLab",
-    noun: "merge request",
-    capabilities: ["checks", "review", "publish", "stacks", "create"],
+    origin: null,
+    on: {
+      kind: "On",
+      uuid: "x",
+      name: "GitLab",
+      noun: "merge request",
+      capabilities: ["checks", "review", "publish", "stacks", "create"],
+    },
   },
 };
 
@@ -30,7 +32,7 @@ describe("a forge's noun", () => {
   it("is the forge's on a repo on one, and pull request otherwise", () => {
     expect(nounOf(ON)).toBe("merge request");
     expect(nounOf({ ...ON, forge: null })).toBe("pull request");
-    expect(nounOf({ ...ON, forge: { kind: "Unmatched", host: "x.org" } })).toBe(
+    expect(nounOf({ ...ON, forge: { origin: null, on: { kind: "Unmatched", host: "x.org" } } })).toBe(
       "pull request",
     );
   });
