@@ -68,13 +68,14 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 
+use crate::processes;
 use crate::stub_harness::{self, StubHarness};
 use verkstead_render::{
     Adopted, AgentOutputEvent, AnswerAttached, Attached, BaseRecorded, BriefSaved, Capture,
     CommitEvent, CommitPane, CompanionAdded, CompanionMode, CompanionModeChosen, CompanionView,
     ConversationClosed, ConversationSteered, ConversationStopped, ConversationView, DevicesView,
-    GrillingStarted, InstallKind, Lifecycle, NoticeEvent, PickedView, PinnedEvent, Process,
-    ProcessPicked, ProfileSaved, PullRequestEvent, Registered, Resolved, Resumed, ServerAttached,
+    GrillingStarted, InstallKind, NoticeEvent, PickedView, PinnedEvent, ProcessPicked,
+    ProfileSaved, ProvidedProcess, PullRequestEvent, Registered, Resolved, Resumed, ServerAttached,
     SetReading, SetView, Shown, Size, StageListReached, StageState, Started, SteerOpened,
     Submitted, TargetRecorded, TaskListEvent, TaskListReached, TerminalClosed, TerminalOpened,
     TerminalView, TerminalsView, TimelineEvent, TranscriptView, Turn, Watching,
@@ -2463,7 +2464,7 @@ async fn tinkering_alongside(
     let picked: ProcessPicked = post(
         app,
         &format!("/api/ui/conversations/{id}/process"),
-        &serde_json::json!({ "process": Process::Tinker }),
+        &serde_json::json!({ "process": processes::tinker() }),
     )
     .await;
     assert_eq!(picked, ProcessPicked::Picked);
@@ -2529,8 +2530,10 @@ fn a_tinker_round(prompts: &Path) -> String {
 }
 
 /// A grilling whose interview offers `offers` alone — what a Process declares
-/// (Set 1765, Q27), said through the bench's hosting until stage 11 writes it —
-/// started as [`grilling`] starts one.
+/// (Set 1765, Q27), said through the bench's hosting because one of the five
+/// Verkstead runs itself has no Process of its own to swap for a narrower one,
+/// see [`verkstead_server::activities::Hosting::offering`] — started as
+/// [`grilling`] starts one.
 async fn grilling_offering(
     spill: tempfile::TempDir,
     stub: &str,
@@ -2615,7 +2618,7 @@ async fn investigating(spill: tempfile::TempDir, stub: &str) -> Grilling {
     let picked: ProcessPicked = post(
         app,
         &format!("/api/ui/conversations/{id}/process"),
-        &serde_json::json!({ "process": Process::Investigate }),
+        &serde_json::json!({ "process": processes::investigate() }),
     )
     .await;
     assert_eq!(picked, ProcessPicked::Picked);
@@ -3317,22 +3320,17 @@ impl Bench {
         for role in roles {
             let role = *role;
             let profile = profile(&self.app, self.elsewhere.path(), role).await;
-            let pairing = serde_json::json!({
-                "profile_id": profile,
-                "model": format!("claude-{role}-5"),
-            });
 
-            // The review picker offers a row that is no account at all, so what
-            // it sends is which of its rows was picked — see
+            // Which of its rows was picked rather than a Pairing outright,
+            // because a picker may offer a row that is no account at all — see
             // [`Bench::unreviewed`].
-            let picked = match role {
-                "review" => serde_json::json!({ "pairing": pairing }),
-                _ => pairing,
-            };
+            let picked = serde_json::json!({
+                "pairing": { "profile_id": profile, "model": format!("claude-{role}-5") },
+            });
 
             let chosen: verkstead_render::ProfileChosen = post(
                 &self.app,
-                &format!("/api/ui/conversations/{id}/{role}-pairing"),
+                &format!("/api/ui/conversations/{id}/pairings/{role}"),
                 &picked,
             )
             .await;
@@ -3505,15 +3503,13 @@ impl Bench {
             ("implementation", CODEX_MODEL),
             ("review", CODEX_MODEL),
         ] {
-            let pairing = serde_json::json!({ "profile_id": profile_id, "model": model });
-            let picked = match role {
-                "review" => serde_json::json!({ "pairing": pairing }),
-                _ => pairing,
-            };
+            let picked = serde_json::json!({
+                "pairing": { "profile_id": profile_id, "model": model },
+            });
 
             let chosen: verkstead_render::ProfileChosen = post(
                 &self.app,
-                &format!("/api/ui/conversations/{id}/{role}-pairing"),
+                &format!("/api/ui/conversations/{id}/pairings/{role}"),
                 &picked,
             )
             .await;
@@ -3584,19 +3580,13 @@ impl Bench {
             .id;
 
         for (role, model) in roles {
-            let pairing = serde_json::json!({ "profile_id": profile_id, "model": model });
-
-            // The one picker that offers a row which is no account at all sends
-            // which row was picked, exactly as [`Bench::under_every_pairing`]
-            // does.
-            let picked = match *role {
-                "review" => serde_json::json!({ "pairing": pairing }),
-                _ => pairing,
-            };
+            let picked = serde_json::json!({
+                "pairing": { "profile_id": profile_id, "model": model },
+            });
 
             let chosen: verkstead_render::ProfileChosen = post(
                 &self.app,
-                &format!("/api/ui/conversations/{id}/{role}-pairing"),
+                &format!("/api/ui/conversations/{id}/pairings/{role}"),
                 &picked,
             )
             .await;
@@ -3613,7 +3603,7 @@ impl Bench {
     async fn unreviewed(&self, id: i64) {
         let chosen: verkstead_render::ProfileChosen = post(
             &self.app,
-            &format!("/api/ui/conversations/{id}/review-pairing"),
+            &format!("/api/ui/conversations/{id}/pairings/review"),
             &serde_json::json!({ "pairing": null }),
         )
         .await;
@@ -5014,7 +5004,7 @@ async fn removing_the_profile_a_running_session_was_launched_under_leaves_it_run
     }
 
     assert_eq!(
-        fixture.view().await.grilling_pairing,
+        fixture.view().await.under("grilling"),
         None,
         "the Conversation is nulled out of while its session runs",
     );
@@ -7132,7 +7122,7 @@ async fn a_session_that_exits_leaves_a_conversation_that_says_so() {
     assert_eq!(summary.latest, "done");
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Grilling,
+        "grilling",
         "where the work has got to is not what the session's ending decides"
     );
 }
@@ -7498,7 +7488,7 @@ async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
     // last step does, so the Conversation moves on to wrapping that up.
     let opened = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping)
+            (view.state == "wrapping")
                 .then(|| pull_request(view).cloned())
                 .flatten()
         })
@@ -7513,15 +7503,11 @@ async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
             .timeline
             .iter()
             .filter_map(|event| match event {
-                TimelineEvent::Moved(moved) => Some(moved.state),
+                TimelineEvent::Moved(moved) => Some(moved.state.clone()),
                 _ => None,
             })
             .collect::<Vec<_>>(),
-        [
-            Lifecycle::Grilling,
-            Lifecycle::Implementing,
-            Lifecycle::Wrapping,
-        ],
+        ["grilling", "implementing", "wrapping",],
         "with Implementing on the way, unlike a roadmap: an inline Conversation's \
          own work is the building, and the whole of it was that one session's",
     );
@@ -7612,8 +7598,7 @@ async fn an_inline_grilling_that_writes_no_handoff_halts_the_run() {
         "and the badge points at the Notice that says so",
     );
     assert_eq!(
-        view.state,
-        Lifecycle::Grilling,
+        view.state, "grilling",
         "and nothing moved: the artifact is what moves a Conversation",
     );
     assert_eq!(
@@ -7718,8 +7703,7 @@ async fn a_later_pick_moves_the_watcher_onto_the_artifact_it_asked_for() {
         "nothing took it: the pick that asked for one has been superseded",
     );
     assert_eq!(
-        view.state,
-        Lifecycle::Grilling,
+        view.state, "grilling",
         "so nothing moved, and the grilling is still what is happening",
     );
     assert_eq!(
@@ -7735,7 +7719,7 @@ async fn a_later_pick_moves_the_watcher_onto_the_artifact_it_asked_for() {
     std::fs::write(handoff_directory(&fixture).join("backlog-now"), "").unwrap();
 
     fixture
-        .until(|view| (view.state == Lifecycle::Implementing).then_some(()))
+        .until(|view| (view.state == "implementing").then_some(()))
         .await;
 
     let worked = fixture
@@ -7845,8 +7829,7 @@ async fn a_restarted_server_grills_the_work_again_rather_than_raising_anything()
         "nothing is waiting on the human, because nothing is waiting at all",
     );
     assert_eq!(
-        view.state,
-        Lifecycle::Grilling,
+        view.state, "grilling",
         "which is where a fresh grilling leaves it: an interview that has to be \
          had again is still the interview",
     );
@@ -7872,7 +7855,7 @@ async fn an_update_over_two_running_sessions_counts_both_and_both_are_resumed() 
     )
     .await;
 
-    let beside = composed_beside(&fixture, Process::Investigate).await;
+    let beside = composed_beside(&fixture, processes::investigate()).await;
     grilled(&fixture, beside).await;
 
     until_working(&fixture, fixture.id).await;
@@ -8171,7 +8154,7 @@ async fn choosing_a_task_list_breaks_the_work_down_in_the_grilling_session() {
     // The signal over the plan commit is what ends the grilling, and the move that
     // follows it is what says the work is being built.
     fixture
-        .until(|view| (view.state == Lifecycle::Implementing).then_some(()))
+        .until(|view| (view.state == "implementing").then_some(()))
         .await;
 
     let said = fixture.capture(grilling_output).await.replace("\r\n", "\n");
@@ -8314,7 +8297,7 @@ async fn choosing_a_roadmap_stages_the_work_in_the_grilling_session() {
     // moves on to wrapping that up.
     let opened = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping)
+            (view.state == "wrapping")
                 .then(|| pull_request(view).cloned())
                 .flatten()
         })
@@ -8361,11 +8344,11 @@ async fn choosing_a_roadmap_stages_the_work_in_the_grilling_session() {
             .timeline
             .iter()
             .filter_map(|event| match event {
-                TimelineEvent::Moved(moved) => Some(moved.state),
+                TimelineEvent::Moved(moved) => Some(moved.state.clone()),
                 _ => None,
             })
             .collect::<Vec<_>>(),
-        [Lifecycle::Grilling, Lifecycle::Wrapping],
+        ["grilling", "wrapping"],
         "with no Implementing on the way: on a roadmap the building belongs to the \
          Stages, and this Conversation's own work is the planning",
     );
@@ -8705,7 +8688,7 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
         .iter()
         .position(|event| matches!(event, TimelineEvent::TaskList(_)));
     let moved = view.timeline.iter().position(
-        |event| matches!(event, TimelineEvent::Moved(moved) if moved.state == Lifecycle::Implementing),
+        |event| matches!(event, TimelineEvent::Moved(moved) if moved.state == "implementing"),
     );
 
     assert!(
@@ -9060,8 +9043,7 @@ async fn a_backlog_worked_to_empty_leaves_a_pull_request_pinned_and_the_work_wra
     // finished.
     let view = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
-                .then(|| view.clone())
+            (view.state == "wrapping" && pull_request(view).is_some()).then(|| view.clone())
         })
         .await;
 
@@ -9096,7 +9078,7 @@ async fn a_backlog_worked_to_empty_leaves_a_pull_request_pinned_and_the_work_wra
         .iter()
         .position(|event| matches!(event, TimelineEvent::PullRequest(_)));
     let moved = view.timeline.iter().rposition(
-        |event| matches!(event, TimelineEvent::Moved(moved) if moved.state == Lifecycle::Wrapping),
+        |event| matches!(event, TimelineEvent::Moved(moved) if moved.state == "wrapping"),
     );
 
     assert!(
@@ -9108,10 +9090,10 @@ async fn a_backlog_worked_to_empty_leaves_a_pull_request_pinned_and_the_work_wra
     // have happened.
     assert_eq!(
         view.timeline.iter().rev().find_map(|event| match event {
-            TimelineEvent::Moved(moved) => Some(moved.state),
+            TimelineEvent::Moved(moved) => Some(moved.state.clone()),
             _ => None,
         }),
-        Some(Lifecycle::Wrapping),
+        Some("wrapping".to_owned()),
     );
 
     // Nothing waited on anybody: the only Set on the Timeline is the proposal
@@ -9280,6 +9262,31 @@ async fn companion_merge_settled(fixture: &Grilling) -> bool {
 }
 
 /// Whether one of the things this wrap-up waits on is settled.
+/// Put everything this Conversation's wrap-up has settled back to waiting, which
+/// is what the end of a round does to it.
+///
+/// Read and then unsettled one by one rather than wiped, so that what a wrap-up
+/// had written is what is taken away: a row this suite had never thought of is
+/// forgotten along with the rest, and a Conversation that had settled nothing
+/// is left exactly as it was.
+///
+/// For the tests whose subject is a wrap-up that arrives with nothing written
+/// under it, on a Process that declares no state opening a round to get there.
+async fn forget_what_the_wrap_up_settled(fixture: &Grilling) {
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    for waiting_on in verkstead_server::store::wrap_up_settled(&pool, fixture.id)
+        .await
+        .unwrap()
+    {
+        verkstead_server::store::unsettle_wrap_up(&pool, fixture.id, waiting_on)
+            .await
+            .unwrap();
+    }
+
+    pool.close().await;
+}
+
 async fn settled(fixture: &Grilling, waiting_on: verkstead_server::store::WaitingOn) -> bool {
     let pool = open_database(&fixture.database).await.unwrap();
     let settled = verkstead_server::store::wrap_up_settled(&pool, fixture.id)
@@ -9599,7 +9606,7 @@ async fn a_green_suite_settles_the_checks_and_dispatches_nothing() {
 
     worked_to_empty(&fixture).await;
     fixture
-        .until(|view| (view.state == Lifecycle::Wrapping).then_some(()))
+        .until(|view| (view.state == "wrapping").then_some(()))
         .await;
 
     let deadline = Instant::now() + *PATIENCE;
@@ -9751,7 +9758,7 @@ async fn checks_gh_cannot_answer_about_leave_the_wrap_up_waiting() {
 
     worked_to_empty(&fixture).await;
     fixture
-        .until(|view| (view.state == Lifecycle::Wrapping).then_some(()))
+        .until(|view| (view.state == "wrapping").then_some(()))
         .await;
 
     // Long enough for many polls, every one of them unable to ask.
@@ -9771,8 +9778,7 @@ async fn checks_gh_cannot_answer_about_leave_the_wrap_up_waiting() {
         notices(&view),
     );
     assert_eq!(
-        view.state,
-        Lifecycle::Wrapping,
+        view.state, "wrapping",
         "the Conversation goes on wrapping up, which is what waiting looks like",
     );
 }
@@ -9780,7 +9786,7 @@ async fn checks_gh_cannot_answer_about_leave_the_wrap_up_waiting() {
 /// A wrap-up with everything but its checks settled and nothing running in its
 /// Worktree reads as **Waiting on checks**, and says so once.
 ///
-/// A condition of Wrapping rather than a state: the Lifecycle is untouched and
+/// A condition of Wrapping rather than a state: the state word is untouched and
 /// nothing new is stored on the Conversation, so what the card and the sidebar
 /// draw it from is the wrap-up's own settle facts read alongside the register of
 /// what is running. The review read the branch and found nothing to raise,
@@ -9811,8 +9817,7 @@ async fn a_wrap_up_down_to_its_checks_reads_as_waiting_on_them_and_says_so_once(
         .await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Wrapping,
+        view.state, "wrapping",
         "which is a condition of Wrapping rather than a state of its own",
     );
     assert!(
@@ -9881,7 +9886,7 @@ async fn the_checks_stop_being_asked_about_once_the_conversation_leaves_wrapping
 
     worked_to_empty(&fixture).await;
     fixture
-        .until(|view| (view.state == Lifecycle::Wrapping).then_some(()))
+        .until(|view| (view.state == "wrapping").then_some(()))
         .await;
 
     let deadline = Instant::now() + *PATIENCE;
@@ -9938,7 +9943,7 @@ async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
 
     worked_to_empty(&fixture).await;
     fixture
-        .until(|view| (view.state == Lifecycle::Wrapping).then_some(()))
+        .until(|view| (view.state == "wrapping").then_some(()))
         .await;
 
     assert!(
@@ -10196,7 +10201,7 @@ async fn a_wrap_up_over_a_forge_lacking_review_settles_it_and_sends_nobody() {
     worked_to_empty(&fixture).await;
 
     let view = fixture
-        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .until(|view| (view.state == "done").then(|| view.clone()))
         .await;
 
     assert!(
@@ -10249,8 +10254,7 @@ async fn a_finish_that_opened_no_pull_request_is_sent_back_for_one() {
     // Conversation that has already finished.
     let view = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
-                .then(|| view.clone())
+            (view.state == "wrapping" && pull_request(view).is_some()).then(|| view.clone())
         })
         .await;
 
@@ -10292,8 +10296,7 @@ async fn a_quiet_session_sent_for_the_pull_request_is_ended_only_once_it_signals
     let view = fixture.view().await;
 
     assert_ne!(
-        view.state,
-        Lifecycle::Wrapping,
+        view.state, "wrapping",
         "a pull request open and a quiet session is not the session over",
     );
     assert!(
@@ -10310,8 +10313,7 @@ async fn a_quiet_session_sent_for_the_pull_request_is_ended_only_once_it_signals
 
     let view = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
-                .then(|| view.clone())
+            (view.state == "wrapping" && pull_request(view).is_some()).then(|| view.clone())
         })
         .await;
 
@@ -10364,7 +10366,7 @@ async fn refused_for_a_pull_request(fixture: &Grilling) -> String {
 async fn wrapped_up_unsent(fixture: &Grilling) {
     let found = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping)
+            (view.state == "wrapping")
                 .then(|| pull_request(view).cloned())
                 .flatten()
         })
@@ -10540,8 +10542,7 @@ esac
 
     let view = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
-                .then(|| view.clone())
+            (view.state == "wrapping" && pull_request(view).is_some()).then(|| view.clone())
         })
         .await;
 
@@ -10661,8 +10662,7 @@ async fn a_finish_whose_pull_request_never_arrives_leaves_the_conversation_where
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Implementing,
+        view.state, "implementing",
         "the work is where it was, because nothing about it got any further",
     );
     assert!(pull_request(&view).is_none(), "and nothing is pinned");
@@ -10721,7 +10721,7 @@ async fn a_companion_the_work_committed_in_is_pinned_beside_the_conversations_ow
          built onto this one's",
     );
 
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(
         view.blocked_on, None,
         "and nothing is waiting on the human: every repository the work committed \
@@ -10885,7 +10885,7 @@ async fn a_committed_in_companion_without_a_pull_request_refuses_the_signal_nami
     );
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Wrapping,
+        "wrapping",
         "and nothing stopped over it",
     );
 }
@@ -10932,8 +10932,7 @@ async fn a_finish_that_exits_leaving_a_companion_without_a_pull_request_stops_th
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Wrapping,
+        view.state, "wrapping",
         "the work is on a pull request of its own, which is what wrapping up is",
     );
     assert_eq!(
@@ -10960,7 +10959,7 @@ async fn a_finish_that_exits_leaving_a_companion_without_a_pull_request_stops_th
 
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Wrapping,
+        "wrapping",
         "a stopped wrap-up is not finished, however little is left outstanding",
     );
 }
@@ -11919,7 +11918,7 @@ async fn a_review_that_finishes_without_exiting_is_ended_and_the_wrap_up_carries
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let view = fixture.view().await;
@@ -12915,7 +12914,7 @@ async fn a_quiet_review_is_spoken_to_rather_than_ended_and_is_ended_once_it_sign
     std::fs::write(handoff_directory(&fixture).join("go"), "").unwrap();
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let view = fixture.view().await;
@@ -13159,8 +13158,7 @@ async fn a_restart_over_a_review_waiting_on_its_ask_stops_the_run_rather_than_le
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Wrapping,
+        view.state, "wrapping",
         "the Conversation did not reach Done over a Set nobody answered",
     );
     assert!(
@@ -13196,7 +13194,7 @@ async fn a_merge_while_the_review_waits_on_its_ask_ends_it_and_lands_in_done() {
     std::fs::write(&landing, r#"{"mergeable":"MERGEABLE","state":"MERGED"}"#).unwrap();
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     seen_out_by_the_landing(&fixture, set).await;
@@ -13219,7 +13217,7 @@ async fn a_close_while_the_review_waits_on_its_ask_ends_it_and_stops_the_run() {
     );
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Wrapping,
+        "wrapping",
         "and the Conversation stays where it was, for a Resume once it is reopened",
     );
 
@@ -13614,9 +13612,14 @@ async fn a_conversation_sent_back_to_be_built_wraps_up_and_reviews_again() {
     let pool = open_database(&fixture.database).await.unwrap();
 
     assert_eq!(
-        verkstead_server::store::implement_again(&pool, fixture.id)
-            .await
-            .unwrap(),
+        verkstead_server::store::implement_again(
+            &pool,
+            fixture.id,
+            &verkstead_server::store::State::named("wrapping"),
+            &verkstead_server::store::State::named("implementing"),
+        )
+        .await
+        .unwrap(),
         verkstead_server::store::Rebuilding::Started,
     );
     let repo = verkstead_server::store::load_conversation(&pool, fixture.id)
@@ -13639,6 +13642,7 @@ async fn a_conversation_sent_back_to_be_built_wraps_up_and_reviews_again() {
                 base: None,
                 repo: None,
             },
+            &verkstead_server::store::State::named("wrapping"),
         )
         .await
         .unwrap(),
@@ -13706,7 +13710,7 @@ async fn a_conversation_sent_back_to_be_built_wraps_up_and_reviews_again() {
     );
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Wrapping,
+        "wrapping",
         "and the second wrap is where the Conversation is, its checks still unanswerable",
     );
 }
@@ -13791,7 +13795,7 @@ const AND_A_FIX: &str = "printf 'a fix\n' >> fixes.md\n    \
 
 /// How many times this Conversation has been moved into `state`, which is what
 /// tells a second wrap from a first.
-fn moves_into(view: &ConversationView, state: Lifecycle) -> usize {
+fn moves_into(view: &ConversationView, state: &str) -> usize {
     view.timeline
         .iter()
         .filter(|event| matches!(event, TimelineEvent::Moved(moved) if moved.state == state))
@@ -13847,13 +13851,13 @@ async fn a_review_that_split_a_finding_out_sends_the_work_back_to_be_built() {
     // The one move down the ladder: a wrap-up that ended holding a backlog is a
     // Conversation with work to build.
     fixture
-        .until(|view| (moves_into(view, Lifecycle::Implementing) == 2).then_some(()))
+        .until(|view| (moves_into(view, "implementing") == 2).then_some(()))
         .await;
 
     // Which is then worked and finished, and the finish wraps it up a second
     // time on the pull request it already had.
     fixture
-        .until(|view| (moves_into(view, Lifecycle::Wrapping) == 2).then_some(()))
+        .until(|view| (moves_into(view, "wrapping") == 2).then_some(()))
         .await;
 
     let deadline = Instant::now() + *PATIENCE;
@@ -13966,7 +13970,7 @@ async fn a_split_with_nothing_else_accepted_still_sends_the_work_back() {
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
     fixture
-        .until(|view| (moves_into(view, Lifecycle::Implementing) == 2).then_some(()))
+        .until(|view| (moves_into(view, "implementing") == 2).then_some(()))
         .await;
 
     let view = fixture.view().await;
@@ -14104,7 +14108,7 @@ async fn a_split_out_backlog_lands_on_the_record_of_a_run_that_never_had_one() {
     // The one move down the ladder, which is the review's backlog being picked
     // up — and the landing that goes on the record with it.
     fixture
-        .until(|view| (moves_into(view, Lifecycle::Implementing) == 2).then_some(()))
+        .until(|view| (moves_into(view, "implementing") == 2).then_some(()))
         .await;
 
     let reached = fixture.until(|view| backlog_row(view).cloned()).await;
@@ -14189,7 +14193,7 @@ async fn a_split_no_backlog_was_written_for_settles_like_any_other_review() {
     // reaching it says more than catching it on the way: a run that had gone
     // back down the ladder would never arrive.
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let view = fixture.view().await;
@@ -14200,7 +14204,7 @@ async fn a_split_no_backlog_was_written_for_settles_like_any_other_review() {
         notices(&view),
     );
     assert_eq!(
-        moves_into(&view, Lifecycle::Implementing),
+        moves_into(&view, "implementing"),
         1,
         "and nothing went back down the ladder: there is no backlog to build",
     );
@@ -15069,7 +15073,7 @@ async fn a_comment_left_while_the_review_runs_is_answered_rather_than_settled_ov
     );
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let told = std::fs::read_to_string(&batches)
@@ -15140,7 +15144,7 @@ async fn a_wrap_up_waits_for_the_run_the_review_pushed() {
 
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Wrapping,
+        "wrapping",
         "the wrap-up waits for the run the fix started",
     );
     assert!(
@@ -15195,7 +15199,7 @@ async fn a_wrap_up_waits_for_the_run_a_batch_session_pushed() {
 
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Wrapping,
+        "wrapping",
         "the wrap-up waits for the run the batch's fix started",
     );
     assert!(
@@ -15269,7 +15273,7 @@ async fn a_rollup_about_a_commit_that_is_not_what_was_pushed_settles_nothing() {
     );
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Wrapping,
+        "wrapping",
         "so the wrap-up waits for the run for what was pushed",
     );
 
@@ -15277,7 +15281,7 @@ async fn a_rollup_about_a_commit_that_is_not_what_was_pushed_settles_nothing() {
     std::fs::write(&head, git(&worktree, &["rev-parse", "HEAD"])).unwrap();
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 }
 
@@ -15346,7 +15350,7 @@ async fn checks_that_have_gone_from_a_pull_request_that_had_them_settle_nothing(
     );
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Wrapping,
+        "wrapping",
         "so the wrap-up waits for it rather than finishing over the fix",
     );
 }
@@ -15390,8 +15394,7 @@ async fn a_pull_request_that_conflicts_keeps_the_wrap_up_out_of_done() {
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Wrapping,
+        view.state, "wrapping",
         "nothing can land a conflicted pull request, so the work is not finished with",
     );
     assert!(
@@ -15461,7 +15464,7 @@ async fn a_pull_request_that_conflicts_keeps_the_wrap_up_out_of_done() {
     std::fs::write(&released, "x").unwrap();
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert!(
@@ -15605,7 +15608,7 @@ async fn a_merge_github_has_not_worked_out_dispatches_nothing() {
     // run which wrongly hurried past the state fails on the assertion below
     // saying where it got to instead of on a poll that missed the moment.
     fixture
-        .until(|view| (view.state != Lifecycle::Implementing).then_some(()))
+        .until(|view| (view.state != "implementing").then_some(()))
         .await;
 
     // Long enough for many polls of a pull request GitHub will not commit itself
@@ -15615,8 +15618,7 @@ async fn a_merge_github_has_not_worked_out_dispatches_nothing() {
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Wrapping,
+        view.state, "wrapping",
         "not knowing is not knowing: it settles nothing, so the wrap-up waits",
     );
     assert!(
@@ -15670,7 +15672,7 @@ async fn a_conflict_that_arrives_after_done_is_written_down_and_nothing_else() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     // The sweep has it in hand: the pull request is open, which is the reading
@@ -15693,8 +15695,7 @@ async fn a_conflict_that_arrives_after_done_is_written_down_and_nothing_else() {
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Done,
+        view.state, "done",
         "the work is still finished with: a conflict after Done moves nothing",
     );
     assert!(
@@ -15756,7 +15757,7 @@ async fn pressing_resolve_on_a_conflicted_done_pull_request_gets_it_resolved() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let read_once = prompts(&std::fs::read_to_string(&reviews).unwrap()).len();
@@ -15801,7 +15802,7 @@ async fn pressing_resolve_on_a_conflicted_done_pull_request_gets_it_resolved() {
 
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Wrapping,
+        "wrapping",
         "the press moves it back into the wrap-up itself, rather than leaving \
          something to notice that it should",
     );
@@ -15824,7 +15825,7 @@ async fn pressing_resolve_on_a_conflicted_done_pull_request_gets_it_resolved() {
     // And then the merge lands, GitHub says the branch merges again, and the
     // ordinary settling rule carries the work back to Done.
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let view = fixture.view().await;
@@ -15854,20 +15855,22 @@ async fn pressing_resolve_on_a_conflicted_done_pull_request_gets_it_resolved() {
             .iter()
             .filter_map(|event| match event {
                 verkstead_render::TimelineEvent::Moved(moved) =>
-                    Some(format!("moved to {:?}", moved.state)),
+                // The word the record holds, which is what a move carries
+                // now that a state is one — `done` rather than `Done`.
+                    Some(format!("moved to {}", moved.state)),
                 verkstead_render::TimelineEvent::Steer(steer) =>
                     Some(format!("steered into {:?}", steer.target)),
                 verkstead_render::TimelineEvent::ResolveConflicts(_) =>
                     Some("asked for the conflict to be resolved".to_owned()),
                 _ => None,
             })
-            .skip_while(|event| event.as_str() != "moved to Done")
+            .skip_while(|event| event.as_str() != "moved to done")
             .collect::<Vec<_>>(),
         [
-            "moved to Done",
+            "moved to done",
             "asked for the conflict to be resolved",
-            "moved to Wrapping",
-            "moved to Done",
+            "moved to wrapping",
+            "moved to done",
         ]
         .map(str::to_owned),
         "somebody decided this, the machine's move says what came of it, and no \
@@ -15904,7 +15907,7 @@ async fn a_pull_request_that_has_been_merged_is_never_asked_about_again() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     until_swept(&asked).await;
@@ -15962,7 +15965,7 @@ async fn a_closed_conversation_is_never_asked_about() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     until_swept(&asked).await;
@@ -16542,8 +16545,7 @@ async fn a_restart_over_a_batch_waiting_on_its_ask_stops_the_run_and_reads_what_
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Wrapping,
+        view.state, "wrapping",
         "the Conversation did not reach Done over a Set nobody answered",
     );
     assert!(
@@ -16836,7 +16838,7 @@ async fn comments_already_dispatched_for_are_not_dispatched_for_again_after_a_re
     );
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Wrapping,
+        "wrapping",
         "and the wrap-up is still going, because its checks were never green",
     );
 }
@@ -16881,7 +16883,7 @@ async fn a_wrap_up_with_nothing_left_outstanding_finishes_without_waiting_for_a_
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let view = fixture.view().await;
@@ -16890,10 +16892,10 @@ async fn a_wrap_up_with_nothing_left_outstanding_finishes_without_waiting_for_a_
     // have happened.
     assert_eq!(
         view.timeline.iter().rev().find_map(|event| match event {
-            TimelineEvent::Moved(moved) => Some(moved.state),
+            TimelineEvent::Moved(moved) => Some(moved.state.clone()),
             _ => None,
         }),
-        Some(Lifecycle::Done),
+        Some("done".to_owned()),
     );
     assert!(
         notices(&view).is_empty(),
@@ -16963,7 +16965,7 @@ async fn a_pull_request_opening_and_a_conversation_finishing_reach_the_devices()
     let before = fixture.view().await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     // In the order they happened: the pull request opens the wrap-up, and Done
@@ -17073,7 +17075,7 @@ async fn a_push_service_that_cannot_be_reached_costs_a_notification_and_nothing_
     // Which arrives on its own, at the pace it would have without any of this:
     // a run that waited on the push services would never get here at all.
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let view = fixture.view().await;
@@ -17167,7 +17169,7 @@ async fn a_commit_landing_on_the_pull_request_puts_the_checks_back_to_waiting() 
     );
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Wrapping,
+        "wrapping",
         "so the wrap-up is not over",
     );
 }
@@ -17218,7 +17220,7 @@ async fn a_breakdown_question_reaches_the_human_as_an_ordinary_set() {
 
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Grilling,
+        "grilling",
         "answering a breakdown question moves nothing: the direction is settled, and \
          nothing has been committed yet",
     );
@@ -18346,8 +18348,7 @@ async fn a_session_that_exits_badly_halts_the_run_with_a_notice() {
          whole of what is waiting",
     );
     assert_eq!(
-        view.state,
-        Lifecycle::Implementing,
+        view.state, "implementing",
         "blocked on you is a badge on an active state, never a state of its own",
     );
     assert!(
@@ -18882,7 +18883,7 @@ async fn an_account_out_of_window_stops_the_run_and_tells_the_devices() {
     assert!(
         notice
             .html
-            .contains("<strong>Implementing the work</strong> stopped."),
+            .contains("<strong>Implementing</strong> stopped."),
         "it stopped the way everything else stops, in the same words: {:?}",
         notice.html,
     );
@@ -19080,7 +19081,7 @@ async fn an_account_that_signs_out_stops_the_run_with_a_log_in_press() {
     assert!(
         notice
             .html
-            .contains("<strong>Implementing the work</strong> stopped."),
+            .contains("<strong>Implementing</strong> stopped."),
         "it stopped the way everything else stops: {:?}",
         notice.html,
     );
@@ -19271,7 +19272,7 @@ async fn a_login_resumes_every_run_it_unblocks() {
 
     let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
 
-    let investigating = composed_beside(&fixture, Process::Investigate).await;
+    let investigating = composed_beside(&fixture, processes::investigate()).await;
     grilled(&fixture, investigating).await;
 
     running_out(&fixture).await;
@@ -19929,21 +19930,19 @@ async fn nothing_moves_a_stopped_conversation_onto_another_profile() {
 
     assert_eq!(
         after
-            .grilling_pairing
-            .as_ref()
+            .under("grilling")
             .map(|pairing| pairing.profile.id.clone()),
         before
-            .grilling_pairing
-            .as_ref()
+            .under("grilling")
             .map(|pairing| pairing.profile.id.clone()),
     );
     assert_eq!(
         after
-            .implementation_pairing
-            .map(|pairing| pairing.profile.id),
+            .under("implementation")
+            .map(|pairing| pairing.profile.id.clone()),
         before
-            .implementation_pairing
-            .map(|pairing| pairing.profile.id),
+            .under("implementation")
+            .map(|pairing| pairing.profile.id.clone()),
         "the account that ran out is the account the rest of the run is spent on",
     );
 }
@@ -20006,7 +20005,7 @@ async fn closing_a_run_is_not_something_to_ask_the_human_about() {
         view.blocked_on, None,
         "and a closed Conversation is not blocked on anybody",
     );
-    assert_eq!(view.state, Lifecycle::Closed);
+    assert_eq!(view.state, "closed");
 }
 
 /// A backlog whose task sessions wait at a gate the test opens, so that a press
@@ -20449,14 +20448,14 @@ async fn steering_into_done_with_interrupt_ends_the_session_where_it_stands() {
     let view = fixture.view().await;
     let worktree = PathBuf::from(view.worktree.clone().unwrap().path);
 
-    assert_eq!(view.state, Lifecycle::Done);
+    assert_eq!(view.state, "done");
     assert_eq!(
         steered(&view),
         [
-            ("moved", Lifecycle::Grilling),
-            ("moved", Lifecycle::Implementing),
-            ("steer", Lifecycle::Done),
-            ("moved", Lifecycle::Done),
+            ("moved", "grilling"),
+            ("moved", "implementing"),
+            ("steer", "done"),
+            ("moved", "done"),
         ],
         "the human's own Event carrying the target, and the plain move under it",
     );
@@ -20561,7 +20560,7 @@ async fn steering_into_done_without_interrupt_sees_the_session_out() {
         worktree.join(".tasks/02-refuse.md").exists(),
         "so the task nothing was launched for is still there",
     );
-    assert_eq!(view.state, Lifecycle::Done);
+    assert_eq!(view.state, "done");
     assert_eq!(
         view.blocked_on, None,
         "and no badge came back on the far side of the session that was seen out",
@@ -20574,12 +20573,12 @@ async fn steering_into_done_without_interrupt_sees_the_session_out() {
 /// Both kinds together, because what a steer leaves is the pair — the human's
 /// own line and the machine's move under it — and a reading that kept only one
 /// of them could not say they stand beside each other.
-fn steered(view: &ConversationView) -> Vec<(&'static str, Lifecycle)> {
+fn steered(view: &ConversationView) -> Vec<(&'static str, &str)> {
     view.timeline
         .iter()
         .filter_map(|event| match event {
-            TimelineEvent::Steer(steer) => Some(("steer", steer.target)),
-            TimelineEvent::Moved(moved) => Some(("moved", moved.state)),
+            TimelineEvent::Steer(steer) => Some(("steer", steer.target.as_str())),
+            TimelineEvent::Moved(moved) => Some(("moved", moved.state.as_str())),
             _ => None,
         })
         .collect()
@@ -20609,7 +20608,7 @@ async fn stop_pressed_with_nothing_running_halts_where_it_stands() {
         stopped.html,
     );
     assert!(
-        stopped.html.contains("Grilling the work"),
+        stopped.html.contains("Grilling"),
         "and what it was that stopped: {:?}",
         stopped.html,
     );
@@ -20843,7 +20842,7 @@ async fn staged_and_settled(fixture: &Grilling) {
     staged(fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 }
 
@@ -20873,7 +20872,7 @@ async fn stage_of(fixture: &Grilling) -> ConversationView {
             let view: ConversationView =
                 get(&fixture.app, &format!("/api/ui/conversations/{}", entry.id)).await;
 
-            if view.state == Lifecycle::Implementing && !notices(&view).is_empty() {
+            if view.state == "implementing" && !notices(&view).is_empty() {
                 return view;
             }
         }
@@ -20911,7 +20910,7 @@ async fn stages_of(fixture: &Grilling, many: usize) -> Vec<ConversationView> {
             let view: ConversationView =
                 get(&fixture.app, &format!("/api/ui/conversations/{}", entry.id)).await;
 
-            if view.state == Lifecycle::Implementing && !notices(&view).is_empty() {
+            if view.state == "implementing" && !notices(&view).is_empty() {
                 working.push(view);
             }
         }
@@ -21074,8 +21073,7 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
         "the branch is the stage brief's own name, under the roadmap it belongs to",
     );
     assert_eq!(
-        stage.state,
-        Lifecycle::Implementing,
+        stage.state, "implementing",
         "straight to Implementing: the grilling that would have settled this wrote the brief",
     );
     assert_eq!(
@@ -21085,16 +21083,14 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
     );
     assert_eq!(
         stage
-            .implementation_pairing
-            .as_ref()
+            .under("implementation")
             .and_then(|pairing| pairing.profile.name.clone()),
         Some("implementation".to_owned()),
         "under the same Profiles, there being nobody to choose them again",
     );
     assert_eq!(
         stage
-            .grilling_pairing
-            .as_ref()
+            .under("grilling")
             .and_then(|pairing| pairing.profile.name.clone()),
         Some("grilling".to_owned()),
         "the grilling one among them — a stage steered into a second round is \
@@ -21122,11 +21118,11 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
             .timeline
             .iter()
             .filter_map(|event| match event {
-                TimelineEvent::Moved(moved) => Some(moved.state),
+                TimelineEvent::Moved(moved) => Some(moved.state.clone()),
                 _ => None,
             })
             .collect::<Vec<_>>(),
-        [Lifecycle::Implementing],
+        ["implementing"],
     );
 
     let said = notices(&stage).join("\n");
@@ -21299,8 +21295,7 @@ async fn a_settle_starts_every_ready_stage_of_a_declaring_roadmap() {
 
     for stage in &stages {
         assert_eq!(
-            stage.state,
-            Lifecycle::Implementing,
+            stage.state, "implementing",
             "each goes straight to work, the brief being what a grilling would have settled",
         );
         assert!(
@@ -21643,18 +21638,13 @@ async fn the_servers_places_hold_a_settle_back_and_never_a_press() {
             .id
             .clone();
 
-        let pairing = serde_json::json!({
-            "profile_id": profile,
-            "model": format!("claude-{role}-5"),
+        let picked = serde_json::json!({
+            "pairing": { "profile_id": profile, "model": format!("claude-{role}-5") },
         });
-        let picked = match role {
-            "review" => serde_json::json!({ "pairing": pairing }),
-            _ => pairing,
-        };
 
         let chosen: verkstead_render::ProfileChosen = post(
             &fixture.app,
-            &format!("/api/ui/conversations/{adopting}/{role}-pairing"),
+            &format!("/api/ui/conversations/{adopting}/pairings/{role}"),
             &picked,
         )
         .await;
@@ -21677,7 +21667,7 @@ async fn the_servers_places_hold_a_settle_back_and_never_a_press() {
         get(&fixture.app, &format!("/api/ui/conversations/{adopting}")).await;
 
     assert_eq!(fifth.branch, "roadmaps/rate-limiting/05-letting-through");
-    assert_eq!(fifth.state, Lifecycle::Implementing);
+    assert_eq!(fifth.state, "implementing");
     assert!(
         git(
             &fixture.repo(),
@@ -21770,7 +21760,7 @@ esac
 
     // And the investigation, started before the roadmap settles so that it is
     // already holding a place when the carry-on counts them.
-    let investigating = composed_beside(&fixture, Process::Investigate).await;
+    let investigating = composed_beside(&fixture, processes::investigate()).await;
 
     grilled(&fixture, investigating).await;
 
@@ -21816,7 +21806,7 @@ esac
 /// Its own function because the tests about the server's places all want the
 /// same thing — a Conversation of another kind beside the fixture's own, holding
 /// one of the four.
-async fn composed_beside(fixture: &Grilling, process: Process) -> i64 {
+async fn composed_beside(fixture: &Grilling, process: ProvidedProcess) -> i64 {
     let started: Started = post(
         &fixture.app,
         "/api/ui/conversations",
@@ -21837,10 +21827,12 @@ async fn composed_beside(fixture: &Grilling, process: Process) -> i64 {
 
     let chosen: verkstead_render::ProfileChosen = post(
         &fixture.app,
-        &format!("/api/ui/conversations/{id}/implementation-pairing"),
+        &format!("/api/ui/conversations/{id}/pairings/implementation"),
         &serde_json::json!({
-            "profile_id": implementation,
-            "model": "claude-implementation-5",
+            "pairing": {
+                "profile_id": implementation,
+                "model": "claude-implementation-5",
+            },
         }),
     )
     .await;
@@ -21973,7 +21965,7 @@ async fn until_let_go(fixture: &Grilling, id: i64) {
         let view: ConversationView =
             get(&fixture.app, &format!("/api/ui/conversations/{id}")).await;
 
-        if view.state == Lifecycle::Done && !view.working && !view.driven {
+        if view.state == "done" && !view.working && !view.driven {
             return;
         }
 
@@ -22051,7 +22043,7 @@ async fn until_settled(fixture: &Grilling, id: i64) {
         let view: ConversationView =
             get(&fixture.app, &format!("/api/ui/conversations/{id}")).await;
 
-        if view.state == Lifecycle::Done {
+        if view.state == "done" {
             return;
         }
 
@@ -22213,7 +22205,7 @@ async fn no_stage_of_a_roadmap_starts_while_the_roadmap_is_being_reviewed() {
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let stages = stages_of(&fixture, 1).await;
@@ -22347,7 +22339,7 @@ esac
     // And the investigation, started before the roadmap settles so that it is
     // already holding that one place when the carry-on counts them. A press, so
     // the limit never stood in front of it.
-    let investigating = composed_beside(&fixture, Process::Investigate).await;
+    let investigating = composed_beside(&fixture, processes::investigate()).await;
 
     grilled(&fixture, investigating).await;
 
@@ -22409,7 +22401,7 @@ esac
     )
     .await;
 
-    assert_eq!(still.state, Lifecycle::Investigating);
+    assert_eq!(still.state, "investigating");
 }
 
 /// And a server restarted while a stage was waiting starts it when a place comes
@@ -22580,7 +22572,7 @@ async fn two_roadmaps_waiting_for_a_place(at_once: usize, pace: Pace) -> (Grilli
 
     // The investigation first, so that it is already holding one of the four
     // when the older roadmap settles and the carry-on counts them.
-    let investigating = composed_beside(&fixture, Process::Investigate).await;
+    let investigating = composed_beside(&fixture, processes::investigate()).await;
 
     grilled(&fixture, investigating).await;
     until_working(&fixture, investigating).await;
@@ -22615,7 +22607,7 @@ async fn two_roadmaps_waiting_for_a_place(at_once: usize, pace: Pace) -> (Grilli
     // And the younger roadmap, planned and settled with every place taken. A
     // press starts its grilling over the limit — presses are never held back —
     // and its settle finds nothing free, so both its roots wait.
-    let parity = composed_beside(&fixture, Process::Develop).await;
+    let parity = composed_beside(&fixture, processes::develop()).await;
 
     staged_and_settled_beside(&fixture, parity, "parity").await;
 
@@ -22887,7 +22879,7 @@ async fn every_half_made(fixture: &Grilling) -> Vec<i64> {
             .filter(|entry| entry.id != fixture.id)
             .collect();
 
-        if !rows.is_empty() && rows.iter().all(|entry| entry.state == Lifecycle::Closed) {
+        if !rows.is_empty() && rows.iter().all(|entry| entry.state == "closed") {
             return rows.into_iter().map(|entry| entry.id).collect();
         }
 
@@ -22895,7 +22887,7 @@ async fn every_half_made(fixture: &Grilling) -> Vec<i64> {
             Instant::now() < deadline,
             "a half-made stage Conversation was left running: {:?}",
             rows.iter()
-                .map(|entry| (entry.id, entry.state))
+                .map(|entry| (entry.id, entry.state.clone()))
                 .collect::<Vec<_>>(),
         );
 
@@ -24362,7 +24354,7 @@ async fn a_roadmap_with_every_stage_checked_starts_nothing_and_says_it_is_comple
     let before = fixture.view().await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let said = said_by(&fixture).await;
@@ -24440,7 +24432,7 @@ async fn a_finished_roadmap_starts_no_stage_of_another_roadmap_on_the_branch() {
     staged(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     // The premise, held to rather than assumed: the branch really did touch both
@@ -24582,7 +24574,7 @@ async fn a_branch_that_wrote_two_roadmaps_starts_nothing_and_says_why() {
     staged(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let said = said_by(&fixture).await;
@@ -24685,7 +24677,7 @@ async fn a_stage_from_before_the_record_starts_nothing_and_says_so() {
         .unwrap();
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let said = fixture
@@ -24733,7 +24725,7 @@ async fn an_ordinary_conversation_that_touched_a_roadmap_carries_nothing_on() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let view = fixture.view().await;
@@ -24913,7 +24905,7 @@ async fn taking_up(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
         gh,
         *BRISKLY,
         Pickers::UnderEveryPairing,
-        Process::Review,
+        processes::review(),
         "",
     )
     .await
@@ -24928,7 +24920,7 @@ async fn taking_up_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) ->
         gh,
         *BRISKLY,
         Pickers::Unreviewed,
-        Process::Review,
+        processes::review(),
         "",
     )
     .await
@@ -24969,7 +24961,7 @@ async fn taking_up_to_fix_at_pace(
         gh,
         pace,
         Pickers::UnderEveryPairing,
-        Process::FixMergeIssues,
+        processes::fix_merge_issues(),
         "",
     )
     .await
@@ -24988,7 +24980,7 @@ async fn taking_up_sharing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gr
         gh,
         *BRISKLY,
         Pickers::UnderEveryPairing,
-        Process::Review,
+        processes::review(),
         "share_on_done: true\n",
     )
     .await
@@ -25006,7 +24998,7 @@ async fn taking_up_however_reviewed(
     gh: &str,
     pace: Pace,
     pickers: Pickers,
-    process: Process,
+    process: ProvidedProcess,
     config: &str,
 ) -> Grilling {
     let bench = bench_at_pace(spill, stub, gh, pace, None).await;
@@ -25030,7 +25022,7 @@ async fn taking_up_however_reviewed(
         panic!("expected the Conversation to start, got {started:?}");
     };
 
-    if process == Process::FixMergeIssues {
+    if process == processes::fix_merge_issues() {
         bench.the_one_an_investigation_runs_under(id).await;
     } else {
         bench.the_two_a_wrap_up_runs_under(id).await;
@@ -25101,7 +25093,7 @@ async fn reviewing_a_branch(
     base: Option<&str>,
     standing: Option<&str>,
     holder: Option<Holder<'_>>,
-    process: Process,
+    process: ProvidedProcess,
 ) -> Grilling {
     let bench = bench(spill, stub, gh).await;
 
@@ -25145,7 +25137,7 @@ async fn reviewing_a_branch(
         panic!("expected the Conversation to start, got {started:?}");
     };
 
-    if process == Process::FixMergeIssues {
+    if process == processes::fix_merge_issues() {
         bench.the_one_an_investigation_runs_under(id).await;
     } else {
         bench.the_two_a_wrap_up_runs_under(id).await;
@@ -25255,14 +25247,14 @@ async fn a_review_of_a_branch_sends_one_session_for_the_pull_request_it_is_owed(
         Some("release/2.1"),
         None,
         None,
-        Process::Review,
+        processes::review(),
     )
     .await;
 
     // Wrapping at the press, before anything has opened anything: the move is the
     // take-up's own.
     let view = fixture.view().await;
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(
         pull_request(&view),
         None,
@@ -25282,19 +25274,18 @@ async fn a_review_of_a_branch_sends_one_session_for_the_pull_request_it_is_owed(
         "the pull request the session opened is the one it wraps up",
     );
     assert_eq!(
-        view.state,
-        Lifecycle::Wrapping,
+        view.state, "wrapping",
         "which it was already: the record arrived beside the wrap-up rather than starting one",
     );
     assert_eq!(
         view.timeline
             .iter()
             .filter_map(|event| match event {
-                TimelineEvent::Moved(moved) => Some(moved.state),
+                TimelineEvent::Moved(moved) => Some(moved.state.clone()),
                 _ => None,
             })
             .collect::<Vec<_>>(),
-        [Lifecycle::Wrapping],
+        ["wrapping"],
         "so there is one move on the Timeline and not two",
     );
     assert_eq!(
@@ -25352,14 +25343,14 @@ async fn a_fix_merge_issues_over_a_branch_sends_the_one_session_it_is_owed() {
         Some("release/2.1"),
         None,
         None,
-        Process::FixMergeIssues,
+        processes::fix_merge_issues(),
     )
     .await;
 
     // Wrapping at the press and on no pull request: the move is the take-up's
     // own, there being no record of one arriving to make it.
     let view = fixture.view().await;
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(
         pull_request(&view),
         None,
@@ -25508,9 +25499,16 @@ async fn stood_on_by_a_finished_conversation(bench: &Bench, holder: Holder<'_>) 
         .await
         .unwrap();
 
-    verkstead_server::store::start_grilling(&pool, id, "c0ffee", &at, &[])
-        .await
-        .unwrap();
+    verkstead_server::store::start_in(
+        &pool,
+        id,
+        &verkstead_server::store::State::named("grilling"),
+        "c0ffee",
+        &at,
+        &[],
+    )
+    .await
+    .unwrap();
 
     // And the pull request its work went onto, which is what makes it the
     // Conversation that link *belongs to* rather than merely one standing in the
@@ -25528,6 +25526,7 @@ async fn stood_on_by_a_finished_conversation(bench: &Bench, holder: Holder<'_>) 
             base: Some("main".to_owned()),
             repo: None,
         },
+        &verkstead_server::store::State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -25589,7 +25588,7 @@ async fn a_bare_branch_inside_a_stack_is_walked_when_its_pull_request_arrives() 
         None,
         None,
         None,
-        Process::FixMergeIssues,
+        processes::fix_merge_issues(),
     )
     .await;
 
@@ -25708,7 +25707,7 @@ async fn a_bare_branch_whose_stack_somebody_is_standing_on_stops_the_run() {
         // here — which is what a human's own clone of the stage below looks like.
         Some("stage-01"),
         None,
-        Process::FixMergeIssues,
+        processes::fix_merge_issues(),
     )
     .await;
 
@@ -25774,7 +25773,7 @@ async fn a_bare_branch_whose_stack_a_finished_conversation_stands_on_carries_on(
             number: 40,
             holding: false,
         }),
-        Process::FixMergeIssues,
+        processes::fix_merge_issues(),
     )
     .await;
 
@@ -25872,7 +25871,7 @@ async fn a_bare_branch_whose_stack_holds_uncommitted_changes_stops_the_run() {
             number: 40,
             holding: true,
         }),
-        Process::FixMergeIssues,
+        processes::fix_merge_issues(),
     )
     .await;
 
@@ -25933,7 +25932,7 @@ async fn a_review_of_a_branch_whose_session_opens_none_stops_and_resume_is_anoth
         None,
         None,
         None,
-        Process::Review,
+        processes::review(),
     )
     .await;
 
@@ -25945,7 +25944,7 @@ async fn a_review_of_a_branch_whose_session_opens_none_stops_and_resume_is_anoth
         .until(|view| (!notices_since_the_take_up(view).is_empty()).then(|| view.clone()))
         .await;
 
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(pull_request(&view), None);
     assert_eq!(
         sessions_on(&fixture, "submitting/SKILL.md").await,
@@ -26008,7 +26007,7 @@ esac
 
     let view = fixture.view().await;
 
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(
         pull_request(&view)
             .expect("a Review of a pull request pins it at the press")
@@ -26057,7 +26056,7 @@ async fn reviewing_a_pull_request(spill: tempfile::TempDir, stub: &str) -> Grill
     let picked: ProcessPicked = post(
         &bench.app,
         &format!("/api/ui/conversations/{id}/process"),
-        &serde_json::json!({ "process": Process::Review }),
+        &serde_json::json!({ "process": processes::review() }),
     )
     .await;
     assert_eq!(picked, ProcessPicked::Picked);
@@ -26152,8 +26151,7 @@ async fn adopting_a_roadmap_starts_its_next_stage_with_a_planning_session() {
         "the branch is the stage brief's own name, under the roadmap it belongs to",
     );
     assert_eq!(
-        view.state,
-        Lifecycle::Implementing,
+        view.state, "implementing",
         "straight to Implementing: the human's press stands in for the stage before it",
     );
 
@@ -26356,7 +26354,7 @@ async fn resuming_a_stage_that_never_planned_runs_the_planning_again() {
 
     let view = fixture.view().await;
 
-    assert_eq!(view.state, Lifecycle::Implementing);
+    assert_eq!(view.state, "implementing");
     assert!(
         view.blocked_on.is_none(),
         "and nothing is waiting on the human any more: the press took the stop away",
@@ -26466,7 +26464,7 @@ async fn an_adopted_stage_that_settles_starts_the_stage_after_it() {
     // The adopted stage runs itself the rest of the way with nothing pressed:
     // planned, worked, finished, reviewed, green.
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert!(
@@ -26483,8 +26481,7 @@ async fn an_adopted_stage_that_settles_starts_the_stage_after_it() {
         "the stage after the adopted one, on a branch of its own",
     );
     assert_eq!(
-        next.state,
-        Lifecycle::Implementing,
+        next.state, "implementing",
         "started the ordinary way, by the stage before it settling",
     );
     assert_eq!(
@@ -26572,7 +26569,7 @@ async fn a_settled_stage_the_roadmap_says_nothing_about_is_still_done() {
     .await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let next = stage_of(&fixture).await;
@@ -26618,7 +26615,7 @@ async fn a_stage_away_from_home_settles_and_starts_nothing_here() {
     // Past its join first: a stage away from home asks home whether it may join,
     // and the home named below is nowhere, so it would wait on it for ever.
     fixture
-        .until(|view| (view.state == Lifecycle::Wrapping).then_some(()))
+        .until(|view| (view.state == "wrapping").then_some(()))
         .await;
 
     // Born on another device, and moved here: a copy away from its home.
@@ -26635,7 +26632,7 @@ async fn a_stage_away_from_home_settles_and_starts_nothing_here() {
     .unwrap();
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     // The settle that follows Done, and a good many looks after it.
@@ -26690,7 +26687,7 @@ async fn a_stage_that_came_home_settles_and_starts_the_next_here() {
     verkstead_store::live_here(&pool, fixture.id).await.unwrap();
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let next = stage_of(&fixture).await;
@@ -26744,7 +26741,7 @@ async fn a_settle_on_a_badly_declaring_roadmap_starts_nothing_and_says_why() {
     .await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let said = fixture
@@ -26879,6 +26876,7 @@ async fn a_stage_of_the_roadmap(fixture: &Grilling, repo_id: i64, label: &str) -
     verkstead_store::start_stage(
         &pool,
         id,
+        &verkstead_store::State::named("implementing"),
         "c0ffee",
         Path::new("/data/worktrees/by-hand"),
         None,
@@ -26916,6 +26914,7 @@ async fn joins_the_chain(fixture: &Grilling, repo_id: i64, id: i64, label: &str,
             base: None,
             repo: None,
         },
+        &verkstead_store::State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -26952,7 +26951,7 @@ async fn a_stage_queued_to_join(fixture: &Grilling, repo_id: i64, label: &str) -
 async fn settles(fixture: &Grilling, id: i64) {
     let pool = open_database(&fixture.database).await.unwrap();
 
-    verkstead_store::set_state(&pool, id, verkstead_store::Lifecycle::Done)
+    verkstead_store::set_state(&pool, id, verkstead_store::State::done())
         .await
         .unwrap();
 }
@@ -27026,9 +27025,8 @@ async fn a_stage_waits_to_join_while_a_stage_in_its_chain_has_not_settled() {
         "which the card says as a label beside the state",
     );
     assert_eq!(
-        view.state,
-        Lifecycle::Implementing,
-        "a condition of Implementing rather than a state: the Lifecycle is untouched",
+        view.state, "implementing",
+        "a condition of Implementing rather than a state: the state word is untouched",
     );
     assert!(
         fixture.row().await.waiting_to_join,
@@ -27077,7 +27075,7 @@ async fn a_stage_waits_to_join_while_a_stage_in_its_chain_has_not_settled() {
     until_written_saying(&worked, "finished=yes").await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert!(
@@ -27143,9 +27141,8 @@ async fn a_restarted_server_takes_a_held_stage_up_and_holds_it_again() {
     };
 
     assert_eq!(
-        held.state,
-        Lifecycle::Implementing,
-        "held where it stood, with the Lifecycle untouched",
+        held.state, "implementing",
+        "held where it stood, with the state word untouched",
     );
     assert!(
         !std::fs::read_to_string(&worked)
@@ -27182,7 +27179,7 @@ async fn a_roadmap_run_in_order_holds_no_stage_at_its_finish() {
     // Stage 01, planned, worked, finished and settled — which is what puts it
     // in the chain, and what starts the stage after it.
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let next = stage_of(&fixture).await;
@@ -27192,7 +27189,7 @@ async fn a_roadmap_run_in_order_holds_no_stage_at_its_finish() {
         let view: ConversationView =
             get(&fixture.app, &format!("/api/ui/conversations/{}", next.id)).await;
 
-        if view.state == Lifecycle::Done {
+        if view.state == "done" {
             break view;
         }
 
@@ -27323,7 +27320,7 @@ async fn the_finish_of_a_stage_is_told_the_chain_it_joins_before_it_pushes() {
     // Stage 01, planned, worked, finished and settled — which is what puts it in
     // the chain, and what starts the stage after it.
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let below = fixture.view().await.branch;
@@ -27334,7 +27331,7 @@ async fn the_finish_of_a_stage_is_told_the_chain_it_joins_before_it_pushes() {
         let view: ConversationView =
             get(&fixture.app, &format!("/api/ui/conversations/{}", next.id)).await;
 
-        if view.state == Lifecycle::Done {
+        if view.state == "done" {
             break view;
         }
 
@@ -27557,8 +27554,7 @@ async fn a_taken_up_pull_request_is_reviewed_on_the_edited_brief_and_what_was_sa
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Wrapping,
+        view.state, "wrapping",
         "which is the state the press landed it in",
     );
 
@@ -27696,7 +27692,7 @@ async fn a_taken_up_pull_request_settles_to_done_and_reaches_for_the_share() {
     .await;
 
     let view = fixture
-        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .until(|view| (view.state == "done").then(|| view.clone()))
         .await;
 
     assert_eq!(
@@ -27770,7 +27766,7 @@ async fn a_review_that_split_work_out_of_a_take_up_builds_it_and_wraps_up_again(
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
     let view = fixture
-        .until(|view| (view.state == Lifecycle::Implementing).then(|| view.clone()))
+        .until(|view| (view.state == "implementing").then(|| view.clone()))
         .await;
 
     assert_eq!(
@@ -27783,7 +27779,7 @@ async fn a_review_that_split_work_out_of_a_take_up_builds_it_and_wraps_up_again(
     // Which is then worked and finished, and the finish wraps it up a second
     // time on the pull request the take-up put it on.
     fixture
-        .until(|view| (moves_into(view, Lifecycle::Wrapping) == 2).then_some(()))
+        .until(|view| (moves_into(view, "wrapping") == 2).then_some(()))
         .await;
 
     let view = fixture.view().await;
@@ -27836,7 +27832,7 @@ async fn a_taken_up_conversation_is_steered_into_a_follow_up_and_back() {
     .await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert_eq!(
@@ -27857,7 +27853,7 @@ async fn a_taken_up_conversation_is_steered_into_a_follow_up_and_back() {
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
     let view = fixture
-        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .until(|view| (view.state == "done").then(|| view.clone()))
         .await;
 
     assert!(
@@ -27924,7 +27920,7 @@ async fn a_fix_merge_issues_wrap_up_reads_no_branch_and_answers_nothing_said_on_
 
     // Then Done, on the two things it waits on and nothing else.
     let view = fixture
-        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .until(|view| (view.state == "done").then(|| view.clone()))
         .await;
 
     assert!(
@@ -27980,7 +27976,7 @@ async fn a_fix_merge_issues_over_a_branch_enters_the_same_narrowed_wrap_up() {
         None,
         None,
         None,
-        Process::FixMergeIssues,
+        processes::fix_merge_issues(),
     )
     .await;
 
@@ -28060,7 +28056,7 @@ async fn a_fix_merge_issues_still_fixes_a_red_check_and_settles_to_done() {
     );
 
     let view = fixture
-        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .until(|view| (view.state == "done").then(|| view.clone()))
         .await;
 
     assert_eq!(fixes(&view), 1, "one go was all it took");
@@ -28100,7 +28096,7 @@ async fn a_steer_into_wrapping_a_narrowed_wrap_up_reads_no_branch_either() {
     .await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert_eq!(
@@ -28116,7 +28112,7 @@ async fn a_steer_into_wrapping_a_narrowed_wrap_up_reads_no_branch_either() {
     // Which is the wrap-up finishing a second time, on a review that settled
     // without a session all over again.
     fixture
-        .until(|view| (moves_into(view, Lifecycle::Done) > 1).then_some(()))
+        .until(|view| (moves_into(view, "done") > 1).then_some(()))
         .await;
 
     assert!(
@@ -28134,13 +28130,12 @@ async fn a_steer_into_wrapping_a_narrowed_wrap_up_reads_no_branch_either() {
 /// them again and finishes, which is the door the take-up's own writing does not
 /// cover.
 ///
-/// A steer into Grilling opens a round, so the round before it is over and its
-/// wrap-up bookkeeping goes with it — every settle, not only the review's. So the
-/// wrap-up after it arrives with nothing written at all, and the take-up that
-/// wrote the narrowing is two rounds behind: what has to hold it up is the two
-/// watchers reading the Process for themselves and settling what they will never
-/// act on. The review watcher always did; the comments watcher settling before it
-/// stops is what makes the pair of them enough.
+/// The end of a round takes its wrap-up bookkeeping with it — every settle, not
+/// only the review's. So a wrap-up entered after one arrives with nothing written
+/// at all, and the take-up that wrote the narrowing is a round behind: what has to
+/// hold it up is the two watchers reading the Process for themselves and settling
+/// what they will never act on. The review watcher always did; the comments
+/// watcher settling before it stops is what makes the pair of them enough.
 ///
 /// Which is worth its own test because the failure is a silence. Nothing stops and
 /// no Notice is written — the narrowing Notice reads the comments' settle too — so
@@ -28163,7 +28158,7 @@ async fn a_narrowed_wrap_up_whose_round_was_forgotten_settles_it_all_again() {
     .await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert!(
@@ -28171,32 +28166,24 @@ async fn a_narrowed_wrap_up_whose_round_was_forgotten_settles_it_all_again() {
         "the take-up wrote both, and that is what carried this one to Done",
     );
 
-    // A round of its own, under the one Profile this Process has: the pick goes on
-    // the grilling role the form asks for, a Fix having none of its own.
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened,
-        "everything had finished, so the click found nothing to interrupt",
-    );
+    // And then every settle under it is forgotten, which is what the end of a
+    // round takes with it — see `store::wrap_up::forget_the_round`.
+    //
+    // Forgotten here rather than by steering into a round, because a **Fix merge
+    // issues** declares no state that opens one: it is a wrap-up with the rounds
+    // beside it, and the states its manifest marks as taking a steer are the
+    // wrap-up, a follow-up of the pull request and the detour (ADR-0030,
+    // *Process*). What this test is about is the door the take-up's own writing
+    // does not cover, and arriving at a wrap-up with nothing written under it is
+    // the whole of what puts a Conversation in front of it.
+    forget_what_the_wrap_up_settled(&fixture).await;
 
-    let profile = fixture.profile("implementation").await;
-
-    assert_eq!(
-        fixture
-            .steer_under("Grilling", &profile, "claude-implementation-5")
-            .await,
-        ConversationSteered::Steered,
-    );
-
-    // Read before the round it opened could have reached a wrap-up of its own,
-    // which is several sessions away and this is one read of a table.
     assert!(
         !review_settled(&fixture).await && !comments_settled(&fixture).await,
-        "the round that ended took every settle with it",
+        "so there is nothing settled under the wrap-up that is about to run",
     );
 
-    // Then straight back into a wrap-up, which is the shortest road to the door
-    // that writes nothing: the interview is interrupted where it stands, and what
+    // Then back into the wrap-up, which is the shortest road to that door: what
     // arrives in Wrapping is a narrowed wrap-up with nothing settled under it.
     assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
@@ -28207,7 +28194,7 @@ async fn a_narrowed_wrap_up_whose_round_was_forgotten_settles_it_all_again() {
     // Which finishes all the same — the two watchers having settled for
     // themselves, and neither of them having read a line or dispatched a thing.
     fixture
-        .until(|view| (moves_into(view, Lifecycle::Done) > 1).then_some(()))
+        .until(|view| (moves_into(view, "done") > 1).then_some(()))
         .await;
 
     assert!(
@@ -28325,8 +28312,7 @@ async fn a_fix_merge_issues_conflict_gets_one_resolution_and_nothing_beside_it()
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Wrapping,
+        view.state, "wrapping",
         "nothing can land a conflicted pull request, so the work is not finished with",
     );
     assert!(
@@ -28402,7 +28388,7 @@ async fn a_fix_merge_issues_conflict_gets_one_resolution_and_nothing_beside_it()
     std::fs::write(&released, "x").unwrap();
 
     let view = fixture
-        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .until(|view| (view.state == "done").then(|| view.clone()))
         .await;
 
     assert!(
@@ -28530,7 +28516,7 @@ async fn pressing_resolve_on_a_narrowed_wrap_up_comes_back_through_the_same_one(
     .await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert_eq!(
@@ -28558,7 +28544,7 @@ async fn pressing_resolve_on_a_narrowed_wrap_up_comes_back_through_the_same_one(
 
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Wrapping,
+        "wrapping",
         "the press moves it back into the wrap-up itself",
     );
 
@@ -28586,7 +28572,7 @@ async fn pressing_resolve_on_a_narrowed_wrap_up_comes_back_through_the_same_one(
     );
 
     fixture
-        .until(|view| (moves_into(view, Lifecycle::Done) > 1).then_some(()))
+        .until(|view| (moves_into(view, "done") > 1).then_some(()))
         .await;
 
     let view = fixture.view().await;
@@ -28729,8 +28715,7 @@ async fn a_conflict_low_in_a_stack_sends_one_session_told_the_whole_chain() {
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Wrapping,
+        view.state, "wrapping",
         "nothing lands over a conflict at the bottom of a stack",
     );
     assert!(
@@ -28818,7 +28803,7 @@ async fn a_conflict_low_in_a_stack_sends_one_session_told_the_whole_chain() {
     std::fs::write(&released, "x").unwrap();
 
     let view = fixture
-        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .until(|view| (view.state == "done").then(|| view.clone()))
         .await;
 
     assert!(
@@ -29960,9 +29945,9 @@ async fn a_conversation_nothing_is_driving_is_halted_while_the_server_runs() {
     let stalled = fixture.stopped().await;
 
     assert!(
-        stalled.html.contains("Grilling the work"),
-        "what ought to have been happening, which for a stall is what the state \
-         says: {:?}",
+        stalled.html.contains("<strong>Grilling</strong> stopped."),
+        "what ought to have been happening, which for a stall is the state itself, \
+         by the id its Process gives it: {:?}",
         stalled.html,
     );
     assert!(
@@ -29981,8 +29966,7 @@ async fn a_conversation_nothing_is_driving_is_halted_while_the_server_runs() {
          stall is precisely the condition that had no badge on it",
     );
     assert_eq!(
-        view.state,
-        Lifecycle::Grilling,
+        view.state, "grilling",
         "and it is still where it was — a stall is a condition an active state is \
          in rather than a state of its own",
     );
@@ -30077,8 +30061,7 @@ async fn a_conversation_nothing_is_supposed_to_be_driving_is_never_halted() {
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Closed,
+        view.state, "closed",
         "the work stopped where it was, which is not the same as standing still in it",
     );
     assert_eq!(
@@ -30188,8 +30171,7 @@ async fn an_inline_run_that_opened_no_pull_request_leaves_the_conversation_where
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Implementing,
+        view.state, "implementing",
         "the work is where it was, because nothing about it got any further",
     );
     assert!(pull_request(&view).is_none(), "and nothing is pinned");
@@ -30239,7 +30221,7 @@ async fn a_wrap_up_nothing_is_watching_halts_as_one() {
     let stalled = fixture.stopped().await;
 
     assert!(
-        stalled.html.contains("Wrapping the work up"),
+        stalled.html.contains("Wrapping"),
         "the Conversation says it is wrapping up and nothing is watching it: {:?}",
         stalled.html,
     );
@@ -30267,7 +30249,7 @@ async fn halted_by(fixture: &Grilling, decision: Decision) {
         &pool,
         fixture.id,
         decision,
-        "**Grilling the work** stopped.\n\nNothing is driving it. No session is \
+        "**Grilling** stopped.\n\nNothing is driving it. No session is \
          running, and nothing is left to start one.\n\n### The worktree\n\nGit had \
          nothing pending, or the repository would not answer.\n\n### What the last \
          session said\n\n    the grilling has nothing to say\n",
@@ -30314,6 +30296,7 @@ async fn wrapping_unwatched(fixture: &Grilling) {
             base: None,
             repo: None,
         },
+        &verkstead_server::store::State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -30562,7 +30545,7 @@ async fn resuming_an_inline_run_whose_branch_has_a_pull_request_wraps_it_up_unsp
 
     let found = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping)
+            (view.state == "wrapping")
                 .then(|| pull_request(view).cloned())
                 .flatten()
         })
@@ -30672,8 +30655,7 @@ async fn resuming_an_inline_run_with_no_pull_request_builds_the_work_again() {
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Implementing,
+        view.state, "implementing",
         "and the work is being built, which is where it stopped",
     );
     assert_eq!(
@@ -30757,7 +30739,7 @@ esac
 
     let found = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping)
+            (view.state == "wrapping")
                 .then(|| pull_request(view).cloned())
                 .flatten()
         })
@@ -30858,7 +30840,7 @@ esac
 
     let found = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping)
+            (view.state == "wrapping")
                 .then(|| pull_request(view).cloned())
                 .flatten()
         })
@@ -30939,8 +30921,7 @@ async fn resuming_an_inline_run_github_cannot_be_asked_about_halts_unspent() {
         "and nothing was launched into it: a session could only reach the same `gh`",
     );
     assert_eq!(
-        view.state,
-        Lifecycle::Implementing,
+        view.state, "implementing",
         "the work is where it was, because nothing about it got any further",
     );
     assert_eq!(
@@ -31005,7 +30986,7 @@ async fn resuming_a_stalled_grilling_starts_a_fresh_one_told_what_was_already_se
     let stopped = fixture.stopped().await;
 
     assert!(
-        stopped.html.contains("Grilling the work"),
+        stopped.html.contains("Grilling"),
         "the Conversation says it is being grilled and nothing is: {:?}",
         stopped.html,
     );
@@ -31269,14 +31250,14 @@ async fn steering_a_stalled_backlog_run_into_implementing_works_the_next_task() 
 
     let view = fixture.view().await;
 
-    assert_eq!(view.state, Lifecycle::Implementing);
+    assert_eq!(view.state, "implementing");
     assert_eq!(
         steered(&view),
         [
-            ("moved", Lifecycle::Grilling),
-            ("moved", Lifecycle::Implementing),
-            ("steer", Lifecycle::Implementing),
-            ("moved", Lifecycle::Implementing),
+            ("moved", "grilling"),
+            ("moved", "implementing"),
+            ("steer", "implementing"),
+            ("moved", "implementing"),
         ],
         "the human's own line, and the plain move under it — into the state it \
          was already in, because that is what they said",
@@ -31417,7 +31398,7 @@ async fn steering_into_implementing_carries_on_a_backlog_whose_worktree_has_gone
 
     let view = fixture.view().await;
 
-    assert_eq!(view.state, Lifecycle::Implementing);
+    assert_eq!(view.state, "implementing");
     assert_eq!(
         view.blocked_on, None,
         "and the stop the click wrote is gone"
@@ -31487,15 +31468,15 @@ async fn steering_a_halted_wrap_up_into_wrapping_watches_the_checks_afresh() {
 
     let view = fixture.view().await;
 
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
     assert_eq!(
         steered(&view),
         [
-            ("moved", Lifecycle::Grilling),
-            ("moved", Lifecycle::Implementing),
-            ("moved", Lifecycle::Wrapping),
-            ("steer", Lifecycle::Wrapping),
-            ("moved", Lifecycle::Wrapping),
+            ("moved", "grilling"),
+            ("moved", "implementing"),
+            ("moved", "wrapping"),
+            ("steer", "wrapping"),
+            ("moved", "wrapping"),
         ],
         "the human's own line, and the plain move under it — into the state it \
          was already in, because that is what they said",
@@ -31552,7 +31533,7 @@ async fn steering_a_done_conversation_into_wrapping_reads_the_branch_afresh() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let told = until_written_by(&reviews, 1).await;
@@ -31585,7 +31566,7 @@ async fn steering_a_done_conversation_into_wrapping_reads_the_branch_afresh() {
     // checks are green and nothing has been said, so it finishes the way every
     // other one does.
     fixture
-        .until(|view| (moves_into(view, Lifecycle::Done) > 1).then_some(()))
+        .until(|view| (moves_into(view, "done") > 1).then_some(()))
         .await;
 }
 
@@ -31655,7 +31636,7 @@ async fn an_instruction_session_that_commits_wraps_the_pull_request_up_again() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let view = fixture.view().await;
@@ -31699,7 +31680,7 @@ async fn an_instruction_session_that_commits_wraps_the_pull_request_up_again() {
     // read once — a wrap-up with nothing outstanding settles itself and goes
     // straight on to Done, so the state a moment later is as likely to be that.
     let view = fixture
-        .until(|view| (moves_into(view, Lifecycle::Wrapping) > 1).then(|| view.clone()))
+        .until(|view| (moves_into(view, "wrapping") > 1).then(|| view.clone()))
         .await;
 
     assert!(
@@ -31777,8 +31758,7 @@ async fn an_instruction_session_wraps_up_a_pull_request_the_record_never_got() {
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Implementing,
+        view.state, "implementing",
         "and the Conversation is left implementing a backlog with nothing in it",
     );
     assert!(
@@ -31813,7 +31793,7 @@ async fn an_instruction_session_wraps_up_a_pull_request_the_record_never_got() {
 
     let found = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping)
+            (view.state == "wrapping")
                 .then(|| pull_request(view).cloned())
                 .flatten()
         })
@@ -32121,8 +32101,7 @@ async fn a_tinker_starts_the_follow_ups_own_session_on_the_brief() {
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::FollowUp,
+        view.state, "follow-up",
         "the press landed it there rather than in a grilling",
     );
     assert!(
@@ -32240,8 +32219,7 @@ async fn a_tinkers_round_commits_and_asks_on_a_branch_with_no_pull_request() {
         .await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::FollowUp,
+        view.state, "follow-up",
         "the round is being worked where the start left it",
     );
     assert_eq!(
@@ -32350,8 +32328,7 @@ async fn an_investigate_starts_the_investigating_session_on_the_brief() {
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Investigating,
+        view.state, "investigating",
         "the press landed it there rather than in a grilling or a follow-up",
     );
     assert!(
@@ -32516,7 +32493,7 @@ async fn an_investigation_ends_over_its_scratch_and_lands_done() {
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
     let view = fixture
-        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .until(|view| (view.state == "done").then(|| view.clone()))
         .await;
 
     assert!(
@@ -32618,7 +32595,7 @@ async fn an_investigations_signal_without_the_mark_is_refused_in_its_own_words()
 
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Investigating,
+        "investigating",
         "the refused signal ended nothing",
     );
 
@@ -32626,7 +32603,7 @@ async fn an_investigations_signal_without_the_mark_is_refused_in_its_own_words()
     std::fs::write(handoff_directory(&fixture).join("again"), "").unwrap();
 
     let view = fixture
-        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .until(|view| (view.state == "done").then(|| view.clone()))
         .await;
 
     assert!(
@@ -32667,7 +32644,7 @@ async fn an_investigating_session_that_finishes_on_the_mark_lands_done() {
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
     let view = fixture
-        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .until(|view| (view.state == "done").then(|| view.clone()))
         .await;
 
     assert!(
@@ -32840,8 +32817,7 @@ async fn a_tinker_that_committed_lands_in_wrapping_on_a_pull_request_it_sent_for
 
     let view = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
-                .then(|| view.clone())
+            (view.state == "wrapping" && pull_request(view).is_some()).then(|| view.clone())
         })
         .await;
 
@@ -32971,8 +32947,7 @@ async fn resume_on_a_tinker_that_owes_a_pull_request_sends_for_it_rather_than_an
         .await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::FollowUp,
+        view.state, "follow-up",
         "a stop leaves the Conversation where it is, and the ending had not moved it yet",
     );
     assert_eq!(
@@ -32990,8 +32965,7 @@ async fn resume_on_a_tinker_that_owes_a_pull_request_sends_for_it_rather_than_an
 
     let view = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
-                .then(|| view.clone())
+            (view.state == "wrapping" && pull_request(view).is_some()).then(|| view.clone())
         })
         .await;
 
@@ -33071,8 +33045,7 @@ async fn a_tinker_that_committed_before_it_lost_its_session_lands_in_wrapping_to
 
     let view = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
-                .then(|| view.clone())
+            (view.state == "wrapping" && pull_request(view).is_some()).then(|| view.clone())
         })
         .await;
 
@@ -33115,7 +33088,7 @@ async fn a_tinker_that_built_nothing_lands_done_with_nothing_dispatched() {
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
     let view = fixture
-        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .until(|view| (view.state == "done").then(|| view.clone()))
         .await;
 
     assert!(
@@ -33285,8 +33258,7 @@ async fn a_tinker_that_committed_only_in_a_companion_lands_in_wrapping_too() {
 
     let view = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping && pull_requests(view).len() == 2)
-                .then(|| view.clone())
+            (view.state == "wrapping" && pull_requests(view).len() == 2).then(|| view.clone())
         })
         .await;
 
@@ -33339,7 +33311,7 @@ async fn steering_into_follow_up_runs_the_skill_on_the_brief_and_is_never_swept(
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let view = fixture.view().await;
@@ -33386,8 +33358,7 @@ async fn steering_into_follow_up_runs_the_skill_on_the_brief_and_is_never_swept(
         .await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::FollowUp,
+        view.state, "follow-up",
         "the Conversation is where the steer put it, with what the follow-up \
          committed on its Timeline",
     );
@@ -33398,7 +33369,7 @@ async fn steering_into_follow_up_runs_the_skill_on_the_brief_and_is_never_swept(
 
     let view = fixture.view().await;
 
-    assert_eq!(view.state, Lifecycle::FollowUp);
+    assert_eq!(view.state, "follow-up");
     assert_eq!(
         notices(&view).len(),
         said,
@@ -33440,7 +33411,7 @@ async fn steering_into_investigating_runs_the_skill_on_the_question_it_was_given
 
     let before = outputs(
         &fixture
-            .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+            .until(|view| (view.state == "done").then(|| view.clone()))
             .await,
     )
     .len();
@@ -33470,8 +33441,7 @@ async fn steering_into_investigating_runs_the_skill_on_the_question_it_was_given
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Investigating,
+        view.state, "investigating",
         "the steer put it there rather than into a follow-up",
     );
     assert!(
@@ -33556,7 +33526,7 @@ async fn an_investigation_steered_out_of_a_wrap_up_lands_back_in_it() {
     // The wrap-up down to the merge GitHub has not worked out, which is a wrap-up
     // with everything it can settle settled and nothing running in it.
     fixture
-        .until(|view| (view.state == Lifecycle::Wrapping).then_some(()))
+        .until(|view| (view.state == "wrapping").then_some(()))
         .await;
 
     all_but_the_merge_settled(&fixture).await;
@@ -33597,8 +33567,7 @@ async fn an_investigation_steered_out_of_a_wrap_up_lands_back_in_it() {
     let asking = fixture.view().await;
 
     assert_eq!(
-        asking.state,
-        Lifecycle::Investigating,
+        asking.state, "investigating",
         "the steer took the wrap-up out of its state to ask the question",
     );
 
@@ -33611,7 +33580,7 @@ async fn an_investigation_steered_out_of_a_wrap_up_lands_back_in_it() {
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
     let view = fixture
-        .until(|view| (view.state == Lifecycle::Wrapping).then(|| view.clone()))
+        .until(|view| (view.state == "wrapping").then(|| view.clone()))
         .await;
 
     assert!(
@@ -33706,7 +33675,7 @@ async fn an_investigation_steered_out_of_a_wrap_up_lands_back_in_it() {
     std::fs::write(&merges, "").unwrap();
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert_eq!(
@@ -33764,7 +33733,7 @@ async fn an_investigation_steered_out_of_a_draft_lands_done() {
 
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Investigating,
+        "investigating",
         "the steer took the draft straight into the state, cutting it a branch on \
          the way",
     );
@@ -33773,7 +33742,7 @@ async fn an_investigation_steered_out_of_a_draft_lands_done() {
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
     let view = fixture
-        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .until(|view| (view.state == "done").then(|| view.clone()))
         .await;
 
     assert!(
@@ -33814,7 +33783,7 @@ async fn an_investigation_steered_out_of_a_closed_conversation_lands_done() {
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
 
     let closed = fixture
-        .until(|view| (view.state == Lifecycle::Closed).then(|| view.clone()))
+        .until(|view| (view.state == "closed").then(|| view.clone()))
         .await;
 
     assert!(
@@ -33835,13 +33804,13 @@ async fn an_investigation_steered_out_of_a_closed_conversation_lands_done() {
 
     let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
 
-    assert_eq!(fixture.view().await.state, Lifecycle::Investigating);
+    assert_eq!(fixture.view().await.state, "investigating");
 
     assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
     let view = fixture
-        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .until(|view| (view.state == "done").then(|| view.clone()))
         .await;
 
     assert!(
@@ -33874,7 +33843,7 @@ async fn a_follow_up_session_that_exits_badly_says_how_it_ended() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert_eq!(fixture.steer().await, SteerOpened::Opened);
@@ -33927,7 +33896,7 @@ async fn a_follow_up_session_that_is_gone_stops_the_conversation() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert_eq!(fixture.steer().await, SteerOpened::Opened);
@@ -33960,8 +33929,7 @@ async fn a_follow_up_session_that_is_gone_stops_the_conversation() {
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::FollowUp,
+        view.state, "follow-up",
         "stopped where it stood: a stop is a condition an active state is in \
          rather than a state of its own",
     );
@@ -34002,7 +33970,7 @@ async fn a_follow_up_session_that_finishes_on_the_mark_lands_in_the_wrap_up() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert_eq!(fixture.steer().await, SteerOpened::Opened);
@@ -34019,7 +33987,7 @@ async fn a_follow_up_session_that_finishes_on_the_mark_lands_in_the_wrap_up() {
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let view = fixture.view().await;
@@ -34064,7 +34032,7 @@ async fn a_follow_up_ends_on_the_mark_and_lands_back_in_the_wrap_up() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let said = waiting_on_checks(&fixture.view().await).len();
@@ -34098,7 +34066,7 @@ async fn a_follow_up_ends_on_the_mark_and_lands_back_in_the_wrap_up() {
 
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::FollowUp,
+        "follow-up",
         "a session idling on a Blocking Ask is one working rather than one over",
     );
 
@@ -34106,7 +34074,7 @@ async fn a_follow_up_ends_on_the_mark_and_lands_back_in_the_wrap_up() {
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
     let view = fixture
-        .until(|view| (view.state == Lifecycle::Wrapping).then(|| view.clone()))
+        .until(|view| (view.state == "wrapping").then(|| view.clone()))
         .await;
 
     assert!(
@@ -34125,8 +34093,7 @@ async fn a_follow_up_ends_on_the_mark_and_lands_back_in_the_wrap_up() {
         .await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Wrapping,
+        view.state, "wrapping",
         "which is the wrap-up down to the one thing nothing here can hurry",
     );
     assert!(
@@ -34139,7 +34106,7 @@ async fn a_follow_up_ends_on_the_mark_and_lands_back_in_the_wrap_up() {
     std::fs::remove_file(&running).unwrap();
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert!(
@@ -34172,7 +34139,7 @@ async fn a_follow_up_that_pushed_nothing_goes_straight_back_to_done() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let landed = commits(&fixture.view().await).len();
@@ -34191,7 +34158,7 @@ async fn a_follow_up_that_pushed_nothing_goes_straight_back_to_done() {
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let view = fixture.view().await;
@@ -34237,7 +34204,7 @@ async fn a_set_asked_after_the_mark_keeps_the_follow_up_open() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert_eq!(fixture.steer().await, SteerOpened::Opened);
@@ -34265,8 +34232,7 @@ async fn a_set_asked_after_the_mark_keeps_the_follow_up_open() {
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::FollowUp,
+        view.state, "follow-up",
         "the follow-up is open again, and what it is waiting on is the answer to \
          the round it has just asked",
     );
@@ -34285,7 +34251,7 @@ async fn a_set_asked_after_the_mark_keeps_the_follow_up_open() {
 
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::FollowUp,
+        "follow-up",
         "the newest Response decides, and it carried no mark",
     );
 }
@@ -34317,7 +34283,7 @@ async fn a_follow_up_signal_without_the_mark_is_refused_and_one_with_it_ends_the
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert_eq!(fixture.steer().await, SteerOpened::Opened);
@@ -34348,7 +34314,7 @@ async fn a_follow_up_signal_without_the_mark_is_refused_and_one_with_it_ends_the
 
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::FollowUp,
+        "follow-up",
         "the refused signal ended nothing",
     );
 
@@ -34356,7 +34322,7 @@ async fn a_follow_up_signal_without_the_mark_is_refused_and_one_with_it_ends_the
     std::fs::write(handoff_directory(&fixture).join("again"), "").unwrap();
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let view = fixture.view().await;
@@ -34387,7 +34353,7 @@ async fn a_marked_follow_up_that_never_signals_is_not_ended_but_told_it_may_be_d
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert_eq!(fixture.steer().await, SteerOpened::Opened);
@@ -34410,8 +34376,7 @@ async fn a_marked_follow_up_that_never_signals_is_not_ended_but_told_it_may_be_d
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::FollowUp,
+        view.state, "follow-up",
         "the mark and the silence together ended nothing",
     );
     assert!(view.working, "and the session is still there");
@@ -34421,7 +34386,7 @@ async fn a_marked_follow_up_that_never_signals_is_not_ended_but_told_it_may_be_d
     );
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert!(
@@ -34460,7 +34425,7 @@ async fn a_gone_follow_up_session_takes_the_question_it_left_with_it() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert_eq!(fixture.steer().await, SteerOpened::Opened);
@@ -34494,8 +34459,7 @@ async fn a_gone_follow_up_session_takes_the_question_it_left_with_it() {
         .await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::FollowUp,
+        view.state, "follow-up",
         "stopped where it stood, as every stop is",
     );
     assert_eq!(
@@ -35047,7 +35011,7 @@ async fn a_grilling_signal_is_refused_before_a_pick_and_over_another_directions_
 
     let view = fixture.view().await;
 
-    assert_eq!(view.state, Lifecycle::Grilling, "and nothing moved");
+    assert_eq!(view.state, "grilling", "and nothing moved");
     assert!(
         running(&fixture, grilled).await,
         "with the grilling session still running",
@@ -35539,7 +35503,7 @@ async fn a_follow_up_that_goes_idle_without_asking_is_told_to_put_it_to_the_huma
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert_eq!(fixture.steer().await, SteerOpened::Opened);
@@ -35583,7 +35547,7 @@ async fn a_follow_up_that_goes_idle_without_asking_is_told_to_put_it_to_the_huma
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let view = fixture.view().await;
@@ -35629,7 +35593,7 @@ async fn a_follow_up_session_that_will_not_answer_is_put_to_the_human_and_left_r
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     // Subscribed after the run's own news, so the only push these devices are
@@ -35691,7 +35655,7 @@ async fn a_follow_up_session_that_will_not_answer_is_put_to_the_human_and_left_r
 
     let view = fixture.view().await;
 
-    assert_eq!(view.state, Lifecycle::FollowUp, "still following up");
+    assert_eq!(view.state, "follow-up", "still following up");
     assert!(
         view.working,
         "with the session still running in its Worktree"
@@ -35764,7 +35728,7 @@ async fn a_rescue_answered_puts_the_count_back_to_nothing() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let before = notices(&fixture.view().await).len();
@@ -37446,8 +37410,7 @@ async fn an_inline_session_that_commits_and_says_it_is_done_is_ended_and_wraps_u
     // asking about a Worktree the review had by then.
     let view = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
-                .then(|| view.clone())
+            (view.state == "wrapping" && pull_request(view).is_some()).then(|| view.clone())
         })
         .await;
 
@@ -37526,8 +37489,7 @@ esac
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Implementing,
+        view.state, "implementing",
         "a commit and quiet is not an inline run done",
     );
     assert!(
@@ -37543,8 +37505,7 @@ esac
 
     let view = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
-                .then(|| view.clone())
+            (view.state == "wrapping" && pull_request(view).is_some()).then(|| view.clone())
         })
         .await;
 
@@ -37625,9 +37586,7 @@ esac
     );
 
     fixture
-        .until(|view| {
-            (view.state == Lifecycle::Wrapping && pull_request(view).is_some()).then_some(())
-        })
+        .until(|view| (view.state == "wrapping" && pull_request(view).is_some()).then_some(()))
         .await;
 }
 
@@ -38036,7 +37995,7 @@ async fn resume_follows_the_work_up_again_on_the_brief_and_the_rounds_answered()
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert_eq!(fixture.steer().await, SteerOpened::Opened);
@@ -38116,7 +38075,7 @@ async fn resume_on_a_marked_follow_up_on_a_pull_request_follows_it_up_again() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert_eq!(fixture.steer().await, SteerOpened::Opened);
@@ -38160,7 +38119,7 @@ async fn resume_on_a_marked_follow_up_on_a_pull_request_follows_it_up_again() {
     );
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::FollowUp,
+        "follow-up",
         "and the Conversation stays in Follow-up rather than going back to its \
          wrap-up",
     );
@@ -38189,7 +38148,7 @@ async fn a_restart_follows_the_work_up_again_rather_than_raising_anything() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert_eq!(fixture.steer().await, SteerOpened::Opened);
@@ -38233,8 +38192,7 @@ async fn a_restart_follows_the_work_up_again_rather_than_raising_anything() {
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::FollowUp,
+        view.state, "follow-up",
         "the Conversation is where it was, and being followed up again",
     );
     assert!(
@@ -38348,7 +38306,7 @@ async fn an_instruction_session_over_a_backlog_hands_on_to_the_next_task() {
 
     let view = fixture.view().await;
 
-    assert_eq!(view.state, Lifecycle::Implementing);
+    assert_eq!(view.state, "implementing");
     assert_eq!(
         view.direction,
         Some(Direction::TaskList),
@@ -38489,13 +38447,13 @@ async fn steering_into_grilling_primes_the_digest_only_where_it_was_asked_for() 
 
     let view = fixture.view().await;
 
-    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(view.state, "grilling");
     assert_eq!(
         steered(&view),
         [
-            ("moved", Lifecycle::Grilling),
-            ("steer", Lifecycle::Grilling),
-            ("moved", Lifecycle::Grilling),
+            ("moved", "grilling"),
+            ("steer", "grilling"),
+            ("moved", "grilling"),
         ],
     );
 
@@ -38565,7 +38523,7 @@ async fn steering_a_closed_conversation_checks_its_branch_out_again() {
 
     let view = fixture.view().await;
 
-    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.state, "wrapping");
 
     let worktree = PathBuf::from(
         view.worktree
@@ -38622,8 +38580,8 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
         fixture
             .view()
             .await
-            .implementation_pairing
-            .map(|pairing| pairing.profile.id),
+            .under("implementation")
+            .map(|pairing| pairing.profile.id.clone()),
         "the work is running under the other one, so this is a change to make",
     );
 
@@ -38656,11 +38614,8 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
         ConversationSteered::Steered,
     );
 
-    let paired = fixture
-        .view()
-        .await
-        .implementation_pairing
-        .expect("the steer settled one");
+    let view = fixture.view().await;
+    let paired = view.under("implementation").expect("the steer settled one");
 
     assert_eq!(paired.profile.id, picked);
     assert_eq!(
@@ -38696,8 +38651,8 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
         fixture
             .view()
             .await
-            .implementation_pairing
-            .and_then(|pairing| pairing.model),
+            .under("implementation")
+            .and_then(|pairing| pairing.model.clone()),
         Some("claude-grilling-4.8".to_owned()),
         "the model moved under a Profile that did not",
     );
@@ -38999,8 +38954,7 @@ async fn resuming_an_emptied_backlog_with_no_pull_request_sends_for_one_again() 
 
     let view = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
-                .then(|| view.clone())
+            (view.state == "wrapping" && pull_request(view).is_some()).then(|| view.clone())
         })
         .await;
 
@@ -39079,7 +39033,7 @@ async fn resuming_an_emptied_backlog_whose_branch_has_a_pull_request_wraps_it_up
 
     let found = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping)
+            (view.state == "wrapping")
                 .then(|| pull_request(view).cloned())
                 .flatten()
         })
@@ -39180,7 +39134,7 @@ while [ ! -f {gate} ]; do sleep 0.05; done
 
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Grilling,
+        "grilling",
         "which is a state something ought to be driving, and is what makes a \
          Conversation with nothing driving it worth offering the press on",
     );
@@ -39233,7 +39187,7 @@ async fn a_restarted_server_works_the_backlog_it_was_left_implementing() {
 
     // The task's own session, which is the run this restart interrupts.
     fixture
-        .until(|view| (view.state == Lifecycle::Implementing).then_some(()))
+        .until(|view| (view.state == "implementing").then_some(()))
         .await;
 
     let before = fixture
@@ -39285,8 +39239,7 @@ async fn a_restarted_server_works_the_backlog_it_was_left_implementing() {
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Implementing,
+        view.state, "implementing",
         "and the run is where it was: a restart puts things back rather than \
          moving anything on",
     );
@@ -39585,7 +39538,7 @@ async fn a_restart_that_can_start_nothing_halts_with_the_refusal_on_the_timeline
         .await;
 
     assert!(
-        refused.contains("Implementing the work"),
+        refused.contains("Implementing"),
         "what nobody could be started for is named as the run it was: {refused:?}",
     );
     assert!(
@@ -40092,7 +40045,7 @@ async fn two_red_pull_requests_are_fixed_one_session_at_a_time() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let told = std::fs::read_to_string(&dispatched).expect("both pull requests were fixed");
@@ -40174,7 +40127,7 @@ async fn a_wrap_up_waits_for_every_pull_requests_checks() {
     );
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Wrapping,
+        "wrapping",
         "so the Conversation waits, whatever its own pull request is doing",
     );
     assert!(
@@ -40187,7 +40140,7 @@ async fn a_wrap_up_waits_for_every_pull_requests_checks() {
     std::fs::write(&running, "x").unwrap();
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 }
 
@@ -40242,7 +40195,7 @@ async fn a_wrap_up_waits_for_every_pull_request_to_merge() {
     );
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Wrapping,
+        "wrapping",
         "so the Conversation waits, green as its own pull request is",
     );
     assert!(
@@ -40254,7 +40207,7 @@ async fn a_wrap_up_waits_for_every_pull_request_to_merge() {
     std::fs::write(&resolved, "x").unwrap();
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 }
 
@@ -40288,7 +40241,7 @@ async fn a_conflicted_companion_pull_request_is_merged_in_that_companions_worktr
     // The session went to the companion, so `gh` there now says the pull
     // request merges — and that is the last thing the wrap-up was waiting on.
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let worktree = fixture.view().await.companions[0]
@@ -40358,7 +40311,7 @@ async fn two_conflicted_pull_requests_are_merged_one_session_at_a_time() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let told = std::fs::read_to_string(&dispatched).expect("both conflicts were merged away");
@@ -40430,7 +40383,7 @@ async fn each_resolution_session_is_told_the_strategy_the_settings_file_names() 
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let told = std::fs::read_to_string(&dispatched).expect("both conflicts were resolved");
@@ -40737,7 +40690,7 @@ async fn a_comment_on_a_companions_pull_request_is_answered_in_that_companions_w
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let told = std::fs::read_to_string(&batches).expect("the batch session wrote its prompt");
@@ -40832,7 +40785,7 @@ async fn a_rule_covers_a_companions_pull_request_as_much_as_the_works_own() {
     // Which is a wrap-up with nothing left outstanding on either pull request,
     // so it finishes on its own.
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 }
 
@@ -40862,7 +40815,7 @@ async fn the_review_is_told_every_pull_request_and_where_to_read_it() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let told = std::fs::read_to_string(&reviews).expect("the review session wrote its prompt");
@@ -40946,10 +40899,10 @@ async fn the_second_wrap_of_a_split_out_backlog_reviews_every_pull_request_again
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
     fixture
-        .until(|view| (moves_into(view, Lifecycle::Implementing) == 2).then_some(()))
+        .until(|view| (moves_into(view, "implementing") == 2).then_some(()))
         .await;
     fixture
-        .until(|view| (moves_into(view, Lifecycle::Wrapping) == 2).then_some(()))
+        .until(|view| (moves_into(view, "wrapping") == 2).then_some(()))
         .await;
 
     let deadline = Instant::now() + *PATIENCE;
@@ -41070,7 +41023,7 @@ async fn a_review_that_accepts_findings_in_two_repositories_lands_them_in_both()
     }
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let view = fixture.view().await;
@@ -41118,7 +41071,7 @@ async fn the_review_is_given_what_was_said_on_every_pull_request() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let told = std::fs::read_to_string(&reviews).expect("the review session wrote its prompt");
@@ -41195,7 +41148,7 @@ async fn a_wrap_up_waits_for_every_pull_requests_comments() {
     );
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Wrapping,
+        "wrapping",
         "so the Conversation waits, whatever its own pull request is doing",
     );
 
@@ -41203,7 +41156,7 @@ async fn a_wrap_up_waits_for_every_pull_requests_comments() {
     std::fs::write(&logged_in, "x").unwrap();
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     assert!(
@@ -41240,7 +41193,7 @@ async fn a_conversation_with_no_review_wraps_up_without_one_and_reaches_done() {
     worked_to_empty(&fixture).await;
 
     fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .until(|view| (view.state == "done").then_some(()))
         .await;
 
     let view = fixture.view().await;
@@ -41307,8 +41260,7 @@ async fn a_wrap_up_with_no_review_answers_what_was_said_and_narrows_to_its_check
         .await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Wrapping,
+        view.state, "wrapping",
         "which is a condition of Wrapping rather than a state of its own",
     );
     assert!(
@@ -41376,14 +41328,13 @@ async fn a_stage_inherits_the_no_review_its_roadmap_was_grilled_with() {
     let stage = stage_of(&fixture).await;
 
     assert_eq!(
-        stage.review_pairing,
+        stage.paired("review"),
         PickedView::Skipped,
         "the row its roadmap was grilled on, and so the row its stages run on",
     );
     assert_eq!(
         stage
-            .implementation_pairing
-            .as_ref()
+            .under("implementation")
             .and_then(|pairing| pairing.profile.name.clone()),
         Some("implementation".to_owned()),
         "with the roles beside it inherited as they always were",
@@ -43058,7 +43009,7 @@ async fn a_wrap_up_session_is_refused_a_memo_naming_the_kinds_that_may() {
         None,
         None,
         None,
-        Process::Review,
+        processes::review(),
     )
     .await;
 
@@ -44391,4 +44342,1346 @@ async fn a_force_stop_ends_a_components_session_and_the_component() {
             (!view.driven && outputs(view).iter().all(|output| !output.running)).then_some(())
         })
         .await;
+}
+
+/// The uuid of the fixture plugin providing the Process *Two steps*.
+const TWO_STEPS: &str = "5e0c9a7e-2f4b-4c1d-8a3e-6b9f0d2c7a41";
+
+/// Install a plugin written under `elsewhere` providing the Process *Two
+/// steps* — two states, `drafting` and `checking`, each over the One session
+/// Activity Verkstead ships — through the presses the Plugins page makes.
+///
+/// Each state's session is told which it is by the opening line its options
+/// write: *Draft the change.* and *Check the change.*. One that ends without
+/// its Done signal stops the Conversation where it stands.
+///
+/// `more` is written under its two states: further states, each a YAML list
+/// item indented as the two are.
+async fn installing_two_steps_with(app: &axum::Router, elsewhere: &std::path::Path, more: &str) {
+    let plugin = elsewhere.join("two-steps");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(
+        plugin.join("plugin.yaml"),
+        format!(
+            "uuid: {TWO_STEPS}\n\
+             name: Two steps\n\
+             author:\n  name: Ada Lovelace\n  email: ada@example.com\n\
+             version: 1.0.0\n\
+             interface: 1\n\
+             dependencies:\n\
+             \x20 - uuid: d7a5e719-8491-46a7-b7d7-8f9f85e57bd6\n\
+             \x20   name: Activities\n\
+             \x20   author:\n      name: Tobias Cohen\n      email: tobi@tobico.net\n\
+             \x20   version: ^0.1\n\
+             \x20 - uuid: 15447a8d-f28d-4573-8b8b-a7226d477755\n\
+             \x20   name: Verkstead\n\
+             \x20   author:\n      name: Tobias Cohen\n      email: tobi@tobico.net\n\
+             \x20   version: ^0.1\n\
+             provides:\n\
+             \x20 - category: process\n\
+             \x20   id: two-steps\n\
+             \x20   name: Two steps\n\
+             \x20   description: Draft the change, then check it.\n\
+             \x20   roles:\n\
+             \x20     - {{ name: implementation, label: Implementation, building: true }}\n\
+             \x20   states:\n\
+             \x20     - id: drafting\n\
+             \x20       word: Drafting\n\
+             \x20       activity: one-session\n\
+             \x20       options: {{ skill: verkstead/instruction, prompt: Draft the change., evidence: nothing }}\n\
+             \x20     - id: checking\n\
+             \x20       word: Checking\n\
+             \x20       activity: one-session\n\
+             \x20       options: {{ skill: verkstead/instruction, prompt: Check the change., evidence: nothing }}\n\
+             {more}\
+             \x20   transitions:\n\
+             \x20     drafting: {{ done: checking, refused: stopped }}\n\
+             \x20     checking: {{ done: done, refused: stopped }}\n\
+             capabilities: []\n"
+        ),
+    )
+    .unwrap();
+    let consent: verkstead_render::PluginConsent = post(
+        app,
+        "/api/ui/plugins/read",
+        &serde_json::json!({ "source": plugin }),
+    )
+    .await;
+    let view: verkstead_render::PluginsView = post(
+        app,
+        "/api/ui/plugins",
+        &serde_json::json!({ "source": plugin, "granted": consent.capabilities }),
+    )
+    .await;
+    let row = view
+        .installed
+        .iter()
+        .find(|row| row.uuid == TWO_STEPS)
+        .expect("the plugin is listed");
+    assert_eq!(row.trouble, None, "and loads: {row:?}");
+}
+
+/// A Conversation on *Two steps*, its stub `stub`, picked, briefed and
+/// started through the presses the composer makes.
+async fn two_steps(spill: tempfile::TempDir, stub: &str) -> Grilling {
+    two_steps_with(spill, stub, "").await
+}
+
+/// The same Conversation, on the plugin with `more` states — see
+/// [`installing_two_steps_with`].
+async fn two_steps_with(spill: tempfile::TempDir, stub: &str, more: &str) -> Grilling {
+    let bench = bench_at_pace(spill, stub, PULL_REQUEST, *BRISKLY, None).await;
+    let app = bench.app.clone();
+
+    installing_two_steps_with(&app, bench.elsewhere.path(), more).await;
+
+    let started: Started = post(
+        &app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+    bench.the_one_an_investigation_runs_under(id).await;
+
+    let picked: ProcessPicked = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/process"),
+        &serde_json::json!({ "process": { "plugin": TWO_STEPS, "id": "two-steps" } }),
+    )
+    .await;
+    assert_eq!(picked, ProcessPicked::Picked);
+
+    let saved: BriefSaved = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": BRIEF }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    let start: GrillingStarted = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/grill"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(start, GrillingStarted::Started);
+
+    bench.holding(id)
+}
+
+/// A stub for *Two steps*: it appends which state's session it is to
+/// `{spill}/ran`, runs `drafting` or `checking` for that state's, and then
+/// idles.
+fn two_steps_stub(spill: &Path, drafting: &str, checking: &str) -> String {
+    let ran = spill.join("ran");
+    format!(
+        r#"case "$2" in
+*'Draft the change.'*) echo drafting >> {ran}
+{drafting}
+;;
+*'Check the change.'*) echo checking >> {ran}
+{checking}
+;;
+esac
+while :; do sleep 1; done"#,
+        ran = ran.display(),
+    )
+}
+
+/// The state word the column holds for this fixture's Conversation, read
+/// straight off the database.
+async fn stored_state(fixture: &Grilling) -> String {
+    let pool = open_database(&fixture.database).await.unwrap();
+    sqlx::query_scalar("SELECT state FROM conversations WHERE id = ?")
+        .bind(fixture.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+}
+
+/// The declared states and Verkstead's own a Timeline's moves entered, in
+/// order.
+fn entered(view: &ConversationView) -> Vec<String> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Moved(moved) => Some(moved.state.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A Conversation on a plugin's Process runs Draft → its first declared
+/// state → its second → Done, over the One session Activity, each state's
+/// id what the `conversations.state` column holds while it is there.
+#[tokio::test]
+async fn a_conversation_on_a_plugins_process_runs_its_states_to_done() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = two_steps_stub(
+        spill.path(),
+        "while [ ! -f /tmp/verkstead/drafted ]; do sleep 0.05; done\n: > /tmp/verkstead/done",
+        "while [ ! -f /tmp/verkstead/checked ]; do sleep 0.05; done\n: > /tmp/verkstead/done",
+    );
+    let ran = spill.path().join("ran");
+    let fixture = two_steps(spill, &stub).await;
+
+    let view = fixture
+        .until(|view| (view.state == "drafting").then(|| view.clone()))
+        .await;
+    assert_eq!(view.process.plugin, TWO_STEPS);
+    assert_eq!(stored_state(&fixture).await, "drafting");
+
+    std::fs::write(handoff_directory(&fixture).join("drafted"), "").unwrap();
+
+    fixture
+        .until(|view| (view.state == "checking").then_some(()))
+        .await;
+    assert_eq!(stored_state(&fixture).await, "checking");
+
+    std::fs::write(handoff_directory(&fixture).join("checked"), "").unwrap();
+
+    let view = fixture
+        .until(|view| (view.state == "done").then(|| view.clone()))
+        .await;
+    assert_eq!(stored_state(&fixture).await, "done");
+    assert_eq!(
+        entered(&view),
+        ["drafting", "checking", "done"],
+        "each move on the Timeline, in order"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&ran).unwrap(),
+        "drafting\nchecking\n",
+        "one session per state, each told which it is",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped: {:?}",
+        notices(&view)
+    );
+}
+
+/// A server that comes back up while a plugin's Process is in a declared
+/// state enters that state's Activity again, and the Conversation carries on
+/// from there.
+#[tokio::test]
+async fn a_restart_carries_a_plugins_process_on_from_the_state_it_was_in() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = two_steps_stub(spill.path(), ": > /tmp/verkstead/done", "");
+    let ran = spill.path().join("ran");
+    let again = two_steps_stub(spill.path(), "", ": > /tmp/verkstead/done-again");
+    let fixture = two_steps(spill, &stub).await;
+
+    fixture
+        .until(|view| (view.state == "checking").then_some(()))
+        .await;
+    let deadline = Instant::now() + *PATIENCE;
+    while std::fs::read_to_string(&ran).unwrap_or_default() != "drafting\nchecking\n" {
+        assert!(Instant::now() < deadline, "the checking session never ran");
+        pause(Duration::from_millis(25)).await;
+    }
+
+    // A second server over the same database: nothing drives the
+    // Conversation as far as it is concerned, and its own sessions signal
+    // through a marker of their own, posted to it here.
+    let restarted = fixture.restarted(&again, PULL_REQUEST).await;
+    let marker = handoff_directory(&fixture).join("done-again");
+    let deadline = Instant::now() + *PATIENCE;
+    while !marker.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the restart never entered checking again"
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+    let (status, said) = fetch(
+        &restarted,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/conversations/{}/api/v1/done", fixture.id))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    let view = fixture
+        .until(|view| (view.state == "done").then(|| view.clone()))
+        .await;
+    assert_eq!(
+        std::fs::read_to_string(&ran).unwrap(),
+        "drafting\nchecking\nchecking\n",
+        "the state it was in entered again, and the one before it not",
+    );
+    assert_eq!(entered(&view), ["drafting", "checking", "done"]);
+}
+
+/// An Outcome a plugin's Process maps to `stopped` leaves the Conversation
+/// Stopped in the state it was in, with a Notice saying what the Activity
+/// ended in; Resume enters that state again.
+#[tokio::test]
+async fn an_outcome_mapped_to_stopped_stops_it_where_it_stands_until_resumed() {
+    let spill = tempfile::tempdir().unwrap();
+    let once = spill.path().join("once");
+    let stub = two_steps_stub(
+        spill.path(),
+        ": > /tmp/verkstead/done",
+        &format!(
+            "if [ ! -f {once} ]; then : > {once}; exit 0; fi\n: > /tmp/verkstead/done",
+            once = once.display()
+        ),
+    );
+    let ran = spill.path().join("ran");
+    let fixture = two_steps(spill, &stub).await;
+
+    let stopped = fixture.stopped().await;
+    assert!(
+        stopped.html.contains("ended in <code>refused</code>"),
+        "the Notice says what the Activity ended in: {:?}",
+        stopped.html,
+    );
+    let view = fixture.view().await;
+    assert_eq!(view.state, "checking");
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let view = fixture
+        .until(|view| (view.state == "done").then(|| view.clone()))
+        .await;
+    assert_eq!(
+        std::fs::read_to_string(&ran).unwrap(),
+        "drafting\nchecking\nchecking\n",
+        "Resume entered checking again",
+    );
+    assert_eq!(entered(&view), ["drafting", "checking", "done"]);
+}
+
+/// A Conversation on *Two steps* — whose manifest marks neither state as
+/// taking a steer — is offered Close alone on its Steer form, and a steer
+/// naming either state, or one of Verkstead's own, is refused naming it.
+#[tokio::test]
+async fn a_process_with_no_steerable_state_offers_close_alone() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = two_steps_stub(spill.path(), "", "");
+    let fixture = two_steps(spill, &stub).await;
+
+    let view = fixture
+        .until(|view| (view.state == "drafting").then(|| view.clone()))
+        .await;
+    let rows: Vec<_> = view
+        .steer_rows
+        .iter()
+        .map(|row| (row.target, row.word.as_str()))
+        .collect();
+    assert_eq!(rows, [(verkstead_render::SteerTarget::Close, "Close")]);
+
+    fixture.steer().await;
+    for (target, state, named) in [
+        ("Declared", Some("checking"), "checking"),
+        ("Declared", Some("nowhere"), "nowhere"),
+        ("Wrapping", None, "wrapping"),
+    ] {
+        let refused: ConversationSteered = post(
+            &fixture.app,
+            &format!("/api/ui/conversations/{}/steer/submit", fixture.id),
+            &serde_json::json!({ "target": target, "state": state, "interrupt": false }),
+        )
+        .await;
+        assert_eq!(
+            refused,
+            ConversationSteered::NotSteerable {
+                state: named.to_owned()
+            },
+            "{target} {state:?}"
+        );
+    }
+    assert_eq!(
+        stored_state(&fixture).await,
+        "drafting",
+        "and nothing moved"
+    );
+
+    // And Close, which is Verkstead's: the ordinary Close, made from the form.
+    let closed: ConversationSteered = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/steer/submit", fixture.id),
+        &serde_json::json!({ "target": "Close", "interrupt": true }),
+    )
+    .await;
+    assert_eq!(closed, ConversationSteered::Steered);
+    let view = fixture.view().await;
+    assert_eq!(view.state, "closed");
+    assert!(view.pending_steer.is_none(), "the form went with it");
+}
+
+/// *Two steps* with a third state, `asking`, marked as a detour that takes a
+/// steer with the brief kind `brief`, over the One session Activity expecting
+/// the evidence `evidence` of its session.
+fn asking(brief: &str, evidence: &str) -> String {
+    format!(
+        "\x20     - id: asking\n\
+         \x20       word: Asking\n\
+         \x20       activity: one-session\n\
+         \x20       options: {{ skill: verkstead/instruction, prompt: Answer the question., evidence: {evidence} }}\n\
+         \x20       steer: {{ brief: {brief} }}\n\
+         \x20       detour: true\n"
+    )
+}
+
+/// A stub for *Two steps* with `asking`: drafting waits on its marker,
+/// asking writes the prompt it was given to `{spill}/asked` and signals at
+/// once, and each appends which it is to `{spill}/ran`.
+fn asking_stub(spill: &Path) -> String {
+    format!(
+        r#"case "$2" in
+*'Draft the change.'*) echo drafting >> {ran}
+while [ ! -f /tmp/verkstead/drafted ]; do sleep 0.05; done
+: > /tmp/verkstead/done
+;;
+*'Answer the question.'*) echo asking >> {ran}
+printf '%s' "$2" > {asked}
+: > /tmp/verkstead/done
+;;
+*'Check the change.'*) echo checking >> {ran}
+;;
+esac
+while :; do sleep 1; done"#,
+        ran = spill.join("ran").display(),
+        asked = spill.join("asked").display(),
+    )
+}
+
+/// A steer into a declared detour runs its Activity with what the human
+/// wrote under it, and once that Activity ends the Conversation goes back to
+/// the state it was steered from — whose Activity is entered again.
+#[tokio::test]
+async fn a_steer_into_a_detour_returns_to_the_state_it_left() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = asking_stub(spill.path());
+    let ran = spill.path().join("ran");
+    let asked = spill.path().join("asked");
+    let fixture = two_steps_with(spill, &stub, &asking("instruction", "nothing")).await;
+
+    let view = fixture
+        .until(|view| (view.state == "drafting").then(|| view.clone()))
+        .await;
+    let rows: Vec<_> = view
+        .steer_rows
+        .iter()
+        .map(|row| {
+            (
+                row.target,
+                row.state.as_deref(),
+                row.word.as_str(),
+                row.brief,
+                row.detour,
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (
+                verkstead_render::SteerTarget::Declared,
+                Some("asking"),
+                "Asking",
+                verkstead_render::SteerBrief::Instruction,
+                true
+            ),
+            (
+                verkstead_render::SteerTarget::Close,
+                None,
+                "Close",
+                verkstead_render::SteerBrief::None,
+                false
+            ),
+        ]
+    );
+    let deadline = Instant::now() + *PATIENCE;
+    while std::fs::read_to_string(&ran).unwrap_or_default() != "drafting\n" {
+        assert!(Instant::now() < deadline, "the drafting session never ran");
+        pause(Duration::from_millis(25)).await;
+    }
+
+    fixture.steer().await;
+    let steered: ConversationSteered = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/steer/submit", fixture.id),
+        &serde_json::json!({
+            "target": "Declared",
+            "state": "asking",
+            "interrupt": true,
+            "instruction": "Find where the counter lives.",
+        }),
+    )
+    .await;
+    assert_eq!(steered, ConversationSteered::Steered);
+
+    let deadline = Instant::now() + *PATIENCE;
+    while std::fs::read_to_string(&ran).unwrap_or_default() != "drafting\nasking\ndrafting\n" {
+        assert!(
+            Instant::now() < deadline,
+            "the detour never went back to drafting: {:?}",
+            std::fs::read_to_string(&ran)
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+    let view = fixture
+        .until(|view| (view.state == "drafting").then(|| view.clone()))
+        .await;
+    assert_eq!(entered(&view), ["drafting", "asking", "drafting"]);
+    let prompt = std::fs::read_to_string(&asked).unwrap();
+    assert!(
+        prompt.contains("# What I want done") && prompt.contains("Find where the counter lives."),
+        "the detour's session was started on what was written: {prompt}"
+    );
+    assert!(
+        notices(&view)
+            .iter()
+            .all(|notice| !notice.contains("ended in")),
+        "and nothing stopped: {:?}",
+        notices(&view)
+    );
+}
+/// *Two steps* with a third state, `probing`, marked as a detour over the
+/// **Follow-up rounds** Activity expecting an investigation's evidence.
+///
+/// Which is the one shape of detour whose session may leave scratch behind:
+/// an investigation's evidence is the only kind whose Done signal is given
+/// over uncommitted changes rather than refused by them, and it ends on the
+/// human's Nothing-else mark — see [`verkstead_server::done::Evidence`].
+fn probing() -> String {
+    "\x20     - id: probing\n\
+     \x20       word: Probing\n\
+     \x20       activity: follow-up-rounds\n\
+     \x20       options: { skill: verkstead/investigating, evidence: investigated }\n\
+     \x20       steer: { brief: question }\n\
+     \x20       detour: true\n"
+        .to_owned()
+}
+
+/// A stub for *Two steps* with `probing`: drafting waits on its marker, and
+/// the detour's session writes probes into the checkout and leaves every one
+/// of them where it wrote them — modified, staged and untracked — puts its
+/// round, and says it is done once the human has answered it.
+///
+/// Which is what a detour's session is for: find something out by writing and
+/// running whatever it takes, and commit none of it. Each appends which it is
+/// to `{spill}/ran`.
+fn probing_stub(spill: &Path) -> String {
+    format!(
+        r#"SAYING='finding it out'
+case "$2" in
+*'Draft the change.'*) echo drafting >> {ran}
+while [ ! -f /tmp/verkstead/drafted ]; do sleep 0.05; done
+: > /tmp/verkstead/done
+;;
+*'Check the change.'*) echo checking >> {ran}
+;;
+*) echo probing >> {ran}
+printf 'a probe\n' >> README.md
+printf 'staged\n' > probe.md
+git add probe.md
+printf 'stray\n' > scratch.md
+printf '%s\n' "$SAYING"
+{WHILE_NOBODY_HAS_ASKED}
+while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done
+: > /tmp/verkstead/done
+;;
+esac
+while :; do sleep 1; done"#,
+        ran = spill.join("ran").display(),
+    )
+}
+
+/// **A declared detour's scratch comes out of the checkout when it ends**, as
+/// an investigation's does — the same rule and the same function, reached from
+/// the engine rather than from the host's Follow-up rounds: what the steer
+/// found is read at the submit and written down beside its Event, and
+/// everything the detour's session left that the record does not name is taken
+/// back out after the move and before the state it goes back to is worked in.
+///
+/// The point is the state it returns to. `drafting` hands the checkout to
+/// sessions that commit and push, and each opens its commit step with
+/// `git add -A` — so a probe left lying there is a probe on a pull request, and
+/// a session that did not commit it would have its own Done signal refused over
+/// a file it never wrote.
+#[tokio::test]
+async fn a_declared_detour_leaves_its_scratch_out_of_the_checkout() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = probing_stub(spill.path());
+    let ran = spill.path().join("ran");
+    let fixture = two_steps_with(spill, &stub, &probing()).await;
+
+    let view = fixture
+        .until(|view| (view.state == "drafting").then(|| view.clone()))
+        .await;
+    let worktree = PathBuf::from(
+        view.worktree
+            .expect("a Conversation drafting is checked out")
+            .path,
+    );
+
+    let deadline = Instant::now() + *PATIENCE;
+    while std::fs::read_to_string(&ran).unwrap_or_default() != "drafting\n" {
+        assert!(Instant::now() < deadline, "the drafting session never ran");
+        pause(Duration::from_millis(25)).await;
+    }
+
+    // What the human had already left uncommitted when the question was asked,
+    // which is what the record names and what stays: a note of their own, and a
+    // tracked file they were part way through that the detour writes to as well.
+    std::fs::write(worktree.join("half-done.md"), "a note to self\n").unwrap();
+    let readme = worktree.join("README.md");
+    let mut already = std::fs::read_to_string(&readme).unwrap_or_default();
+    already.push_str("a line the human had already written\n");
+    std::fs::write(&readme, &already).unwrap();
+
+    fixture.steer().await;
+    let steered: ConversationSteered = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/steer/submit", fixture.id),
+        &serde_json::json!({
+            "target": "Declared",
+            "state": "probing",
+            "interrupt": true,
+            "investigation": "Where does the counter live?",
+        }),
+    )
+    .await;
+    assert_eq!(steered, ConversationSteered::Steered);
+
+    // The round the detour's session puts, and the human ending it: the mark is
+    // what an investigation's evidence waits on, so nothing is done until it
+    // is given.
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let deadline = Instant::now() + *PATIENCE;
+    while std::fs::read_to_string(&ran).unwrap_or_default() != "drafting\nprobing\ndrafting\n" {
+        if Instant::now() >= deadline {
+            let view = fixture.view().await;
+            panic!(
+                "the detour never went back to drafting: {:?} state={:?} notices={:?}",
+                std::fs::read_to_string(&ran),
+                view.state,
+                notices(&view),
+            );
+        }
+        pause(Duration::from_millis(25)).await;
+    }
+
+    // Waited for rather than read off the move: the tidying comes after it and
+    // is meant to, so a view reading `drafting` is not yet a checkout put back,
+    // and the probes go one path at a time.
+    let scratch = until_tidied(&worktree).await;
+
+    assert!(
+        !worktree.join("probe.md").exists() && !worktree.join("scratch.md").exists(),
+        "and gone off the disk rather than only out of the index: {scratch:?}",
+    );
+    assert!(
+        scratch.contains("half-done.md"),
+        "the note they had left themselves is still there: {scratch:?}",
+    );
+    assert!(
+        std::fs::read_to_string(&readme)
+            .unwrap()
+            .contains("a line the human had already written"),
+        "and the line they had written is still in the file the detour wrote to \
+         as well, the record holding paths rather than contents",
+    );
+}
+
+/// A declared state whose brief is a question takes the question in the
+/// field Investigating takes it in: refused without one, and with one its
+/// session is started on it.
+#[tokio::test]
+async fn a_declared_question_is_required_and_reaches_the_activity() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = asking_stub(spill.path());
+    let asked = spill.path().join("asked");
+    let fixture = two_steps_with(spill, &stub, &asking("question", "nothing")).await;
+
+    fixture
+        .until(|view| (view.state == "drafting").then_some(()))
+        .await;
+    fixture.steer().await;
+
+    let submit = |investigation: Option<&str>| {
+        let body = serde_json::json!({
+            "target": "Declared",
+            "state": "asking",
+            "interrupt": true,
+            "investigation": investigation,
+        });
+        let app = fixture.app.clone();
+        let uri = format!("/api/ui/conversations/{}/steer/submit", fixture.id);
+        async move { post::<ConversationSteered>(&app, &uri, &body).await }
+    };
+    assert_eq!(
+        submit(Some("  ")).await,
+        ConversationSteered::NoInvestigationBrief
+    );
+    assert_eq!(
+        submit(Some("Does it count the 429s?")).await,
+        ConversationSteered::Steered
+    );
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !asked.exists() {
+        if Instant::now() >= deadline {
+            let view = fixture.view().await;
+            panic!(
+                "the question's session never ran: {:?} {:?} {:?}",
+                view.state,
+                notices(&view),
+                entered(&view)
+            );
+        }
+        pause(Duration::from_millis(25)).await;
+    }
+    let prompt = std::fs::read_to_string(&asked).unwrap();
+    assert!(
+        prompt.contains("# What I want found out") && prompt.contains("Does it count the 429s?"),
+        "{prompt}"
+    );
+}
+
+/// The uuid of the fixture plugin providing the Process *Sketching*, whose
+/// three roles are its own and whose building role is none of Verkstead's.
+const SKETCHING: &str = "9c2d7a51-3e6b-4f08-9a1c-5d4e2b7f0a63";
+
+/// Install a plugin providing the Process *Sketching*: three roles of its own
+/// — `sketching`, which it marks as building, `drawing` and `checking` — over
+/// two states, each a One session registered as building.
+///
+/// The `sketched` state runs under the building role and the `checked` state
+/// under one that is not, which is the whole of what the Memo and preview gate
+/// turns on (Set 1765, Q26). `drawing` is declared and run nowhere: a role a
+/// Process declares is a picker the press waits on whether or not a state names
+/// it.
+async fn installing_sketching(app: &axum::Router, elsewhere: &std::path::Path) {
+    let plugin = elsewhere.join("sketching");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(
+        plugin.join("plugin.yaml"),
+        format!(
+            "uuid: {SKETCHING}\n\
+             name: Sketching\n\
+             author:\n  name: Grace Hopper\n  email: grace@example.com\n\
+             version: 1.0.0\n\
+             interface: 1\n\
+             dependencies:\n\
+             \x20 - uuid: d7a5e719-8491-46a7-b7d7-8f9f85e57bd6\n\
+             \x20   name: Activities\n\
+             \x20   author:\n      name: Tobias Cohen\n      email: tobi@tobico.net\n\
+             \x20   version: ^0.1\n\
+             \x20 - uuid: 15447a8d-f28d-4573-8b8b-a7226d477755\n\
+             \x20   name: Verkstead\n\
+             \x20   author:\n      name: Tobias Cohen\n      email: tobi@tobico.net\n\
+             \x20   version: ^0.1\n\
+             provides:\n\
+             \x20 - category: process\n\
+             \x20   id: sketching\n\
+             \x20   name: Sketching\n\
+             \x20   description: Sketch it, then have it looked at.\n\
+             \x20   roles:\n\
+             \x20     - {{ name: sketching, label: Sketching, building: true }}\n\
+             \x20     - {{ name: drawing, label: Drawing }}\n\
+             \x20     - {{ name: checking, label: Checking }}\n\
+             \x20   states:\n\
+             \x20     - id: sketched\n\
+             \x20       word: Sketched\n\
+             \x20       activity: one-session\n\
+             \x20       roles: [sketching]\n\
+             \x20       options: {{ skill: verkstead/instruction, prompt: Sketch it., evidence: nothing, building: finish }}\n\
+             \x20     - id: checked\n\
+             \x20       word: Checked\n\
+             \x20       activity: one-session\n\
+             \x20       roles: [checking]\n\
+             \x20       options: {{ skill: verkstead/instruction, prompt: Check it., evidence: nothing, building: finish }}\n\
+             \x20   transitions:\n\
+             \x20     sketched: {{ done: checked, refused: stopped }}\n\
+             \x20     checked: {{ done: done, refused: stopped }}\n\
+             capabilities: []\n"
+        ),
+    )
+    .unwrap();
+
+    let consent: verkstead_render::PluginConsent = post(
+        app,
+        "/api/ui/plugins/read",
+        &serde_json::json!({ "source": plugin }),
+    )
+    .await;
+    let view: verkstead_render::PluginsView = post(
+        app,
+        "/api/ui/plugins",
+        &serde_json::json!({ "source": plugin, "granted": consent.capabilities }),
+    )
+    .await;
+    let row = view
+        .installed
+        .iter()
+        .find(|row| row.uuid == SKETCHING)
+        .expect("the plugin is listed");
+    assert_eq!(row.trouble, None, "and loads: {row:?}");
+}
+
+/// A Conversation on *Sketching*, picked for each of its three roles, briefed
+/// and started — plus the Repo it is on, for the memory the start writes.
+async fn sketching(spill: tempfile::TempDir, stub: &str) -> (Grilling, i64) {
+    let bench = bench_at_pace(spill, stub, PULL_REQUEST, *BRISKLY, None).await;
+    let app = bench.app.clone();
+
+    installing_sketching(&app, bench.elsewhere.path()).await;
+
+    let started: Started = post(
+        &app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    let picked: ProcessPicked = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/process"),
+        &serde_json::json!({ "process": { "plugin": SKETCHING, "id": "sketching" } }),
+    )
+    .await;
+    assert_eq!(picked, ProcessPicked::Picked);
+
+    // Every role it declares, by the name it declares it under: none of the
+    // three is one Verkstead knows, and each is a picker the press waits on.
+    bench
+        .paired(id, &["sketching", "drawing", "checking"])
+        .await;
+
+    let saved: BriefSaved = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": BRIEF }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    let start: GrillingStarted = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/grill"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(start, GrillingStarted::Started);
+
+    let repo_id = bench.repo_id;
+
+    (bench.holding(id), repo_id)
+}
+
+/// A stub for *Sketching*, the shape [`two_steps_stub`] has: it runs
+/// `sketched` or `checked` for whichever state's session it is, and then idles.
+fn sketching_stub(sketched: &str, checked: &str) -> String {
+    format!(
+        r#"case "$2" in
+*'Sketch it.'*)
+{sketched}
+;;
+*'Check it.'*)
+{checked}
+;;
+esac
+while :; do sleep 1; done"#
+    )
+}
+
+/// Which roles a Conversation's **Agent** control draws a picker for, and what
+/// each is labelled: the Process's own, in the order its manifest writes them.
+///
+/// One role is a flat dropdown and more a panel, which is the viewer's reading
+/// of how many there are — see `ROLES` in `web/src/workbench/processes.ts`. The
+/// list and its labels are what this says.
+#[tokio::test]
+async fn the_roles_a_conversation_is_run_under_are_its_processs_own() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = sketching_stub("", "");
+    let (fixture, _) = sketching(spill, &stub).await;
+
+    let view = fixture.view().await;
+    let drawn = |roles: &[verkstead_render::RolePairingView]| {
+        roles
+            .iter()
+            .map(|role| (role.role.clone(), role.label.clone(), role.building))
+            .collect::<Vec<_>>()
+    };
+    let three = [
+        ("sketching".to_owned(), "Sketching".to_owned(), true),
+        ("drawing".to_owned(), "Drawing".to_owned(), false),
+        ("checking".to_owned(), "Checking".to_owned(), false),
+    ];
+
+    assert_eq!(
+        drawn(&view.pairings),
+        three,
+        "three roles of the Process's own, labelled as its manifest labels them",
+    );
+    assert!(
+        view.pairings
+            .iter()
+            .all(|role| matches!(role.picked, PickedView::Under(_))),
+        "each with the Pairing picked for it: {:?}",
+        view.pairings,
+    );
+
+    // And the Process's own entry says the same, which is what the composer
+    // draws its pickers off before there is a Conversation on it.
+    let processes: Vec<verkstead_render::ProcessEntry> =
+        get(&fixture.app, "/api/ui/processes").await;
+    let entry = |plugin: &str| {
+        processes
+            .iter()
+            .find(|entry| entry.plugin == plugin)
+            .unwrap_or_else(|| panic!("{plugin} is listed"))
+            .roles
+            .iter()
+            .map(|role| (role.role.clone(), role.label.clone(), role.building))
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(entry(SKETCHING), three);
+
+    // Against a Process of one role, which is the other shape the control
+    // takes: one picker, and no panel over it. Develop's is the three
+    // Verkstead knows, in the order its manifest writes them.
+    assert_eq!(
+        entry(verkstead_server::plugins::built_in::INVESTIGATE),
+        [(
+            "implementation".to_owned(),
+            "Implementation".to_owned(),
+            true
+        )],
+    );
+    assert_eq!(
+        entry(verkstead_server::plugins::built_in::DEVELOP),
+        [
+            ("grilling".to_owned(), "Grilling".to_owned(), false),
+            (
+                "implementation".to_owned(),
+                "Implementation".to_owned(),
+                true
+            ),
+            ("review".to_owned(), "Review".to_owned(), false),
+        ],
+    );
+}
+
+/// A role name nobody has used before is remembered against the Repo once a
+/// Conversation is started under it, exactly as the three Verkstead knows are:
+/// the next Conversation on that Repo arrives with it prefilled.
+#[tokio::test]
+async fn a_role_nobody_has_used_before_is_remembered_against_the_repo() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = sketching_stub("", "");
+    let (fixture, repo_id) = sketching(spill, &stub).await;
+
+    let remembered: verkstead_render::RepoPairingsView =
+        get(&fixture.app, &format!("/api/ui/repos/{repo_id}/pairings")).await;
+
+    for role in ["sketching", "drawing", "checking"] {
+        let pairing = remembered
+            .under(role)
+            .unwrap_or_else(|| panic!("the Repo remembers the {role} role: {remembered:?}"));
+
+        assert_eq!(
+            pairing.profile.name.as_deref(),
+            Some(role),
+            "under the account that role was grilled with",
+        );
+        assert_eq!(
+            pairing.model.as_deref(),
+            Some(format!("claude-{role}-5").as_str()),
+        );
+    }
+}
+
+/// Only the building role's session may leave a Memo or suggest a preview, and
+/// the building role is the Process's: a session the `sketched` state launches
+/// may, and one the `checked` state launches is refused — on a Process whose
+/// building role is not `implementation`.
+#[tokio::test]
+async fn a_memo_is_the_building_roles_session_whichever_role_that_is() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = sketching_stub(
+        "while [ ! -f /tmp/verkstead/sketched ]; do sleep 0.05; done\n: > /tmp/verkstead/done",
+        "",
+    );
+    let (fixture, _) = sketching(spill, &stub).await;
+
+    fixture
+        .until(|view| (view.state == "sketched").then_some(()))
+        .await;
+
+    let (status, body) = until_a_memo(&fixture, "The stub idles", StatusCode::OK).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the building role's session: {body}"
+    );
+    assert_eq!(memos(&fixture).await.len(), 1, "and it lands");
+
+    let (status, body) = suggest_a_preview(&fixture, "Try it", "cargo run\n").await;
+    assert_eq!(status, StatusCode::OK, "and so may its preview: {body}");
+
+    // On to the state that runs under a role the Process does not mark as
+    // building, where the same two are refused.
+    std::fs::write(handoff_directory(&fixture).join("sketched"), "").unwrap();
+    fixture
+        .until(|view| (view.state == "checked").then_some(()))
+        .await;
+
+    let (status, body) = until_a_memo(&fixture, "Looks fine", StatusCode::CONFLICT).await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "refused: {body}");
+    let said = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        said.contains("only a building session may leave a memo"),
+        "naming the rule: {body}",
+    );
+    assert_eq!(
+        memos(&fixture).await.len(),
+        1,
+        "and nothing lands beside the one the building role left",
+    );
+
+    let (status, body) = suggest_a_preview(&fixture, "Try it again", "cargo test\n").await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "and nor may its preview: {body}"
+    );
+}
+
+/// Leave a Memo until the server answers `wanted`, or until the patience runs
+/// out — and hand back whatever it last answered.
+///
+/// A state is entered before the session its Activity launches is running, so a
+/// memo pressed the moment the card changes is refused as *there is no session
+/// running*: the refusal this is waiting for is the one about the role, which
+/// only a session can be refused.
+async fn until_a_memo(fixture: &Grilling, title: &str, wanted: StatusCode) -> (StatusCode, String) {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let answered = leave_a_memo(fixture, title, "Nothing to raise.\n").await;
+
+        if answered.0 == wanted || Instant::now() >= deadline {
+            return answered;
+        }
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
+/// The uuid of the design Process's fixture plugin, `plugins/tests/design` —
+/// the manifest and two skills the repository holds, read from the checkout
+/// the way a human installs a local plugin.
+const DESIGN: &str = "0a31fe70-efc0-46eb-86a7-3df4b4fa69b6";
+
+/// Install it, through the presses the Plugins page makes.
+///
+/// From the checkout rather than written into a temporary directory: this one
+/// is the stage's acceptance test, so what runs has to be the plugin that is
+/// in the repository and passes `verkstead plugin check` there — see
+/// `crates/cli/tests/suite/plugin.rs`. A local plugin is read in place and
+/// nothing of it is copied, so the install writes nothing into it.
+async fn installing_design(app: &axum::Router) -> std::path::PathBuf {
+    let plugin = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../plugins/tests/design")
+        .canonicalize()
+        .expect("the design fixture plugin is in the checkout");
+
+    let consent: verkstead_render::PluginConsent = post(
+        app,
+        "/api/ui/plugins/read",
+        &serde_json::json!({ "source": plugin }),
+    )
+    .await;
+    assert!(
+        consent.capabilities.is_empty(),
+        "it asks for nothing: {consent:?}"
+    );
+
+    let view: verkstead_render::PluginsView = post(
+        app,
+        "/api/ui/plugins",
+        &serde_json::json!({ "source": plugin, "granted": consent.capabilities }),
+    )
+    .await;
+    let row = view
+        .installed
+        .iter()
+        .find(|row| row.uuid == DESIGN)
+        .expect("the plugin is listed");
+    assert_eq!(row.trouble, None, "and loads: {row:?}");
+
+    plugin
+}
+
+/// A Conversation on the design Process, with an MCP server and the plugin's
+/// own Skill Pack attached, briefed and started through the presses the
+/// composer makes.
+///
+/// Its building role is `design`, which Verkstead has never heard of, and its
+/// `review` role is answered with the row that runs no session — a picture is
+/// not a branch to read, which is what the manifest marks `away` for.
+async fn designing(spill: tempfile::TempDir, stub: &str) -> Grilling {
+    let bench = bench_at_pace(spill, stub, &gh_about(GREEN, "", ""), *BRISKLY, None).await;
+    let app = bench.app.clone();
+
+    installing_design(&app).await;
+
+    let started: Started = post(
+        &app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    let picked: ProcessPicked = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/process"),
+        &serde_json::json!({ "process": { "plugin": DESIGN, "id": "design" } }),
+    )
+    .await;
+    assert_eq!(picked, ProcessPicked::Picked);
+
+    bench.paired(id, &["design"]).await;
+    bench.unreviewed(id).await;
+
+    // The MCP server the pictures are made through, declared on the settings
+    // page and then picked off the Attach menu — and the plugin's own pack
+    // beside it, which is how a session comes to be able to read the skill the
+    // Process names (ADR-0030, *Skill packs*).
+    std::fs::write(
+        bench.state.path().join("config.yaml"),
+        format!("{THE_AUTHOR}mcp_servers:\n  - name: modeller\n    url: https://mcp.example.com/modeller\n"),
+    )
+    .unwrap();
+
+    let attached: ServerAttached = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/mcp-servers/modeller"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(attached, ServerAttached::Attached);
+
+    let attached: verkstead_render::PackAttached = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/skill-packs/design"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(attached, verkstead_render::PackAttached::Attached);
+
+    let saved: BriefSaved = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": BRIEF }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    let start: GrillingStarted = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/grill"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(start, GrillingStarted::Started);
+
+    bench.holding(id)
+}
+
+/// What a session started under one of the pack's skills is told to read, which
+/// is the opening line `crate::skills::declared` writes over the documents.
+const DRAWING: &str = "Read /verkstead/skills/design/drawing/SKILL.md and do what it says.";
+const EXPORTING: &str = "Read /verkstead/skills/design/exporting/SKILL.md and do what it says.";
+
+/// A stub for the design Process: it writes every prompt it is started on into
+/// `prompts`, and runs whichever of the three sessions this one is.
+///
+/// Which it is, is read off the **opening line** of the prompt rather than off
+/// the skill's path anywhere in it: an attached pack is listed to every session
+/// of the Conversation with each of its skills' paths, so the paths of both of
+/// these are in all three prompts and only the line that says *read this one*
+/// tells them apart.
+fn design_stub(prompts: &Path) -> String {
+    format!(
+        r#"printf '%s\n=====\n' "$2" >> {prompts}
+case "$2" in
+*'Read /verkstead/skills/design/drawing/SKILL.md and'*)
+    printf 'a cube, 40mm\n' >> cube.scad
+    git add -A
+    git commit --quiet -m 'feat: draw the cube'
+    SAYING='drawing it'
+    printf '%s\n' "$SAYING"
+    {WHILE_NOBODY_HAS_ASKED}
+    while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done
+    printf 'nothing else then\n'
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+*'Read /verkstead/skills/design/exporting/SKILL.md and'*)
+    printf 'solid cube\n' >> cube.stl
+    git add -A
+    git commit --quiet -m 'feat: export the cube'
+    : > /tmp/verkstead/done
+    printf 'exported it\n'
+    sleep 300
+    ;;
+*submitting/SKILL.md*)
+    printf 'the branch is pushed and the pull request is open\n'
+    ;;
+*)
+    printf 'nothing asked of this session\n'
+    ;;
+esac
+"#,
+        prompts = quoted(prompts),
+    )
+}
+
+/// The human's design Process, as a plugin that names nothing but the
+/// Activities Verkstead ships and a Skill Pack of its own: a Conversation on
+/// it runs its drawing rounds under that skill, then the export, then the
+/// wrap-up, to Done.
+///
+/// The stage's acceptance test, and the whole of what it is for: no state of
+/// this Process is one Verkstead words, no role of it is one Verkstead knows,
+/// its rounds run under a skill out of its own pack with an MCP server the
+/// human attached, and there is no code anywhere about any of it — the plugin
+/// is `plugins/tests/design`, a manifest and two `SKILL.md` files.
+#[tokio::test]
+async fn a_conversation_on_the_design_process_draws_exports_and_wraps_up_to_done() {
+    let spill = tempfile::tempdir().unwrap();
+    let prompts = spill.path().join("prompts");
+    let stub = design_stub(&prompts);
+    let fixture = designing(spill, &stub).await;
+
+    // Start enters the first state the manifest declares, worded as it words
+    // it rather than as Verkstead would.
+    let view = fixture
+        .until(|view| (view.state == "rounds").then(|| view.clone()))
+        .await;
+    assert_eq!(view.process.plugin, DESIGN);
+
+    // And every word drawn about it is the manifest's: its states, in the order
+    // it declares them, and its roles under the labels it labels them with.
+    let processes: Vec<verkstead_render::ProcessEntry> =
+        get(&fixture.app, "/api/ui/processes").await;
+    let entry = processes
+        .iter()
+        .find(|entry| entry.plugin == DESIGN)
+        .expect("the design Process is listed");
+
+    assert_eq!(entry.name, "Design");
+    assert_eq!(
+        entry
+            .states
+            .iter()
+            .map(|state| (state.id.as_str(), state.word.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("rounds", "Drawing"),
+            ("export", "Exporting"),
+            ("wrapping", "Wrapping"),
+        ],
+    );
+    assert_eq!(
+        entry
+            .roles
+            .iter()
+            .map(|role| (role.role.as_str(), role.label.as_str(), role.building))
+            .collect::<Vec<_>>(),
+        [("design", "Design", true), ("review", "Review", false)],
+        "a building role Verkstead has never heard of, and a review it may run without",
+    );
+
+    // The rounds session is started under the plugin's own skill, at the path
+    // its pack is mounted at — which is what waiting for that line proves —
+    // and with the server the human attached to make the pictures through.
+    let said = fixture
+        .until(|_| {
+            std::fs::read_to_string(&prompts)
+                .ok()
+                .filter(|said| said.contains(DRAWING))
+        })
+        .await;
+    assert!(
+        said.contains("# MCP servers") && said.contains("- `modeller`"),
+        "and the server the human attached is named to it: {said}"
+    );
+    assert!(
+        said.contains("- `design`\n  - `design/drawing`"),
+        "with the pack it came out of listed beside it: {said}"
+    );
+
+    // The round goes to the human, and the mark beside the comment box is what
+    // says the drawing is over.
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    // The rounds committed, so the transition the manifest writes for
+    // `committed` is followed: the export, under the pack's other skill.
+    fixture
+        .until(|view| (view.state == "export").then_some(()))
+        .await;
+
+    fixture
+        .until(|_| {
+            std::fs::read_to_string(&prompts)
+                .ok()
+                .filter(|said| said.contains(EXPORTING))
+        })
+        .await;
+
+    // Its Done signal lands it in the wrap-up, which opens the pull request
+    // and sees it out — nothing to review, green checks, nothing said — and
+    // `settled` is Done.
+    fixture
+        .until(|view| (view.state == "wrapping").then_some(()))
+        .await;
+
+    let view = fixture
+        .until(|view| (view.state == "done").then(|| view.clone()))
+        .await;
+
+    assert_eq!(
+        entered(&view),
+        ["rounds", "export", "wrapping", "done"],
+        "the states its manifest declares, in the order it declares them",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped along the way: {:?}",
+        notices(&view),
+    );
+    assert!(
+        pull_request(&view).is_some(),
+        "the wrap-up's pull request is pinned to it: {:?}",
+        view.pinned,
+    );
 }

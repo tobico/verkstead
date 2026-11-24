@@ -42,7 +42,7 @@ use anyhow::{Context, Result};
 use sqlx::SqlitePool;
 
 use super::Birth;
-use super::conversations::{Lifecycle, Role};
+use super::conversations::{Role, State};
 
 /// A Conversation as it arrives from the device that was doing the work.
 ///
@@ -71,17 +71,32 @@ pub struct Arrival {
     /// [`super::Conversation::naming`].
     pub naming: bool,
 
-    /// The state the work is in, which is where it goes on from here.
-    pub state: Lifecycle,
+    /// The state the work is in, which is where it goes on from here — the word
+    /// its column holds, read against the Process below (ADR-0030, *Process*).
+    pub state: State,
+
+    /// And which Process that is: the plugin providing it and the id its
+    /// manifest gives it there, which mean the same on every device.
+    ///
+    /// Written rather than left to this device's own default, because what the
+    /// state word means is that manifest's: a copy that landed on Develop's
+    /// reading would be a Conversation drawn and driven as something it is not.
+    /// `None` is a copy from a release that sent none, which keeps whatever
+    /// this device's row already said.
+    pub process: Option<super::Process>,
 
     /// Its **Rank**, verbatim: the key and the Device Id that issued it,
     /// unchanged, so the row sits where it sat in the merged list.
     pub rank: String,
 
-    /// And what each role runs under, as ids of this device's own.
-    pub grilling: ArrivingPicked,
-    pub implementation: ArrivingPicked,
-    pub review: ArrivingPicked,
+    /// And what each role something was settled for runs under, by the name
+    /// the role is declared under, as ids of this device's own.
+    ///
+    /// Whichever roles the sending device had settled something about, rather
+    /// than three: which roles a Conversation has is its Process's to say, and
+    /// a Process a plugin provides may name one nobody here has used — see
+    /// [`Role`].
+    pub pairings: Vec<(Role, ArrivingPicked)>,
 }
 
 /// What one role arrives having settled — [`super::Picked`] with a local
@@ -98,9 +113,9 @@ pub enum ArrivingPicked {
 
     /// It runs no session at all.
     ///
-    /// Grilling and review only: the implementation is the one role that cannot
-    /// be picked away, and a message saying otherwise is written down as it
-    /// arrived rather than argued with.
+    /// Whichever roles the Process offers the row for: a message saying a role
+    /// that is answered with a Pairing or nothing was picked away is written
+    /// down as it arrived rather than argued with.
     Skipped,
 
     /// The Profile and model its sessions run under, the Profile by the uuid
@@ -164,6 +179,7 @@ pub async fn arrive(pool: &SqlitePool, arriving: &Arrival) -> Result<Option<i64>
     // transaction.
     super::births::stamp(&mut tx, id, &arriving.born).await?;
 
+    running(&mut tx, id, arriving).await?;
     settled(&mut tx, id, arriving).await?;
 
     tx.commit().await.context("taking a Conversation in")?;
@@ -269,10 +285,7 @@ pub async fn replace(pool: &SqlitePool, id: i64, arriving: &Arrival) -> Result<R
              rank = ?,
              base_commit = NULL,
              base_ref = NULL,
-             stop_asked_at = NULL,
-             grilling_profile_id = NULL,
-             implementation_profile_id = NULL,
-             review_profile_id = NULL
+             stop_asked_at = NULL
          WHERE id = ?",
     )
     .bind(arriving.repo_id)
@@ -292,7 +305,7 @@ pub async fn replace(pool: &SqlitePool, id: i64, arriving: &Arrival) -> Result<R
     // work is one thing is not this device's to hold an opinion about.
     super::births::stamp_over(&mut tx, id, &arriving.born).await?;
 
-    for table in ["pairing_models", "skipped_roles"] {
+    for table in ["conversation_pairings", "pairing_models", "skipped_roles"] {
         sqlx::query(&format!("DELETE FROM {table} WHERE conversation_id = ?"))
             .bind(id)
             .execute(&mut *tx)
@@ -300,6 +313,7 @@ pub async fn replace(pool: &SqlitePool, id: i64, arriving: &Arrival) -> Result<R
             .with_context(|| format!("letting go of the {table} of Conversation {id}"))?;
     }
 
+    running(&mut tx, id, arriving).await?;
     settled(&mut tx, id, arriving).await?;
 
     tx.commit().await.context("taking a Conversation back in")?;
@@ -307,18 +321,42 @@ pub async fn replace(pool: &SqlitePool, id: i64, arriving: &Arrival) -> Result<R
     Ok(Replacing::Replaced)
 }
 
+/// Which Process it arrived on, written against the row — the other thing
+/// [`arrive`] and [`replace`] do the same way, and for [`settled`]'s reason: a
+/// copy that landed without it would read its state against a Process it is not
+/// on, and be drawn and driven as something it is not.
+///
+/// Nothing where it arrived without one, which is a copy from a release that
+/// sent none: the row keeps what it said, and a fresh one keeps the store's own
+/// default.
+async fn running(tx: &mut sqlx::SqliteConnection, id: i64, arriving: &Arrival) -> Result<()> {
+    let Some(process) = &arriving.process else {
+        return Ok(());
+    };
+
+    sqlx::query(
+        "INSERT INTO processes (conversation_id, process, plugin) VALUES (?, ?, ?)
+         ON CONFLICT (conversation_id)
+             DO UPDATE SET process = excluded.process, plugin = excluded.plugin",
+    )
+    .bind(id)
+    .bind(process.stored())
+    .bind(process.plugin())
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("recording the Process Conversation {id} arrived on"))?;
+
+    Ok(())
+}
+
 /// What each role arrived having settled, written against the row.
 ///
 /// The one thing [`arrive`] and [`replace`] do the same way, and the reason they
-/// do: a Pairing is three writes over two tables and a column, and a copy that
-/// landed having lost one of them would be a Conversation refusing to start or
+/// do: a Pairing is three writes over three tables, and a copy that landed
+/// having lost one of them would be a Conversation refusing to start or
 /// starting a session the human said there was to be none of.
 async fn settled(tx: &mut sqlx::SqliteConnection, id: i64, arriving: &Arrival) -> Result<()> {
-    for (role, picked) in [
-        (Role::Grilling, &arriving.grilling),
-        (Role::Implementation, &arriving.implementation),
-        (Role::Review, &arriving.review),
-    ] {
+    for (role, picked) in &arriving.pairings {
         match picked {
             ArrivingPicked::Nothing => {}
 
@@ -329,21 +367,22 @@ async fn settled(tx: &mut sqlx::SqliteConnection, id: i64, arriving: &Arrival) -
                     .execute(&mut *tx)
                     .await
                     .with_context(|| {
-                        format!("writing down that Conversation {id} runs no {role:?} session")
+                        format!("writing down that Conversation {id} runs no {role} session")
                     })?;
             }
 
             ArrivingPicked::Under { profile_id, model } => {
-                sqlx::query(&format!(
-                    "UPDATE conversations SET {} = ? WHERE id = ?",
-                    role.column(),
-                ))
-                .bind(profile_id)
+                sqlx::query(
+                    "INSERT INTO conversation_pairings (conversation_id, role, profile_id)
+                     VALUES (?, ?, ?)",
+                )
                 .bind(id)
+                .bind(role.stored())
+                .bind(profile_id)
                 .execute(&mut *tx)
                 .await
                 .with_context(|| {
-                    format!("writing down the Profile Conversation {id} runs {role:?} under")
+                    format!("writing down the Profile Conversation {id} runs {role} under")
                 })?;
 
                 // The model where one was paired. A Pairing made before there
@@ -362,7 +401,7 @@ async fn settled(tx: &mut sqlx::SqliteConnection, id: i64, arriving: &Arrival) -
                     .execute(&mut *tx)
                     .await
                     .with_context(|| {
-                        format!("writing down the model Conversation {id} runs {role:?} on")
+                        format!("writing down the model Conversation {id} runs {role} on")
                     })?;
                 }
             }

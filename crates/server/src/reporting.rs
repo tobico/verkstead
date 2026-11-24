@@ -20,9 +20,7 @@
 //! home carries its roadmap on and answers with what it would have said on the
 //! tombstone — which nobody opens — so this copy says it on its own Timeline.
 
-use verkstead_render::{
-    BirthKey, Lifecycle as Drawn, StageAdopting, StageJoined, StageReport, StageReported,
-};
+use verkstead_render::{BirthKey, StageAdopting, StageJoined, StageReport, StageReported};
 use verkstead_schema::Nudge;
 
 use crate::AppState;
@@ -151,7 +149,7 @@ async fn report(state: &AppState, conversation_id: i64) {
             device: away.born.device.clone(),
             id: away.born.id,
         },
-        state: drawn(standing.state),
+        state: drawn(&standing.state),
         done: standing.done,
         wrapped: standing.wrapped,
         stopped: standing.stopped,
@@ -266,7 +264,7 @@ async fn adopting(state: &AppState, conversation_id: i64, home: &str) -> Option<
     })
 }
 
-/// The state as it crosses the link, which is the viewer's word for it.
-fn drawn(state: store::Lifecycle) -> Drawn {
-    crate::ui::lifecycle(state)
+/// The state as it crosses the link: the word the record holds.
+fn drawn(state: &store::State) -> String {
+    state.stored().to_owned()
 }

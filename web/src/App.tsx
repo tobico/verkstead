@@ -20,6 +20,7 @@ import { useReading } from "./freshness";
 import { dress } from "./head";
 import { Empty } from "./notices";
 import { useHarnesses } from "./harnesses";
+import { useProvidedProcesses } from "./workbench/provided";
 import { follow } from "./opened";
 import { listenForNudges } from "./nudge";
 import { SettingsPage, panes } from "./settings/SettingsPage";
@@ -123,6 +124,10 @@ export function Gate(): JSX.Element {
   // And the harnesses this server can run, which both apps name and draw the
   // marks of — see `harnesses.ts`.
   useHarnesses();
+
+  // And the Processes the plugins loaded here provide, which the picker
+  // offers and a Conversation on one is worded from — see `provided.ts`.
+  useProvidedProcesses();
 
   return (
     <Show when={!onboarding.isPending} fallback={<DragBar />}>

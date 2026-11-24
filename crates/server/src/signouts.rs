@@ -372,7 +372,7 @@ impl Watch {
 async fn signed_out(pool: &SqlitePool, nudges: &Nudges, watch: &Watch, said: &str) -> bool {
     let conversation_id = watch.conversation_id;
 
-    let lifecycle = match store::load_conversation(pool, conversation_id).await {
+    let standing = match store::load_conversation(pool, conversation_id).await {
         Ok(Some(conversation)) => conversation.state,
         Ok(None) => return false,
         Err(error) => {
@@ -384,7 +384,7 @@ async fn signed_out(pool: &SqlitePool, nudges: &Nudges, watch: &Watch, said: &st
     // Read now rather than as the line arrived: a login that lands while the
     // session is saying so is one the next session is given.
     if watch.login.as_ref().is_some_and(Login::replaced) {
-        return late(pool, nudges, watch, said, lifecycle).await;
+        return late(pool, nudges, watch, said, standing).await;
     }
 
     let home = match &watch.home {
@@ -410,7 +410,7 @@ async fn signed_out(pool: &SqlitePool, nudges: &Nudges, watch: &Watch, said: &st
             id: &watch.profile_id,
             profile: &watch.profile,
         },
-        crate::stalls::driving(lifecycle),
+        crate::stalls::driving(&standing),
         &crate::stopping::signed_out(&watch.profile, said, home.as_deref()),
         Some(watch.event_id),
     )
@@ -454,7 +454,7 @@ async fn late(
     nudges: &Nudges,
     watch: &Watch,
     said: &str,
-    lifecycle: store::Lifecycle,
+    standing: store::State,
 ) -> bool {
     let conversation_id = watch.conversation_id;
 
@@ -463,7 +463,7 @@ async fn late(
         nudges,
         conversation_id,
         crate::stopping::Decided::Nobody,
-        crate::stalls::driving(lifecycle),
+        crate::stalls::driving(&standing),
         &crate::stopping::signed_out_since(&watch.profile, said),
         Some(watch.event_id),
     )

@@ -24,9 +24,9 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_schema::{Answer, Question, QuestionSet, Response};
 use verkstead_store::{
-    Ask, Ending, Event, Investigated, Lifecycle, PullRequest, Recorded, Settlements, Steer,
-    Steering, Submission, WAITED_ON, WaitingOn, ask, ended_on, follow_up_done, follow_up_over,
-    investigation_over, load_conversation, load_response, lock_set, nothing_else, open_database,
+    Ask, Ending, Event, Investigated, PullRequest, Recorded, Settlements, State, Steer, Steering,
+    Submission, WAITED_ON, WaitingOn, ask, ended_on, follow_up_over, investigation_over,
+    load_conversation, load_response, lock_set, nothing_else, open_database,
     record_another_pull_request, register_repo, settle_wrap_up, start_conversation,
     steer_conversation, submit_response, timeline, wrap_up_settled,
 };
@@ -257,7 +257,9 @@ async fn following_up(pool: &SqlitePool, conversation: i64) {
             pool,
             conversation,
             Steer {
-                target: Lifecycle::FollowUp,
+                target: State::named("follow-up"),
+                opens_a_round: false,
+                wraps_up: false,
                 pairings: &[],
                 brief: None,
                 instruction: Some("Does it count the 429s it sends?\n"),
@@ -286,7 +288,7 @@ async fn the_follow_up_is_over_when_the_latest_round_answered_carries_the_mark()
     following_up(&pool, conversation).await;
 
     assert!(
-        !nothing_else(&pool, conversation, Lifecycle::FollowUp)
+        !nothing_else(&pool, conversation, &State::named("follow-up"))
             .await
             .unwrap(),
         "a follow-up that has asked nothing is one nobody has ended"
@@ -298,7 +300,7 @@ async fn the_follow_up_is_over_when_the_latest_round_answered_carries_the_mark()
         .unwrap();
 
     assert!(
-        !nothing_else(&pool, conversation, Lifecycle::FollowUp)
+        !nothing_else(&pool, conversation, &State::named("follow-up"))
             .await
             .unwrap(),
         "and an answer without the option ticked is the human saying there is more"
@@ -310,7 +312,7 @@ async fn the_follow_up_is_over_when_the_latest_round_answered_carries_the_mark()
         .unwrap();
 
     assert!(
-        nothing_else(&pool, conversation, Lifecycle::FollowUp)
+        nothing_else(&pool, conversation, &State::named("follow-up"))
             .await
             .unwrap(),
         "the newest round they answered carries the mark, so the follow-up is over"
@@ -332,7 +334,7 @@ async fn a_round_asked_after_the_mark_puts_the_follow_up_back_to_running() {
     let again = asked(&pool, conversation, "one more thing then").await;
 
     assert!(
-        nothing_else(&pool, conversation, Lifecycle::FollowUp)
+        nothing_else(&pool, conversation, &State::named("follow-up"))
             .await
             .unwrap(),
         "a round nobody has answered says nothing, so the marked one is still \
@@ -344,7 +346,7 @@ async fn a_round_asked_after_the_mark_puts_the_follow_up_back_to_running() {
         .unwrap();
 
     assert!(
-        !nothing_else(&pool, conversation, Lifecycle::FollowUp)
+        !nothing_else(&pool, conversation, &State::named("follow-up"))
             .await
             .unwrap(),
         "and its own Response decides: the mark is never sticky"
@@ -364,7 +366,7 @@ async fn a_mark_left_by_the_follow_up_before_this_one_ends_nothing() {
         .unwrap();
 
     assert!(
-        nothing_else(&pool, conversation, Lifecycle::FollowUp)
+        nothing_else(&pool, conversation, &State::named("follow-up"))
             .await
             .unwrap()
     );
@@ -372,14 +374,22 @@ async fn a_mark_left_by_the_follow_up_before_this_one_ends_nothing() {
     // Back to the wrap-up, and steered into Follow-up a second time — which is a
     // follow-up that has asked nothing yet.
     assert_eq!(
-        follow_up_over(&pool, conversation, false).await.unwrap(),
-        Ending::Wrapped,
+        follow_up_over(
+            &pool,
+            conversation,
+            &State::named("follow-up"),
+            &State::named("wrapping"),
+            false
+        )
+        .await
+        .unwrap(),
+        Ending::Landed,
     );
 
     following_up(&pool, conversation).await;
 
     assert!(
-        !nothing_else(&pool, conversation, Lifecycle::FollowUp)
+        !nothing_else(&pool, conversation, &State::named("follow-up"))
             .await
             .unwrap(),
         "the window opens at the newest move into Follow-up, so last time's mark \
@@ -403,7 +413,7 @@ async fn a_locked_round_is_not_the_latest_word_and_a_deferred_one_is_never_count
     lock_set(&pool, &settlements(), locked).await.unwrap();
 
     assert!(
-        nothing_else(&pool, conversation, Lifecycle::FollowUp)
+        nothing_else(&pool, conversation, &State::named("follow-up"))
             .await
             .unwrap(),
         "a Set nobody answered carries no Response and so no word either way"
@@ -425,14 +435,14 @@ async fn a_locked_round_is_not_the_latest_word_and_a_deferred_one_is_never_count
         .unwrap();
 
     assert!(
-        nothing_else(&pool, conversation, Lifecycle::FollowUp)
+        nothing_else(&pool, conversation, &State::named("follow-up"))
             .await
             .unwrap(),
         "and a Deferred Ask is nobody's round: its Answers are for a later \
          session by design"
     );
     assert!(
-        nothing_else(&pool, conversation, Lifecycle::FollowUp)
+        nothing_else(&pool, conversation, &State::named("follow-up"))
             .await
             .unwrap(),
         "and a Deferred Ask is nobody's round: its Answers are for a later \
@@ -459,7 +469,7 @@ async fn a_locked_round_is_not_the_latest_word_and_a_deferred_one_is_never_count
         .unwrap();
 
     assert!(
-        !nothing_else(&pool, conversation, Lifecycle::FollowUp)
+        !nothing_else(&pool, conversation, &State::named("follow-up"))
             .await
             .unwrap(),
         "an answer without the mark on a store-and-nudge round puts the \
@@ -500,8 +510,16 @@ async fn the_follow_up_lands_back_in_the_wrap_up_and_takes_the_checks_with_it() 
     following_up(&pool, conversation).await;
 
     assert_eq!(
-        follow_up_over(&pool, conversation, true).await.unwrap(),
-        Ending::Wrapped,
+        follow_up_over(
+            &pool,
+            conversation,
+            &State::named("follow-up"),
+            &State::named("wrapping"),
+            true
+        )
+        .await
+        .unwrap(),
+        Ending::Landed,
     );
 
     let conversation_row = load_conversation(&pool, conversation)
@@ -511,7 +529,7 @@ async fn the_follow_up_lands_back_in_the_wrap_up_and_takes_the_checks_with_it() 
 
     assert_eq!(
         conversation_row.state,
-        Lifecycle::Wrapping,
+        State::named("wrapping"),
         "a follow-up ends where it started: the pull request it was opened about",
     );
 
@@ -570,8 +588,16 @@ async fn a_follow_up_that_pushed_nothing_lands_with_every_settle_standing() {
     following_up(&pool, conversation).await;
 
     assert_eq!(
-        follow_up_over(&pool, conversation, false).await.unwrap(),
-        Ending::Wrapped,
+        follow_up_over(
+            &pool,
+            conversation,
+            &State::named("follow-up"),
+            &State::named("wrapping"),
+            false
+        )
+        .await
+        .unwrap(),
+        Ending::Landed,
     );
 
     let settled = wrap_up_settled(&pool, conversation).await.unwrap();
@@ -600,8 +626,16 @@ async fn a_follow_up_that_built_nothing_lands_in_done_with_the_move_on_its_timel
     following_up(&pool, conversation).await;
 
     assert_eq!(
-        follow_up_done(&pool, conversation).await.unwrap(),
-        Ending::Finished,
+        follow_up_over(
+            &pool,
+            conversation,
+            &State::named("follow-up"),
+            &State::done(),
+            false
+        )
+        .await
+        .unwrap(),
+        Ending::Landed,
     );
 
     let conversation_row = load_conversation(&pool, conversation)
@@ -611,7 +645,7 @@ async fn a_follow_up_that_built_nothing_lands_in_done_with_the_move_on_its_timel
 
     assert_eq!(
         conversation_row.state,
-        Lifecycle::Done,
+        State::done(),
         "there is nothing on the branch to wrap up, so the work is finished",
     );
 
@@ -619,25 +653,25 @@ async fn a_follow_up_that_built_nothing_lands_in_done_with_the_move_on_its_timel
 
     assert_eq!(
         moved.last(),
-        Some(&Lifecycle::Done),
+        Some(&State::done()),
         "and the Timeline says when it got there, as it does for every move: \
          {moved:?}",
     );
     assert!(
-        !moved.contains(&Lifecycle::Wrapping),
+        !moved.contains(&State::named("wrapping")),
         "without passing through a wrap-up on the way: there was never a pull \
          request for one to be about: {moved:?}",
     );
 }
 
 /// The states a Conversation's Timeline says it has moved through, in order.
-async fn moves(pool: &SqlitePool, id: i64) -> Vec<Lifecycle> {
+async fn moves(pool: &SqlitePool, id: i64) -> Vec<State> {
     timeline(pool, id)
         .await
         .unwrap()
         .iter()
-        .filter_map(|event| match event.event {
-            Event::Moved(state) => Some(state),
+        .filter_map(|event| match &event.event {
+            Event::Moved(state) => Some(state.clone()),
             _ => None,
         })
         .collect()
@@ -649,12 +683,28 @@ async fn nothing_but_a_follow_up_can_be_landed_back_in_a_wrap_up() {
     let conversation = conversation(&pool).await;
 
     assert_eq!(
-        follow_up_over(&pool, conversation, false).await.unwrap(),
+        follow_up_over(
+            &pool,
+            conversation,
+            &State::named("follow-up"),
+            &State::named("wrapping"),
+            false
+        )
+        .await
+        .unwrap(),
         Ending::NotFollowingUp,
         "a Conversation that is not following anything up has no follow-up to end",
     );
     assert_eq!(
-        follow_up_over(&pool, 404, false).await.unwrap(),
+        follow_up_over(
+            &pool,
+            404,
+            &State::named("follow-up"),
+            &State::named("wrapping"),
+            false
+        )
+        .await
+        .unwrap(),
         Ending::NoSuchConversation,
     );
 
@@ -662,11 +712,27 @@ async fn nothing_but_a_follow_up_can_be_landed_back_in_a_wrap_up() {
     // one move out of Follow-up, so neither is a way into Done or Wrapping from
     // anywhere else.
     assert_eq!(
-        follow_up_done(&pool, conversation).await.unwrap(),
+        follow_up_over(
+            &pool,
+            conversation,
+            &State::named("follow-up"),
+            &State::done(),
+            false
+        )
+        .await
+        .unwrap(),
         Ending::NotFollowingUp,
     );
     assert_eq!(
-        follow_up_done(&pool, 404).await.unwrap(),
+        follow_up_over(
+            &pool,
+            404,
+            &State::named("follow-up"),
+            &State::done(),
+            false
+        )
+        .await
+        .unwrap(),
         Ending::NoSuchConversation,
     );
 }
@@ -679,7 +745,9 @@ async fn investigating(pool: &SqlitePool, conversation: i64) {
             pool,
             conversation,
             Steer {
-                target: Lifecycle::Investigating,
+                target: State::named("investigating"),
+                opens_a_round: false,
+                wraps_up: false,
                 pairings: &[],
                 brief: None,
                 instruction: Some("Where does it get the window from?\n"),
@@ -720,7 +788,7 @@ async fn a_mark_left_in_another_state_is_not_this_ones_word() {
         .unwrap();
 
     assert!(
-        nothing_else(&pool, conversation, Lifecycle::FollowUp)
+        nothing_else(&pool, conversation, &State::named("follow-up"))
             .await
             .unwrap(),
     );
@@ -728,7 +796,7 @@ async fn a_mark_left_in_another_state_is_not_this_ones_word() {
     investigating(&pool, conversation).await;
 
     assert!(
-        !nothing_else(&pool, conversation, Lifecycle::Investigating)
+        !nothing_else(&pool, conversation, &State::named("investigating"))
             .await
             .unwrap(),
         "the investigation's window opens at the move into Investigating, so the \
@@ -741,14 +809,14 @@ async fn a_mark_left_in_another_state_is_not_this_ones_word() {
         .unwrap();
 
     assert!(
-        !nothing_else(&pool, conversation, Lifecycle::Investigating)
+        !nothing_else(&pool, conversation, &State::named("investigating"))
             .await
             .unwrap(),
         "and an answer without the option ticked is the human saying there is \
          more they want found out"
     );
     assert!(
-        !nothing_else(&pool, conversation, Lifecycle::FollowUp)
+        !nothing_else(&pool, conversation, &State::named("follow-up"))
             .await
             .unwrap(),
         "which is the newest round read the other way round as well: the window \
@@ -761,7 +829,7 @@ async fn a_mark_left_in_another_state_is_not_this_ones_word() {
         .unwrap();
 
     assert!(
-        nothing_else(&pool, conversation, Lifecycle::Investigating)
+        nothing_else(&pool, conversation, &State::named("investigating"))
             .await
             .unwrap(),
         "and the mark on the newest round they answered is what ends the \
@@ -783,9 +851,14 @@ async fn an_investigation_lands_in_done_with_the_move_on_its_timeline() {
     investigating(&pool, conversation).await;
 
     assert_eq!(
-        investigation_over(&pool, conversation, Lifecycle::Done)
-            .await
-            .unwrap(),
+        investigation_over(
+            &pool,
+            conversation,
+            &State::named("investigating"),
+            &State::done()
+        )
+        .await
+        .unwrap(),
         Investigated::Landed,
     );
 
@@ -794,18 +867,18 @@ async fn an_investigation_lands_in_done_with_the_move_on_its_timeline() {
         .unwrap()
         .expect("the Conversation is there");
 
-    assert_eq!(conversation_row.state, Lifecycle::Done);
+    assert_eq!(conversation_row.state, State::done());
 
     let moved = moves(&pool, conversation).await;
 
     assert_eq!(
         moved.last(),
-        Some(&Lifecycle::Done),
+        Some(&State::done()),
         "and the Timeline says when it got there, as it does for every move: \
          {moved:?}",
     );
     assert!(
-        !moved.contains(&Lifecycle::Wrapping),
+        !moved.contains(&State::named("wrapping")),
         "without passing through a wrap-up on the way: an investigation builds \
          nothing for one to be about: {moved:?}",
     );
@@ -856,9 +929,14 @@ async fn an_investigation_lands_in_whatever_state_it_is_sent_back_to() {
     investigating(&pool, conversation).await;
 
     assert_eq!(
-        investigation_over(&pool, conversation, Lifecycle::Wrapping)
-            .await
-            .unwrap(),
+        investigation_over(
+            &pool,
+            conversation,
+            &State::named("investigating"),
+            &State::named("wrapping")
+        )
+        .await
+        .unwrap(),
         Investigated::Landed,
     );
 
@@ -869,7 +947,7 @@ async fn an_investigation_lands_in_whatever_state_it_is_sent_back_to() {
 
     assert_eq!(
         conversation_row.state,
-        Lifecycle::Wrapping,
+        State::named("wrapping"),
         "the investigation went back where it came from",
     );
 
@@ -877,11 +955,11 @@ async fn an_investigation_lands_in_whatever_state_it_is_sent_back_to() {
 
     assert_eq!(
         moved.last(),
-        Some(&Lifecycle::Wrapping),
+        Some(&State::named("wrapping")),
         "with the move on its Timeline, as every move has: {moved:?}",
     );
     assert!(
-        !moved.contains(&Lifecycle::Done),
+        !moved.contains(&State::done()),
         "and nothing passed through Done on the way: {moved:?}",
     );
 
@@ -909,15 +987,20 @@ async fn nothing_but_an_investigation_can_be_ended_as_one() {
     let conversation = conversation(&pool).await;
 
     assert_eq!(
-        investigation_over(&pool, conversation, Lifecycle::Done)
-            .await
-            .unwrap(),
+        investigation_over(
+            &pool,
+            conversation,
+            &State::named("investigating"),
+            &State::done()
+        )
+        .await
+        .unwrap(),
         Investigated::NotInvestigating,
         "a Conversation that is not investigating anything has no investigation \
          to end",
     );
     assert_eq!(
-        investigation_over(&pool, 404, Lifecycle::Done)
+        investigation_over(&pool, 404, &State::named("investigating"), &State::done())
             .await
             .unwrap(),
         Investigated::NoSuchConversation,
@@ -929,15 +1012,25 @@ async fn nothing_but_an_investigation_can_be_ended_as_one() {
     investigating(&pool, conversation).await;
 
     assert_eq!(
-        investigation_over(&pool, conversation, Lifecycle::Done)
-            .await
-            .unwrap(),
+        investigation_over(
+            &pool,
+            conversation,
+            &State::named("investigating"),
+            &State::done()
+        )
+        .await
+        .unwrap(),
         Investigated::Landed,
     );
     assert_eq!(
-        investigation_over(&pool, conversation, Lifecycle::Wrapping)
-            .await
-            .unwrap(),
+        investigation_over(
+            &pool,
+            conversation,
+            &State::named("investigating"),
+            &State::named("wrapping")
+        )
+        .await
+        .unwrap(),
         Investigated::NotInvestigating,
     );
 }

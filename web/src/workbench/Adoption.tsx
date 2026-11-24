@@ -36,6 +36,7 @@ import {
   authorUnpicked,
   otherAuthorHeld,
   companionRefusal,
+  pairingWanted,
   profileRefusal,
 } from "./Timeline";
 import styles from "./Adoption.module.css";
@@ -53,10 +54,6 @@ export const ADOPT_REFUSAL: Record<Extract<Adopted, string>, string> = {
   NotDrafting: "This conversation has already been started.",
   NotAdopting:
     "This conversation has no roadmap, so there's no stage for it to take.",
-  NoGrillingProfile: "Choose a grilling profile and model on the brief first.",
-  NoImplementationProfile:
-    "Choose an implementation profile and model on the brief first.",
-  NoReviewProfile: "Choose a review profile and model on the brief first.",
   NoGitAuthor:
     "No git author is configured, so Verkstead can't commit on the branch. Set one in Settings first.",
   FetchFailed:
@@ -96,6 +93,10 @@ export const ADOPT_REFUSAL: Record<Extract<Adopted, string>, string> = {
 /// judgement knows.
 export function adoptRefusal(outcome: Adopted): string {
   if (typeof outcome === "object") {
+    if ("NoPairing" in outcome) {
+      return pairingWanted(outcome.NoPairing);
+    }
+
     if ("Companion" in outcome) {
       return `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
     }
@@ -218,7 +219,7 @@ export function Adoption(props: {
         )}
       </Show>
 
-      <Show when={props.conversation.state === "Draft"}>
+      <Show when={props.conversation.state === "draft"}>
         <button
           type="button"
           class={styles.adopt}

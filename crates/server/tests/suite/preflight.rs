@@ -40,7 +40,7 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{AuthorEntry, ClonableRepo, Lacking, PairingRole, Preflight, ProfileEntry};
+use verkstead_render::{AuthorEntry, ClonableRepo, Lacking, Preflight, ProfileEntry};
 use verkstead_schema::Nudge;
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
@@ -330,14 +330,13 @@ impl Verkstead {
                 .unwrap()
                 .expect("the Repo is registered");
 
-        let pairing = serde_json::json!({ "profile_id": profile, "model": MODEL }).to_string();
         let role =
             serde_json::json!({ "pairing": { "profile_id": profile, "model": MODEL } }).to_string();
 
         for (path, saying) in [
-            ("grilling-pairing", &pairing),
-            ("implementation-pairing", &pairing),
-            ("review-pairing", &role),
+            ("pairings/grilling", &role),
+            ("pairings/implementation", &role),
+            ("pairings/review", &role),
         ] {
             let said = press(
                 &self.workbench,
@@ -752,8 +751,8 @@ async fn a_harness_the_far_end_has_not_got_is_named_with_its_pairings() {
     let profile = a.saves("work").await;
     let conversation = a.conversation(&here, &profile).await;
 
-    let harness = |role| Lacking::Harness {
-        role,
+    let harness = |role: &str| Lacking::Harness {
+        role: role.to_owned(),
         profile: Some("work".to_owned()),
         agent_type: verkstead_render::AgentType::CLAUDE,
     };
@@ -761,9 +760,9 @@ async fn a_harness_the_far_end_has_not_got_is_named_with_its_pairings() {
     assert_eq!(
         a.preflight(conversation, B).await.lacks,
         vec![
-            harness(PairingRole::Grilling),
-            harness(PairingRole::Implementation),
-            harness(PairingRole::Review),
+            harness("Grilling"),
+            harness("Implementation"),
+            harness("Review"),
         ],
         "the repository is there and the harness the three Pairings run is not",
     );
@@ -804,8 +803,8 @@ async fn a_harness_only_a_newer_member_knows_is_passed_over() {
     let profile = a.saves("work").await;
     let conversation = a.conversation(&here, &profile).await;
 
-    let harness = |role| Lacking::Harness {
-        role,
+    let harness = |role: &str| Lacking::Harness {
+        role: role.to_owned(),
         profile: Some("work".to_owned()),
         agent_type: verkstead_render::AgentType::CLAUDE,
     };
@@ -813,9 +812,9 @@ async fn a_harness_only_a_newer_member_knows_is_passed_over() {
     assert_eq!(
         a.preflight(conversation, B).await.lacks,
         vec![
-            harness(PairingRole::Grilling),
-            harness(PairingRole::Implementation),
-            harness(PairingRole::Review),
+            harness("Grilling"),
+            harness("Implementation"),
+            harness("Review"),
         ],
         "the harness this device knows is read, and the one it does not is no reason to say \
          the machine is unreachable",
@@ -1032,5 +1031,73 @@ async fn a_repo_with_no_author_picked_over_there_is_named() {
             name: "widgets".to_owned(),
             companion: false,
         }],
+    );
+}
+
+/// **A Process no plugin on the far end provides is named** (ADR-0030,
+/// *Process*): every Process is data in a plugin, so a Conversation moved onto
+/// a device that holds no plugin providing its Process is one nothing over
+/// there could drive — it would land and stop with the plugin's trouble as its
+/// Notice. The finding names the Process, which is the errand on that machine.
+#[tokio::test]
+async fn a_process_the_far_end_has_no_plugin_for_is_named() {
+    let (a, b) = linked_up().await;
+
+    let origin = "https://github.com/you/widgets.git";
+
+    b.repo("widgets-clone", Some(origin)).await;
+    let here = a.repo("widgets", Some(origin)).await;
+
+    let profile = a.saves("work").await;
+    let conversation = a.conversation(&here, &profile).await;
+
+    // A plugin neither machine holds, which is what a Process installed on the
+    // one the work is on and not on the other reads as from here: B answers
+    // with the Processes it has, and this is not among them.
+    store::set_process(
+        &a.pool,
+        conversation,
+        store::Process {
+            plugin: "5e0c9a7e-2f4b-4c1d-8a3e-6b9f0d2c7a41".to_owned(),
+            id: "two-steps".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        a.preflight(conversation, B).await.lacks,
+        vec![Lacking::Process {
+            // Its id, this device holding no manifest to read a name off
+            // either — which is legible where a blank would not be.
+            name: "two-steps".to_owned(),
+        }],
+        "the repository is there and the Process is not",
+    );
+}
+
+/// And one the far end does hold is no finding at all: both machines carry the
+/// five Verkstead ships as bundled plugins, so a Conversation on any of them
+/// moves with nothing in the way.
+#[tokio::test]
+async fn a_process_the_far_end_holds_is_not_named() {
+    let (a, b) = linked_up().await;
+
+    let origin = "https://github.com/you/widgets.git";
+
+    b.repo("widgets-clone", Some(origin)).await;
+    let here = a.repo("widgets", Some(origin)).await;
+
+    let profile = a.saves("work").await;
+    let conversation = a.conversation(&here, &profile).await;
+
+    store::set_process(&a.pool, conversation, store::Process::tinker())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        a.preflight(conversation, B).await.lacks,
+        Vec::new(),
+        "Tinker is a bundled plugin on both machines",
     );
 }

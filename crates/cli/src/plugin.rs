@@ -89,6 +89,14 @@ fn check(dir: &Path) -> Result<()> {
                     .collect();
                 provides.push_str(&format!(" — its activities {}", listed(&names)));
             }
+            if !manifest.processes.is_empty() {
+                let names: Vec<&str> = manifest
+                    .processes
+                    .iter()
+                    .map(|process| process.name.as_str())
+                    .collect();
+                provides.push_str(&format!(" — its processes {}", listed(&names)));
+            }
 
             println!(
                 "{} is a plugin Verkstead would load: {} {} by {}, written against interface {}, \

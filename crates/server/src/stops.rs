@@ -28,7 +28,7 @@ use verkstead_render::ConversationStopped;
 
 use crate::AppState;
 use crate::stopping::Decided;
-use crate::store::{self, Lifecycle};
+use crate::store::{self, State};
 
 /// Why the Notice says the run stopped, for each way of pressing.
 ///
@@ -58,13 +58,13 @@ pub(crate) async fn stop(state: &AppState, conversation_id: i64) -> Result<Conve
         return Ok(ConversationStopped::NoSuchConversation);
     };
 
-    let lifecycle = match standing {
-        Standing::Driven(lifecycle) => lifecycle,
+    let standing = match standing {
+        Standing::Driven(standing) => standing,
         Standing::Refused(refusal) => return Ok(refusal),
     };
 
     if !state.sessions.working().contains(&conversation_id) {
-        by_hand(state, conversation_id, lifecycle, NOTHING_RUNNING).await?;
+        by_hand(state, conversation_id, &standing, NOTHING_RUNNING).await?;
 
         return Ok(ConversationStopped::Stopped);
     }
@@ -73,7 +73,7 @@ pub(crate) async fn stop(state: &AppState, conversation_id: i64) -> Result<Conve
 
     tracing::info!(
         conversation_id,
-        state = ?lifecycle,
+        state = standing.stored(),
         "the human asked the run to stop after the step it is on",
     );
 
@@ -97,18 +97,18 @@ pub(crate) async fn force(state: &AppState, conversation_id: i64) -> Result<Conv
         return Ok(ConversationStopped::NoSuchConversation);
     };
 
-    let lifecycle = match standing {
-        Standing::Driven(lifecycle) => lifecycle,
+    let standing = match standing {
+        Standing::Driven(standing) => standing,
         Standing::Refused(refusal) => return Ok(refusal),
     };
 
-    by_hand(state, conversation_id, lifecycle, AT_ONCE).await?;
+    by_hand(state, conversation_id, &standing, AT_ONCE).await?;
 
     state.sessions.end(conversation_id).await;
 
     tracing::info!(
         conversation_id,
-        state = ?lifecycle,
+        state = standing.stored(),
         "the human stopped the run where it stood, and what was running was ended",
     );
 
@@ -146,7 +146,7 @@ pub(crate) async fn asked(state: &AppState, conversation_id: i64) -> bool {
         }
     }
 
-    let lifecycle = match store::load_conversation(&state.pool, conversation_id).await {
+    let standing = match store::load_conversation(&state.pool, conversation_id).await {
         Ok(Some(conversation)) => conversation.state,
         Ok(None) => return true,
         Err(error) => {
@@ -157,11 +157,11 @@ pub(crate) async fn asked(state: &AppState, conversation_id: i64) -> bool {
 
     tracing::info!(
         conversation_id,
-        state = ?lifecycle,
+        state = standing.stored(),
         "the step the human asked to stop after has finished, so the run stops here",
     );
 
-    match landing(state, conversation_id, lifecycle, AFTER_THE_STEP).await {
+    match landing(state, conversation_id, &standing, AFTER_THE_STEP).await {
         Ok(store::Stopping::Withdrawn) => false,
         // Driven is only ever the stall sweep's answer, never a request's.
         Ok(store::Stopping::Stopped(_) | store::Stopping::Already | store::Stopping::Driven) => {
@@ -184,21 +184,16 @@ pub(crate) async fn asked(state: &AppState, conversation_id: i64) -> bool {
 /// Nothing about what is running. A Conversation between one step and the next
 /// is one to stop as much as a busy one: what Stop is for is the run, and the
 /// run is what will launch the next session the moment it can.
-pub(crate) fn ready(lifecycle: Lifecycle, stopped: bool) -> bool {
-    matches!(
-        lifecycle,
-        Lifecycle::Grilling
-            | Lifecycle::Implementing
-            | Lifecycle::Wrapping
-            | Lifecycle::FollowUp
-            | Lifecycle::Investigating
-    ) && !stopped
+pub(crate) fn ready(standing: &State, stopped: bool) -> bool {
+    standing.declared().is_some() && !stopped
 }
 
 /// What a press finds when it arrives: a Conversation to stop, or the refusal to
 /// answer with.
 enum Standing {
-    Driven(Lifecycle),
+    /// A Conversation to stop, by the state it stands in — which is what says
+    /// what ought to have been happening.
+    Driven(State),
     Refused(ConversationStopped),
 }
 
@@ -216,7 +211,7 @@ async fn standing(state: &AppState, conversation_id: i64) -> Result<Option<Stand
         .await?
         .is_some();
 
-    Ok(Some(if !ready(conversation.state, stopped) {
+    Ok(Some(if !ready(&conversation.state, stopped) {
         Standing::Refused(if stopped {
             ConversationStopped::AlreadyStopped
         } else {
@@ -242,7 +237,7 @@ async fn standing(state: &AppState, conversation_id: i64) -> Result<Option<Stand
 async fn by_hand(
     state: &AppState,
     conversation_id: i64,
-    lifecycle: Lifecycle,
+    standing: &State,
     how: &str,
 ) -> Result<()> {
     let stopped = crate::stopping::stop(
@@ -250,7 +245,7 @@ async fn by_hand(
         &state.nudges,
         conversation_id,
         Decided::Human,
-        crate::stalls::driving(lifecycle),
+        crate::stalls::driving(standing),
         how,
         crate::stalls::said_last(state, conversation_id).await,
     )
@@ -276,7 +271,7 @@ async fn by_hand(
 async fn landing(
     state: &AppState,
     conversation_id: i64,
-    lifecycle: Lifecycle,
+    standing: &State,
     how: &str,
 ) -> Result<store::Stopping> {
     crate::stopping::stop_as_asked(
@@ -284,7 +279,7 @@ async fn landing(
         &state.nudges,
         conversation_id,
         Decided::Human,
-        crate::stalls::driving(lifecycle),
+        crate::stalls::driving(standing),
         how,
         crate::stalls::said_last(state, conversation_id).await,
     )

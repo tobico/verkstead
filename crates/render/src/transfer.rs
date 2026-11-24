@@ -29,20 +29,6 @@ use crate::{AgentType, ClonableRepo};
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-/// Which of a Conversation's three roles a Pairing is for.
-///
-/// Here rather than read off a Profile, because what a missing harness has to be
-/// named against is the Pairing that wants it: two roles can want two harnesses,
-/// and a sentence that said only *Claude Code is not over there* would leave the
-/// human to work out which picker to go and change.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum PairingRole {
-    Grilling,
-    Implementation,
-    Review,
-}
-
 /// One thing the far end has not got.
 ///
 /// Each names the *somewhere* it is to be put right, because each is a different
@@ -97,9 +83,33 @@ pub enum Lacking {
     /// several it has, so nothing could be committed in it there.
     RepoAuthorUnpicked { name: String, companion: bool },
 
+    /// No plugin on that device provides the Process the Conversation is on.
+    ///
+    /// Every Process is data in a plugin (ADR-0030, *Process*), so a
+    /// Conversation moved onto a device that holds no plugin providing its
+    /// Process is one nothing over there could drive: it would land and stop
+    /// with the plugin's trouble as its Notice. What puts it right is
+    /// installing the plugin over there, which is an errand on that machine
+    /// like the repository and the harness beside it.
+    Process {
+        /// What this device calls it — the name its manifest gives the
+        /// Process, which is what the human picked it by. Its id where this
+        /// device holds no manifest for it either, which is legible where a
+        /// blank would not be.
+        name: String,
+    },
+
     /// The harness a Pairing names is not on that device's `PATH`.
     Harness {
-        role: PairingRole,
+        /// The role whose Pairing wants it, as its Process labels it.
+        ///
+        /// Named rather than read off a Profile, because what a missing harness
+        /// has to be named against is the Pairing that wants it: two roles can
+        /// want two harnesses, and a sentence that said only *Claude Code is
+        /// not over there* would leave the human to work out which picker to go
+        /// and change. The label rather than a word of Verkstead's, a
+        /// Conversation's roles being its Process's (ADR-0030, *Process*).
+        role: String,
 
         /// The Agent Profile's name as it reads here, or nothing for the one
         /// account on its harness that nobody named.
@@ -242,16 +252,56 @@ pub struct ConversationAcross {
     pub naming: bool,
 
     /// The state it is in, which is what the far end's Resume asks its question
-    /// of.
-    pub state: crate::Lifecycle,
+    /// of: the word its `state` column holds, read over there against the
+    /// Process below (ADR-0030, *Process*).
+    pub state: String,
+
+    /// And which Process that is: the uuid of the plugin providing it and the
+    /// id its manifest gives it there.
+    ///
+    /// **Cluster-wide by construction**, which is why it crosses unchanged: a
+    /// plugin is one uuid on every device, and what the Process is called, what
+    /// its states are called and what each of them runs are that manifest's to
+    /// say — so the far end reads where the work stands against the same
+    /// manifest this one did. A device holding no plugin for it is refused the
+    /// move before anything crosses, naming the Process; see
+    /// [`Lacking::Process`].
+    ///
+    /// `None` is a copy from a release that sent none, which reads as the
+    /// store's own default — the reading every Conversation from before there
+    /// were Processes has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process: Option<ProcessAcross>,
 
     /// Its **Rank**, verbatim.
     pub rank: String,
 
-    /// And what each of the three roles has settled.
-    pub grilling: PickedAcross,
-    pub implementation: PickedAcross,
-    pub review: PickedAcross,
+    /// And what each role something was settled for has settled, by the name
+    /// its Process declares it under.
+    ///
+    /// Whichever roles those are rather than three: a Process names the roles
+    /// it is run under (ADR-0030, *Process*), so a Conversation on a plugin's
+    /// crosses carrying names the far end may never have seen. Each arrives
+    /// under its own name and is written down under it.
+    pub pairings: Vec<RoleAcross>,
+}
+
+/// Which Process a Conversation is on, as it crosses: the plugin providing it
+/// and the id its manifest gives the Process there.
+///
+/// Its own shape rather than the viewer's `ProvidedProcess`: nothing here is a
+/// viewer type, and the two ends of this are two Verksteads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessAcross {
+    pub plugin: String,
+    pub id: String,
+}
+
+/// One role's name and what it has settled, as they cross.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleAcross {
+    pub role: String,
+    pub picked: PickedAcross,
 }
 
 /// What names a Conversation across a whole cluster: the device it was drafted
@@ -343,7 +393,7 @@ pub struct StageReport {
     pub born: BirthKey,
 
     /// The state its live copy is in.
-    pub state: crate::Lifecycle,
+    pub state: String,
 
     /// Whether it has ever moved to Done.
     pub done: bool,

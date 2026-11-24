@@ -208,7 +208,7 @@ label: string | null, added: Added, state: AdditionState, };
  * watching says itself on a Timeline instead — see the server's `continuing`
  * module, which starts the same stage by the other route.
  */
-export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | { "Misdeclared": { 
+export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | { "NoPairing": RoleWanted } | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | { "Misdeclared": { 
 /**
  * Why, as the judgement put it.
  */
@@ -1664,7 +1664,21 @@ naming: boolean,
 /**
  * What the Repo this Conversation is against is called.
  */
-repo: string, state: Lifecycle, 
+repo: string, 
+/**
+ * The word its `state` column holds, which the row's word is read off its
+ * Process by — see [`ProcessEntry::states`].
+ *
+ * Verkstead's own three — `draft`, `done` and `closed` — are the viewer's
+ * to word, no Process declaring them. Every other word is one its Process
+ * declares, and a row whose Process this server holds nothing for is read
+ * aloud as the word it has.
+ */
+state: string, 
+/**
+ * And the Process to read it against.
+ */
+process: ProvidedProcess, 
 /**
  * Whether a session is running on this Conversation right now.
  *
@@ -1887,7 +1901,7 @@ export type ConversationPorts = { conversation: number, terminals: Array<Termina
  * the target's work can be set going rather than about where the work has got
  * to here.
  */
-export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "NoInvestigationBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | { "AlreadyHeld": { 
+export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "NoInvestigationBrief" | { "NotSteerable": { state: string, } } | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | { "AlreadyHeld": { 
 /**
  * The Conversation that has it, for the way there.
  */
@@ -1943,7 +1957,8 @@ export type ConversationView = { id: number,
 repo: RepoEntry, 
 /**
  * What kind of work it is: the Process, picked on the composer between the
- * Repo and the Pairings and frozen when the work starts — see [`Process`].
+ * Repo and the Pairings and frozen when the work starts — see
+ * [`ProvidedProcess`], and [`ProcessEntry`] for what it is called.
  *
  * Never `null`. Every Conversation has one, including every one started
  * before there were any: where the record holds no pick the reading stands,
@@ -1954,7 +1969,7 @@ repo: RepoEntry,
  * the machine the work was done on, and a Process is a fact about the work.
  * So it is one of the facts a published share says.
  */
-process: Process, branch: string, 
+process: ProvidedProcess, branch: string, 
 /**
  * Whether that name is one somebody settled on, rather than the one
  * Verkstead prefilled the record with — see
@@ -1990,32 +2005,30 @@ base_commit: string | null,
  * and settled in the same place and at the same moment: the setup card
  * while the Brief drafts, frozen when grilling starts.
  */
-companions: Array<CompanionView>, state: Lifecycle, 
+companions: Array<CompanionView>, 
 /**
- * The Profile and model the grilling session will run under, whole rather
- * than by id: the pane says what they are, and whether the Profile is
+ * The word its `state` column holds, which the card's word is read off
+ * its Process by — see [`ProcessEntry::states`].
+ *
+ * All five of Verkstead's own Processes are plugins whose states are named
+ * with the words the record holds, so a Grilling reads `grilling` here and
+ * is worded *Grilling* off Develop's manifest; Verkstead's own three are
+ * the viewer's to word.
+ */
+state: string, 
+/**
+ * What each role its Process declares will run its sessions under, in the
+ * order the **Agent** control draws them — whole rather than by id: the
+ * pane says what the Profile and model are, and whether the Profile is
  * still runnable.
  *
- * A Pairing or nothing, the picker having no row that runs no session:
- * *No grilling* is retired, and a record written while it was there reads
- * as nothing picked — see [`crate::PickedView`], which the two roles that
- * do have one still use.
+ * One entry per role rather than three fields, a Conversation's roles
+ * being its Process's (ADR-0030, *Process*). Each says which of three the
+ * human picked rather than whether they picked at all — a Pairing, the row
+ * that runs no session, or nothing yet; a picker that offers no such row
+ * simply never reads it back.
  */
-grilling_pairing: PairingView | null, 
-/**
- * And the ones the implementation will run under. Chosen separately
- * because it is genuinely a separate account and model.
- */
-implementation_pairing: PairingView | null, 
-/**
- * And what the wrap-up's review session will run under, chosen separately
- * again: reviewing is a fresh set of eyes on what was built.
- *
- * The other role the picker offers a row that runs no session for, so this
- * says which of three the human picked rather than whether they picked at
- * all.
- */
-review_pairing: PickedView, 
+pairings: Array<RolePairingView>, 
 /**
  * Whether everything needed before the work will start is settled: every
  * role picked — a Pairing complete and no Profile broken, or the row that
@@ -2149,9 +2162,9 @@ adopting: AdoptionView | null,
  * is decided at Start and not before, so there is nothing here saying
  * which the page is looking at.
  *
- * Drawn in the Repo panel under the Branch field, for the Processes that
- * take a target and no others — see `processes.ts`, where that list is
- * kept beside the role table.
+ * Drawn in the Repo panel under the Branch field, for the Processes whose
+ * manifest says they take a target and no others — see
+ * [`ProcessEntry::target`], which is where the page asks.
  */
 target: string | null, 
 /**
@@ -2436,6 +2449,12 @@ skill_packs: Array<AttachedPackView>,
  */
 pending_steer: PendingSteerView | null, 
 /**
+ * The rows the Steer form draws, in the order it draws them: each state
+ * the Conversation's Process marks as taking a steer, then Close, which
+ * is Verkstead's and on every form (ADR-0030, *Process*).
+ */
+steer_rows: Array<SteerRow>, 
+/**
  * The Previews standing on this Conversation, oldest first: what a
  * building session suggested for trying its work by hand (ADR-0024).
  *
@@ -2554,6 +2573,25 @@ github: boolean,
  * and refused the way a [`Registration`]'s is.
  */
 author?: string, };
+
+/**
+ * A declared state and its word.
+ */
+export type DeclaredStateEntry = { 
+/**
+ * What the `conversations.state` column holds.
+ */
+id: string, word: string, 
+/**
+ * Whether its Activity is the **Interview**, which is the one thing the
+ * page has to know about a state besides its word.
+ *
+ * What a round is: a steer into it opens one on a Brief of its own, and
+ * the digest tick on its form is what primes the interview that round
+ * runs. Off the manifest rather than off the state's name, as everything
+ * about a state is (Set 1765, Q29).
+ */
+interviews: boolean, };
 
 /**
  * What a row is about.
@@ -3570,7 +3608,7 @@ export type FoundOn = "Lan" | "Tailscale";
  * the Repo they are about. Nothing gates the button on a companion: the
  * configuration is always complete, so refusal at the start is the whole story.
  */
-export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "EmptyBrief" | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | { "NoPairing": RoleWanted } | { "ProfileBroken": ProfileTrouble } | "EmptyBrief" | "ProcessNotOffered" | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
 /**
  * What the companion Repo is called, which is what the human picked it
  * by and what they will go and look at.
@@ -3866,7 +3904,25 @@ here: string,
 /**
  * And what that device's is called.
  */
-there: string, } } | { "RepoAuthorUnpicked": { name: string, companion: boolean, } } | { "Harness": { role: PairingRole, 
+there: string, } } | { "RepoAuthorUnpicked": { name: string, companion: boolean, } } | { "Process": { 
+/**
+ * What this device calls it — the name its manifest gives the
+ * Process, which is what the human picked it by. Its id where this
+ * device holds no manifest for it either, which is legible where a
+ * blank would not be.
+ */
+name: string, } } | { "Harness": { 
+/**
+ * The role whose Pairing wants it, as its Process labels it.
+ *
+ * Named rather than read off a Profile, because what a missing harness
+ * has to be named against is the Pairing that wants it: two roles can
+ * want two harnesses, and a sentence that said only *Claude Code is
+ * not over there* would leave the human to work out which picker to go
+ * and change. The label rather than a word of Verkstead's, a
+ * Conversation's roles being its Process's (ADR-0030, *Process*).
+ */
+role: string, 
 /**
  * The Agent Profile's name as it reads here, or nothing for the one
  * account on its harness that nobody named.
@@ -3914,15 +3970,6 @@ enabled: boolean,
  * slow build rather than a broken one.
  */
 compiling: CompileCaching | null, };
-
-/**
- * Where a Conversation has got to.
- *
- * The whole ladder, though only the first two are reachable yet: the states are
- * the domain's, and the page says which one a Conversation is in rather than
- * assuming the only one it can currently be.
- */
-export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Investigating" | "Done" | "Closed";
 
 /**
  * One device linked to this one: what it says it is, and whether the last dial
@@ -4317,7 +4364,12 @@ export type MovedEvent = { id: number,
 /**
  * When it moved, RFC 3339.
  */
-at: string, state: Lifecycle, };
+at: string, 
+/**
+ * The word the record holds for the state it moved to, which is what the
+ * line's word is read off its Process by.
+ */
+state: string, };
 
 /**
  * Starting one to adopt a roadmap with: which Repo, and which of its roadmaps.
@@ -4657,16 +4709,6 @@ export type PackAttached = "Attached" | "NoSuchConversation" | "NotDrafting" | "
 export type PackRemoved = "Removed" | "NoSuchConversation" | "NotDrafting";
 
 /**
- * Which of a Conversation's three roles a Pairing is for.
- *
- * Here rather than read off a Profile, because what a missing harness has to be
- * named against is the Pairing that wants it: two roles can want two harnesses,
- * and a sentence that said only *Claude Code is not over there* would leave the
- * human to work out which picker to go and change.
- */
-export type PairingRole = "Grilling" | "Implementation" | "Review";
-
-/**
  * One of a Conversation's Pairings, as the page shows it: the Profile
  * whole, and the model paired with it.
  *
@@ -4938,7 +4980,11 @@ export type PluginConsent = { uuid: string, name: string, version: string, autho
 /**
  * The drawn name of each Activity it provides.
  */
-activities: Array<string>, capabilities: Array<PluginCapability>, };
+activities: Array<string>, 
+/**
+ * The drawn name of each Process it provides.
+ */
+processes: Array<string>, capabilities: Array<PluginCapability>, };
 
 /**
  * The checkbox.
@@ -5096,7 +5142,11 @@ languages: Array<string>,
 /**
  * The drawn name of each Activity it provides, in the order written.
  */
-activities: Array<string>, source: PluginSource, 
+activities: Array<string>, 
+/**
+ * The drawn name of each Process it provides, in the order written.
+ */
+processes: Array<string>, source: PluginSource, 
 /**
  * Its checkbox: whether the cluster has it on.
  */
@@ -5312,40 +5362,81 @@ command: string,
 description?: string, };
 
 /**
- * What kind of work a Conversation is for, and so which states it runs
- * through.
- *
- * [`Lifecycle`]'s pair rather than a schema type: a Process rides no Question
- * Set, so it is the viewer's half of a fact of the record's — the store's own
- * enum is in `crates/store/src/conversations.rs`, and the two vocabularies are
- * held to each other in one function on the server.
- *
- * All five, and all five can start something now that Fix Merge Issues has
- * landed: which of them the picker offers is a list of its own all the same,
- * and what a stage adds is a row on that list and a start path behind it —
- * never a variant. A wire that carried only what could be started would be one
- * to widen every time one more could.
- *
- * See ADR-0020.
- */
-export type Process = "Develop" | "Investigate" | "Review" | "Tinker" | "FixMergeIssues";
-
-/**
  * What kind of work a drafting Conversation is for.
  *
  * The Process and nothing else, the way [`RepoChoice`] is an id and nothing
- * else: which one it is is the whole of what the picker says.
- *
- * Any of the five may be asked for — the wire carries all of them, and whether
- * the one asked for can be started yet is the server's list to keep rather than
- * something the shape of this refuses. See [`ProcessPicked::NotLanded`].
+ * else: which one it is is the whole of what the picker says. Any Process may
+ * be asked for, and whether the one asked for is offered here is the server's
+ * list to keep rather than something the shape of this refuses — see
+ * [`ProcessPicked::NotOffered`].
  */
-export type ProcessChoice = { process: Process, };
+export type ProcessChoice = { process: ProvidedProcess, };
+
+/**
+ * One Process a plugin loaded here provides, as the picker draws it and as
+ * a Conversation on it is worded: read off the manifest rather than kept in
+ * the viewer (ADR-0030, *Process*).
+ */
+export type ProcessEntry = { plugin: string, id: string, 
+/**
+ * What the picker's row says, and the Configuration under a frozen Brief.
+ */
+name: string, 
+/**
+ * The sentence under its name in the picker's dropped rows.
+ */
+description: string, 
+/**
+ * Whether the picker offers it. A disabled plugin's Process is still
+ * listed while Conversations on it run to the end, so that they are
+ * worded; it is not offered to a new one.
+ */
+offered: boolean, 
+/**
+ * Each state it declares, in order, with the word the card draws.
+ */
+states: Array<DeclaredStateEntry>, 
+/**
+ * Each role it declares, in the order its manifest writes them: the order
+ * the **Agent** control draws their pickers in, and how many of them says
+ * which shape that control takes — one role a flat dropdown, more a panel
+ * (ADR-0020, *A Conversation has a Process*; Set 1765, Q26).
+ */
+roles: Array<RoleEntry>, 
+/**
+ * Whether it is pointed at work that is already somewhere else, and so
+ * draws the **Target** field in the Repo panel: its manifest's `target`
+ * (Set 1765, Q29). What a Start waits on reads the same fact — see
+ * `processes::takes_a_target` on the server.
+ */
+target: boolean, 
+/**
+ * And whether its wrap-up is narrowed to what GitHub refuses a merge
+ * for: its `wrapping` state turns the Wrap-up's `review` and `comments`
+ * off, so nothing reads the branch and nothing said on the pull request
+ * is answered.
+ *
+ * What the Steer form says wrapping up will do, under Verkstead's own
+ * **Wrapping** row — which is the row this is for, so it is read by that
+ * state's id and `false` for a Process that declares no such state.
+ */
+narrowed: boolean, 
+/**
+ * And whether a Brief that is one pull request URL and nothing else fills
+ * the Process with this one: **Fix merge issues**, which is the server's
+ * own rule rather than anything the manifest says (CONTEXT, *Target*).
+ *
+ * Sent so that the composer can draw the fill before the save lands and
+ * keep no word of its own for which Process that is — see
+ * `filled_from_a_pull_request` in `crates/server/src/conversations.rs`,
+ * which is where the rule lives.
+ */
+filled_from_a_pull_request: boolean, };
 
 /**
  * What became of picking one.
  */
-export type ProcessPicked = "Picked" | "NoSuchConversation" | "NotDrafting" | "NotLanded";
+export type ProcessPicked = "Picked" | "NoSuchConversation" | "NotDrafting" | "NotOffered";
 
 /**
  * The account a Profile names: which harness runs it, and each of the paths
@@ -5607,6 +5698,20 @@ export type Prose = {
  * reconciles rows by, so a fold opened on one survives a re-read.
  */
 id: number, html: string, };
+
+/**
+ * Which Process: the uuid of the plugin providing it and the id its manifest
+ * gives the Process (Set 1877, Q6).
+ *
+ * **One shape for every Process** (ADR-0030, *Process*): the five Verkstead
+ * ships are bundled plugins of their own, so a wire that named them apart
+ * would be naming a difference there is not. What each of them is *called*,
+ * and what each of its states is called, is read off [`ProcessEntry`] —
+ * which the server sends for every Process it holds.
+ *
+ * See ADR-0020 and ADR-0030.
+ */
+export type ProvidedProcess = { plugin: string, id: string, };
 
 /**
  * One check GitHub is running against a pull request, as the details pane
@@ -5915,6 +6020,15 @@ export type Registration = { path: string,
 author?: string, };
 
 /**
+ * What one role's memory prefills its picker with.
+ */
+export type RememberedRole = { 
+/**
+ * The role's name, as its Process declares it.
+ */
+role: string, picked: PickedView, };
+
+/**
  * Whether the human is done with the banner that points at this section.
  *
  * The banner stands on a Conversation page above the Timeline, at every
@@ -6086,20 +6200,15 @@ origin: string | null, };
  */
 export type RepoPairingsView = { 
 /**
- * A Pairing, or nothing: the grilling role has no row that runs no session,
- * so a skip some Repo remembers from before *No grilling* retired is read
- * as nothing remembered and never handed over as a choice.
+ * One entry per role anything is remembered for, by the name the role is
+ * declared under — whichever roles those are, a Process's roles being its
+ * own (ADR-0030, *Process*).
+ *
+ * Each is a Pairing, the row that runs no session, or nothing — so an
+ * entry says which of the three rather than whether anything is
+ * remembered. A role with no entry is nothing remembered.
  */
-grilling: PairingView | null, 
-/**
- * And the other role with no such row.
- */
-implementation: PairingView | null, 
-/**
- * The one whose memory can hold it, so this says which of three rather than
- * whether anything is remembered.
- */
-review: PickedView, };
+roles: Array<RememberedRole>, };
 
 /**
  * What became of taking one off the registry.
@@ -6362,8 +6471,76 @@ diagrams: boolean, };
  * `null` is the row that runs no session: a picker that offers one offers it
  * beside the Pairings, so the one press that picks either sends the same body
  * — see [`PickedView`].
+ *
+ * **Nothing else is read.** A body carrying a Pairing's own fields at the top
+ * level — the shape the three retired per-role presses took — would read as
+ * `pairing` missing, which is `null`, which is the row that runs no session:
+ * a pick silently turned into picking the role away. Refused instead, so a
+ * caller sending the old shape is told.
  */
 export type RoleChoice = { pairing: ProfileChoice | null, };
+
+/**
+ * One role a Process declares, as its manifest declares it.
+ */
+export type RoleEntry = { 
+/**
+ * What its Pairing is stored and picked by.
+ */
+role: string, 
+/**
+ * What its picker is labelled inside the panel.
+ */
+label: string, 
+/**
+ * Whether it is the role the Done signal, memos and previews assume.
+ */
+building: boolean, 
+/**
+ * And whether its picker offers the row that runs no session at all: *No
+ * review*, and whatever a plugin's own role calls it. A role without it is
+ * answered with a Pairing or the press waits.
+ */
+away: boolean, };
+
+/**
+ * One of a Conversation's roles and what it will run under: the role as its
+ * Process declares it, and the pick beside it.
+ */
+export type RolePairingView = { 
+/**
+ * What a pick is posted under and what the record stores it by.
+ */
+role: string, 
+/**
+ * What its picker is labelled inside the panel.
+ */
+label: string, 
+/**
+ * Whether it is the role the Done signal, memos and previews assume.
+ */
+building: boolean, 
+/**
+ * And whether its picker offers the row that runs no session at all: *No
+ * review*, and whatever a plugin's own role calls it. A role without it is
+ * answered with a Pairing or the press waits.
+ */
+away: boolean, picked: PickedView, };
+
+/**
+ * The role a press is waiting on a Pairing for: its name, as its Process
+ * declares it, and the label its picker is drawn under.
+ *
+ * Both, because the two are for two different things: the label is what the
+ * sentence says, and the name is what the page looks the picker's own rows up
+ * by.
+ */
+export type RoleWanted = { role: string, label: string, 
+/**
+ * And whether its picker offers the row that runs no session, which the
+ * sentence names where it does: *or No review*.
+ */
+away: boolean, };
 
 /**
  * Which device a sidebar row belongs to, as the row itself says it.
@@ -7548,6 +7725,13 @@ base_ref: string | null,
 branch: string, };
 
 /**
+ * The brief a steer into a state takes, as its manifest's steer mark says
+ * (Set 1877, Q5): each a set of fields Verkstead knows how to draw, and the
+ * field of [`SteerSubmission`] it is carried in.
+ */
+export type SteerBrief = "Round" | "Instruction" | "FollowUp" | "Question" | "None";
+
+/**
  * What cancelling a pending steer came to.
  *
  * Cancel is a press now rather than a modal being dismissed: it takes the
@@ -7578,7 +7762,7 @@ export type SteerCancelled = "Cancelled" | "NoSuchConversation";
  * yet — or where it is already as open as a companion gets.
  *
  * A vocabulary of its own rather than more variants of the grill start's, for
- * the reason [`SteerTarget`] is not [`crate::Lifecycle`]: what a grilling can
+ * the reason [`SteerTarget`] is not a state word: what a grilling can
  * be refused for and what a steer can be refused for are different lists, and
  * one list would say each press can be refused for things it never could.
  */
@@ -7602,9 +7786,10 @@ export type SteerEvent = { id: number,
  */
 at: string, 
 /**
- * The state the human moved it into.
+ * The state the human moved it into, by the word the record holds — which
+ * is what the card's word is read off its Process by.
  */
-target: Lifecycle, 
+target: string, 
 /**
  * The instruction they steered it with, rendered and sanitized on the way
  * out as every piece of markdown on this wire is — and `None` for every
@@ -7653,6 +7838,10 @@ export type SteerForm = {
  * the Timeline's item reads *Steer* for.
  */
 target: SteerTarget | null, 
+/**
+ * And the declared state's id, where the picker is on one.
+ */
+state: string | null, 
 /**
  * The new round's Brief, for a steer into Grilling.
  */
@@ -7773,6 +7962,40 @@ added: Array<SteerAdditionView>,
 upgraded: Array<SteerUpgradeView>, };
 
 /**
+ * One row of the Steer form: somewhere the Conversation can be steered into.
+ */
+export type SteerRow = { 
+/**
+ * What a submit names it by.
+ */
+target: SteerTarget, 
+/**
+ * The declared state's id, where [`Self::target`] is
+ * [`SteerTarget::Declared`].
+ */
+state: string | null, 
+/**
+ * What the row reads: the state's word, as its manifest writes it.
+ */
+word: string, 
+/**
+ * What the form draws under it, and the field a submit carries it in.
+ */
+brief: SteerBrief, 
+/**
+ * Whether the state returns to where it was steered from once its
+ * Activity ends.
+ */
+detour: boolean, 
+/**
+ * The role whose Pairing the row's one picker settles: the first of the
+ * roles the target state declares, by its name — or nothing where nothing
+ * runs there. A state declaring more takes this pick for the first and
+ * fills the rest where they have none.
+ */
+role: string | null, };
+
+/**
  * What became of saving one.
  *
  * Both refusals are permanent, which is what the pane does with them: a field
@@ -7792,6 +8015,12 @@ export type SteerSubmission = {
  * Which state to move it into.
  */
 target: SteerTarget, 
+/**
+ * The declared state's id, where [`Self::target`] is
+ * [`SteerTarget::Declared`]. What the human writes under it is carried in
+ * the field its brief kind draws — see [`SteerBrief`].
+ */
+state: string | null, 
 /**
  * Whether to end the session that is running where it stands.
  *
@@ -7964,7 +8193,7 @@ discarding: Array<number>, };
  * at any stage, but there is no wrapping up and no following up of work nobody
  * can see.
  */
-export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Investigating" | "Done";
+export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Investigating" | "Done" | "Declared" | "Close";
 
 /**
  * And one companion the steer opened up, which carries the one field an
@@ -8046,7 +8275,7 @@ export type Subscription = { endpoint: string, p256dh: string, auth: string, };
  * named a pull request — and what that field holds is read at the press. So this
  * list begins with what the field said and what GitHub made of it.
  */
-export type TakenUp = "TakenUp" | "NoSuchConversation" | "NotDrafting" | "NotHoldingOne" | "NoTarget" | { "AnotherRepository": { 
+export type TakenUp = "TakenUp" | "NoSuchConversation" | "NotDrafting" | "NotHoldingOne" | "ProcessNotOffered" | "NoTarget" | { "AnotherRepository": { 
 /**
  * The `owner/repo` the URL said, as it was written.
  */
@@ -8089,7 +8318,7 @@ at: string,
 /**
  * What git said, as it said it.
  */
-said: string, } } | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
+said: string, } } | { "NoPairing": RoleWanted } | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
 /**
  * Where it is checked out, as git named it.
  */

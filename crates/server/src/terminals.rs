@@ -1220,9 +1220,9 @@ pub(crate) async fn open(
     // Pairing's stands in where the implementation role has none, which is the
     // only way a Conversation with a Worktree can have got this far.
     let paired = conversation
-        .implementation_pairing
-        .clone()
-        .or_else(|| conversation.grilling_pairing.clone());
+        .pairings
+        .under(&store::Role::implementation())
+        .or_else(|| conversation.pairings.under(&store::Role::grilling()));
 
     let Some(pairing) = paired else {
         return Ok(TerminalOpened::NoProfile);

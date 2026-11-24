@@ -28,19 +28,17 @@ use anyhow::{Context, Result};
 use sqlx::SqlitePool;
 
 use super::Picked;
-use super::conversations::{Event, Lifecycle, Role};
+use super::conversations::{MOVED, Pairings, Role, State};
 
 /// What a Repo was last grilled with, as far as the store can still stand
 /// behind it.
 ///
-/// Any of them is [`Picked::Nothing`] where nothing was remembered for that
-/// role, or where what was remembered names a Profile that has since gone.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct RepoPairings {
-    pub grilling: Picked,
-    pub implementation: Picked,
-    pub review: Picked,
-}
+/// Read by role name, so a Process that names a role nobody has used before has
+/// a memory of its own from the first Conversation grilled under it — which is
+/// the whole of what makes a new role name work (ADR-0030, *Process*). Any role
+/// is [`Picked::Nothing`] where nothing was remembered for it, or where what was
+/// remembered names a Profile that has since gone.
+pub type RepoPairings = Pairings;
 
 /// The two tables the memory lives in.
 ///
@@ -97,23 +95,42 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// A role the human picked away is remembered as that, and the two writes are a
 /// pair: whichever of them lands takes the other's row away, so what comes back
 /// is one answer rather than two to choose between.
+/// The roles this is written for are **the Conversation's own** — whichever it
+/// has a row for — rather than a list kept here: a Process naming a role nobody
+/// has used before is remembered under that name the first time something is
+/// picked for it, and the three Verkstead knows go on being written under the
+/// words their rows already hold.
 pub(crate) async fn remember(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     conversation_id: i64,
 ) -> Result<()> {
-    for role in Role::ALL {
-        sqlx::query(&format!(
+    let roles: Vec<(String,)> = sqlx::query_as(
+        "SELECT role FROM conversation_pairings WHERE conversation_id = ?
+         UNION
+         SELECT role FROM skipped_roles WHERE conversation_id = ?",
+    )
+    .bind(conversation_id)
+    .bind(conversation_id)
+    .fetch_all(&mut **tx)
+    .await
+    .with_context(|| format!("reading which roles Conversation {conversation_id} has settled"))?;
+
+    for (role,) in roles {
+        let role = Role::named(&role);
+
+        sqlx::query(
             "INSERT INTO repo_pairings (repo_id, role, profile_id, model)
-             SELECT c.repo_id, ?, c.{}, m.model
+             SELECT c.repo_id, ?, p.profile_id, m.model
              FROM conversations c
+             JOIN conversation_pairings p
+               ON p.conversation_id = c.id AND p.role = ?
              JOIN pairing_models m
                ON m.conversation_id = c.id AND m.role = ?
-             WHERE c.id = ? AND c.{} IS NOT NULL
+             WHERE c.id = ?
              ON CONFLICT (repo_id, role)
              DO UPDATE SET profile_id = excluded.profile_id, model = excluded.model",
-            role.column(),
-            role.column(),
-        ))
+        )
+        .bind(role.stored())
         .bind(role.stored())
         .bind(role.stored())
         .bind(conversation_id)
@@ -175,19 +192,37 @@ pub(crate) async fn remember(
 /// guards is a database somebody edited by hand, and it guards it the way the
 /// memory fails everywhere: by handing back the unchosen picker a Repo with no
 /// memory gets.
+/// Every role the Repo remembers anything about, by name: whichever it was last
+/// grilled with, rather than a fixed three.
 pub async fn remembered_pairings(pool: &SqlitePool, repo_id: i64) -> Result<RepoPairings> {
-    Ok(RepoPairings {
-        grilling: remembered(pool, repo_id, Role::Grilling).await?,
-        implementation: remembered(pool, repo_id, Role::Implementation).await?,
-        review: remembered(pool, repo_id, Role::Review).await?,
-    })
+    let roles: Vec<(String,)> = sqlx::query_as(
+        "SELECT role FROM repo_pairings WHERE repo_id = ?
+         UNION
+         SELECT role FROM repo_skips WHERE repo_id = ?
+         ORDER BY role",
+    )
+    .bind(repo_id)
+    .bind(repo_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("reading which roles Repo {repo_id} remembers"))?;
+
+    let mut settled = Vec::new();
+
+    for (role,) in roles {
+        let role = Role::named(&role);
+        let picked = remembered(pool, repo_id, &role).await?;
+        settled.push((role, picked));
+    }
+
+    Ok(RepoPairings::of_each(settled))
 }
 
 /// One role's memory, read as what it says was picked.
 ///
 /// The skip first, for the reason a Conversation's own is read first: the two
 /// writes are a pair and a skip is the newer of them wherever both are there.
-async fn remembered(pool: &SqlitePool, repo_id: i64, role: Role) -> Result<Picked> {
+async fn remembered(pool: &SqlitePool, repo_id: i64, role: &Role) -> Result<Picked> {
     let skipped: Option<(i64,)> =
         sqlx::query_as("SELECT 1 FROM repo_skips WHERE repo_id = ? AND role = ?")
             .bind(repo_id)
@@ -261,8 +296,8 @@ pub async fn last_started_pairings(pool: &SqlitePool) -> Result<RepoPairings> {
          ORDER BY e.id DESC
          LIMIT 1",
     )
-    .bind(Event::Moved(Lifecycle::Closed).kind())
-    .bind(Lifecycle::Closed.stored())
+    .bind(MOVED)
+    .bind(State::CLOSED)
     .fetch_optional(pool)
     .await
     .context("finding the Conversation whose work most recently started")?;
@@ -275,13 +310,5 @@ pub async fn last_started_pairings(pool: &SqlitePool) -> Result<RepoPairings> {
         return Ok(RepoPairings::default());
     };
 
-    Ok(RepoPairings {
-        grilling: conversation
-            .grilling_pairing
-            .map_or(Picked::Nothing, Picked::Under),
-        implementation: conversation
-            .implementation_pairing
-            .map_or(Picked::Nothing, Picked::Under),
-        review: conversation.review_pairing,
-    })
+    Ok(conversation.pairings)
 }

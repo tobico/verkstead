@@ -9,10 +9,10 @@ use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, Deleting, Picked, Profile, ProfileFacts, Repo, close_conversation, create_profile,
-    delete_profile, last_started_pairings, open_database, register_repo, remembered_pairings,
-    set_grilling_pairing, set_implementation_pairing, set_review_pairing, skip_review,
-    start_conversation, start_grilling, update_profile,
+    Account, Deleting, Picked, Profile, ProfileFacts, Repo, State, close_conversation,
+    create_profile, delete_profile, last_started_pairings, open_database, register_repo,
+    remembered_pairings, set_grilling_pairing, set_implementation_pairing, set_review_pairing,
+    skip_review, start_conversation, start_in, update_profile,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -86,9 +86,16 @@ async fn grilled(
         .await
         .unwrap();
 
-    start_grilling(pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
-        .await
-        .unwrap();
+    start_in(
+        pool,
+        id,
+        &State::named("grilling"),
+        "deadbeef",
+        Path::new("/state/worktrees/x"),
+        &[],
+    )
+    .await
+    .unwrap();
 }
 
 /// And one grilled with the Review picker on the row that runs nothing.
@@ -106,9 +113,16 @@ async fn unreviewed(pool: &SqlitePool, repo: &Repo, grilling: &Profile, implemen
         .unwrap();
     skip_review(pool, id).await.unwrap();
 
-    start_grilling(pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
-        .await
-        .unwrap();
+    start_in(
+        pool,
+        id,
+        &State::named("grilling"),
+        "deadbeef",
+        Path::new("/state/worktrees/x"),
+        &[],
+    )
+    .await
+    .unwrap();
 }
 
 /// The whole of it: grilling one Conversation is what fills the next one's
@@ -126,22 +140,19 @@ async fn a_repo_remembers_what_it_was_last_grilled_with() {
     let remembered = remembered_pairings(&pool, repo.id).await.unwrap();
 
     let grilling = remembered
-        .grilling
-        .pairing()
+        .under(&verkstead_store::Role::grilling())
         .expect("the grilling half was recorded");
     assert_eq!(grilling.profile.id, fable.id);
     assert_eq!(grilling.model.as_deref(), Some(MODEL));
 
     let implementation = remembered
-        .implementation
-        .pairing()
+        .under(&verkstead_store::Role::implementation())
         .expect("the implementation half was recorded");
     assert_eq!(implementation.profile.id, opus.id);
     assert_eq!(implementation.model.as_deref(), Some(MODEL));
 
     let review = remembered
-        .review
-        .pairing()
+        .under(&verkstead_store::Role::review())
         .expect("and so was the review one");
     assert_eq!(review.profile.id, haiku.id);
     assert_eq!(review.model.as_deref(), Some(MODEL));
@@ -201,12 +212,33 @@ async fn grilling_again_replaces_what_was_remembered() {
     grilled(&pool, &repo, &opus, &fable, &opus).await;
 
     let remembered = remembered_pairings(&pool, repo.id).await.unwrap();
-    assert_eq!(remembered.grilling.pairing().unwrap().profile.id, opus.id);
     assert_eq!(
-        remembered.implementation.pairing().unwrap().profile.id,
+        remembered
+            .of(&verkstead_store::Role::grilling())
+            .pairing()
+            .unwrap()
+            .profile
+            .id,
+        opus.id
+    );
+    assert_eq!(
+        remembered
+            .of(&verkstead_store::Role::implementation())
+            .pairing()
+            .unwrap()
+            .profile
+            .id,
         fable.id
     );
-    assert_eq!(remembered.review.pairing().unwrap().profile.id, opus.id);
+    assert_eq!(
+        remembered
+            .of(&verkstead_store::Role::review())
+            .pairing()
+            .unwrap()
+            .profile
+            .id,
+        opus.id
+    );
 }
 
 /// One memory per Repo. Two Repos grilled under different accounts each get
@@ -226,8 +258,7 @@ async fn each_repo_remembers_its_own() {
         remembered_pairings(&pool, verkstead.id)
             .await
             .unwrap()
-            .grilling
-            .pairing()
+            .under(&verkstead_store::Role::grilling())
             .unwrap()
             .profile
             .id,
@@ -237,8 +268,7 @@ async fn each_repo_remembers_its_own() {
         remembered_pairings(&pool, askance.id)
             .await
             .unwrap()
-            .grilling
-            .pairing()
+            .under(&verkstead_store::Role::grilling())
             .unwrap()
             .profile
             .id,
@@ -261,9 +291,10 @@ async fn a_model_a_profile_no_longer_lists_still_comes_back_as_it_was_written() 
         .await
         .unwrap();
 
-    let grilling = remembered_pairings(&pool, repo.id).await.unwrap().grilling;
-    let grilling = grilling
-        .pairing()
+    let grilling = remembered_pairings(&pool, repo.id)
+        .await
+        .unwrap()
+        .under(&verkstead_store::Role::grilling())
         .expect("the row still names a Profile that is there");
     assert_eq!(grilling.model.as_deref(), Some(MODEL));
     assert_eq!(grilling.profile.models, ["claude-sonnet-5"]);
@@ -293,16 +324,29 @@ async fn a_removed_profile_is_taken_out_of_the_memory_that_named_it() {
     let remembered = remembered_pairings(&pool, repo.id).await.unwrap();
 
     assert_eq!(
-        remembered.implementation,
+        remembered.of(&verkstead_store::Role::implementation()),
         Picked::Nothing,
         "the role that remembered it has nothing to prefill with",
     );
     assert_eq!(
-        remembered.grilling.pairing().unwrap().profile.id,
+        remembered
+            .of(&verkstead_store::Role::grilling())
+            .pairing()
+            .unwrap()
+            .profile
+            .id,
         fable.id,
         "and the roles that remembered another account still do",
     );
-    assert_eq!(remembered.review.pairing().unwrap().profile.id, haiku.id);
+    assert_eq!(
+        remembered
+            .of(&verkstead_store::Role::review())
+            .pairing()
+            .unwrap()
+            .profile
+            .id,
+        haiku.id
+    );
 }
 
 /// A Conversation grilled with no review remembers that, and the next
@@ -321,12 +365,17 @@ async fn a_repo_remembers_having_been_grilled_with_no_review() {
     let remembered = remembered_pairings(&pool, repo.id).await.unwrap();
 
     assert_eq!(
-        remembered.review,
+        remembered.of(&verkstead_store::Role::review()),
         Picked::Skipped,
         "the row that runs nothing, remembered as the choice it was",
     );
     assert_eq!(
-        remembered.grilling.pairing().unwrap().profile.id,
+        remembered
+            .of(&verkstead_store::Role::grilling())
+            .pairing()
+            .unwrap()
+            .profile
+            .id,
         fable.id,
         "and the roles beside it are remembered as they always were",
     );
@@ -348,8 +397,7 @@ async fn a_pairing_grilled_after_no_review_replaces_the_row_that_ran_nothing() {
         remembered_pairings(&pool, repo.id)
             .await
             .unwrap()
-            .review
-            .pairing()
+            .under(&verkstead_store::Role::review())
             .unwrap()
             .profile
             .id,
@@ -371,7 +419,10 @@ async fn no_review_grilled_after_a_pairing_replaces_it() {
     unreviewed(&pool, &repo, &fable, &fable).await;
 
     assert_eq!(
-        remembered_pairings(&pool, repo.id).await.unwrap().review,
+        remembered_pairings(&pool, repo.id)
+            .await
+            .unwrap()
+            .of(&verkstead_store::Role::review()),
         Picked::Skipped,
         "one answer rather than two to choose between",
     );
@@ -405,9 +456,16 @@ async fn drafted(
 }
 
 async fn press(pool: &SqlitePool, id: i64) {
-    start_grilling(pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
-        .await
-        .unwrap();
+    start_in(
+        pool,
+        id,
+        &State::named("grilling"),
+        "deadbeef",
+        Path::new("/state/worktrees/x"),
+        &[],
+    )
+    .await
+    .unwrap();
 }
 
 /// A workbench where nothing has started has no last start to copy, whatever
@@ -448,11 +506,29 @@ async fn the_last_conversation_to_start_is_the_one_copied_whenever_it_was_create
 
     let copied = last_started_pairings(&pool).await.unwrap();
 
-    let grilling = copied.grilling.pairing().expect("the older one's grilling");
+    let grilling = copied
+        .under(&verkstead_store::Role::grilling())
+        .expect("the older one’s grilling");
     assert_eq!(grilling.profile.id, fable.id);
     assert_eq!(grilling.model.as_deref(), Some(MODEL));
-    assert_eq!(copied.implementation.pairing().unwrap().profile.id, opus.id);
-    assert_eq!(copied.review.pairing().unwrap().profile.id, haiku.id);
+    assert_eq!(
+        copied
+            .of(&verkstead_store::Role::implementation())
+            .pairing()
+            .unwrap()
+            .profile
+            .id,
+        opus.id
+    );
+    assert_eq!(
+        copied
+            .of(&verkstead_store::Role::review())
+            .pairing()
+            .unwrap()
+            .profile
+            .id,
+        haiku.id
+    );
 }
 
 /// A draft closed without its work ever starting moved out of Draft all the
@@ -476,8 +552,7 @@ async fn a_draft_closed_unstarted_is_passed_over_and_a_started_one_closed_is_not
         last_started_pairings(&pool)
             .await
             .unwrap()
-            .grilling
-            .pairing()
+            .under(&verkstead_store::Role::grilling())
             .map(|pairing| pairing.profile.id.clone()),
         Some(fable.id),
     );
@@ -494,6 +569,11 @@ async fn the_last_start_hands_its_skips_back_as_written() {
 
     unreviewed(&pool, &repo, &fable, &fable).await;
     let copied = last_started_pairings(&pool).await.unwrap();
-    assert_eq!(copied.review, Picked::Skipped);
-    assert!(copied.grilling.pairing().is_some());
+    assert_eq!(copied.of(&verkstead_store::Role::review()), Picked::Skipped);
+    assert!(
+        copied
+            .of(&verkstead_store::Role::grilling())
+            .pairing()
+            .is_some()
+    );
 }

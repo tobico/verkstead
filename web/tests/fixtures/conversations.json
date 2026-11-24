@@ -8,9 +8,13 @@
     "idle": false,
     "naming": false,
     "parked": null,
+    "process": {
+      "id": "develop",
+      "plugin": "2bcf359e-071a-4237-8741-9897cf06ac15"
+    },
     "rank": "Zw-aa00bb11cc22dd33ee44ff5566778899",
     "repo": "verkstead",
-    "state": "Implementing",
+    "state": "implementing",
     "terminal_busy": false,
     "transferred": false,
     "unseen": false,
@@ -28,9 +32,13 @@
     "idle": false,
     "naming": false,
     "parked": null,
+    "process": {
+      "id": "develop",
+      "plugin": "2bcf359e-071a-4237-8741-9897cf06ac15"
+    },
     "rank": "Zx-aa00bb11cc22dd33ee44ff5566778899",
     "repo": "verkstead",
-    "state": "Implementing",
+    "state": "implementing",
     "terminal_busy": false,
     "transferred": false,
     "unseen": false,
@@ -48,9 +56,13 @@
     "idle": false,
     "naming": false,
     "parked": null,
+    "process": {
+      "id": "develop",
+      "plugin": "2bcf359e-071a-4237-8741-9897cf06ac15"
+    },
     "rank": "Zy-aa00bb11cc22dd33ee44ff5566778899",
     "repo": "verkstead",
-    "state": "Grilling",
+    "state": "grilling",
     "terminal_busy": false,
     "transferred": false,
     "unseen": false,
@@ -68,9 +80,13 @@
     "idle": false,
     "naming": false,
     "parked": null,
+    "process": {
+      "id": "develop",
+      "plugin": "2bcf359e-071a-4237-8741-9897cf06ac15"
+    },
     "rank": "Zz-aa00bb11cc22dd33ee44ff5566778899",
     "repo": "askance",
-    "state": "Draft",
+    "state": "draft",
     "terminal_busy": false,
     "transferred": false,
     "unseen": false,
@@ -88,9 +104,13 @@
     "idle": false,
     "naming": false,
     "parked": null,
+    "process": {
+      "id": "develop",
+      "plugin": "2bcf359e-071a-4237-8741-9897cf06ac15"
+    },
     "rank": "a0-aa00bb11cc22dd33ee44ff5566778899",
     "repo": "verkstead",
-    "state": "Draft",
+    "state": "draft",
     "terminal_busy": false,
     "transferred": false,
     "unseen": false,

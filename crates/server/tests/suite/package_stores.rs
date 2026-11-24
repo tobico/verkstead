@@ -330,9 +330,16 @@ async fn machine(conversations: usize) -> Machine {
             ],
         );
 
-        store::start_grilling(&pool, id, &commit, &worktree, &[])
-            .await
-            .unwrap();
+        store::start_in(
+            &pool,
+            id,
+            &store::State::named("grilling"),
+            &commit,
+            &worktree,
+            &[],
+        )
+        .await
+        .unwrap();
 
         rows.push(
             store::load_conversation(&pool, id)

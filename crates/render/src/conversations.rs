@@ -21,75 +21,179 @@ use ts_rs::TS;
 
 use crate::{DiffView, PairingView, PickedView, ProfileChoice, RepoEntry, Standing};
 
-/// Where a Conversation has got to.
+/// Which Process: the uuid of the plugin providing it and the id its manifest
+/// gives the Process (Set 1877, Q6).
 ///
-/// The whole ladder, though only the first two are reachable yet: the states are
-/// the domain's, and the page says which one a Conversation is in rather than
-/// assuming the only one it can currently be.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// **One shape for every Process** (ADR-0030, *Process*): the five Verkstead
+/// ships are bundled plugins of their own, so a wire that named them apart
+/// would be naming a difference there is not. What each of them is *called*,
+/// and what each of its states is called, is read off [`ProcessEntry`] —
+/// which the server sends for every Process it holds.
+///
+/// See ADR-0020 and ADR-0030.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum Lifecycle {
-    Draft,
-    Grilling,
-    Implementing,
-    Wrapping,
-
-    /// Beside the ladder rather than on it: the human following up on work that
-    /// is already on a pull request, in a session they steered into being.
-    /// Reachable from Done, from Wrapping and from Closed, and leading back
-    /// into the wrap-up.
-    FollowUp,
-
-    /// Beside the ladder rather than on it, the way Follow-up is: a question
-    /// about the code being answered in rounds, with nothing built and nothing
-    /// committed. Reachable from a Start on an **Investigate** draft and from a
-    /// steer out of anywhere, and leading back to wherever it was entered from.
-    Investigating,
-
-    Done,
-
-    /// Off the ladder rather than on it: the work stopped wherever it had got
-    /// to. Reachable from every other state, and leading nowhere.
-    Closed,
+pub struct ProvidedProcess {
+    pub plugin: String,
+    pub id: String,
 }
 
-/// What kind of work a Conversation is for, and so which states it runs
-/// through.
-///
-/// [`Lifecycle`]'s pair rather than a schema type: a Process rides no Question
-/// Set, so it is the viewer's half of a fact of the record's — the store's own
-/// enum is in `crates/store/src/conversations.rs`, and the two vocabularies are
-/// held to each other in one function on the server.
-///
-/// All five, and all five can start something now that Fix Merge Issues has
-/// landed: which of them the picker offers is a list of its own all the same,
-/// and what a stage adds is a row on that list and a start path behind it —
-/// never a variant. A wire that carried only what could be started would be one
-/// to widen every time one more could.
-///
-/// See ADR-0020.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// One Process a plugin loaded here provides, as the picker draws it and as
+/// a Conversation on it is worded: read off the manifest rather than kept in
+/// the viewer (ADR-0030, *Process*).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum Process {
-    /// The ladder as it has always run, the interview included. Every new
-    /// draft's default, and how every Conversation from before there were
-    /// Processes reads.
-    Develop,
+pub struct ProcessEntry {
+    pub plugin: String,
+    pub id: String,
 
-    /// Questions about the code answered without changing it.
-    Investigate,
+    /// What the picker's row says, and the Configuration under a frozen Brief.
+    pub name: String,
 
-    /// The wrap-up run over a pull request or a branch the Brief names — and
-    /// how a Conversation that adopted a pull request reads, that being the
-    /// Process its path already was.
-    Review,
+    /// The sentence under its name in the picker's dropped rows.
+    pub description: String,
 
-    /// Follow-up entered from a Draft: rounds on a fresh branch, primed with
-    /// the Brief.
-    Tinker,
+    /// Whether the picker offers it. A disabled plugin's Process is still
+    /// listed while Conversations on it run to the end, so that they are
+    /// worded; it is not offered to a new one.
+    pub offered: bool,
 
-    /// A wrap-up narrowed to what GitHub refuses a merge for.
-    FixMergeIssues,
+    /// Each state it declares, in order, with the word the card draws.
+    pub states: Vec<DeclaredStateEntry>,
+
+    /// Each role it declares, in the order its manifest writes them: the order
+    /// the **Agent** control draws their pickers in, and how many of them says
+    /// which shape that control takes — one role a flat dropdown, more a panel
+    /// (ADR-0020, *A Conversation has a Process*; Set 1765, Q26).
+    pub roles: Vec<RoleEntry>,
+
+    /// Whether it is pointed at work that is already somewhere else, and so
+    /// draws the **Target** field in the Repo panel: its manifest's `target`
+    /// (Set 1765, Q29). What a Start waits on reads the same fact — see
+    /// `processes::takes_a_target` on the server.
+    pub target: bool,
+
+    /// And whether its wrap-up is narrowed to what GitHub refuses a merge
+    /// for: its `wrapping` state turns the Wrap-up's `review` and `comments`
+    /// off, so nothing reads the branch and nothing said on the pull request
+    /// is answered.
+    ///
+    /// What the Steer form says wrapping up will do, under Verkstead's own
+    /// **Wrapping** row — which is the row this is for, so it is read by that
+    /// state's id and `false` for a Process that declares no such state.
+    pub narrowed: bool,
+
+    /// And whether a Brief that is one pull request URL and nothing else fills
+    /// the Process with this one: **Fix merge issues**, which is the server's
+    /// own rule rather than anything the manifest says (CONTEXT, *Target*).
+    ///
+    /// Sent so that the composer can draw the fill before the save lands and
+    /// keep no word of its own for which Process that is — see
+    /// `filled_from_a_pull_request` in `crates/server/src/conversations.rs`,
+    /// which is where the rule lives.
+    pub filled_from_a_pull_request: bool,
+}
+
+impl ConversationView {
+    /// What the role named `role` will run its sessions under.
+    ///
+    /// [`PickedView::Nothing`] where its Process declares no such role, which
+    /// is the same answer as a picker nobody has filled: what roles there are
+    /// is the Process's to say, and a reader asking after one it does not
+    /// declare is asking about a picker that is drawn nowhere.
+    pub fn paired(&self, role: &str) -> PickedView {
+        self.pairings
+            .iter()
+            .find(|settled| settled.role == role)
+            .map_or(PickedView::Nothing, |settled| settled.picked.clone())
+    }
+
+    /// And its Pairing, where a Pairing is what was picked for it.
+    pub fn under(&self, role: &str) -> Option<&PairingView> {
+        self.pairings
+            .iter()
+            .find(|settled| settled.role == role)
+            .and_then(|settled| match &settled.picked {
+                PickedView::Under(pairing) => Some(pairing),
+                PickedView::Nothing | PickedView::Skipped => None,
+            })
+    }
+}
+
+/// One of a Conversation's roles and what it will run under: the role as its
+/// Process declares it, and the pick beside it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct RolePairingView {
+    /// What a pick is posted under and what the record stores it by.
+    pub role: String,
+
+    /// What its picker is labelled inside the panel.
+    pub label: String,
+
+    /// Whether it is the role the Done signal, memos and previews assume.
+    pub building: bool,
+
+    /// And whether its picker offers the row that runs no session at all: *No
+    /// review*, and whatever a plugin's own role calls it. A role without it is
+    /// answered with a Pairing or the press waits.
+    pub away: bool,
+
+    pub picked: PickedView,
+}
+
+/// One role a Process declares, as its manifest declares it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct RoleEntry {
+    /// What its Pairing is stored and picked by.
+    pub role: String,
+
+    /// What its picker is labelled inside the panel.
+    pub label: String,
+
+    /// Whether it is the role the Done signal, memos and previews assume.
+    pub building: bool,
+
+    /// And whether its picker offers the row that runs no session at all: *No
+    /// review*, and whatever a plugin's own role calls it. A role without it is
+    /// answered with a Pairing or the press waits.
+    pub away: bool,
+}
+
+/// The role a press is waiting on a Pairing for: its name, as its Process
+/// declares it, and the label its picker is drawn under.
+///
+/// Both, because the two are for two different things: the label is what the
+/// sentence says, and the name is what the page looks the picker's own rows up
+/// by.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct RoleWanted {
+    pub role: String,
+    pub label: String,
+
+    /// And whether its picker offers the row that runs no session, which the
+    /// sentence names where it does: *or No review*.
+    pub away: bool,
+}
+
+/// A declared state and its word.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct DeclaredStateEntry {
+    /// What the `conversations.state` column holds.
+    pub id: String,
+    pub word: String,
+
+    /// Whether its Activity is the **Interview**, which is the one thing the
+    /// page has to know about a state besides its word.
+    ///
+    /// What a round is: a steer into it opens one on a Brief of its own, and
+    /// the digest tick on its form is what primes the interview that round
+    /// runs. Off the manifest rather than off the state's name, as everything
+    /// about a state is (Set 1765, Q29).
+    pub interviews: bool,
 }
 
 /// One row of the conversations sidebar.
@@ -139,7 +243,17 @@ pub struct ConversationEntry {
     /// What the Repo this Conversation is against is called.
     pub repo: String,
 
-    pub state: Lifecycle,
+    /// The word its `state` column holds, which the row's word is read off its
+    /// Process by — see [`ProcessEntry::states`].
+    ///
+    /// Verkstead's own three — `draft`, `done` and `closed` — are the viewer's
+    /// to word, no Process declaring them. Every other word is one its Process
+    /// declares, and a row whose Process this server holds nothing for is read
+    /// aloud as the word it has.
+    pub state: String,
+
+    /// And the Process to read it against.
+    pub process: ProvidedProcess,
 
     /// Whether a session is running on this Conversation right now.
     ///
@@ -538,7 +652,8 @@ pub struct ConversationView {
     pub repo: RepoEntry,
 
     /// What kind of work it is: the Process, picked on the composer between the
-    /// Repo and the Pairings and frozen when the work starts — see [`Process`].
+    /// Repo and the Pairings and frozen when the work starts — see
+    /// [`ProvidedProcess`], and [`ProcessEntry`] for what it is called.
     ///
     /// Never `null`. Every Conversation has one, including every one started
     /// before there were any: where the record holds no pick the reading stands,
@@ -548,7 +663,7 @@ pub struct ConversationView {
     /// draws it: the Pairings are in the half of the Configuration that is about
     /// the machine the work was done on, and a Process is a fact about the work.
     /// So it is one of the facts a published share says.
-    pub process: Process,
+    pub process: ProvidedProcess,
 
     pub branch: String,
 
@@ -584,29 +699,26 @@ pub struct ConversationView {
     /// while the Brief drafts, frozen when grilling starts.
     pub companions: Vec<CompanionView>,
 
-    pub state: Lifecycle,
+    /// The word its `state` column holds, which the card's word is read off
+    /// its Process by — see [`ProcessEntry::states`].
+    ///
+    /// All five of Verkstead's own Processes are plugins whose states are named
+    /// with the words the record holds, so a Grilling reads `grilling` here and
+    /// is worded *Grilling* off Develop's manifest; Verkstead's own three are
+    /// the viewer's to word.
+    pub state: String,
 
-    /// The Profile and model the grilling session will run under, whole rather
-    /// than by id: the pane says what they are, and whether the Profile is
+    /// What each role its Process declares will run its sessions under, in the
+    /// order the **Agent** control draws them — whole rather than by id: the
+    /// pane says what the Profile and model are, and whether the Profile is
     /// still runnable.
     ///
-    /// A Pairing or nothing, the picker having no row that runs no session:
-    /// *No grilling* is retired, and a record written while it was there reads
-    /// as nothing picked — see [`crate::PickedView`], which the two roles that
-    /// do have one still use.
-    pub grilling_pairing: Option<PairingView>,
-
-    /// And the ones the implementation will run under. Chosen separately
-    /// because it is genuinely a separate account and model.
-    pub implementation_pairing: Option<PairingView>,
-
-    /// And what the wrap-up's review session will run under, chosen separately
-    /// again: reviewing is a fresh set of eyes on what was built.
-    ///
-    /// The other role the picker offers a row that runs no session for, so this
-    /// says which of three the human picked rather than whether they picked at
-    /// all.
-    pub review_pairing: PickedView,
+    /// One entry per role rather than three fields, a Conversation's roles
+    /// being its Process's (ADR-0030, *Process*). Each says which of three the
+    /// human picked rather than whether they picked at all — a Pairing, the row
+    /// that runs no session, or nothing yet; a picker that offers no such row
+    /// simply never reads it back.
+    pub pairings: Vec<RolePairingView>,
 
     /// Whether everything needed before the work will start is settled: every
     /// role picked — a Pairing complete and no Profile broken, or the row that
@@ -733,9 +845,9 @@ pub struct ConversationView {
     /// is decided at Start and not before, so there is nothing here saying
     /// which the page is looking at.
     ///
-    /// Drawn in the Repo panel under the Branch field, for the Processes that
-    /// take a target and no others — see `processes.ts`, where that list is
-    /// kept beside the role table.
+    /// Drawn in the Repo panel under the Branch field, for the Processes whose
+    /// manifest says they take a target and no others — see
+    /// [`ProcessEntry::target`], which is where the page asks.
     pub target: Option<String>,
 
     /// The worktree the grilling was given to work in, once there is one.
@@ -999,6 +1111,11 @@ pub struct ConversationView {
     /// a Share, which is the record, carries no trace of it.
     pub pending_steer: Option<PendingSteerView>,
 
+    /// The rows the Steer form draws, in the order it draws them: each state
+    /// the Conversation's Process marks as taking a steer, then Close, which
+    /// is Verkstead's and on every form (ADR-0030, *Process*).
+    pub steer_rows: Vec<SteerRow>,
+
     /// The Previews standing on this Conversation, oldest first: what a
     /// building session suggested for trying its work by hand (ADR-0024).
     ///
@@ -1156,6 +1273,10 @@ pub struct SteerForm {
     /// the Timeline's item reads *Steer* for.
     #[serde(default)]
     pub target: Option<SteerTarget>,
+
+    /// And the declared state's id, where the picker is on one.
+    #[serde(default)]
+    pub state: Option<String>,
 
     /// The new round's Brief, for a steer into Grilling.
     #[serde(default)]
@@ -2588,8 +2709,9 @@ pub struct SteerEvent {
     /// When it was steered, RFC 3339.
     pub at: String,
 
-    /// The state the human moved it into.
-    pub target: Lifecycle,
+    /// The state the human moved it into, by the word the record holds — which
+    /// is what the card's word is read off its Process by.
+    pub target: String,
 
     /// The instruction they steered it with, rendered and sanitized on the way
     /// out as every piece of markdown on this wire is — and `None` for every
@@ -2726,7 +2848,9 @@ pub struct MovedEvent {
     /// When it moved, RFC 3339.
     pub at: String,
 
-    pub state: Lifecycle,
+    /// The word the record holds for the state it moved to, which is what the
+    /// line's word is read off its Process by.
+    pub state: String,
 }
 
 /// The Brief as the page receives it: rendered for reading, and as it was
@@ -3289,7 +3413,11 @@ pub enum TerminalClosed {
 
 /// A move as an Event. Nothing to render — see [`MovedEvent`] — but built here
 /// beside the Brief so that one place knows how a Timeline is made.
-pub fn moved_event(id: i64, at: String, state: Lifecycle) -> TimelineEvent {
+///
+/// `state` is the word the record holds, which is what the line's word is read
+/// off its Process by: the five Processes Verkstead ships name their states
+/// with those words, so a move into Grilling carries `grilling`.
+pub fn moved_event(id: i64, at: String, state: String) -> TimelineEvent {
     TimelineEvent::Moved(MovedEvent { id, at, state })
 }
 
@@ -3910,8 +4038,9 @@ pub fn manual_task_event(id: i64, at: String, instruction: &str) -> TimelineEven
     })
 }
 
-/// A Steer as an Event: the state the human sent the Conversation into, and the
-/// instruction they sent it with where they wrote one.
+/// A Steer as an Event: the state the human sent the Conversation into — by the
+/// word the record holds, which is what the card's word is read off its Process
+/// by — and the instruction they sent it with where they wrote one.
 ///
 /// Rendered the way the Brief is, and for the same reason: it is what the human
 /// asked for, written for somebody to read back.
@@ -3921,7 +4050,7 @@ pub fn manual_task_event(id: i64, at: String, instruction: &str) -> TimelineEven
 pub fn steer_event(
     id: i64,
     at: String,
-    target: Lifecycle,
+    target: String,
     instruction: Option<&str>,
     record: Option<SteerRecordView>,
 ) -> TimelineEvent {
@@ -4066,15 +4195,14 @@ pub struct RepoChoice {
 /// What kind of work a drafting Conversation is for.
 ///
 /// The Process and nothing else, the way [`RepoChoice`] is an id and nothing
-/// else: which one it is is the whole of what the picker says.
-///
-/// Any of the five may be asked for — the wire carries all of them, and whether
-/// the one asked for can be started yet is the server's list to keep rather than
-/// something the shape of this refuses. See [`ProcessPicked::NotLanded`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// else: which one it is is the whole of what the picker says. Any Process may
+/// be asked for, and whether the one asked for is offered here is the server's
+/// list to keep rather than something the shape of this refuses — see
+/// [`ProcessPicked::NotOffered`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ProcessChoice {
-    pub process: Process,
+    pub process: ProvidedProcess,
 }
 
 /// What became of picking one.
@@ -4095,16 +4223,14 @@ pub enum ProcessPicked {
     /// is no way left to change it.
     NotDrafting,
 
-    /// That Process has no stage behind it yet: the record reads and writes all
-    /// five, and only the ones whose stage has landed can be picked on.
+    /// No plugin loaded here offers that Process: it was never installed, its
+    /// plugin is switched off, or it is in trouble — see the Plugins page.
     ///
-    /// A refusal of its own rather than one of the above, because it is
-    /// something different about the world — nothing the human does to this
-    /// Conversation makes it pickable, and what they are waiting on is
-    /// Verkstead rather than themselves. Which Processes have landed is the
-    /// server's list; the rows the picker draws are the viewer's, and a stage
-    /// that adds one adds the other.
-    NotLanded,
+    /// The one refusal about the world rather than about this Conversation,
+    /// now that every Process is a plugin's: nothing the human does to the
+    /// Conversation makes it pickable, and what the picker draws is the list
+    /// the server sends.
+    NotOffered,
 }
 
 /// Where a saved draft's work has gone: the device it was moved onto, and the
@@ -4870,17 +4996,15 @@ pub enum GrillingStarted {
     /// It is past drafting, so it has been started once already — or closed.
     NotDrafting,
 
-    /// No Agent Profile is chosen for the grilling session.
-    NoGrillingProfile,
-
-    /// None is chosen for the implementation either. Fixed before starting
-    /// rather than after, because the grilling ends by handing over to it.
-    NoImplementationProfile,
-
-    /// Nor for the review the wrap-up runs. Fixed before starting for the same
-    /// reason: what the work is looked at by is settled before the work begins
-    /// rather than swapped underneath it.
-    NoReviewProfile,
+    /// No Pairing is settled for one of the roles the Conversation's Process
+    /// declares.
+    ///
+    /// **Every role it names**, because each is a session something would
+    /// launch: they are fixed before the work starts rather than swapped
+    /// underneath it, and which of them there are is the Process's to say
+    /// (ADR-0030, *Process*). A role the human picked away is settled — what it
+    /// says is that no session runs there.
+    NoPairing(RoleWanted),
 
     /// A chosen Profile cannot be run under as things stand — its account is
     /// not where it was left or has signed out, or it is a member's and
@@ -4891,6 +5015,11 @@ pub enum GrillingStarted {
     /// The Brief is empty, and the Brief is what the grilling starts from.
     /// Freezing an empty one would freeze nothing worth having.
     EmptyBrief,
+
+    /// Its Process is a plugin's that isn't offered here any more: the
+    /// plugin was switched off, removed, or is in trouble. Pick another, or
+    /// put the plugin right on the Plugins page.
+    ProcessNotOffered,
 
     /// No git author is configured, so there is nobody for Verkstead to commit
     /// on the branch as — and the first thing it commits there is the clearing
@@ -5263,6 +5392,18 @@ pub enum SteerTarget {
     /// Finished with. Nothing runs, so there is no Pairing to settle and no
     /// payload to carry: a steer into Done is the move alone.
     Done,
+
+    /// One of the states the Conversation's Process declares, named by the
+    /// submission's [`SteerSubmission::state`]: a state its manifest marks as
+    /// taking a steer, with the brief that mark says (ADR-0030, *Process*;
+    /// Set 1765, Q28). What runs there is the state's Activity, started with
+    /// what the human wrote.
+    Declared,
+
+    /// Closed, which is Verkstead's rather than a state any Process declares,
+    /// and so on every Steer form whatever the Process: the ordinary Close,
+    /// made from the form.
+    Close,
 }
 
 impl SteerTarget {
@@ -5279,10 +5420,65 @@ impl SteerTarget {
             | Self::Implementing
             | Self::Wrapping
             | Self::FollowUp
-            | Self::Investigating => true,
-            Self::Done => false,
+            | Self::Investigating
+            | Self::Declared => true,
+            Self::Done | Self::Close => false,
         }
     }
+}
+
+/// One row of the Steer form: somewhere the Conversation can be steered into.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct SteerRow {
+    /// What a submit names it by.
+    pub target: SteerTarget,
+
+    /// The declared state's id, where [`Self::target`] is
+    /// [`SteerTarget::Declared`].
+    pub state: Option<String>,
+
+    /// What the row reads: the state's word, as its manifest writes it.
+    pub word: String,
+
+    /// What the form draws under it, and the field a submit carries it in.
+    pub brief: SteerBrief,
+
+    /// Whether the state returns to where it was steered from once its
+    /// Activity ends.
+    pub detour: bool,
+
+    /// The role whose Pairing the row's one picker settles: the first of the
+    /// roles the target state declares, by its name — or nothing where nothing
+    /// runs there. A state declaring more takes this pick for the first and
+    /// fills the rest where they have none.
+    pub role: Option<String>,
+}
+
+/// The brief a steer into a state takes, as its manifest's steer mark says
+/// (Set 1877, Q5): each a set of fields Verkstead knows how to draw, and the
+/// field of [`SteerSubmission`] it is carried in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum SteerBrief {
+    /// A new round's Brief and the digest tick: [`SteerSubmission::brief`] and
+    /// [`SteerSubmission::digest`].
+    Round,
+
+    /// What the human wants done, or nothing where the branch has something
+    /// standing: [`SteerSubmission::instruction`].
+    Instruction,
+
+    /// What to take up about work already pushed, required:
+    /// [`SteerSubmission::follow_up`].
+    FollowUp,
+
+    /// The question an investigation answers, required:
+    /// [`SteerSubmission::investigation`].
+    Question,
+
+    /// Nothing written.
+    None,
 }
 
 /// What the human settled on the form: where the Conversation goes, what runs
@@ -5292,6 +5488,12 @@ impl SteerTarget {
 pub struct SteerSubmission {
     /// Which state to move it into.
     pub target: SteerTarget,
+
+    /// The declared state's id, where [`Self::target`] is
+    /// [`SteerTarget::Declared`]. What the human writes under it is carried in
+    /// the field its brief kind draws — see [`SteerBrief`].
+    #[serde(default)]
+    pub state: Option<String>,
 
     /// Whether to end the session that is running where it stands.
     ///
@@ -5560,6 +5762,13 @@ pub enum ConversationSteered {
     /// name a pull request that a steer into Investigating need not have.
     NoInvestigationBrief,
 
+    /// The state named takes no steer: the Conversation's Process declares no
+    /// such state, or declares it without marking it as one a steer goes
+    /// into. Named, so the refusal says which.
+    NotSteerable {
+        state: String,
+    },
+
     /// Grilling was named with no brief written, for a Conversation whose newest
     /// Brief is empty.
     ///
@@ -5677,7 +5886,7 @@ pub enum ConversationSteered {
 /// yet — or where it is already as open as a companion gets.
 ///
 /// A vocabulary of its own rather than more variants of the grill start's, for
-/// the reason [`SteerTarget`] is not [`crate::Lifecycle`]: what a grilling can
+/// the reason [`SteerTarget`] is not a state word: what a grilling can
 /// be refused for and what a steer can be refused for are different lists, and
 /// one list would say each press can be refused for things it never could.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -5757,19 +5966,10 @@ pub enum Adopted {
     /// Brief and a grilling. There is no roadmap here to take a stage from.
     NotAdopting,
 
-    /// No Agent Profile is chosen for the grilling. Carried by an adopted stage
-    /// rather than run under: every stage after it inherits both Profiles from
-    /// its predecessor, and a Conversation steered into a second round is
-    /// grilled.
-    NoGrillingProfile,
-
-    /// And none is chosen for the implementation, which is what the stage's own
-    /// work runs under.
-    NoImplementationProfile,
-
-    /// Nor for the review, which is what looks at what the stage built — and
-    /// which every stage after this one inherits along with the other two.
-    NoReviewProfile,
+    /// No Pairing is settled for one of the roles the Conversation's Process
+    /// declares — every one of which an adopted stage carries, its successors
+    /// inheriting them from it.
+    NoPairing(RoleWanted),
 
     /// A chosen Profile cannot be run under as things stand — its account is
     /// not where it was left, or it is a member's and something about this
@@ -5922,6 +6122,10 @@ pub enum TakenUp {
     /// pull request, so there is nothing here to wrap up.
     NotHoldingOne,
 
+    /// Its Process's plugin is unticked or in trouble, so nothing new starts
+    /// on it.
+    ProcessNotOffered,
+
     /// The **Target** field is empty, so there is nothing for this Review to take
     /// up. Anything in it at all is a pull request or a branch — see
     /// [`Self::NoHeadBranch`], which is what a name origin has nothing under
@@ -6041,17 +6245,13 @@ pub enum TakenUp {
         said: String,
     },
 
-    /// No Agent Profile is chosen for the implementation, which is what a red
-    /// check and a conflict are fixed under.
+    /// No Pairing is settled for one of the roles the Conversation's Process
+    /// declares — what a red check and a conflict are fixed under among them.
     ///
-    /// The grilling is not among these, unlike an adoption's: the work on a
-    /// pull request is built, there is no round for a grilling to open, and the
-    /// picker is not drawn.
-    NoImplementationProfile,
-
-    /// Nor for the review, which is what reads the branch and what has been
-    /// said on it.
-    NoReviewProfile,
+    /// A **Review** and a **Fix merge issues** declare no grilling role, which
+    /// is why this never names one: the work on a pull request is built, there
+    /// is no round for a grilling to open, and no picker is drawn for one.
+    NoPairing(RoleWanted),
 
     /// A chosen Profile cannot be run under as things stand — its account is
     /// not where it was left, or it is a member's and something about this

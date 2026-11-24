@@ -116,11 +116,13 @@ flowchart LR
   is closed — *corrected 2026-08-20, building stage 02*: this said "archived",
   and there is no archive action on a conversation. Closing is what the teardown
   hangs off, and it leaves the branch alone.
-- **Lifecycle:** Draft → Grilling → Direction → Implementing → Wrapping →
-  Done — or straight from Draft to Implementing where the human picked **No
-  grilling**, the brief being the whole of the plan and an inline
-  implementation what it goes to (*refined 2026-08-29, building
-  optional-steps-and-auto-branch*).
+- **States:** Draft → Grilling → Direction → Implementing → Wrapping → Done
+  is **Develop**'s ladder, and a ladder is now a Process's to declare rather
+  than a shared enum — *corrected 2026-11-23, building stage 11*: this said
+  *Lifecycle*, and there is no such enum. A state is the word the
+  `conversations.state` column holds, read against the manifest of the Process
+  the Conversation is on (ADR-0030, *Process*); Draft, Done and Closed are
+  Verkstead's own, which no Process declares and none returns to.
   *Blocked on you* is a badge on any active state, not a state. Closing
   is possible from any state, and **Closed** is a state of its own — off the
   ladder rather than on it, since every other state is somewhere the work has

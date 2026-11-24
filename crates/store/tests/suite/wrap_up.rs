@@ -11,15 +11,15 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Ask, Event, Finished, Lifecycle, Locking, Recorded, Settlements, Steer, Steering, Submission,
+    Ask, Event, Finished, Locking, Recorded, Settlements, State, Steer, Steering, Submission,
     WAITED_ON, WaitingOn, addressed_comments, ask, batch_over, finish_wrap_up, fix_attempts,
     forget_addressed_comments, forget_every_addressed_comment, forget_fix_attempts,
     implement_again, last_batch_proposal, last_proposal, load_conversation, load_response,
     lock_set, most_fix_attempts, open_database, pick_direction, pull_requests,
     record_addressed_comments, record_another_pull_request, record_fix_attempt,
     record_pull_request, register_repo, review_over, save_brief, settle_wrap_up,
-    start_conversation, start_grilling, steer_conversation, submit_response, timeline,
-    unsettle_wrap_up, wrap_up_settled,
+    start_conversation, start_in, steer_conversation, submit_response, timeline, unsettle_wrap_up,
+    wrap_up_settled,
 };
 
 /// The number GitHub gave the Conversation's own pull request, which every
@@ -51,9 +51,10 @@ async fn wrapping(pool: &SqlitePool) -> i64 {
         .expect("the Repo was just registered");
 
     save_brief(pool, id, "# Rate limiting\n").await.unwrap();
-    start_grilling(
+    start_in(
         pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         Path::new("/state/worktrees/rate-limiting"),
         &[],
@@ -75,6 +76,7 @@ async fn wrapping(pool: &SqlitePool) -> i64 {
             base: None,
             repo: None,
         },
+        &State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -776,19 +778,24 @@ async fn a_wrap_up_with_everything_settled_is_done_and_the_move_is_on_the_timeli
         settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
 
-    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+    assert_eq!(
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
+        Finished::Done
+    );
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Done);
+    assert_eq!(conversation.state, State::done());
 
     let timeline = timeline(&pool, id).await.unwrap();
 
     assert_eq!(
         timeline.iter().rev().find_map(|event| match &event.event {
-            Event::Moved(state) => Some(*state),
+            Event::Moved(state) => Some(state.clone()),
             _ => None,
         }),
-        Some(Lifecycle::Done),
+        Some(State::done()),
         "the move is the last thing to have happened, on the record like every other",
     );
 
@@ -800,7 +807,9 @@ async fn a_wrap_up_with_everything_settled_is_done_and_the_move_is_on_the_timeli
     // And a second watcher asking finds the move already made rather than making
     // it twice.
     assert_eq!(
-        finish_wrap_up(&pool, id).await.unwrap(),
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
         Finished::NotWrapping,
     );
 }
@@ -827,14 +836,23 @@ async fn a_second_round_forgets_what_the_round_before_it_settled() {
         .await
         .unwrap();
 
-    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+    assert_eq!(
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
+        Finished::Done
+    );
 
     assert_eq!(
         steer_conversation(
             &pool,
             id,
             Steer {
-                target: Lifecycle::Grilling,
+                target: State::named("grilling"),
+                // The state running the Interview, so this steer opens a
+                // round — as `steering::submit` reads it off the manifest.
+                opens_a_round: true,
+                wraps_up: false,
                 pairings: &[],
                 brief: Some("# Rate limiting, per account\n"),
                 instruction: None,
@@ -902,19 +920,26 @@ async fn missing_any_one_of_the_four_keeps_the_conversation_wrapping() {
         }
 
         assert_eq!(
-            finish_wrap_up(&pool, id).await.unwrap(),
+            finish_wrap_up(&pool, id, &State::named("wrapping"))
+                .await
+                .unwrap(),
             Finished::StillWaiting,
             "{missing:?} is outstanding, so the wrap-up is not over",
         );
 
         assert_eq!(
             load_conversation(&pool, id).await.unwrap().unwrap().state,
-            Lifecycle::Wrapping,
+            State::named("wrapping"),
         );
 
         // And settling the last of them is what finishes it.
         settle_wrap_up(&pool, id, missing).await.unwrap();
-        assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+        assert_eq!(
+            finish_wrap_up(&pool, id, &State::named("wrapping"))
+                .await
+                .unwrap(),
+            Finished::Done
+        );
     }
 }
 
@@ -939,7 +964,9 @@ async fn a_companions_pull_request_is_one_more_thing_to_wait_on() {
     let beside = beside(&pool, id).await;
 
     assert_eq!(
-        finish_wrap_up(&pool, id).await.unwrap(),
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
         Finished::StillWaiting,
         "the companion's checks are nobody's idea of green yet",
     );
@@ -956,7 +983,9 @@ async fn a_companions_pull_request_is_one_more_thing_to_wait_on() {
     .unwrap();
 
     assert_eq!(
-        finish_wrap_up(&pool, id).await.unwrap(),
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
         Finished::StillWaiting,
         "and nobody has read what was said on it either",
     );
@@ -973,7 +1002,9 @@ async fn a_companions_pull_request_is_one_more_thing_to_wait_on() {
     .unwrap();
 
     assert_eq!(
-        finish_wrap_up(&pool, id).await.unwrap(),
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
         Finished::StillWaiting,
         "and nothing has said GitHub can merge it",
     );
@@ -989,7 +1020,12 @@ async fn a_companions_pull_request_is_one_more_thing_to_wait_on() {
     .await
     .unwrap();
 
-    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+    assert_eq!(
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
+        Finished::Done
+    );
 }
 
 /// And a stack is three more of them in the one repository: three suites, three
@@ -1031,7 +1067,9 @@ async fn every_pull_request_of_a_stack_is_waited_on_in_its_own_right() {
     }
 
     assert_eq!(
-        finish_wrap_up(&pool, id).await.unwrap(),
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
         Finished::StillWaiting,
         "one red check anywhere in the stack is a wrap-up still going",
     );
@@ -1056,7 +1094,9 @@ async fn every_pull_request_of_a_stack_is_waited_on_in_its_own_right() {
             .unwrap();
 
         assert_eq!(
-            finish_wrap_up(&pool, id).await.unwrap(),
+            finish_wrap_up(&pool, id, &State::named("wrapping"))
+                .await
+                .unwrap(),
             Finished::StillWaiting,
             "pull request #{number} of the stack conflicts, so nothing can land \
              what is above it",
@@ -1068,7 +1108,9 @@ async fn every_pull_request_of_a_stack_is_waited_on_in_its_own_right() {
     }
 
     assert_eq!(
-        finish_wrap_up(&pool, id).await.unwrap(),
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
         Finished::Done,
         "every one of the three is green and merges, which is the whole of it",
     );
@@ -1161,13 +1203,15 @@ async fn a_pull_request_that_conflicts_keeps_the_wrap_up_going() {
     .unwrap();
 
     assert_eq!(
-        finish_wrap_up(&pool, id).await.unwrap(),
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
         Finished::StillWaiting,
         "nothing can land a conflicted pull request, so the work is not finished with",
     );
     assert_eq!(
         load_conversation(&pool, id).await.unwrap().unwrap().state,
-        Lifecycle::Wrapping,
+        State::named("wrapping"),
     );
 
     settle_wrap_up(
@@ -1181,7 +1225,12 @@ async fn a_pull_request_that_conflicts_keeps_the_wrap_up_going() {
     .await
     .unwrap();
 
-    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+    assert_eq!(
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
+        Finished::Done
+    );
 }
 
 /// A wrap-up that settled everything and then had one of them come undone — a
@@ -1208,7 +1257,9 @@ async fn checks_that_stop_being_settled_leave_a_finished_wrap_up_unfinishable() 
     .unwrap();
 
     assert_eq!(
-        finish_wrap_up(&pool, id).await.unwrap(),
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
         Finished::StillWaiting,
     );
 }
@@ -1637,7 +1688,14 @@ async fn leaving_wrapping_puts_the_review_back_to_waiting_and_nothing_else() {
     .await
     .unwrap();
 
-    implement_again(&pool, id).await.unwrap();
+    implement_again(
+        &pool,
+        id,
+        &State::named("wrapping"),
+        &State::named("implementing"),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         wrap_up_settled(&pool, id).await.unwrap(),
@@ -1663,7 +1721,14 @@ async fn the_first_wraps_review_is_not_the_second_wraps() {
         .unwrap();
     assert_eq!(last_proposal(&pool, id).await.unwrap(), Some(asked.id));
 
-    implement_again(&pool, id).await.unwrap();
+    implement_again(
+        &pool,
+        id,
+        &State::named("wrapping"),
+        &State::named("implementing"),
+    )
+    .await
+    .unwrap();
 
     let repo = load_conversation(&pool, id).await.unwrap().unwrap().repo.id;
 
@@ -1679,6 +1744,7 @@ async fn the_first_wraps_review_is_not_the_second_wraps() {
             base: None,
             repo: None,
         },
+        &State::named("wrapping"),
     )
     .await
     .unwrap();

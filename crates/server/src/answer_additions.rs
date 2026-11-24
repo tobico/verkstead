@@ -526,10 +526,12 @@ pub(crate) async fn submit(
 /// session the arrival started carries on (ADR-0028, *Pending additions cross
 /// with the record*).
 ///
-/// **And a state whose relaunch is that same session again**: a grilling, a run,
-/// a follow-up or an investigation, each of which Resume starts again by
-/// launching a session. A wrap-up's watchers send sessions for reasons of their
-/// own, so a Set asked in one is left to the next launch. So is a Response that
+/// **And a state whose relaunch is that same session again**: any state its
+/// Process declares whose Activity is not the Wrap-up — a grilling, a run, a
+/// follow-up or an investigation on the ladder — each of which Resume starts
+/// again by launching a session. A wrap-up's watchers send sessions for reasons
+/// of their own, so a Set asked in one is left to the next launch. So is a
+/// Response that
 /// picks a direction on a proposal — the work moves on from there in a session
 /// of its own — and a Conversation that is stopped, which no launch passes.
 async fn widening(state: &AppState, set_id: i64, response: &Response) -> Result<Option<i64>> {
@@ -576,15 +578,16 @@ async fn widening(state: &AppState, set_id: i64, response: &Response) -> Result<
         return Ok(None);
     }
 
-    Ok(match store::state(&state.pool, conversation_id).await? {
-        Some(
-            store::Lifecycle::Grilling
-            | store::Lifecycle::Implementing
-            | store::Lifecycle::FollowUp
-            | store::Lifecycle::Investigating,
-        ) => Some(conversation_id),
-        _ => None,
-    })
+    // Any state its Process declares but the one that wraps up, which is the
+    // manifest's to say — see above.
+    let Some((standing, process)) = store::state_under(&state.pool, conversation_id).await? else {
+        return Ok(None);
+    };
+
+    let carried_on = store::State::named(&standing).declared().is_some()
+        && !crate::processes::runs(state, &process, &standing, crate::processes::WRAP_UP);
+
+    Ok(carried_on.then_some(conversation_id))
 }
 
 /// End the session waiting on Set `set_id` where it stands, having written down

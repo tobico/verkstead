@@ -37,8 +37,8 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, AgentType, Arrival, ArrivingPicked, Birth, CompanionWorktree, Deletion, Lifecycle,
-    Picked, ProfileFacts, Replacing, Transferred, arrive, birth, born_as, conversation_rank,
+    Account, AgentType, Arrival, ArrivingPicked, Birth, CompanionWorktree, Deletion, Picked,
+    ProfileFacts, Replacing, Role, State, Transferred, arrive, birth, born_as, conversation_rank,
     conversations, create_profile, delete_conversation, load_conversation, open_database,
     register_repo, replace, start_conversation, sweep_arrival, transfer_away, transferred,
 };
@@ -98,21 +98,32 @@ fn arriving(repo_id: i64, profile_id: &str) -> Arrival {
             device: THE_OTHER_DEVICE.to_owned(),
             id: 7,
         },
+        // The Process it arrives on, which is what its state word is read
+        // against over here.
+        process: Some(verkstead_store::Process::develop()),
         repo_id,
         branch: "rate-limiting".to_owned(),
         branch_named: true,
         naming: false,
-        state: Lifecycle::Grilling,
+        state: State::named("grilling"),
         rank: RANK.to_owned(),
-        grilling: ArrivingPicked::Under {
-            profile_id: profile_id.to_owned(),
-            model: Some("gpt-5".to_owned()),
-        },
-        implementation: ArrivingPicked::Under {
-            profile_id: profile_id.to_owned(),
-            model: Some("gpt-5".to_owned()),
-        },
-        review: ArrivingPicked::Skipped,
+        pairings: vec![
+            (
+                Role::grilling(),
+                ArrivingPicked::Under {
+                    profile_id: profile_id.to_owned(),
+                    model: Some("gpt-5".to_owned()),
+                },
+            ),
+            (
+                Role::implementation(),
+                ArrivingPicked::Under {
+                    profile_id: profile_id.to_owned(),
+                    model: Some("gpt-5".to_owned()),
+                },
+            ),
+            (Role::review(), ArrivingPicked::Skipped),
+        ],
     }
 }
 
@@ -132,27 +143,29 @@ async fn a_conversation_arrives_under_this_devices_own_id_with_everything_else_a
         .unwrap()
         .expect("the Conversation that just landed");
 
-    assert_eq!(held.state, Lifecycle::Grilling, "the state it was in");
+    assert_eq!(held.state, State::named("grilling"), "the state it was in");
     assert_eq!(held.branch, "rate-limiting", "the branch the work is on");
     assert!(held.branch_named, "which is a name somebody settled on");
     assert_eq!(held.repo.id, repo, "in the Repo the matching settled");
 
     assert_eq!(
-        held.grilling_pairing
+        held.pairings
+            .under(&verkstead_store::Role::grilling())
             .as_ref()
             .map(|under| under.profile.id.clone()),
         Some(profile.clone()),
         "and the grilling runs under a Profile of this device's own",
     );
     assert_eq!(
-        held.implementation_pairing
+        held.pairings
+            .under(&verkstead_store::Role::implementation())
             .as_ref()
             .map(|under| under.profile.id.clone()),
         Some(profile.clone()),
         "and so does the implementation",
     );
     assert_eq!(
-        held.review_pairing,
+        held.pairings.of(&verkstead_store::Role::review()),
         Picked::Skipped,
         "and the role that was picked away arrives picked away, which is a \
          choice rather than an empty picker",
@@ -449,7 +462,7 @@ async fn a_conversation_coming_home_lands_on_the_row_it_left() {
 
     let coming_home = Arrival {
         born: born.clone(),
-        state: Lifecycle::Implementing,
+        state: State::named("implementing"),
         branch: "rate-limiting-again".to_owned(),
         ..arriving(repo, &profile)
     };
@@ -478,7 +491,7 @@ async fn a_conversation_coming_home_lands_on_the_row_it_left() {
 
     assert_eq!(
         held.state,
-        Lifecycle::Implementing,
+        State::named("implementing"),
         "in the state the work is in now rather than the one it left in",
     );
     assert_eq!(
@@ -486,14 +499,15 @@ async fn a_conversation_coming_home_lands_on_the_row_it_left() {
         "on the branch it is on now",
     );
     assert_eq!(
-        held.grilling_pairing
+        held.pairings
+            .under(&verkstead_store::Role::grilling())
             .as_ref()
             .map(|under| under.profile.id.clone()),
         Some(profile.clone()),
         "under the Pairings that came with it",
     );
     assert_eq!(
-        held.review_pairing,
+        held.pairings.of(&verkstead_store::Role::review()),
         Picked::Skipped,
         "the role picked away among them",
     );

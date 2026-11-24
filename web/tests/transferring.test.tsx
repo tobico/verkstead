@@ -398,7 +398,7 @@ describe("transferring a conversation to another device", () => {
   /// Draft, which is moved by its own composer's device select, and a Closed
   /// Conversation, whose work has ended.
   it("is on neither menu for a draft or a closed conversation", async () => {
-    for (const state of ["Draft", "Closed"] as const) {
+    for (const state of ["draft", "closed"] as const) {
       theCluster(
         whenever(
           `/api/ui/conversations/${GRILLING.id}`,

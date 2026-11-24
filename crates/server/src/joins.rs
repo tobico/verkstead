@@ -41,7 +41,7 @@
 //!
 //! **Waiting to join is a condition of Implementing rather than a state**,
 //! drawn the way *Waiting on checks* is drawn for a wrap-up: a line on the
-//! Timeline, a label on the Conversation, nothing on the Lifecycle and no push
+//! Timeline, a label on the Conversation, nothing on the state word and no push
 //! to the devices. There is nothing for the human to do about it — the stage
 //! below is being got on with — so it is a label rather than a phone lighting
 //! up.

@@ -42,13 +42,13 @@ use sqlx::SqlitePool;
 use verkstead_schema::Direction;
 use verkstead_store::{
     Account, Adding, Archiving, Base, Closing, CompanionMode, Deleting, Directing, Edited, Event,
-    Investigated, Joining, Lifecycle, Opening, PickedPairing, ProfileFacts, Recorded,
-    RecordedPairing, Role, Scratch, Settling, Steer, SteerRecord, Steering, WaitingOn,
-    add_companion, archive_conversation, archived, close_conversation, conversations,
-    create_profile, delete_profile, fix_attempts, investigation_over, load_conversation,
-    open_database, pick_direction, record_fix_attempt, register_repo, save_brief, scratch,
-    settle_naming, settle_wrap_up, start_conversation, start_grilling, start_unnamed_conversation,
-    steer_conversation, timeline, wrap_up_settled,
+    Investigated, Joining, Opening, PickedPairing, ProfileFacts, Recorded, RecordedPairing, Role,
+    Scratch, Settling, State, Steer, SteerRecord, Steering, WaitingOn, add_companion,
+    archive_conversation, archived, close_conversation, conversations, create_profile,
+    delete_profile, fix_attempts, investigation_over, load_conversation, open_database,
+    pick_direction, record_fix_attempt, register_repo, save_brief, scratch, settle_naming,
+    settle_wrap_up, start_conversation, start_in, start_unnamed_conversation, steer_conversation,
+    timeline, wrap_up_settled,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -61,8 +61,13 @@ const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
 /// top of it. A steer settles a Pairing, opens a round with a Brief and records
 /// the Worktree it had to make only where the human's press said so, and the
 /// ordinary press says none of it.
-fn into(target: Lifecycle) -> Steer<'static> {
+fn into(target: State) -> Steer<'static> {
     Steer {
+        // As the server reads them off the target state's own manifest: the
+        // state running the Interview opens a round, and the one running the
+        // Wrap-up reads the branch afresh — see `steering::submit`.
+        opens_a_round: target == "grilling",
+        wraps_up: target == "wrapping",
         target,
         pairings: &[],
         brief: None,
@@ -111,9 +116,10 @@ async fn drafting(pool: &SqlitePool) -> i64 {
 async fn grilling(pool: &SqlitePool) -> i64 {
     let id = drafting(pool).await;
 
-    start_grilling(
+    start_in(
         pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         Path::new("/state/worktrees/rate-limiting"),
         &[],
@@ -172,7 +178,7 @@ async fn profile(pool: &SqlitePool, name: &str, models: &[&str]) -> String {
 }
 
 /// Where a Conversation says it has got to.
-async fn state(pool: &SqlitePool, id: i64) -> Lifecycle {
+async fn state(pool: &SqlitePool, id: i64) -> State {
     load_conversation(pool, id)
         .await
         .unwrap()
@@ -199,7 +205,7 @@ async fn briefs(pool: &SqlitePool, id: i64) -> Vec<String> {
 
 /// Its Timeline as the kinds that say where the work went: the states it was
 /// steered into and the states it moved to, in the order they landed.
-async fn ladder(pool: &SqlitePool, id: i64) -> Vec<(&'static str, Lifecycle)> {
+async fn ladder(pool: &SqlitePool, id: i64) -> Vec<(&'static str, State)> {
     timeline(pool, id)
         .await
         .unwrap()
@@ -218,20 +224,20 @@ async fn a_steer_moves_the_conversation_and_leaves_the_two_events_of_one() {
     let id = grilling(&pool).await;
 
     assert_eq!(
-        steer_conversation(&pool, id, into(Lifecycle::Done))
+        steer_conversation(&pool, id, into(State::done()))
             .await
             .unwrap(),
         Steering::Steered,
     );
 
-    assert_eq!(state(&pool, id).await, Lifecycle::Done);
+    assert_eq!(state(&pool, id).await, State::done());
 
     assert_eq!(
         ladder(&pool, id).await,
         [
-            ("moved", Lifecycle::Grilling),
-            ("steer", Lifecycle::Done),
-            ("moved", Lifecycle::Done),
+            ("moved", State::named("grilling")),
+            ("steer", State::done()),
+            ("moved", State::done()),
         ],
         "the human's own line first and the machine's move under it: the act, \
          and then what came of it",
@@ -248,15 +254,15 @@ async fn every_state_is_somewhere_to_be_steered_from() {
     let draft = drafting(&pool).await;
 
     assert_eq!(
-        steer_conversation(&pool, draft, into(Lifecycle::Done))
+        steer_conversation(&pool, draft, into(State::done()))
             .await
             .unwrap(),
         Steering::Steered,
     );
-    assert_eq!(state(&pool, draft).await, Lifecycle::Done);
+    assert_eq!(state(&pool, draft).await, State::done());
 
     assert_eq!(
-        steer_conversation(&pool, draft, into(Lifecycle::Done))
+        steer_conversation(&pool, draft, into(State::done()))
             .await
             .unwrap(),
         Steering::Steered,
@@ -267,10 +273,10 @@ async fn every_state_is_somewhere_to_be_steered_from() {
     assert_eq!(
         ladder(&pool, draft).await,
         [
-            ("steer", Lifecycle::Done),
-            ("moved", Lifecycle::Done),
-            ("steer", Lifecycle::Done),
-            ("moved", Lifecycle::Done),
+            ("steer", State::done()),
+            ("moved", State::done()),
+            ("steer", State::done()),
+            ("moved", State::done()),
         ],
     );
 }
@@ -290,11 +296,11 @@ async fn a_steer_settles_the_pairing_the_human_picked() {
             id,
             Steer {
                 pairings: &[Settling {
-                    role: Role::Implementation,
+                    role: Role::implementation(),
                     profile_id: &profile,
                     model: "opus-4.8",
                 }],
-                ..into(Lifecycle::Wrapping)
+                ..into(State::named("wrapping"))
             },
         )
         .await
@@ -307,10 +313,11 @@ async fn a_steer_settles_the_pairing_the_human_picked() {
         .unwrap()
         .expect("the Conversation is there");
 
-    assert_eq!(conversation.state, Lifecycle::Wrapping);
+    assert_eq!(conversation.state, State::named("wrapping"));
 
     let paired = conversation
-        .implementation_pairing
+        .pairings
+        .under(&verkstead_store::Role::implementation())
         .expect("the steer settled one");
 
     assert_eq!(paired.profile.id, profile);
@@ -321,7 +328,10 @@ async fn a_steer_settles_the_pairing_the_human_picked() {
          with",
     );
     assert!(
-        conversation.grilling_pairing.is_none(),
+        conversation
+            .pairings
+            .under(&verkstead_store::Role::grilling())
+            .is_none(),
         "and only the role steered into: the other is nobody's to re-settle here",
     );
 }
@@ -343,11 +353,11 @@ async fn a_steer_naming_a_profile_that_has_gone_moves_nothing() {
             id,
             Steer {
                 pairings: &[Settling {
-                    role: Role::Implementation,
+                    role: Role::implementation(),
                     profile_id: "no-such-profile",
                     model: "opus-5",
                 }],
-                ..into(Lifecycle::Wrapping)
+                ..into(State::named("wrapping"))
             },
         )
         .await
@@ -357,12 +367,12 @@ async fn a_steer_naming_a_profile_that_has_gone_moves_nothing() {
 
     assert_eq!(
         state(&pool, id).await,
-        Lifecycle::Grilling,
+        State::named("grilling"),
         "it is where it was",
     );
     assert_eq!(
         ladder(&pool, id).await,
-        [("moved", Lifecycle::Grilling)],
+        [("moved", State::named("grilling"))],
         "and nothing on the Timeline says otherwise",
     );
 }
@@ -385,7 +395,7 @@ async fn a_steer_into_grilling_with_a_brief_opens_a_round_with_it() {
             id,
             Steer {
                 brief: Some("# Retries\n\nThe backoff is wrong.\n"),
-                ..into(Lifecycle::Grilling)
+                ..into(State::named("grilling"))
             },
         )
         .await
@@ -406,9 +416,9 @@ async fn a_steer_into_grilling_with_a_brief_opens_a_round_with_it() {
     assert_eq!(
         ladder(&pool, id).await,
         [
-            ("moved", Lifecycle::Grilling),
-            ("steer", Lifecycle::Grilling),
-            ("moved", Lifecycle::Grilling),
+            ("moved", State::named("grilling")),
+            ("steer", State::named("grilling")),
+            ("moved", State::named("grilling")),
         ],
     );
 
@@ -427,7 +437,7 @@ async fn a_steer_into_grilling_without_one_writes_no_brief() {
     let id = grilling(&pool).await;
 
     assert_eq!(
-        steer_conversation(&pool, id, into(Lifecycle::Grilling))
+        steer_conversation(&pool, id, into(State::named("grilling")))
             .await
             .unwrap(),
         Steering::Steered,
@@ -470,7 +480,7 @@ async fn a_steer_into_grilling_forgets_the_round_before_it() {
         .await
         .unwrap();
 
-    steer_conversation(&pool, id, into(Lifecycle::Wrapping))
+    steer_conversation(&pool, id, into(State::named("wrapping")))
         .await
         .unwrap();
 
@@ -484,7 +494,7 @@ async fn a_steer_into_grilling_forgets_the_round_before_it() {
     );
     assert_eq!(fix_attempts(&pool, id, repo, 41, "Rust").await.unwrap(), 1);
 
-    steer_conversation(&pool, id, into(Lifecycle::Grilling))
+    steer_conversation(&pool, id, into(State::named("grilling")))
         .await
         .unwrap();
 
@@ -537,11 +547,11 @@ async fn a_steer_into_wrapping_reads_the_branch_afresh() {
 
     // Where the whole of that settling carried it, which is the state the steer
     // this is about starts from: work Verkstead has finished with.
-    steer_conversation(&pool, id, into(Lifecycle::Done))
+    steer_conversation(&pool, id, into(State::done()))
         .await
         .unwrap();
 
-    steer_conversation(&pool, id, into(Lifecycle::Wrapping))
+    steer_conversation(&pool, id, into(State::named("wrapping")))
         .await
         .unwrap();
 
@@ -571,7 +581,7 @@ async fn a_steer_into_wrapping_reads_the_branch_afresh() {
     // goes the same way a settle from a finished round does.
     settle_wrap_up(&pool, id, WaitingOn::Review).await.unwrap();
 
-    steer_conversation(&pool, id, into(Lifecycle::Wrapping))
+    steer_conversation(&pool, id, into(State::named("wrapping")))
         .await
         .unwrap();
 
@@ -606,7 +616,7 @@ async fn a_steer_records_the_worktree_and_the_commit_it_branched_from() {
                     commit: "c0ffee",
                     named: Some("origin/main"),
                 }),
-                ..into(Lifecycle::Grilling)
+                ..into(State::named("grilling"))
             },
         )
         .await
@@ -619,7 +629,7 @@ async fn a_steer_records_the_worktree_and_the_commit_it_branched_from() {
         .unwrap()
         .expect("the Conversation is there");
 
-    assert_eq!(conversation.state, Lifecycle::Grilling);
+    assert_eq!(conversation.state, State::named("grilling"));
     assert_eq!(
         conversation.worktree.as_deref(),
         Some(Path::new("/state/worktrees/rate-limiting")),
@@ -657,7 +667,7 @@ async fn a_steer_into_implementing_leaves_the_direction_it_found() {
     );
 
     assert_eq!(
-        steer_conversation(&pool, id, into(Lifecycle::Implementing))
+        steer_conversation(&pool, id, into(State::named("implementing")))
             .await
             .unwrap(),
         Steering::Steered,
@@ -668,7 +678,7 @@ async fn a_steer_into_implementing_leaves_the_direction_it_found() {
         .unwrap()
         .expect("the Conversation is there");
 
-    assert_eq!(conversation.state, Lifecycle::Implementing);
+    assert_eq!(conversation.state, State::named("implementing"));
     assert_eq!(conversation.direction, Some(Direction::TaskList));
 }
 
@@ -708,7 +718,7 @@ async fn a_steer_with_an_instruction_keeps_it_as_the_steers_own_body() {
             Steer {
                 instruction: Some(instruction),
                 direction: Some(Direction::Inline),
-                ..into(Lifecycle::Implementing)
+                ..into(State::named("implementing"))
             },
         )
         .await
@@ -725,9 +735,9 @@ async fn a_steer_with_an_instruction_keeps_it_as_the_steers_own_body() {
     assert_eq!(
         ladder(&pool, id).await,
         [
-            ("moved", Lifecycle::Grilling),
-            ("steer", Lifecycle::Implementing),
-            ("moved", Lifecycle::Implementing),
+            ("moved", State::named("grilling")),
+            ("steer", State::named("implementing")),
+            ("moved", State::named("implementing")),
         ],
         "and the pair around it unchanged: the instruction rides on the human's \
          own line rather than beside it",
@@ -761,7 +771,7 @@ async fn a_steer_into_follow_up_keeps_its_brief_and_reads_back_as_follow_up() {
             id,
             Steer {
                 instruction: Some(brief),
-                ..into(Lifecycle::FollowUp)
+                ..into(State::named("follow-up"))
             },
         )
         .await
@@ -769,14 +779,14 @@ async fn a_steer_into_follow_up_keeps_its_brief_and_reads_back_as_follow_up() {
         Steering::Steered,
     );
 
-    assert_eq!(state(&pool, id).await, Lifecycle::FollowUp);
+    assert_eq!(state(&pool, id).await, State::named("follow-up"));
     assert_eq!(instructions(&pool, id).await, [Some(brief.to_owned())]);
     assert_eq!(
         ladder(&pool, id).await,
         [
-            ("moved", Lifecycle::Grilling),
-            ("steer", Lifecycle::FollowUp),
-            ("moved", Lifecycle::FollowUp),
+            ("moved", State::named("grilling")),
+            ("steer", State::named("follow-up")),
+            ("moved", State::named("follow-up")),
         ],
     );
     assert_eq!(
@@ -798,7 +808,7 @@ async fn a_steer_with_nothing_written_says_the_state_alone() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
-    steer_conversation(&pool, id, into(Lifecycle::Done))
+    steer_conversation(&pool, id, into(State::done()))
         .await
         .unwrap();
 
@@ -825,7 +835,7 @@ async fn a_steer_records_how_the_work_is_built_where_nothing_said() {
             Steer {
                 instruction: Some("Fix the flaky test.\n"),
                 direction: Some(Direction::Inline),
-                ..into(Lifecycle::Implementing)
+                ..into(State::named("implementing"))
             },
         )
         .await
@@ -867,7 +877,7 @@ async fn a_steer_never_writes_over_how_the_work_is_already_built() {
             Steer {
                 instruction: Some("Fix the flaky test first.\n"),
                 direction: Some(Direction::Inline),
-                ..into(Lifecycle::Implementing)
+                ..into(State::named("implementing"))
             },
         )
         .await
@@ -888,7 +898,7 @@ async fn there_is_no_conversation_to_steer() {
     let (_dir, pool) = fresh_pool().await;
 
     assert_eq!(
-        steer_conversation(&pool, 404, into(Lifecycle::Done))
+        steer_conversation(&pool, 404, into(State::done()))
             .await
             .unwrap(),
         Steering::NoSuchConversation,
@@ -903,7 +913,7 @@ async fn a_steer_survives_the_database_being_reopened() {
     let id = {
         let pool = open_database(&database).await.unwrap();
         let id = grilling(&pool).await;
-        steer_conversation(&pool, id, into(Lifecycle::Done))
+        steer_conversation(&pool, id, into(State::done()))
             .await
             .unwrap();
         pool.close().await;
@@ -915,13 +925,13 @@ async fn a_steer_survives_the_database_being_reopened() {
     // one process and read by another is what says the kind is on both sides.
     let pool = open_database(&database).await.unwrap();
 
-    assert_eq!(state(&pool, id).await, Lifecycle::Done);
+    assert_eq!(state(&pool, id).await, State::done());
     assert_eq!(
         ladder(&pool, id).await,
         [
-            ("moved", Lifecycle::Grilling),
-            ("steer", Lifecycle::Done),
-            ("moved", Lifecycle::Done),
+            ("moved", State::named("grilling")),
+            ("steer", State::done()),
+            ("moved", State::done()),
         ],
     );
 }
@@ -938,7 +948,7 @@ async fn steering_a_draft_into_the_work_leaves_its_branch_to_be_named() {
     let id = unnamed(&pool).await;
 
     assert_eq!(
-        steer_conversation(&pool, id, into(Lifecycle::Implementing))
+        steer_conversation(&pool, id, into(State::named("implementing")))
             .await
             .unwrap(),
         Steering::Steered,
@@ -954,7 +964,7 @@ async fn steering_a_draft_into_done_settles_for_the_name_it_has() {
     let (_dir, pool) = fresh_pool().await;
     let id = unnamed(&pool).await;
 
-    steer_conversation(&pool, id, into(Lifecycle::Done))
+    steer_conversation(&pool, id, into(State::done()))
         .await
         .unwrap();
 
@@ -968,9 +978,10 @@ async fn steering_work_that_has_already_run_leaves_its_branch_alone() {
     let (_dir, pool) = fresh_pool().await;
     let id = unnamed(&pool).await;
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         Path::new("/state/worktrees/amber-kestrel"),
         &[],
@@ -982,7 +993,7 @@ async fn steering_work_that_has_already_run_leaves_its_branch_alone() {
     // settled for the name, which is one of the two ways the waiting ends.
     settle_naming(&pool, id).await.unwrap();
 
-    steer_conversation(&pool, id, into(Lifecycle::Implementing))
+    steer_conversation(&pool, id, into(State::named("implementing")))
         .await
         .unwrap();
 
@@ -1036,9 +1047,10 @@ async fn a_steer_records_the_whole_form_beside_its_event() {
     // up — the other is one it puts in.
     assert_eq!(add_companion(&pool, id, docs).await.unwrap(), Adding::Added,);
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         Path::new("/state/worktrees/rate-limiting"),
         &[],
@@ -1052,7 +1064,7 @@ async fn a_steer_records_the_whole_form_beside_its_event() {
             id,
             Steer {
                 pairings: &[Settling {
-                    role: Role::Implementation,
+                    role: Role::implementation(),
                     profile_id: &profile,
                     model: "opus-4.8",
                 }],
@@ -1074,7 +1086,7 @@ async fn a_steer_records_the_whole_form_beside_its_event() {
                         model: "opus-4.8",
                     }),
                 },
-                ..into(Lifecycle::Implementing)
+                ..into(State::named("implementing"))
             },
         )
         .await
@@ -1113,7 +1125,7 @@ async fn a_steer_records_the_whole_form_beside_its_event() {
 
     assert_eq!(
         record.source,
-        Some(Lifecycle::Grilling),
+        Some(State::named("grilling")),
         "and the state the press found it in, which the Event's target cannot say",
     );
 }
@@ -1127,7 +1139,7 @@ async fn a_steer_that_picked_nothing_records_that_it_picked_nothing() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
-    steer_conversation(&pool, id, into(Lifecycle::Done))
+    steer_conversation(&pool, id, into(State::done()))
         .await
         .unwrap();
 
@@ -1157,7 +1169,7 @@ async fn a_steer_whose_profile_has_been_removed_still_says_one_was_picked() {
         id,
         Steer {
             pairings: &[Settling {
-                role: Role::Implementation,
+                role: Role::implementation(),
                 profile_id: &profile,
                 model: "opus-5",
             }],
@@ -1169,7 +1181,7 @@ async fn a_steer_whose_profile_has_been_removed_still_says_one_was_picked() {
                     model: "opus-5",
                 }),
             },
-            ..into(Lifecycle::Implementing)
+            ..into(State::named("implementing"))
         },
     )
     .await
@@ -1205,21 +1217,27 @@ async fn a_steer_records_the_state_it_came_out_of() {
 
     // Out of Grilling and into Investigating: the question asked about work that
     // is still being interviewed, which is the source nothing else would say.
-    steer_conversation(&pool, id, into(Lifecycle::Investigating))
+    steer_conversation(&pool, id, into(State::named("investigating")))
         .await
         .unwrap();
 
     // And out of Investigating again, which is what makes this a fact per press
     // rather than one per Conversation.
-    steer_conversation(&pool, id, into(Lifecycle::Implementing))
+    steer_conversation(&pool, id, into(State::named("implementing")))
         .await
         .unwrap();
 
     assert_eq!(
         sources(&pool, id).await,
         [
-            (Lifecycle::Investigating, Some(Lifecycle::Grilling)),
-            (Lifecycle::Implementing, Some(Lifecycle::Investigating)),
+            (
+                State::named("investigating"),
+                Some(State::named("grilling"))
+            ),
+            (
+                State::named("implementing"),
+                Some(State::named("investigating"))
+            ),
         ],
         "each steer says where it went and where it came from",
     );
@@ -1233,8 +1251,14 @@ async fn a_steer_records_the_state_it_came_out_of() {
     assert_eq!(
         sources(&reopened, id).await,
         [
-            (Lifecycle::Investigating, Some(Lifecycle::Grilling)),
-            (Lifecycle::Implementing, Some(Lifecycle::Investigating)),
+            (
+                State::named("investigating"),
+                Some(State::named("grilling"))
+            ),
+            (
+                State::named("implementing"),
+                Some(State::named("investigating"))
+            ),
         ],
         "and a restart reads back what the press wrote down",
     );
@@ -1251,7 +1275,7 @@ async fn a_steer_from_before_the_source_was_written_down_reads_back_without_one(
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
-    steer_conversation(&pool, id, into(Lifecycle::Investigating))
+    steer_conversation(&pool, id, into(State::named("investigating")))
         .await
         .unwrap();
 
@@ -1262,7 +1286,7 @@ async fn a_steer_from_before_the_source_was_written_down_reads_back_without_one(
 
     assert_eq!(
         sources(&pool, id).await,
-        [(Lifecycle::Investigating, None)],
+        [(State::named("investigating"), None)],
         "the rest of the record is exactly where it was",
     );
 }
@@ -1300,7 +1324,7 @@ async fn a_steer_records_what_each_checkout_already_held() {
                     paths: &[],
                 },
             ],
-            ..into(Lifecycle::Investigating)
+            ..into(State::named("investigating"))
         },
     )
     .await
@@ -1358,7 +1382,7 @@ async fn a_steer_from_before_the_scratch_was_read_has_no_reading_of_it() {
                 repo_id: own(&pool, id).await,
                 paths: &half_done,
             }],
-            ..into(Lifecycle::Investigating)
+            ..into(State::named("investigating"))
         },
     )
     .await
@@ -1385,7 +1409,7 @@ async fn a_steer_into_anywhere_else_records_no_reading_of_the_checkouts() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
-    steer_conversation(&pool, id, into(Lifecycle::Implementing))
+    steer_conversation(&pool, id, into(State::named("implementing")))
         .await
         .unwrap();
 
@@ -1424,7 +1448,7 @@ async fn steered(pool: &SqlitePool, id: i64) -> i64 {
 /// The pair rather than the source alone, because the source is a fact about one
 /// press: a Conversation steered three times has three of them, and a reading
 /// that dropped the target could not say which press each belonged to.
-async fn sources(pool: &SqlitePool, id: i64) -> Vec<(Lifecycle, Option<Lifecycle>)> {
+async fn sources(pool: &SqlitePool, id: i64) -> Vec<(State, Option<State>)> {
     timeline(pool, id)
         .await
         .unwrap()
@@ -1449,7 +1473,7 @@ async fn a_steer_from_before_the_record_was_kept_reads_back_without_one() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
-    steer_conversation(&pool, id, into(Lifecycle::Done))
+    steer_conversation(&pool, id, into(State::done()))
         .await
         .unwrap();
 
@@ -1464,9 +1488,9 @@ async fn a_steer_from_before_the_record_was_kept_reads_back_without_one() {
     assert_eq!(
         ladder(&pool, id).await,
         [
-            ("moved", Lifecycle::Grilling),
-            ("steer", Lifecycle::Done),
-            ("moved", Lifecycle::Done),
+            ("moved", State::named("grilling")),
+            ("steer", State::done()),
+            ("moved", State::done()),
         ],
         "and the Event itself is untouched: what it always said, it says",
     );
@@ -1510,7 +1534,7 @@ async fn a_steer_out_of_an_archived_conversation_unarchives_it() {
             id,
             Steer {
                 instruction: Some("Pick it back up.\n"),
-                ..into(Lifecycle::Implementing)
+                ..into(State::named("implementing"))
             },
         )
         .await
@@ -1537,13 +1561,13 @@ async fn a_steer_into_done_unarchives_it_too() {
     let id = put_away(&pool).await;
 
     assert_eq!(
-        steer_conversation(&pool, id, into(Lifecycle::Done))
+        steer_conversation(&pool, id, into(State::done()))
             .await
             .unwrap(),
         Steering::Steered,
     );
 
-    assert_eq!(state(&pool, id).await, Lifecycle::Done);
+    assert_eq!(state(&pool, id).await, State::done());
     assert!(
         !archived(&pool, id).await.unwrap(),
         "nothing runs in Done, and it is still out of Closed",
@@ -1561,7 +1585,7 @@ async fn a_steer_out_of_a_conversation_never_archived_leaves_the_archive_alone()
     assert!(!archived(&pool, id).await.unwrap());
 
     assert_eq!(
-        steer_conversation(&pool, id, into(Lifecycle::Implementing))
+        steer_conversation(&pool, id, into(State::named("implementing")))
             .await
             .unwrap(),
         Steering::Steered,
@@ -1585,7 +1609,7 @@ async fn an_investigation_out_of_the_archive_lands_back_at_closed_on_the_sidebar
             id,
             Steer {
                 instruction: Some("Why did this stop?\n"),
-                ..into(Lifecycle::Investigating)
+                ..into(State::named("investigating"))
             },
         )
         .await
@@ -1594,13 +1618,13 @@ async fn an_investigation_out_of_the_archive_lands_back_at_closed_on_the_sidebar
     );
 
     assert_eq!(
-        investigation_over(&pool, id, Lifecycle::Closed)
+        investigation_over(&pool, id, &State::named("investigating"), &State::closed())
             .await
             .unwrap(),
         Investigated::Landed,
     );
 
-    assert_eq!(state(&pool, id).await, Lifecycle::Closed);
+    assert_eq!(state(&pool, id).await, State::closed());
     assert!(
         !archived(&pool, id).await.unwrap(),
         "the answer is on the Timeline, and nothing puts it away again by itself",

@@ -25,7 +25,7 @@
 use anyhow::{Context, Result};
 use sqlx::{SqliteConnection, SqlitePool};
 
-use super::conversations::{Event, Lifecycle};
+use super::conversations::{MOVED, State};
 
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
@@ -88,10 +88,10 @@ pub async fn ended_on(pool: &SqlitePool, set_id: i64) -> Result<bool> {
 /// wrap-up's proposals are counted from the newest move into Wrapping — see
 /// [`super::conversations::last_batch_proposal`].
 ///
-/// Which state that is, is the caller's, because two of them end on this mark
-/// and each has a window of its own: [`Lifecycle::FollowUp`] for a follow-up,
-/// and [`Lifecycle::Investigating`] for an investigation, which is had in rounds
-/// the same way and ended the same way. A Conversation investigated and then
+/// Which state that is, is the caller's, because more than one of them ends on
+/// this mark and each has a window of its own: Develop's `follow-up` and its
+/// `investigating` detour both run the Follow-up rounds Activity, and a plugin's
+/// Process may name as many as it likes. A Conversation investigated and then
 /// followed up would read the investigation's mark as the follow-up's if the
 /// state were assumed here, and end a follow-up that had asked nothing.
 ///
@@ -106,11 +106,7 @@ pub async fn ended_on(pool: &SqlitePool, set_id: i64) -> Result<bool> {
 /// not the round's own last word. A store-and-nudge round is the round's own
 /// last word all the same — the session that asked it is idling on the Answer
 /// with its turn ended, which is exactly the session this mark ends.
-pub async fn nothing_else(
-    pool: &SqlitePool,
-    conversation_id: i64,
-    within: Lifecycle,
-) -> Result<bool> {
+pub async fn nothing_else(pool: &SqlitePool, conversation_id: i64, within: &State) -> Result<bool> {
     // The mark in the same query as the Set it is looked for on, rather than a
     // second read by the Set's id: a record landing again between the two
     // would have renumbered it.
@@ -133,14 +129,14 @@ pub async fn nothing_else(
     )
     .bind(conversation_id)
     .bind(conversation_id)
-    .bind(Event::Moved(within).kind())
+    .bind(MOVED)
     .bind(within.stored())
     .fetch_optional(pool)
     .await
     .with_context(|| {
         format!(
             "looking for the last round Conversation {conversation_id} answered while {}",
-            within.stored()
+            within
         )
     })?;
 

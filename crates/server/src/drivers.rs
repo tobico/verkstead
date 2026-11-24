@@ -1,8 +1,9 @@
 //! What is driving each Conversation, so that something can say when nothing
 //! is.
 //!
-//! A Conversation in a driven state — Grilling, Implementing, Wrapping,
-//! Follow-up — is supposed to have a task of Verkstead's own seeing it along:
+//! A Conversation in any state its Process declares — Develop's Grilling,
+//! Implementing, Wrapping, Follow-up — is supposed to have a task of
+//! Verkstead's own seeing it along:
 //! the runner working a backlog, the driver following an inline run or a
 //! roadmap, the set of watchers a wrap-up has going, the one seeing a follow-up
 //! session out. When one of those dies the Conversation is
@@ -38,7 +39,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::Notify;
 
-use crate::store::Lifecycle;
+use crate::store::State;
 
 /// Which Conversations have something driving them, and how many things.
 ///
@@ -114,28 +115,30 @@ impl Drivers {
     /// Conversation there is — see [`crate::sessions::Sessions::working`] for
     /// why that is the cheaper way round.
     ///
-    /// A state nothing is meant to be driving answers that it is fine as it
-    /// stands. Draft is waiting on the human, Done is finished and Closed is
-    /// stopped: none of them is a Conversation standing still, so none of them
-    /// is one this question is really about.
+    /// The three states Verkstead words itself answer that the Conversation is
+    /// fine as it stands. Draft is waiting on the human, Done is finished and
+    /// Closed is stopped: none of them is a Conversation standing still, so none
+    /// of them is one this question is really about. Every other word is a state
+    /// its Process declares, whose Activity's run holds a registration for as
+    /// long as it runs — see [`crate::processes`].
+    ///
+    /// `by_its_session` is for the one Activity whose session is the driver:
+    /// a grilling session running is a grilling being driven, whatever holds
+    /// it — see this module's own documentation. Which state that is, is the
+    /// manifest's to say and the caller's to have read, see
+    /// `processes::runs`.
     pub(crate) fn driven(
         &self,
         working: &HashSet<i64>,
         conversation_id: i64,
-        state: Lifecycle,
+        state: &State,
+        by_its_session: bool,
     ) -> bool {
-        match state {
-            // A grilling session, or the interview holding it — see this
-            // module's own documentation for why it is both.
-            Lifecycle::Grilling => {
-                working.contains(&conversation_id) || self.registered(conversation_id)
-            }
-            Lifecycle::Implementing
-            | Lifecycle::Wrapping
-            | Lifecycle::FollowUp
-            | Lifecycle::Investigating => self.registered(conversation_id),
-            Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => true,
+        if state.declared().is_none() {
+            return true;
         }
+
+        self.registered(conversation_id) || (by_its_session && working.contains(&conversation_id))
     }
 
     /// Which Conversations are **taking a place on the server**: those with a
@@ -426,27 +429,28 @@ mod tests {
     #[test]
     fn a_grilling_is_driven_by_its_session_or_by_the_interview_holding_it() {
         let drivers = Drivers::new();
+        let grilling = State::named("grilling");
 
         assert!(
-            drivers.driven(&working(&[CONVERSATION]), CONVERSATION, Lifecycle::Grilling),
+            drivers.driven(&working(&[CONVERSATION]), CONVERSATION, &grilling, true),
             "its grilling session is running",
         );
         assert!(
-            !drivers.driven(&working(&[]), CONVERSATION, Lifecycle::Grilling),
+            !drivers.driven(&working(&[]), CONVERSATION, &grilling, true),
             "its session has gone and it was never picked on, so nothing is grilling it",
         );
 
         let driving = drivers.driving(CONVERSATION);
 
         assert!(
-            drivers.driven(&working(&[]), CONVERSATION, Lifecycle::Grilling),
+            drivers.driven(&working(&[]), CONVERSATION, &grilling, true),
             "a pick's watcher follows the grilling to the artifact it asked for",
         );
 
         drop(driving);
 
         assert!(
-            !drivers.driven(&working(&[]), CONVERSATION, Lifecycle::Grilling),
+            !drivers.driven(&working(&[]), CONVERSATION, &grilling, true),
             "and with the watcher gone too there is nothing left driving it",
         );
     }
@@ -456,45 +460,34 @@ mod tests {
     /// the task that keeps starting them rather than any one of them.
     #[test]
     fn implementing_and_wrapping_are_driven_by_the_task_that_runs_them() {
+        /// Develop's states whose Activity is driven by a task rather than by
+        /// its own session.
+        const STATES: [&str; 4] = ["implementing", "wrapping", "follow-up", "investigating"];
+
         let drivers = Drivers::new();
 
-        for state in [
-            Lifecycle::Implementing,
-            Lifecycle::Wrapping,
-            Lifecycle::FollowUp,
-            Lifecycle::Investigating,
-        ] {
+        for state in STATES.map(State::named) {
             assert!(
-                !drivers.driven(&working(&[CONVERSATION]), CONVERSATION, state),
-                "{state:?} with a session running and no driver is a run nothing is seeing out",
+                !drivers.driven(&working(&[CONVERSATION]), CONVERSATION, &state, false),
+                "{state} with a session running and no driver is a run nothing is seeing out",
             );
         }
 
         let driving = drivers.driving(CONVERSATION);
 
-        for state in [
-            Lifecycle::Implementing,
-            Lifecycle::Wrapping,
-            Lifecycle::FollowUp,
-            Lifecycle::Investigating,
-        ] {
+        for state in STATES.map(State::named) {
             assert!(
-                drivers.driven(&working(&[]), CONVERSATION, state),
-                "{state:?} between one session and the next is still being driven",
+                drivers.driven(&working(&[]), CONVERSATION, &state, false),
+                "{state} between one session and the next is still being driven",
             );
         }
 
         drop(driving);
 
-        for state in [
-            Lifecycle::Implementing,
-            Lifecycle::Wrapping,
-            Lifecycle::FollowUp,
-            Lifecycle::Investigating,
-        ] {
+        for state in STATES.map(State::named) {
             assert!(
-                !drivers.driven(&working(&[]), CONVERSATION, state),
-                "{state:?} with the loop ended is not",
+                !drivers.driven(&working(&[]), CONVERSATION, &state, false),
+                "{state} with the loop ended is not",
             );
         }
     }
@@ -506,10 +499,10 @@ mod tests {
     fn a_state_nothing_drives_is_never_one_standing_still() {
         let drivers = Drivers::new();
 
-        for state in [Lifecycle::Draft, Lifecycle::Done, Lifecycle::Closed] {
+        for state in [State::draft(), State::done(), State::closed()] {
             assert!(
-                drivers.driven(&working(&[]), CONVERSATION, state),
-                "{state:?} is not a state anything is supposed to be driving",
+                drivers.driven(&working(&[]), CONVERSATION, &state, true),
+                "{state} is not a state anything is supposed to be driving",
             );
         }
     }

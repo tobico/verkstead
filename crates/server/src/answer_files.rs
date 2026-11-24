@@ -291,7 +291,7 @@ pub(crate) async fn standing(pool: &SqlitePool, set_id: i64) -> Result<Standing>
 
     Ok(match store::state(pool, conversation).await? {
         None => Standing::Fixed(Fixed::NoSuchSet),
-        Some(store::Lifecycle::Closed) => Standing::Fixed(Fixed::Closed),
+        Some(standing) if standing == store::State::CLOSED => Standing::Fixed(Fixed::Closed),
         Some(_) => Standing::Waiting(conversation),
     })
 }

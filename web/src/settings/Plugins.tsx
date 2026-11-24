@@ -6,12 +6,12 @@
 //! the Skill Pack `verkstead` first, then Codex and the six Language plugins,
 //! each Language plugin saying the languages it provides. A built-in has no
 //! Remove, and is always on, so its row has no checkbox — but for a Language
-//! plugin, whose tick is whether sessions get its languages, and an Agent
-//! plugin, whose tick is whether its harness is offered. An installer's own
-//! language — a `languages:`
-//! entry of this device's `config.yaml` that no plugin provides — is a row
-//! under Installed, saying where it comes from, with no Update or Remove: the
-//! entry is the file's.
+//! plugin, whose tick is whether sessions get its languages, an Agent plugin,
+//! whose tick is whether its harness is offered, and a Process plugin, whose
+//! tick is whether the picker offers it. An installer's own language — a
+//! `languages:` entry of this device's `config.yaml` that no plugin
+//! provides — is a row under Installed, saying where it comes from, with no
+//! Update or Remove: the entry is the file's.
 //!
 //! **A row** reads the plugin's name, version and author, the Category of what
 //! it provides, where it came from, its checkbox, and its trouble where it
@@ -385,7 +385,14 @@ export function PluginsPane(props: {
                           of={row}
                           pressing={enable.isPending}
                           flip={
+                            // The same three as the server's
+                            // `plugins::built_in::switched`, which is what
+                            // refuses the press for a built-in that has no
+                            // tick: a row drawing one the endpoint would
+                            // refuse, or withholding one it would take, is the
+                            // two halves disagreeing about the same rule.
                             row.languages.length > 0 ||
+                            row.processes.length > 0 ||
                             row.provides.includes("agent")
                               ? (enabled) =>
                                   enable.mutate({ uuid: row.uuid, enabled })
@@ -576,6 +583,10 @@ function Row(props: {
         <p class={styles.provides}>{activities(props.of.activities)}</p>
       </Show>
 
+      <Show when={props.of.processes.length > 0}>
+        <p class={styles.provides}>{processes(props.of.processes)}</p>
+      </Show>
+
       <Show when={source(props.of)}>
         {(from) => <p class={styles.source}>{from()}</p>}
       </Show>
@@ -722,6 +733,13 @@ function activities(names: string[]): string {
     : `Its activities are ${listed(names)}.`;
 }
 
+/// The Processes a plugin provides, by the names its manifest draws them as.
+function processes(names: string[]): string {
+  return names.length === 1
+    ? `Its process is ${names[0]}.`
+    : `Its processes are ${listed(names)}.`;
+}
+
 /// Where a row's plugin came from: its directory, its repository and the
 /// revision this cluster is pinned to, or this device's `config.yaml`. Nothing
 /// for a built-in, whose group says it.
@@ -800,6 +818,10 @@ function Consent(props: {
 
       <Show when={props.of.activities.length > 0}>
         <p>{activities(props.of.activities)}</p>
+      </Show>
+
+      <Show when={props.of.processes.length > 0}>
+        <p>{processes(props.of.processes)}</p>
       </Show>
 
       <Show

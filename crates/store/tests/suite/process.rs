@@ -8,16 +8,17 @@
 //! reading rather than a gap. Nothing is backfilled into an old row, and the
 //! same rule answers for whichever kind of row a Conversation lacks.
 //!
-//! Only Develop can start anything yet. All five are here all the same, because
-//! the record reads and writes every one of them and what a stage after this
-//! adds is a start path rather than a variant.
+//! All five are Processes written as data in built-in plugins of their own, and
+//! the record holds each of them by the word it always held — so a
+//! Conversation stored before any of that reads its Process and its state with
+//! nothing rewritten.
 
 use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    AdoptedPullRequest, Edited, Process, hold_pull_request, load_conversation, open_database,
-    process, register_repo, save_brief, set_process, start_conversation, start_grilling,
+    AdoptedPullRequest, Edited, Process, State, hold_pull_request, load_conversation,
+    open_database, process, register_repo, save_brief, set_process, start_conversation, start_in,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -101,10 +102,10 @@ async fn a_conversation_with_no_row_of_its_own_reads_develop() {
     let (_dir, pool) = fresh_pool().await;
     let id = drafting(&pool).await;
 
-    assert_eq!(process(&pool, id).await.unwrap(), Process::Develop);
+    assert_eq!(process(&pool, id).await.unwrap(), Process::develop());
     assert_eq!(
         loaded(&pool, id).await,
-        Process::Develop,
+        Process::develop(),
         "and the loaded Conversation carries it, beside the Direction",
     );
 }
@@ -116,8 +117,8 @@ async fn a_conversation_holding_a_pull_request_reads_review() {
     let (_dir, pool) = fresh_pool().await;
     let id = holding_a_pull_request(&pool).await;
 
-    assert_eq!(process(&pool, id).await.unwrap(), Process::Review);
-    assert_eq!(loaded(&pool, id).await, Process::Review);
+    assert_eq!(process(&pool, id).await.unwrap(), Process::review());
+    assert_eq!(loaded(&pool, id).await, Process::review());
 }
 
 /// A Process written over either reading is what reads back: the row is the
@@ -135,22 +136,28 @@ async fn a_process_written_over_either_reading_is_what_reads_back() {
         ),
     ] {
         assert_eq!(
-            set_process(&pool, id, Process::Tinker).await.unwrap(),
+            set_process(&pool, id, Process::tinker()).await.unwrap(),
             Edited::Saved,
             "picking on {how}",
         );
-        assert_eq!(loaded(&pool, id).await, Process::Tinker, "picking on {how}");
+        assert_eq!(
+            loaded(&pool, id).await,
+            Process::tinker(),
+            "picking on {how}"
+        );
 
         // And a second pick is the human changing their mind rather than a
         // second Process: one row per Conversation, replaced.
         assert_eq!(
-            set_process(&pool, id, Process::Investigate).await.unwrap(),
+            set_process(&pool, id, Process::investigate())
+                .await
+                .unwrap(),
             Edited::Saved,
             "picking again on {how}",
         );
         assert_eq!(
             loaded(&pool, id).await,
-            Process::Investigate,
+            Process::investigate(),
             "the latest pick is the one that stands, on {how}",
         );
     }
@@ -165,19 +172,44 @@ async fn all_five_round_trip_through_their_stored_words() {
     let id = drafting(&pool).await;
 
     for picked in [
-        Process::Develop,
-        Process::Investigate,
-        Process::Review,
-        Process::Tinker,
-        Process::FixMergeIssues,
+        Process::develop(),
+        Process::investigate(),
+        Process::review(),
+        Process::tinker(),
+        Process::fix_merge_issues(),
     ] {
         assert_eq!(
-            set_process(&pool, id, picked).await.unwrap(),
+            set_process(&pool, id, picked.clone()).await.unwrap(),
             Edited::Saved,
             "picking {picked:?}",
         );
         assert_eq!(process(&pool, id).await.unwrap(), picked);
     }
+}
+
+/// A plugin's Process round-trips by its plugin's uuid and its id, and picking
+/// one of Verkstead's own after it leaves no plugin behind.
+#[tokio::test]
+async fn a_plugins_process_round_trips_by_its_plugin_and_its_id() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafting(&pool).await;
+    let provided = Process {
+        plugin: "5e0c9a7e-2f4b-4c1d-8a3e-6b9f0d2c7a41".to_owned(),
+        id: "review".to_owned(),
+    };
+
+    assert_eq!(
+        set_process(&pool, id, provided.clone()).await.unwrap(),
+        Edited::Saved
+    );
+    assert_eq!(
+        process(&pool, id).await.unwrap(),
+        provided,
+        "its id is `review` and it is still the plugin's, not Verkstead's Review"
+    );
+
+    set_process(&pool, id, Process::tinker()).await.unwrap();
+    assert_eq!(process(&pool, id).await.unwrap(), Process::tinker());
 }
 
 /// The words themselves, which are the half of the round trip a database opened
@@ -189,11 +221,11 @@ async fn the_stored_words_are_the_ones_the_column_holds() {
     let id = drafting(&pool).await;
 
     for (picked, word) in [
-        (Process::Develop, "develop"),
-        (Process::Investigate, "investigate"),
-        (Process::Review, "review"),
-        (Process::Tinker, "tinker"),
-        (Process::FixMergeIssues, "fix-merge-issues"),
+        (Process::develop(), "develop"),
+        (Process::investigate(), "investigate"),
+        (Process::review(), "review"),
+        (Process::tinker(), "tinker"),
+        (Process::fix_merge_issues(), "fix-merge-issues"),
     ] {
         set_process(&pool, id, picked).await.unwrap();
 
@@ -205,6 +237,56 @@ async fn the_stored_words_are_the_ones_the_column_holds() {
                 .unwrap();
 
         assert_eq!(stored, word);
+    }
+}
+
+/// And a row written before a Process was the plugin providing it — the bare
+/// word, with nothing in the column beside it — reads as the Process of the
+/// bundled plugin that word belongs to. Which is the whole of how a database
+/// from before this stage runs on: nothing is rewritten, and a row this build
+/// writes for one of the five has that column empty too, so a device of the
+/// cluster on an older release reads it as the word it always was.
+#[tokio::test]
+async fn a_bare_word_reads_as_the_plugin_that_word_belongs_to() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafting(&pool).await;
+
+    for word in [
+        "develop",
+        "investigate",
+        "review",
+        "tinker",
+        "fix-merge-issues",
+    ] {
+        sqlx::query(
+            "INSERT INTO processes (conversation_id, process, plugin) VALUES (?, ?, NULL)
+             ON CONFLICT (conversation_id)
+                 DO UPDATE SET process = excluded.process, plugin = NULL",
+        )
+        .bind(id)
+        .bind(word)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let read = process(&pool, id).await.unwrap();
+        assert_eq!(read.id, word);
+        assert_eq!(
+            read,
+            Process::named(word).expect("one of the five"),
+            "{word} is the Process of the plugin providing it",
+        );
+        assert!(read.built_in(), "{word} is one of the five");
+
+        // And written back by this build, that column is still empty.
+        set_process(&pool, id, read).await.unwrap();
+        let (plugin,): (Option<String>,) =
+            sqlx::query_as("SELECT plugin FROM processes WHERE conversation_id = ?")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(plugin, None, "nothing is rewritten for {word}");
     }
 }
 
@@ -248,9 +330,10 @@ async fn a_pick_is_refused_from_the_moment_the_branch_is_cut() {
     let (_dir, pool) = fresh_pool().await;
     let id = drafting(&pool).await;
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         Path::new("/state/worktrees/rate-limiting"),
         &[],
@@ -259,12 +342,12 @@ async fn a_pick_is_refused_from_the_moment_the_branch_is_cut() {
     .unwrap();
 
     assert_eq!(
-        set_process(&pool, id, Process::Tinker).await.unwrap(),
+        set_process(&pool, id, Process::tinker()).await.unwrap(),
         Edited::NotDrafting,
     );
     assert_eq!(
         loaded(&pool, id).await,
-        Process::Develop,
+        Process::develop(),
         "and nothing was written, so the reading still stands",
     );
 }
@@ -274,7 +357,7 @@ async fn there_is_no_conversation_to_pick_a_process_on() {
     let (_dir, pool) = fresh_pool().await;
 
     assert_eq!(
-        set_process(&pool, 404, Process::Develop).await.unwrap(),
+        set_process(&pool, 404, Process::develop()).await.unwrap(),
         Edited::NoSuchConversation,
     );
 }
@@ -289,7 +372,7 @@ async fn a_process_survives_a_restart() {
     let id = {
         let pool = open_database(&database).await.unwrap();
         let id = drafting(&pool).await;
-        set_process(&pool, id, Process::FixMergeIssues)
+        set_process(&pool, id, Process::fix_merge_issues())
             .await
             .unwrap();
         pool.close().await;
@@ -298,5 +381,148 @@ async fn a_process_survives_a_restart() {
 
     let pool = open_database(&database).await.unwrap();
 
-    assert_eq!(loaded(&pool, id).await, Process::FixMergeIssues);
+    assert_eq!(loaded(&pool, id).await, Process::fix_merge_issues());
+}
+
+/// A Conversation of each of the five Processes, stored by a Verkstead from
+/// before there were plugin Processes — the `processes` table with no `plugin`
+/// column, and each state the word it always held — reads its Process and its
+/// state on a database opened again, with nothing rewritten.
+///
+/// Develop in every one of its five states, and its `implementing` under each
+/// Direction: what the state column holds is the word the manifest now names
+/// the state by, so the word that was stored is the word that is read.
+#[tokio::test]
+async fn the_five_stored_before_processes_were_data_read_on() {
+    use verkstead_schema::Direction;
+    use verkstead_store::State;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("verkstead.db");
+    let stored = [
+        (
+            Process::develop(),
+            "grilling",
+            State::named("grilling"),
+            None,
+        ),
+        (
+            Process::develop(),
+            "implementing",
+            State::named("implementing"),
+            Some(Direction::Inline),
+        ),
+        (
+            Process::develop(),
+            "implementing",
+            State::named("implementing"),
+            Some(Direction::TaskList),
+        ),
+        (
+            Process::develop(),
+            "implementing",
+            State::named("implementing"),
+            Some(Direction::Roadmap),
+        ),
+        (
+            Process::develop(),
+            "wrapping",
+            State::named("wrapping"),
+            None,
+        ),
+        (
+            Process::develop(),
+            "follow-up",
+            State::named("follow-up"),
+            None,
+        ),
+        (
+            Process::develop(),
+            "investigating",
+            State::named("investigating"),
+            None,
+        ),
+        (
+            Process::tinker(),
+            "follow-up",
+            State::named("follow-up"),
+            None,
+        ),
+        (
+            Process::investigate(),
+            "investigating",
+            State::named("investigating"),
+            None,
+        ),
+        (
+            Process::review(),
+            "wrapping",
+            State::named("wrapping"),
+            None,
+        ),
+        (
+            Process::fix_merge_issues(),
+            "wrapping",
+            State::named("wrapping"),
+            None,
+        ),
+    ];
+
+    let mut ids = Vec::new();
+    {
+        let pool = open_database(&path).await.unwrap();
+        for (picked, state, _, direction) in &stored {
+            let id = drafting(&pool).await;
+            set_process(&pool, id, picked.clone()).await.unwrap();
+            // The row as a Verkstead from before would have left it: a
+            // Direction is picked on a grilling, and this Conversation is
+            // being stood up in the state it was found in.
+            if let Some(direction) = direction {
+                sqlx::query("INSERT INTO directions (conversation_id, direction) VALUES (?, ?)")
+                    .bind(id)
+                    .bind(match direction {
+                        Direction::Inline => "inline",
+                        Direction::TaskList => "task-list",
+                        Direction::Roadmap => "roadmap",
+                    })
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+            }
+            sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+                .bind(state)
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap();
+            ids.push(id);
+        }
+
+        // And the table as it was before it had anywhere to name a plugin.
+        sqlx::query("ALTER TABLE processes DROP COLUMN plugin")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+    }
+
+    let pool = open_database(&path).await.unwrap();
+    for (id, (picked, _, lifecycle, direction)) in ids.into_iter().zip(stored) {
+        let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+        assert_eq!(conversation.process, picked);
+        assert_eq!(conversation.state, lifecycle, "{picked:?}");
+        // The state's own id beside it, which is the word the column holds:
+        // the five name their states with exactly these words, so a row
+        // stored before any of this is worded off its Process's manifest with
+        // nothing rewritten.
+        assert_eq!(
+            conversation.state.declared(),
+            match lifecycle.verksteads() {
+                true => None,
+                false => Some(lifecycle.stored()),
+            },
+            "{picked:?}"
+        );
+        assert_eq!(conversation.direction, direction, "{picked:?}");
+    }
 }

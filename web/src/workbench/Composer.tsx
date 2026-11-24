@@ -131,7 +131,6 @@ import type {
   OfferedPack,
   PackAttached,
   PackRemoved,
-  Process,
   ServerAttached,
   ServerRemoved,
   TakenUp,
@@ -156,7 +155,8 @@ import {
   NOTHING_CONFIRMED,
   TakeUpRefusal,
 } from "./TakeUp";
-import { needed, targeted } from "./processes";
+import { targeted } from "./provided";
+import { needed } from "./roles";
 import { keeping } from "./settling";
 import { BRIEF_REFUSAL, grillRefusal } from "./Timeline";
 
@@ -172,7 +172,7 @@ export function composing(
   conversation: ConversationView,
   brief: BriefEvent,
 ): boolean {
-  if (conversation.state !== "Draft") {
+  if (conversation.state !== "draft") {
     return false;
   }
 
@@ -512,10 +512,13 @@ function Written(props: {
 }
 
 /// What an unready start is waiting on, said in its tooltip — the clauses and
-/// the roles counted off the Process's own table rather than written into the
+/// the roles counted off the Process's own roles rather than written into the
 /// sentence, so a Review says it waits on a target and a Develop does not.
-const missing = (process: Process): string =>
-  `This needs ${needed(process, { brief: true, target: true })}.`;
+const missing = (conversation: ConversationView): string =>
+  `This needs ${needed(conversation.pairings.length, {
+    brief: true,
+    target: targeted(conversation.process),
+  })}.`;
 
 /// The press the whole pane is arranged for, in whichever of its two shapes
 /// this Conversation's Process gives it.
@@ -527,10 +530,10 @@ const missing = (process: Process): string =>
 /// the take-up — and every refusal the take-up already had keeps its name and
 /// its sentence. See [`Starting`], which is the row both draw.
 ///
-/// Asked of [`targeted`] rather than of the Process by name, that being
-/// `processes.ts`'s list to keep: the Target field and the endpoint behind the
-/// press are the one fact about a Process, so a stage giving one a target gives
-/// it this press along with the field.
+/// Asked of [`targeted`] rather than of the Process by name, that being the
+/// Process's own manifest: the Target field and the endpoint behind the press
+/// are the one fact about a Process, so a Process that declares a target gets
+/// this press along with the field.
 function Start(props: {
   conversation: ConversationView;
   files: Attaching;
@@ -611,7 +614,7 @@ function Starting(props: {
           // which is what carries the explanation.
           disabled={props.pending}
           aria-disabled={!ready()}
-          title={ready() ? undefined : missing(props.conversation.process)}
+          title={ready() ? undefined : missing(props.conversation)}
           onClick={() => ready() && props.press()}
         >
           {props.pending ? "Starting…" : (props.label ?? "Start work")}

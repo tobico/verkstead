@@ -95,7 +95,7 @@ pub(crate) async fn resolve(state: &AppState, conversation_id: i64) -> anyhow::R
     // Conversation the move is about to refuse would be slow work done for
     // nothing. The store's own answer is still the one that decides — see the
     // match below, which is what two presses a moment apart race on.
-    if conversation.state != store::Lifecycle::Done {
+    if conversation.state != store::State::DONE {
         return Ok(Resolved::NotDone);
     }
 

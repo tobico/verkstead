@@ -1,0 +1,71 @@
+# Review as data: the wrap-up run over a pull request or a branch the Target
+# names, the branch read and what is said on the pull request answered. Built
+# in with a tick, as Tinker is; the state id is the word already stored.
+# Each state marked `steer` is a row on the Steer form: the wrap-up, a
+# follow-up of the pull request, and `investigating`, the detour a question
+# takes, which goes back to where it was steered from.
+uuid: 0b55843a-7c93-47cc-9655-e5f6ec3cf019
+name: Review
+author:
+  name: Tobias Cohen
+  email: tobi@tobico.net
+version: 0.1.0
+interface: 1
+description: An existing pull request or branch reviewed, and the issues found fixed.
+dependencies:
+  - uuid: d7a5e719-8491-46a7-b7d7-8f9f85e57bd6
+    name: Activities
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+  - uuid: 15447a8d-f28d-4573-8b8b-a7226d477755
+    name: Verkstead
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+provides:
+  - category: process
+    id: review
+    name: Review
+    description: Review an existing PR or branch, and fix any issues found
+    target: true
+    roles:
+      - { name: implementation, label: Implementation, building: true }
+      - { name: review, label: Review }
+    # Where a backlog is built, which is the one question this Process is asked
+    # about a Direction: a review that splits a finding out has made the work a
+    # task list, and `implementing` is where that list is worked. No interview
+    # offers these — a take-up never had a round to pick in — so this is the
+    # mapping read on its own, by the review that writes the backlog.
+    directions: { task-list: implementing }
+    states:
+      - id: wrapping
+        word: Wrapping
+        activity: wrap-up
+        roles: [implementation, review]
+        steer: { brief: none }
+      # The split-out backlog, worked exactly as any other is, and wrapped up
+      # again on the pull request the take-up already had. Nothing steers into
+      # it: it is reached by a review answered into splitting work out, which
+      # is a move out of the wrap-up rather than a row on the form.
+      - id: implementing
+        word: Implementing
+        activity: backlog-runner
+        roles: [implementation]
+      - id: follow-up
+        word: Follow-up
+        activity: follow-up-rounds
+        options: { skill: verkstead/following-up }
+        steer: { brief: follow-up }
+      - id: investigating
+        word: Investigating
+        activity: follow-up-rounds
+        options: { skill: verkstead/investigating, evidence: investigated }
+        steer: { brief: question }
+        detour: true
+    transitions:
+      wrapping: { settled: done, merged: done, closed: stopped, given-up: stopped }
+      implementing: { finished: wrapping }
+      follow-up: { committed: wrapping, nothing: done }

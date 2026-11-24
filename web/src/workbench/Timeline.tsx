@@ -121,18 +121,21 @@ import type {
   ConversationView,
   GrillingStarted,
   HandoffEvent,
-  Lifecycle,
   ManualTaskEvent,
   MemoEvent,
   MovedEvent,
   NoticeEvent,
   OtherAuthor,
   PendingSteerView,
+  SteerForm,
+  SteerRow,
+  ProvidedProcess,
   PinnedEvent,
   ProfileEntry,
   ProfileTrouble,
   PullRequestEvent,
   QuestionSetEvent,
+  RoleWanted,
   StageEntry,
   StageListEvent,
   StageListReached,
@@ -173,7 +176,8 @@ import { StatusButton } from "./StatusButton";
 import styles from "./Timeline.module.css";
 import { titled } from "./naming";
 import { inFlight, settled, stageState } from "./stages";
-import { STATE } from "./states";
+import { away } from "./roles";
+import { stateWord } from "./provided";
 import { opensRoadmap, type Opening } from "./openings";
 import { windowed } from "./windowing";
 
@@ -205,13 +209,9 @@ const GRILL_REFUSAL: Record<Extract<GrillingStarted, string>, string> = {
   Started: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
-  NoGrillingProfile:
-    "Choose a grilling profile and model on the brief first.",
-  NoImplementationProfile:
-    "Choose an implementation profile and model on the brief first.",
-  NoReviewProfile:
-    "Pick a review profile and model, or No review, on the brief first.",
   EmptyBrief: "Write the brief first. The work starts from it.",
+  ProcessNotOffered:
+    "This process's plugin is switched off or in trouble. Pick another process, or fix the plugin in Settings.",
   NoGitAuthor:
     "No git author is set, so Verkstead can't commit on the branch. Set one in Settings first.",
   FetchFailed:
@@ -254,6 +254,19 @@ export function companionRefusal(why: CompanionRefusal): string {
   return COMPANION_REFUSAL[why];
 }
 
+/// What a press says about a role it is waiting on a pairing for, whichever
+/// press it was: the role named as its own picker is labelled, so the sentence
+/// sends the human to the control they would go and change.
+///
+/// Exported because every press that waits on one says it: starting a grilling,
+/// adopting a stage and taking a pull request up — see
+/// [`Adoption`](./Adoption.tsx) and [`TakeUp`](./TakeUp.tsx).
+export function pairingWanted(role: RoleWanted): string {
+  return role.away
+    ? `Pick a profile and model for ${role.label}, or ${away(role)}, on the brief first.`
+    : `Choose a profile and model for ${role.label} on the brief first.`;
+}
+
 /// What to say about a start that was refused.
 ///
 /// A companion's refusal names the repository, because that is the whole of
@@ -261,6 +274,10 @@ export function companionRefusal(why: CompanionRefusal): string {
 /// thing to go and look at is one of several repos rather than the obvious one.
 export function grillRefusal(outcome: GrillingStarted): string {
   if (typeof outcome === "object") {
+    if ("NoPairing" in outcome) {
+      return pairingWanted(outcome.NoPairing);
+    }
+
     if ("ProfileBroken" in outcome) {
       return profileRefusal(outcome.ProfileBroken);
     }
@@ -346,14 +363,20 @@ export function profileRefusal(why: ProfileTrouble): string {
 ///
 /// A move records only the state it went to, so the other half of the
 /// transition is the Timeline's own to work out by reading back up itself.
-function movedFrom(timeline: TimelineEvent[], index: number): Lifecycle {
+///
+/// The move itself rather than its state, so that a declared state it went to
+/// is said in its own word; `null` is the Draft.
+function movedFrom(
+  timeline: TimelineEvent[],
+  index: number,
+): MovedEvent | null {
   for (const event of timeline.slice(0, index).reverse()) {
     if ("Moved" in event) {
-      return event.Moved.state;
+      return event.Moved;
     }
   }
 
-  return "Draft";
+  return null;
 }
 
 /// How many lines of a document a card shows before it is cut off.
@@ -838,6 +861,7 @@ export function Timeline(props: {
                     <Moved
                       from={movedFrom(props.conversation.timeline, index())}
                       moved={moved()}
+                      process={props.conversation.process}
                     />
                   )}
                 </Match>
@@ -845,6 +869,7 @@ export function Timeline(props: {
                   {(steer) => (
                     <Steered
                       steer={steer()}
+                      process={props.conversation.process}
                       selected={props.selected === steer().id}
                       open={() => {
                         props.select(steer().id);
@@ -1042,6 +1067,7 @@ export function Timeline(props: {
               <li ref={item} class={styles.timelineEvent}>
                 <PendingSteer
                   pending={pending()}
+                  rows={props.conversation.steer_rows}
                   selected={props.selected === "steer"}
                   open={() => {
                     props.select("steer");
@@ -2069,13 +2095,25 @@ function ManualTask(props: { manual: ManualTaskEvent }): JSX.Element {
 /// that was moved to: where the work has got to is a step from somewhere, and a
 /// line saying only where it arrived leaves the reader to remember where it
 /// was. The state it came from is [`movedFrom`]'s to say.
-function Moved(props: { from: Lifecycle; moved: MovedEvent }): JSX.Element {
+///
+/// Every state is said in the word its Process's manifest gives it, read off
+/// the Conversation's Process — see `provided.ts`. The three that are
+/// Verkstead's own, Draft among them, are worded there.
+function Moved(props: {
+  from: MovedEvent | null;
+  moved: MovedEvent;
+  process: ProvidedProcess;
+}): JSX.Element {
+  const word = (moved: MovedEvent | null) =>
+    stateWord(props.process, moved?.state ?? "draft");
+  const tone = () => styles[props.moved.state.toLowerCase()];
+
   return (
     <p
       class={styles.moved}
-      classList={{ [styles[props.moved.state.toLowerCase()]!]: true }}
+      classList={tone() === undefined ? {} : { [tone()!]: true }}
     >
-      {STATE[props.from]} → {STATE[props.moved.state]}
+      {word(props.from)} → {word(props.moved)}
     </p>
   );
 }
@@ -2105,9 +2143,14 @@ function Moved(props: { from: Lifecycle; moved: MovedEvent }): JSX.Element {
 /// lines here, whole in the details pane.
 function Steered(props: {
   steer: SteerEvent;
+  process: ProvidedProcess;
   selected: boolean;
   open: () => void;
 }): JSX.Element {
+  // Asked for by name, as the move below it is, and a target the module has no
+  // class for — a state a plugin's process declares — is drawn without one.
+  const tone = () => styles[props.steer.target.toLowerCase()];
+
   return (
     <Openable
       kind={styles.steeredWith!}
@@ -2116,15 +2159,29 @@ function Steered(props: {
     >
       <p
         class={styles.steered}
-        classList={{ [styles[props.steer.target.toLowerCase()]!]: true }}
+        classList={tone() === undefined ? {} : { [tone()!]: true }}
       >
-        You steered this into {STATE[props.steer.target]}.
+        You steered this into{" "}
+        {stateWord(props.process, props.steer.target)}
+        .
       </p>
       <Show when={props.steer.html}>
         {(html) => <Clamped class={styles.steerBody!} html={html()} />}
       </Show>
     </Openable>
   );
+}
+
+/// The word for where a half-written steer is going: the row its picker is on,
+/// as the Steer form draws it.
+function steeringInto(form: SteerForm, rows: SteerRow[]): string {
+  const row = rows.find(
+    (one) =>
+      one.target === form.target &&
+      (one.target !== "Declared" || one.state === form.state),
+  );
+
+  return row?.word ?? form.state ?? form.target ?? "";
 }
 
 /// The steer being written: the one item on this pane that has not happened
@@ -2148,6 +2205,7 @@ function Steered(props: {
 /// human ever moved the radio.
 function PendingSteer(props: {
   pending: PendingSteerView;
+  rows: SteerRow[];
   selected: boolean;
   open: () => void;
 }): JSX.Element {
@@ -2160,7 +2218,7 @@ function PendingSteer(props: {
       <p class={styles.pendingSteerLine}>
         {props.pending.form.target === null
           ? "Steer"
-          : `Steering into ${STATE[props.pending.form.target]}`}
+          : `Steering into ${steeringInto(props.pending.form, props.rows)}`}
       </p>
       <p class={styles.pendingSteerNote}>
         The run has stopped while you decide.

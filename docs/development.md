@@ -1793,3 +1793,15 @@ nowhere, and hands the tests its path in `VERKSTEAD_STUB_HARNESS_WASM`. And
 the **activity fixture**, an Activity reaching every host function a wrap-up
 needs — waiting on several sessions and a timeout, the Forge, the wrap-up's
 records — whose path is in `VERKSTEAD_ACTIVITY_FIXTURE_WASM`.
+
+**And one fixture plugin that is no component at all**: `plugins/tests/design`,
+the human's design Process written as data — a manifest, a Skill Pack of two
+skills, and nothing else. It names three of the Activities Verkstead ships and
+runs its drawing rounds under its own pack, which is stage 11's proof that a
+Process needs no code. Nothing embeds it and the build script knows nothing of
+it: `crates/cli/tests/suite/plugin.rs` runs `verkstead plugin check` over the
+directory as it stands, and the server's suite installs it from the checkout
+the way a human installs a local plugin — see
+`a_conversation_on_the_design_process_draws_exports_and_wraps_up_to_done` in
+`crates/server/tests/suite/sessions.rs`. Edit the manifest or a skill and both
+read the edit; there is nothing to build.

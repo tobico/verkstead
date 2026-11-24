@@ -134,6 +134,7 @@ pub(crate) fn served(state: AppState) -> Router {
         .merge(super::chains::route())
         .merge(super::repos::route())
         .merge(super::harnesses::route())
+        .merge(super::processes::route())
         .merge(super::checkouts::route())
         .merge(super::transfers::route())
         .merge(super::account::route())

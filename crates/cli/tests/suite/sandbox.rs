@@ -309,9 +309,16 @@ fn grilling() -> Grilling {
         store::set_implementation_pairing(&pool, id, &profile.id, None)
             .await
             .unwrap();
-        store::start_grilling(&pool, id, &commit, &worktree, &[])
-            .await
-            .unwrap();
+        store::start_in(
+            &pool,
+            id,
+            &store::State::named("grilling"),
+            &commit,
+            &worktree,
+            &[],
+        )
+        .await
+        .unwrap();
 
         let conversation = store::load_conversation(&pool, id)
             .await

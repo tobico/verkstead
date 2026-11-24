@@ -158,6 +158,17 @@ struct Watched {
     expected: Expected,
     ends: Ends,
 
+    /// What it was sent to build, where it was sent to build at all: the kind
+    /// its Memos are left under and what permits them and its previews.
+    ///
+    /// **The building role's sessions alone** (Set 1765, Q26). A Process marks
+    /// one of its roles as building, and a session launched under any other is
+    /// not a building one however the Activity registered it — so a review
+    /// session cannot leave a Memo about work it was reading. Settled at the
+    /// launch, where the role is resolved, and read back by the wait that holds
+    /// its Done signal.
+    building: Option<Building>,
+
     /// How it ended, once a wait has seen it end.
     ended: Option<Ended>,
 
@@ -337,7 +348,7 @@ impl Lent {
     pub(crate) async fn start(
         &mut self,
         skill: &str,
-        role: store::Role,
+        role: &store::Role,
         prompt: String,
         evidence: Evidence,
         ends: Ends,
@@ -345,7 +356,7 @@ impl Lent {
         let launched = host::Host::launch(
             self,
             skill.to_owned(),
-            role_named(role).to_owned(),
+            role.stored().to_owned(),
             prompt,
             lent_evidence(&evidence),
             lent_ends(ends),
@@ -395,6 +406,7 @@ impl Lent {
         expected: Expected,
         ends: Ends,
         turn: Option<crate::sessions::Turn>,
+        building: Option<Building>,
     ) -> world::Session {
         self.issued += 1;
         self.writing = Some(session.event_id);
@@ -408,6 +420,7 @@ impl Lent {
                 ended: None,
                 seeing: None,
                 turn,
+                building,
             },
         );
 
@@ -588,14 +601,12 @@ impl Lent {
             };
         }
 
-        let within = match evidence {
-            Evidence::NothingElse => store::Lifecycle::FollowUp,
-            Evidence::Investigated => store::Lifecycle::Investigating,
-            _ => return world::Waited::Gone(ended.badly()),
-        };
+        if !matches!(evidence, Evidence::NothingElse | Evidence::Investigated) {
+            return world::Waited::Gone(ended.badly());
+        }
 
         if !crate::runner::open(state, conversation_id).await
-            && crate::activities::follow_up_rounds::marked(state, conversation_id, within).await
+            && crate::activities::follow_up_rounds::marked(state, conversation_id).await
         {
             return world::Waited::Marked;
         }
@@ -860,10 +871,6 @@ impl host::Host for Lent {
             )));
         }
 
-        let Some(role) = role_called(&role) else {
-            return Ok(self.refused(&format!("There's no role called `{role}`.")));
-        };
-
         // See [`Turn`]: held across the launch alone, and a stop asked after
         // the wait for it rather than before.
         let turn = match std::mem::replace(&mut self.turn, Turn::Held) {
@@ -910,21 +917,32 @@ impl host::Host for Lent {
             }
         };
 
-        let paired = match role {
-            store::Role::Grilling => conversation.grilling_pairing.clone(),
-            role => crate::runner::under(
-                role,
-                &conversation.review_pairing,
-                conversation.implementation_pairing.as_ref(),
-            ),
+        // Which of the state's roles the word the component launched in names
+        // (Set 1765, Q26): a Process declares the roles its states run under,
+        // so `implementation` out of an Activity Verkstead ships is whichever
+        // role the state it runs in declares — see
+        // [`crate::processes::under`].
+        let role = crate::processes::under(
+            &state,
+            &conversation.process,
+            crate::processes::standing_in(&conversation),
+            &role,
+        )
+        .map_or_else(
+            || store::Role::named(&role),
+            |role| store::Role::named(&role.name),
+        );
+
+        let Some(pairing) = crate::runner::under(&role, &conversation.pairings) else {
+            return Ok(self.refused(&format!("The Pairing the {role} role runs under is gone.")));
         };
 
-        let Some(pairing) = paired else {
-            return Ok(self.refused(&format!(
-                "The Pairing the {} role runs under is gone.",
-                role_named(role)
-            )));
-        };
+        // What this session builds, which is nothing unless it runs under the
+        // role its Process marks as building — see [`Watched::building`].
+        let building = self.building.filter(|_| {
+            crate::processes::building(&state, &conversation.process)
+                .is_some_and(|building| building.name == role.stored())
+        });
 
         // A pick is listened for from before the session exists, so none on
         // its proposal can arrive with nothing to hear it.
@@ -946,9 +964,9 @@ impl host::Host for Lent {
         // Deferred Asks that no session has been told about — under everything
         // above. Never into a grilling, which is primed with every Set already:
         // see [`crate::deferrals`].
-        let folding = match role {
-            store::Role::Grilling => None,
-            _ => Some(crate::deferrals::unfolded(&state, conversation_id).await),
+        let folding = match role.stored() == store::Role::GRILLING {
+            true => None,
+            false => Some(crate::deferrals::unfolded(&state, conversation_id).await),
         };
 
         let prompt = match &folding {
@@ -969,7 +987,7 @@ impl host::Host for Lent {
                 &conversation,
                 &pairing,
                 &prompt,
-                self.building.is_some(),
+                building.is_some(),
                 crate::sessions::Held {
                     sets: &self.held,
                     settlements: &state.settlements,
@@ -986,11 +1004,17 @@ impl host::Host for Lent {
                     folding.recorded(&state.pool).await;
                 }
 
-                self.folding = self.building.is_some();
+                self.folding = building.is_some();
 
                 let held = matches!(self.turn, Turn::Try).then_some(turn).flatten();
 
-                Ok(Ok(self.watch(session, expected, taken_ends(ends), held)))
+                Ok(Ok(self.watch(
+                    session,
+                    expected,
+                    taken_ends(ends),
+                    held,
+                    building,
+                )))
             }
             Ok(None) => Ok(self.refused("The session couldn't be started.")),
             Err(error) => {
@@ -1031,6 +1055,7 @@ impl host::Host for Lent {
 
         let event_id = watched.session.event_id;
         let idle = watched.session.idle.clone();
+        let building = watched.building;
         let pace = self.state.sessions.pace();
 
         let expecting = self.state.signals.expecting(
@@ -1038,7 +1063,7 @@ impl host::Host for Lent {
             event_id,
             evidence.clone(),
             watched.ends,
-            self.building,
+            building,
         );
         let signal = expecting.signal();
 
@@ -2115,25 +2140,6 @@ fn named_in_a_pack(skill: &str) -> bool {
         .is_some_and(|(pack, name)| !pack.is_empty() && !name.is_empty() && !name.contains('/'))
 }
 
-/// A role as the world spells it, which is as the store does.
-pub(crate) fn role_named(role: store::Role) -> &'static str {
-    match role {
-        store::Role::Grilling => "grilling",
-        store::Role::Implementation => "implementation",
-        store::Role::Review => "review",
-    }
-}
-
-fn role_called(role: &str) -> Option<store::Role> {
-    [
-        store::Role::Grilling,
-        store::Role::Implementation,
-        store::Role::Review,
-    ]
-    .into_iter()
-    .find(|named| role_named(*named) == role)
-}
-
 /// `evidence` in the world's words. A landing's Worktree goes unsaid: the host
 /// reads it off the Conversation as the session is launched.
 fn lent_evidence(evidence: &Evidence) -> world::Evidence {
@@ -2229,19 +2235,6 @@ mod tests {
         assert!(!named_in_a_pack("verkstead/"));
         assert!(!named_in_a_pack("/following-up"));
         assert!(!named_in_a_pack("verkstead/following-up/SKILL.md"));
-    }
-
-    #[test]
-    fn a_role_is_called_what_the_store_calls_it() {
-        for role in [
-            store::Role::Grilling,
-            store::Role::Implementation,
-            store::Role::Review,
-        ] {
-            assert_eq!(role_called(role_named(role)), Some(role));
-        }
-
-        assert_eq!(role_called("reviewer"), None);
     }
 
     /// Every piece of evidence a driver registers crosses the world and comes

@@ -48,8 +48,8 @@ use sqlx::SqlitePool;
 use tokio::task::JoinHandle;
 use tower::ServiceExt;
 use verkstead_render::{
-    ConversationEntry, ConversationView, Lifecycle, ProfileEntry, QuestionSetEvent, Standing,
-    Started, TimelineEvent,
+    ConversationEntry, ConversationView, ProfileEntry, QuestionSetEvent, Standing, Started,
+    TimelineEvent,
 };
 use verkstead_schema::Direction;
 use verkstead_server::attachments::Attachments;
@@ -925,13 +925,14 @@ impl Verkstead {
             panic!("the Conversation was not started: {started}")
         };
 
-        let pairing = serde_json::json!({ "profile_id": profile, "model": model });
-        let role = serde_json::json!({ "pairing": pairing });
+        let role = serde_json::json!({
+            "pairing": { "profile_id": profile, "model": model },
+        });
 
         for (path, saying) in [
-            ("grilling-pairing", &pairing),
-            ("implementation-pairing", &pairing),
-            ("review-pairing", &role),
+            ("pairings/grilling", &role),
+            ("pairings/implementation", &role),
+            ("pairings/review", &role),
         ] {
             let said = press(
                 &self.workbench,
@@ -2938,8 +2939,7 @@ async fn the_conversation_arrives_in_the_state_it_was_in() {
     let arrived = b.view(there).await;
 
     assert_eq!(
-        arrived.state,
-        Lifecycle::Grilling,
+        arrived.state, "grilling",
         "it arrives in the state it was in",
     );
     assert_eq!(arrived.branch, branch, "on the branch the work is on");
@@ -2954,8 +2954,7 @@ async fn the_conversation_arrives_in_the_state_it_was_in() {
     // holds is a mirror of it, and that is what the row names.
     let mirror = b.profile_called(ACCOUNT).await;
     let pairing = arrived
-        .grilling_pairing
-        .as_ref()
+        .under("grilling")
         .expect("the grilling Pairing crossed with it");
 
     assert_eq!(pairing.profile.id, mirror.id, "B's own id for that account");
@@ -2966,8 +2965,7 @@ async fn the_conversation_arrives_in_the_state_it_was_in() {
     );
     assert_eq!(
         arrived
-            .implementation_pairing
-            .as_ref()
+            .under("implementation")
             .map(|pairing| pairing.profile.id.as_str()),
         Some(mirror.id.as_str()),
         "and the implementation's, which is the same account here",
@@ -3500,9 +3498,14 @@ async fn a_backlog_step_that_made_the_call_stands_down_and_carries_on_over_there
             .unwrap(),
         store::Directing::Writing,
     ));
-    store::start_implementing(&a.pool, conversation)
-        .await
-        .unwrap();
+    store::transition(
+        &a.pool,
+        conversation,
+        &store::State::named("grilling"),
+        &store::State::named("implementing"),
+    )
+    .await
+    .unwrap();
 
     let resumed = press(
         &a.workbench,
@@ -3716,9 +3719,14 @@ async fn planned_across_at(
             .unwrap(),
         store::Directing::Writing,
     ));
-    store::start_implementing(&a.pool, conversation)
-        .await
-        .unwrap();
+    store::transition(
+        &a.pool,
+        conversation,
+        &store::State::named("grilling"),
+        &store::State::named("implementing"),
+    )
+    .await
+    .unwrap();
 
     (a, b, (signalling.0, signalling.1, holding), conversation)
 }
@@ -4695,7 +4703,7 @@ async fn a_roadmap_stages_task_is_moved_and_home_still_sees_the_stage() {
     };
     assert_eq!(at_home().await, Some(store::StageStanding::InFlight));
 
-    store::set_state(&b.pool, there, store::Lifecycle::Closed)
+    store::set_state(&b.pool, there, store::State::closed())
         .await
         .unwrap();
     b.nudges.announce(verkstead_schema::Nudge::Conversation {
@@ -4962,9 +4970,14 @@ async fn an_inline_runs_resume_launches_it_where_it_is() {
     let (a, _b, _held, conversation) =
         proposed_across(&["windows"], spill.path(), Across::default(), false).await;
 
-    store::start_implementing(&a.pool, conversation)
-        .await
-        .unwrap();
+    store::transition(
+        &a.pool,
+        conversation,
+        &store::State::named("grilling"),
+        &store::State::named("implementing"),
+    )
+    .await
+    .unwrap();
 
     resumes(&a, conversation).await;
 
@@ -6433,7 +6446,7 @@ async fn a_grilling_whose_log_did_not_cross_comes_up_re_primed_over_there() {
 
     assert_eq!(
         b.view(there).await.state,
-        Lifecycle::Grilling,
+        "grilling",
         "and it is still a grilling: what moved is where the work is being done \
          rather than how far it has got",
     );
@@ -6540,7 +6553,7 @@ async fn a_grilling_transferred_mid_interview_carries_on_from_the_question_it_wa
 
     assert_eq!(
         b.view(there).await.state,
-        Lifecycle::Grilling,
+        "grilling",
         "and it is still a grilling: what moved is where the work is being done \
          rather than how far it has got",
     );
@@ -7266,7 +7279,7 @@ async fn a_grok_grilling_carries_on_where_the_store_has_a_name_for_the_worktree(
 
     assert_eq!(
         a.view(conversation).await.state,
-        Lifecycle::Grilling,
+        "grilling",
         "and it is still a grilling: what moved is where the work is being done \
          rather than how far it has got",
     );
@@ -7416,7 +7429,7 @@ async fn a_codex_grilling_transferred_mid_interview_carries_on_under_a_name_nobo
 
     assert_eq!(
         b.view(there_id).await.state,
-        Lifecycle::Grilling,
+        "grilling",
         "and it is still a grilling: what moved is where the work is being done \
          rather than how far it has got",
     );
@@ -7855,7 +7868,7 @@ async fn an_opencode_grilling_transferred_mid_interview_carries_on_in_the_row_th
 
     assert_eq!(
         b.view(there_id).await.state,
-        Lifecycle::Grilling,
+        "grilling",
         "and it is still a grilling: what moved is where the work is being done \
          rather than how far it has got",
     );
@@ -8855,6 +8868,7 @@ async fn staged_as(
     store::start_stage(
         &on.pool,
         id,
+        &store::State::named("implementing"),
         "c0ffee",
         worktree,
         stacks_on,
@@ -8873,7 +8887,7 @@ async fn staged_as(
 impl Away {
     /// Move B's copy on to `state`, as a move there does: the row, the line on
     /// its Timeline, and the Nudge.
-    async fn moves(&self, state: store::Lifecycle) {
+    async fn moves(&self, state: store::State) {
         store::set_state(&self.b.pool, self.copy, state)
             .await
             .unwrap();
@@ -8928,7 +8942,7 @@ async fn a_stage_closed_on_the_far_device_reads_abandoned_at_home() {
 
     assert_eq!(away.at_home().await, Some(store::StageStanding::InFlight));
 
-    away.moves(store::Lifecycle::Closed).await;
+    away.moves(store::State::closed()).await;
 
     away.home_reads(store::StageStanding::Abandoned).await;
 }
@@ -8941,7 +8955,7 @@ async fn a_stage_that_settles_away_starts_the_next_at_home_and_says_so_where_it_
     let spill = tempfile::tempdir().unwrap();
     let away = away(spill.path(), B).await;
 
-    away.moves(store::Lifecycle::Done).await;
+    away.moves(store::State::done()).await;
 
     away.home_reads(store::StageStanding::Settled).await;
 
@@ -9033,7 +9047,7 @@ async fn a_stage_that_wants_windows_is_planned_there_and_home_starts_the_one_aft
         .await
         .unwrap();
 
-    away.moves(store::Lifecycle::Done).await;
+    away.moves(store::State::done()).await;
 
     let started = away.b.notice_saying(away.copy, "Stage 02 of the").await;
     assert!(
@@ -9077,7 +9091,7 @@ async fn a_stage_that_wants_windows_is_planned_there_and_home_starts_the_one_aft
 
     // Settling on the Windows device, it reports home, and home starts the stage
     // that stands on it, here.
-    store::set_state(&away.b.pool, there, store::Lifecycle::Done)
+    store::set_state(&away.b.pool, there, store::State::done())
         .await
         .unwrap();
     away.b
@@ -9130,7 +9144,7 @@ async fn away_for_the_gate(spill: &Path, b_os: &str, pace: Pace) -> Away {
 /// Stage 01 settling on B, and the stage 02 home starts for it: its id at home,
 /// once the roadmap's Notice of its start says `saying`.
 async fn stage_02_started(away: &Away, saying: &str) -> i64 {
-    away.moves(store::Lifecycle::Done).await;
+    away.moves(store::State::done()).await;
 
     let started = away.b.notice_saying(away.copy, "Stage 02 of the").await;
     assert!(
@@ -9455,12 +9469,13 @@ async fn adopting_across(
         panic!("the adopting draft was not started: {started}")
     };
 
-    let pairing = serde_json::json!({ "profile_id": account, "model": MODEL });
-    let role = serde_json::json!({ "pairing": pairing });
+    let role = serde_json::json!({
+        "pairing": { "profile_id": account, "model": MODEL },
+    });
     for (path, saying) in [
-        ("grilling-pairing", &pairing),
-        ("implementation-pairing", &pairing),
-        ("review-pairing", &role),
+        ("pairings/grilling", &role),
+        ("pairings/implementation", &role),
+        ("pairings/review", &role),
     ] {
         let said = press(
             &a.workbench,
@@ -9680,7 +9695,7 @@ async fn a_move_made_while_home_is_asleep_reaches_it_once_home_answers() {
         )
         .await;
 
-    away.moves(store::Lifecycle::Closed).await;
+    away.moves(store::State::closed()).await;
 
     away.home_still_reads(store::StageStanding::InFlight).await;
 
@@ -9699,7 +9714,7 @@ async fn a_report_from_a_device_not_holding_the_work_is_refused() {
     let spill = tempfile::tempdir().unwrap();
     let away = away(spill.path(), C).await;
 
-    away.moves(store::Lifecycle::Closed).await;
+    away.moves(store::State::closed()).await;
 
     away.home_still_reads(store::StageStanding::InFlight).await;
 
@@ -9763,7 +9778,7 @@ async fn a_stage_moved_on_a_second_time_still_reports_home() {
     .await
     .unwrap();
 
-    away.moves(store::Lifecycle::Closed).await;
+    away.moves(store::State::closed()).await;
 
     away.home_reads(store::StageStanding::Abandoned).await;
 
@@ -10257,7 +10272,7 @@ async fn home_queues_the_far_stage_behind_a_home_stage_whose_tasks_finished_firs
     );
     assert!(!told.exists(), "the turn is not the far stage's yet");
 
-    store::set_state(&away.a.pool, first, store::Lifecycle::Done)
+    store::set_state(&away.a.pool, first, store::State::done())
         .await
         .unwrap();
 
@@ -10287,6 +10302,7 @@ async fn a_join_away_puts_the_far_stage_at_the_top_of_homes_chain() {
             base: Some("rate-limiting".to_owned()),
             repo: None,
         },
+        &store::State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -10622,5 +10638,144 @@ async fn a_call_to_a_ticked_device_asleep_waits_on_it_and_its_waking_moves_the_w
     assert!(
         resumed.contains("arg=--resume"),
         "B's session carries on the conversation A's was having: {resumed:?}",
+    );
+}
+
+/// The uuid of the fixture plugin providing the Process *Two steps* — the same
+/// plugin `tests/suite/sessions.rs` runs the engine against.
+const TWO_STEPS: &str = "5e0c9a7e-2f4b-4c1d-8a3e-6b9f0d2c7a41";
+
+/// Put `conversation` on the Process `id` of the plugin `plugin`, by the row
+/// the picker would have written.
+///
+/// Written here rather than pressed: picking a Process is a Draft's press, and
+/// every Conversation these tests move has started. The row is the whole of
+/// what a Conversation's Process is — see `set_process`.
+async fn put_on(on: &Verkstead, conversation: i64, plugin: &str, id: &str) {
+    sqlx::query(
+        "INSERT INTO processes (conversation_id, process, plugin) VALUES (?, ?, ?)
+         ON CONFLICT (conversation_id)
+             DO UPDATE SET process = excluded.process, plugin = excluded.plugin",
+    )
+    .bind(conversation)
+    .bind(id)
+    .bind(plugin)
+    .execute(&on.pool)
+    .await
+    .unwrap();
+}
+
+/// **The Process crosses with the record, and the state is read against it**
+/// (ADR-0030, *Process*): what travels is the plugin providing the Process and
+/// the id its manifest gives it there, which mean the same on every device —
+/// so the far end reads where the work stands against the same manifest this
+/// one did, and words it the same way.
+///
+/// A Tinker rather than a Develop, because Develop is what a record with no
+/// Process row reads as: a copy that arrived having lost the Process would
+/// still read *Grilling* off Develop and look right. On Tinker the word
+/// `follow-up` is a state Tinker declares and the reading is its manifest's.
+#[tokio::test]
+async fn the_process_crosses_and_the_far_end_reads_the_state_against_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    // The session the fixture started is seen out, and the work is put on
+    // Tinker in a state Tinker declares.
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    put_on(
+        &a,
+        conversation,
+        verkstead_server::plugins::built_in::TINKER,
+        "tinker",
+    )
+    .await;
+    store::set_state(&a.pool, conversation, "follow-up")
+        .await
+        .unwrap();
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let arrived = b.view(there).await;
+
+    assert_eq!(
+        arrived.state, "follow-up",
+        "it arrives in the state it was in, as the word the record holds",
+    );
+    assert_eq!(
+        arrived.process,
+        verkstead_render::ProvidedProcess {
+            plugin: verkstead_server::plugins::built_in::TINKER.to_owned(),
+            id: "tinker".to_owned(),
+        },
+        "on the Process it was on, which is a reference to that manifest",
+    );
+
+    // And B words it off that manifest, which is the whole reason the record
+    // carries the plugin: the list it draws every state word from says so.
+    let listed: Vec<verkstead_render::ProcessEntry> =
+        reading(&b.workbench, "/api/ui/processes").await;
+    let tinker = listed
+        .iter()
+        .find(|entry| entry.id == "tinker")
+        .expect("B lists the Process it just took work on");
+
+    assert_eq!(
+        tinker
+            .states
+            .iter()
+            .find(|state| state.id == arrived.state)
+            .map(|state| state.word.as_str()),
+        Some("Follow-up"),
+        "the word is the manifest's and not a word of Verkstead's own",
+    );
+}
+
+/// **And a device with no plugin for its Process is refused the move, naming
+/// the Process** — as a device lacking a Pairing's harness is refused.
+///
+/// Every Process is data in a plugin, so a Conversation moved onto a device
+/// that holds none providing its own is one nothing over there could drive: it
+/// would land and stop with the plugin's trouble as its Notice. The refusal is
+/// the preflight's, and the press re-asks it.
+#[tokio::test]
+async fn a_process_the_far_device_has_no_plugin_for_refuses_the_move_naming_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, _b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    // A Process no plugin anywhere in this cluster provides, which is what a
+    // plugin installed on the machine the work is on and not on the other
+    // reads as from here.
+    put_on(&a, conversation, TWO_STEPS, "two-steps").await;
+    store::set_state(&a.pool, conversation, "drafting")
+        .await
+        .unwrap();
+
+    let said = a.transfers(conversation, B).await;
+
+    assert!(
+        said.contains("\"Process\"") && said.contains("two-steps"),
+        "the move is refused naming the Process: {said}",
+    );
+
+    assert!(
+        a.view(conversation).await.transferred.is_none(),
+        "and nothing crossed: the work is still here, unmarked",
     );
 }

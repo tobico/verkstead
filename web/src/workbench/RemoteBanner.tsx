@@ -41,7 +41,7 @@ import styles from "./RemoteBanner.module.css";
 /// record beneath it.
 export function preparingTheFirstSet(conversation: ConversationView): boolean {
   return (
-    conversation.state === "Grilling" &&
+    conversation.state === "grilling" &&
     conversation.working &&
     !conversation.timeline.some(
       (event) => "QuestionSet" in event || "UnreadableSet" in event,

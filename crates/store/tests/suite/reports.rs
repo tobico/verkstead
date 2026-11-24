@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Adopting, Away, Birth, JoinedAway, Lifecycle, LiveStanding, PullRequest, Renaming,
-    RoadmapStage, StageStanding, Transferred, adopt, away_from_home, born_as, conversation_branch,
+    Adopting, Away, Birth, JoinedAway, LiveStanding, PullRequest, Renaming, RoadmapStage,
+    StageStanding, State, Transferred, adopt, away_from_home, born_as, conversation_branch,
     driven_roadmaps, follow, homes, join_queue, land, live_standing, name_heir, open_database,
     queue_to_join, record_birth, record_pull_request, register_repo, set_state, slice, stage_chain,
     stage_standings, stages_away_from_home, start_conversation, start_stage, tell, told,
@@ -52,6 +52,7 @@ async fn stage(pool: &SqlitePool, repo_id: i64, label: &str) -> i64 {
     start_stage(
         pool,
         id,
+        &State::named("implementing"),
         "c0ffee",
         &PathBuf::from("/data/worktrees").join(format!("mvp-{label}")),
         None,
@@ -86,7 +87,7 @@ async fn copy(pool: &SqlitePool, repo_id: i64, label: &str, born_as: i64) -> i64
     id
 }
 
-fn standing(state: Lifecycle, done: bool, wrapped: bool, stopped: bool) -> LiveStanding {
+fn standing(state: State, done: bool, wrapped: bool, stopped: bool) -> LiveStanding {
     LiveStanding {
         state,
         done,
@@ -124,6 +125,7 @@ async fn opens(pool: &SqlitePool, repo_id: i64, id: i64, number: i64) {
             base: None,
             repo: None,
         },
+        &State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -210,13 +212,16 @@ async fn what_home_was_told_is_remembered() {
 
     let now = live_standing(&pool, away).await.unwrap().unwrap();
 
-    assert_eq!(now, standing(Lifecycle::Implementing, false, false, false));
+    assert_eq!(
+        now,
+        standing(State::named("implementing"), false, false, false)
+    );
     assert_eq!(told(&pool, away).await.unwrap(), None);
 
     tell(&pool, away, &now).await.unwrap();
     assert_eq!(told(&pool, away).await.unwrap(), Some(now));
 
-    let wrapping = standing(Lifecycle::Wrapping, false, true, false);
+    let wrapping = standing(State::named("wrapping"), false, true, false);
     tell(&pool, away, &wrapping).await.unwrap();
     assert_eq!(told(&pool, away).await.unwrap(), Some(wrapping));
 
@@ -261,7 +266,7 @@ async fn a_join_reported_puts_the_tombstone_in_homes_chain_in_the_order_home_hea
 
     let joining = LiveStanding {
         joined: Some(joined_on("roadmaps/mvp/01-counting", 12)),
-        ..standing(Lifecycle::Wrapping, false, true, false)
+        ..standing(State::named("wrapping"), false, true, false)
     };
 
     follow(&pool, tombstone, &joining).await.unwrap();
@@ -310,7 +315,7 @@ async fn a_tombstone_reads_the_standing_its_live_copy_reported() {
     follow(
         &pool,
         abandoned,
-        &standing(Lifecycle::Closed, false, false, false),
+        &standing(State::closed(), false, false, false),
     )
     .await
     .unwrap();
@@ -318,7 +323,7 @@ async fn a_tombstone_reads_the_standing_its_live_copy_reported() {
     follow(
         &pool,
         wrapped_then_closed,
-        &standing(Lifecycle::Closed, false, true, false),
+        &standing(State::closed(), false, true, false),
     )
     .await
     .unwrap();
@@ -338,8 +343,8 @@ async fn the_move_into_done_settles_once() {
     let repo_id = repo(&pool).await;
     let tombstone = stage(&pool, repo_id, "01").await;
 
-    let wrapping = standing(Lifecycle::Wrapping, false, true, false);
-    let done = standing(Lifecycle::Done, true, true, false);
+    let wrapping = standing(State::named("wrapping"), false, true, false);
+    let done = standing(State::done(), true, true, false);
 
     assert!(!follow(&pool, tombstone, &wrapping).await.unwrap().settled);
     assert!(follow(&pool, tombstone, &done).await.unwrap().settled);
@@ -374,7 +379,7 @@ async fn a_stop_and_its_lifting_follow_the_live_copy() {
     follow(
         &pool,
         tombstone,
-        &standing(Lifecycle::Implementing, false, false, true),
+        &standing(State::named("implementing"), false, false, true),
     )
     .await
     .unwrap();
@@ -389,7 +394,7 @@ async fn a_stop_and_its_lifting_follow_the_live_copy() {
     follow(
         &pool,
         tombstone,
-        &standing(Lifecycle::Implementing, false, false, false),
+        &standing(State::named("implementing"), false, false, false),
     )
     .await
     .unwrap();
@@ -426,7 +431,9 @@ async fn a_stage_that_comes_home_keeps_its_standing_and_its_places_in_the_chain_
     queue_to_join(&home, at_home).await.unwrap();
 
     opens(&far, far_repo, away, 12).await;
-    set_state(&far, away, Lifecycle::Wrapping).await.unwrap();
+    set_state(&far, away, State::named("wrapping"))
+        .await
+        .unwrap();
 
     let reported = live_standing(&far, away).await.unwrap().unwrap();
     follow(&home, tombstone, &reported).await.unwrap();
@@ -549,7 +556,7 @@ async fn naming_an_heir_has_the_copies_tell_their_home_again() {
     let away = copy(&pool, repo_id, "07", 47).await;
     let born_here = stage(&pool, repo_id, "08").await;
 
-    let told_home = standing(Lifecycle::Implementing, false, false, false);
+    let told_home = standing(State::named("implementing"), false, false, false);
     tell(&pool, away, &told_home).await.unwrap();
     tell(&pool, born_here, &told_home).await.unwrap();
 
@@ -585,7 +592,7 @@ async fn an_heir_adopts_a_stage_it_never_held() {
         stage: "07".to_owned(),
         branch: "roadmaps/mvp/07".to_owned(),
         stacks_on: Some("roadmaps/mvp/06".to_owned()),
-        state: Lifecycle::Implementing,
+        state: State::named("implementing"),
     };
 
     let tombstone = adopt(&pool, &born, &live, &adopting)
@@ -617,7 +624,7 @@ async fn an_heir_adopts_a_stage_it_never_held() {
         tombstone,
         &LiveStanding {
             joined: Some(joined_on("roadmaps/mvp/07", 70)),
-            ..standing(Lifecycle::Wrapping, false, true, false)
+            ..standing(State::named("wrapping"), false, true, false)
         },
     )
     .await

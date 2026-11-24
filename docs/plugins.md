@@ -249,6 +249,12 @@ dependencies:
   of its skills too; an installed dependency's pack is checked when the plugins
   load, and a skill it lacks is the plugin's trouble.
 
+  **And the one it is handed**, beside these: a Process's state names the skill
+  its Activity runs under in its `options`, and that skill is declared by the
+  Process's own plugin — see *A Process* below. So the start facts list it with
+  the rest, and a launch under it is not refused. An Activity that reads no
+  `skill` option is held to this list alone.
+
 **The `activity` world.** The component exports one function, `run`, which is
 handed the **start facts** and answers the Outcome as its word:
 
@@ -262,7 +268,8 @@ handed the **start facts** and answers the Outcome as its word:
   state's word, then a newline and the instruction where the human wrote one;
   and a session's output, a question set or a commit has an empty body;
 - the options the Process configured the Activity with;
-- each skill it declared, with the path a session reads its `SKILL.md` at.
+- each skill it may launch under, with the path a session reads its `SKILL.md`
+  at: the ones its block declared, and the one the options named.
 
 It imports the **host functions**, `verkstead:plugin/host`, and nothing else
 of Verkstead's:
@@ -332,6 +339,241 @@ Each Activity's component is checked as the plugin loads, without being run:
 one that isn't a component, imports something Verkstead does not give an
 Activity, or does not export `run` is the plugin's trouble, drawn on its row
 and printed by `verkstead plugin check`, naming the Activity.
+
+#### `process`
+
+A **Process**: what a Conversation runs, as states over Activities. Each
+state runs one Activity with the options the Process gives it, and the
+Process's transitions map every Outcome that Activity declares to where the
+Conversation goes next. A plugin may provide several, a block each. A Process
+is data and needs no component: every Activity it names is one this plugin or
+a plugin it depends on provides.
+
+This is a whole plugin, providing one Process over two of the Activities
+Verkstead ships:
+
+```yaml
+uuid: 3f9c2b71-6d4e-4a8f-9b0c-1e2d3c4b5a69
+name: Sketching
+author:
+  name: Grace Hopper
+  email: grace@example.com
+version: 1.0.0
+interface: 1
+dependencies:
+  - uuid: d7a5e719-8491-46a7-b7d7-8f9f85e57bd6   # the Activities Verkstead ships
+    name: Activities
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+  - uuid: 15447a8d-f28d-4573-8b8b-a7226d477755   # the pack `verkstead`'s
+    name: Verkstead
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+provides:
+  - category: process
+    id: sketch
+    name: Sketch
+    description: Rounds of changes on a branch, then the wrap-up.
+    roles:
+      - { name: implementation, label: Implementation, building: true }
+      - { name: review, label: Review, away: true }
+    states:
+      - id: sketching
+        word: Sketching
+        activity: follow-up-rounds
+        options: { skill: verkstead/following-up }
+        steer: { brief: follow-up }
+      - id: wrapping
+        word: Wrapping up
+        activity: wrap-up
+        roles: [implementation, review]
+    transitions:
+      sketching: { committed: wrapping, nothing: done }
+      wrapping: { settled: done, merged: done, closed: stopped, given-up: stopped }
+```
+
+- **`id`** — required, lowercase letters, digits and hyphens, and unique among
+  the plugin's Processes: what a Conversation's record names it by, beside the
+  plugin's uuid.
+- **`name`** and **`description`** — required. What the Process picker draws:
+  the row's own word, and the sentence under it. The name is also what a frozen
+  Brief's Configuration reads back.
+- **`target`** — optional, `true` or `false`, and `false` where it is not
+  written: whether a Draft of it takes a Target, a pull request or a branch
+  already there.
+- **`roles`** — required, a list of each role a session of it runs under, by
+  `name` — lowercase letters, digits and hyphens — and the `label` drawn for
+  it. Exactly one is marked `building: true`: the role the Done signal, memos
+  and previews assume. A role marked `away: true` offers the row that runs no
+  session at all above its Pairings — *No review*, worded off the label — and
+  one without it is answered with a Pairing or Start waits; the building role
+  may not have it, there being no work without something doing it.
+
+  **The Agent control's shape follows how many there are**: one role is the
+  flat Pairing dropdown labelled *Agent*, and more is a panel of one picker per
+  role under its own label. The three names Verkstead knows — `grilling`,
+  `implementation` and `review` — keep the per-Repo Pairing memory and the
+  platform default models they have always had; a name nobody has used before
+  is a role of its own, remembered against the Repo the first time something is
+  picked for it.
+- **`states`** — required, a list, in order: **Start enters the first.** Each
+  has:
+  - **`id`** — what the Conversation's state is stored as: lowercase letters,
+    digits, hyphens and underscores, like `follow_up`, unique among the
+    Process's states. `draft`, `done`, `closed` and `stopped` are Verkstead's
+    own, and refused — as is `aborted`, which is what `closed` was called
+    before and is still read as wherever a row holds it.
+  - **`word`** — what the human reads wherever the state is named: the
+    Conversation's card, the moves on its Timeline, the Steer row that goes
+    there, and the sidebar row read aloud. The viewer keeps no words of its own
+    for a state (Set 1765, Q29) — only Verkstead's three, *Draft*, *Done* and
+    *Closed*, which no Process declares.
+  - **`activity`** — the `id` of the Activity it runs. The plugin's own
+    Activities are looked in first, then each dependency's in the order they
+    are written.
+  - **`roles`** — optional, a list of the roles its sessions run under, each
+    one the Process declares; absent is the **building role**. What a steer
+    into the state settles, and what the Pairing a session is launched under is
+    looked up by: a session the Activity launches naming one of them runs under
+    that role, and one naming anything else runs under the first. A state
+    declaring several takes a steer's one pick for the first and fills the rest
+    where nothing is picked for them, which is how a wrap-up settles what
+    builds without replacing the account chosen to review.
+  - **`options`** — optional, a map of what the Activity is started with
+    beside the Conversation's facts, each value text, a number, or `true` or
+    `false`. Which options an Activity reads is the Activity's to say. A
+    `skill` option names a skill as `<pack>/<skill>`, and **what a Process
+    names, it declares**: the pack is the plugin's own or a dependency's, as
+    for an Activity's `skills`.
+
+    **A skill named here is one the Activity may launch under**, whether or
+    not its own block lists it: an Activity is held to the skills it declares
+    *and* the one it was handed, so a Process can run Verkstead's own
+    Activities under a pack of its own. The pack has to be **attached** to the
+    Conversation for a session to read it, as any pack does — a `skill` option
+    says which skill, and the Attach menu is what mounts it.
+
+    **The host fills in what only it can answer.** Where the state's Activity
+    is the **Wrap-up**, it is started with this machine's `poll`, `attempts`
+    and `review-after` whatever the manifest says — the pace it asks the Forge
+    at and the goes it gives a red check are the server's facts rather than a
+    file every device shares.
+  - **`steer`** — optional: the state takes a steer, and `brief` says which
+    of Verkstead's brief kinds the Steer form draws for it — `round`, a new
+    round's Brief; `instruction`, what the human wants done; `follow-up`, what
+    to take up about work already pushed; `question`, the question an
+    investigation answers; or `none`. What the human writes reaches the
+    state's Activity as an option named by the kind — `instruction`,
+    `follow-up`, `question` — and a `round` lands as the Conversation's own
+    Brief. A state with no `steer` is not on the Steer form; **Close** is on
+    every form whatever a Process declares, being Verkstead's own and not a
+    state.
+  - **`detour`** — optional, `true` or `false`: when its Activity ends, the
+    Conversation goes back to the state it was steered from, whatever the
+    Outcome — or to Done, where it was steered in from a state nothing returns
+    to. A detour takes no transitions.
+- **`transitions`** — a map of each state's `id` to a map of each Outcome its
+  Activity declares to where it leads: another of the Process's states,
+  `done`, `closed`, or `stopped`, which leaves the Conversation **Stopped**
+  where it stands, with the Activity's notice, until it is resumed. **Every
+  Outcome is mapped**: one left out is refused, naming the state and the
+  Outcome, and so is one the Activity never ends in. Draft is never a target.
+  `steered` is never written — the `steer` marks are where a steer leads —
+  and nor is a `direction:` Outcome, which `directions` maps.
+- **`directions`** — a map of each Direction the Process's interview offers —
+  `inline`, `task-list` or `roadmap` — to the state it leads to. The chooser
+  draws only those, and a Process offering one draws no chooser. Required
+  where a state runs an Activity ending in a Direction, the *Interview*.
+
+**A state may run an Activity per Direction.** Its `activity` is then a map of
+each Direction the Process offers to an Activity, and the Direction the
+Conversation was given picks which runs, on entry and on every restart. Its
+transitions map the Outcomes of every one of them:
+
+```yaml
+    directions: { inline: implementing, task-list: implementing, roadmap: implementing }
+    states:
+      - id: grilling
+        word: Grilling
+        activity: interview
+        roles: [grilling]
+        steer: { brief: round }
+      - id: implementing
+        word: Implementing
+        activity: { inline: one-session, task-list: backlog-runner, roadmap: stage-runner }
+      - id: investigating
+        word: Investigating
+        activity: follow-up-rounds
+        options: { skill: verkstead/investigating, evidence: investigated }
+        steer: { brief: question }
+        detour: true
+    transitions:
+      grilling: { gone: stopped }
+      implementing: { done: wrapping, refused: stopped, finished: wrapping, continued: wrapping }
+```
+
+`verkstead plugin check` and the loader refuse a Process alike: a state
+running an Activity that neither the plugin nor a dependency provides, or
+under a skill from a pack neither does, naming it; an Outcome unmapped; a
+transition from or to a state that isn't declared; no building role, or two; a
+building role offered the row that runs no session; a state naming a role the
+Process declares none of, naming it; a Direction leading to no state. What an installed dependency provides is known
+once it has loaded, so that much is checked by the loader, and is the plugin's
+trouble rather than a refusal at the card. A Process whose dependency is
+missing, disabled or outdated loads **in trouble**, its row saying which
+dependency is wanted, and is not offered until it is put right.
+
+**How a Conversation on it runs.** A Process that loaded is on the Process
+picker under Verkstead's own, by its `name` and `description`. **Start**
+enters its first state: the state's `id` is what the Conversation's record
+holds, its `word` is what the card says, and its Activity is started with the
+Conversation's facts and the state's `options`. Where the options name a
+`skill`, the `prompt` the Activity is handed is the option's own words — or,
+where it writes none, *read the skill and do what it says* — over the Brief
+and what the grilling settled, as every session Verkstead starts is told the
+work. When the Activity ends, its Outcome's transition is followed: into the
+next state, the same way; to Done; to Closed, as though the human had pressed
+Close; or to `stopped`, where it waits on **Resume**, which starts the state's
+Activity again. A server coming back up does the same for every Conversation
+it finds in one of a Process's states, so an Activity works out where it was
+from its facts rather than from anything kept.
+
+**Verkstead's own Processes are written this way.** *Develop*, *Tinker*,
+*Investigate*, *Review* and *Fix merge issues* are built-in plugins of their
+own, under `plugins/`, each listed under Built-in on the Plugins page with a
+tick: unticked, it is off the picker, and the conversations on it run to the
+end. Unticking *Develop* takes the ladder off the picker too, and a new draft
+is then prefilled with the first Process still offered. Their states are named
+with the words a conversation's record already held — `grilling`,
+`implementing`, `wrapping`, `follow-up`, `investigating` — so one stored
+before they were data reads on. **Their Steer forms are their marks too**,
+drawn through Verkstead's own targets since those are what still drives them:
+*Investigate* marks only its `investigating`, so that row with **Done** and
+**Close** is the whole of its form, and neither *Review*'s nor *Tinker*'s
+offers a Grilling. *Develop* is the one that runs an Activity per
+Direction: its interview offers all three, each leading to `implementing`,
+whose Activity is *One session* inline, the *Backlog runner* for a task list
+and the *Stage runner* for a roadmap.
+
+What Verkstead does on the way into the wrap-up or Done — sending for a pull
+request the work isn't on yet, the settling rule — is its own, whichever
+Process leads there. **A wrap-up is narrowed by its options**:
+Fix merge issues' wrapping state starts the *Wrap-up* with
+`{ review: "off", comments: "off", stack: "on" }`, so nothing reads the branch,
+nothing said on the pull request is answered, and the chain the pull request is
+a link of is walked on GitHub both ways and recorded whole. That is all of what
+makes it different from a Review — three options, and no Process named in any
+of the code that reads them.
+
+A Conversation whose Process is in trouble — its plugin, or the plugin of an
+Activity it runs, missing or in trouble — stops where it stands, its notice
+saying which plugin is wanted, and carries on from that state once it's put
+right. Unticking a Process's plugin takes it off the picker; Conversations
+already on it run to the end.
 
 ### What its wasm component may reach
 
@@ -831,8 +1073,9 @@ harness's goes, and the channel decides which kinds of ask the Guide describes.
 **`models`** — required: the models a Profile of it offers, each an **`id`**,
 what the harness is told, and a **`name`**, what is drawn. Exactly one is
 **`default: true`**, which a Pairing runs where nothing else says; **`for`**
-lists the roles — `grilling`, `implementation`, `review` — whose default is
-that model instead, each role on one model at most. The Profile form offers the
+lists the roles whose default is that model instead, by the names their
+Processes declare them under — `grilling`, `implementation` and `review` are
+the three Verkstead's own use — each role on one model at most. The Profile form offers the
 list in the order written; a fresh Repo's default Pairing reaches a plugin
 harness only where no built-in harness has a Profile.
 

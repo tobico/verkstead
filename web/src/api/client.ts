@@ -92,15 +92,15 @@ import type {
   PackRemoved,
   Preflight,
   PrefillView,
-  Process,
+  ProcessEntry,
   ProcessPicked,
   ProfileAccount,
-  ProfileChoice,
   ProfileChosen,
   ProfileDeleted,
   ProfileEdit,
   ProfileEntry,
   ProfileSaved,
+  ProvidedProcess,
   PullRequestDetails,
   PushKey,
   Registered,
@@ -1511,14 +1511,24 @@ export function switchRepo(
 /// nothing else. Whether that Process can be started yet is the server's list to
 /// keep — a picker offering only the landed ones is a courtesy, and this route
 /// is reachable without one — so a refusal is another outcome to read here too.
+///
+/// Which Process is the plugin providing it and its id there, whichever Process
+/// it is.
 export function pickProcess(
   device: Device,
   id: number,
-  process: Process,
+  process: ProvidedProcess,
 ): Promise<ProcessPicked> {
   return post<ProcessPicked>(
-    on(device, `/api/ui/conversations/${id}/process`), { process },
+    on(device, `/api/ui/conversations/${id}/process`),
+    { process },
   );
+}
+
+/// Every Process the plugins loaded on this server provide — see
+/// `processes.ts`.
+export function listProcesses(): Promise<ProcessEntry[]> {
+  return get<ProcessEntry[]>("/api/ui/processes");
 }
 
 /// Name the branch the work will be done on. Whether git would take the name is
@@ -2062,46 +2072,25 @@ export async function closeLogin(profile: string, viewer: string): Promise<void>
   await refused(at, await sent(at, { viewer }));
 }
 
-/// Choose which account and model a conversation's grilling session runs under.
+/// Choose which account and model the sessions of one of a conversation's roles
+/// run under.
 ///
-/// An account and nothing else: the picker has no row that is not one, *No
-/// grilling* having retired in favour of the Tinker process.
-export function chooseGrillingPairing(
-  device: Device,
-  id: number,
-  pairing: ProfileChoice,
-): Promise<ProfileChosen> {
-  return post<ProfileChosen>(
-    on(device, `/api/ui/conversations/${id}/grilling-pairing`),
-    pairing,
-  );
-}
-
-/// And the one its implementation runs under, which is a separate choice: the
-/// implementation session cannot simply carry the grilling one on.
-export function chooseImplementationPairing(
-  device: Device,
-  id: number,
-  pairing: ProfileChoice,
-): Promise<ProfileChosen> {
-  return post<ProfileChosen>(
-    on(device, `/api/ui/conversations/${id}/implementation-pairing`),
-    pairing,
-  );
-}
-
-/// And the one the wrap-up's review runs under, which is a third separate
-/// choice: reviewing is a fresh set of eyes on what was built.
+/// One press for every role, named by the role: which roles a conversation has
+/// is its process's to say (ADR-0030, *Process*), so the grilling, the
+/// implementation and the review go through here, and so does a role a plugin's
+/// process named itself.
 ///
-/// `null` is the picker's own "No review" row, which is a choice like any
-/// other rather than the absence of one.
-export function chooseReviewPairing(
+/// `null` is the picker's own row that is no account at all — "No review", and
+/// whatever a plugin's own role calls it — which is a choice like any other
+/// rather than the absence of one.
+export function choosePairing(
   device: Device,
   id: number,
+  role: string,
   choice: RoleChoice,
 ): Promise<ProfileChosen> {
   return post<ProfileChosen>(
-    on(device, `/api/ui/conversations/${id}/review-pairing`),
+    on(device, `/api/ui/conversations/${id}/pairings/${role}`),
     choice,
   );
 }

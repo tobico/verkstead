@@ -40,7 +40,7 @@ use anyhow::{Context, Result, bail};
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use super::Repo;
-use super::conversations::{Event, Lifecycle, moved};
+use super::conversations::{Event, State, moved};
 
 /// A pull request as its Timeline Event holds it: which one, what it is called,
 /// where it is, and which repository it was opened in.
@@ -466,6 +466,7 @@ pub async fn record_pull_request(
     conversation_id: i64,
     repo_id: i64,
     pull_request: &PullRequest,
+    wrapping: &State,
 ) -> Result<Wrapping> {
     let mut tx = super::writing(pool, "recording a pull request").await?;
 
@@ -479,17 +480,20 @@ pub async fn record_pull_request(
         return Ok(Wrapping::NoSuchConversation);
     };
 
-    // Four states reach here, and two of them are doors rather than endings: a
-    // Draft holding a pull request is one the human is taking up, its worktree
-    // is already on that pull request's head branch, and this record is the same
-    // move the finish step makes. Asked of the record rather than of the state
-    // alone, so that nothing else can carry a Draft into Wrapping. A Follow-up
-    // is the Tinker whose ending sent for the pull request its branch was on
-    // none of — nothing else opens one over a Conversation in that state.
-    let wrappable = match Lifecycle::read(&state)? {
-        Lifecycle::Implementing | Lifecycle::Grilling | Lifecycle::FollowUp => true,
-        Lifecycle::Draft => taking_one_up(&mut tx, conversation_id).await?,
-        _ => false,
+    // Any state its Process declares but `wrapping` itself reaches here: a
+    // pull request is opened from whatever state the work was being built in,
+    // and `wrapping` is where its manifest says that leaves it. A Conversation
+    // already wrapping has nothing left to wrap, and Done and Closed are over.
+    //
+    // And a Draft, which is a door rather than an ending: a Draft holding a
+    // pull request is one the human is taking up, its worktree is already on
+    // that pull request's head branch, and this record is the same move the
+    // finish step makes. Asked of the record rather than of the state alone, so
+    // that nothing else can carry a Draft into a wrap-up.
+    let state = State::named(&state);
+    let wrappable = match state.declared().is_some() {
+        true => state != *wrapping,
+        false => state == State::DRAFT && taking_one_up(&mut tx, conversation_id).await?,
     };
 
     if !wrappable {
@@ -499,13 +503,13 @@ pub async fn record_pull_request(
     record(&mut tx, conversation_id, repo_id, pull_request).await?;
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
-        .bind(Lifecycle::Wrapping.stored())
+        .bind(wrapping.stored())
         .bind(conversation_id)
         .execute(&mut *tx)
         .await
-        .with_context(|| format!("moving Conversation {conversation_id} to wrapping"))?;
+        .with_context(|| format!("moving Conversation {conversation_id} to {wrapping}"))?;
 
-    moved(&mut tx, conversation_id, Lifecycle::Wrapping).await?;
+    moved(&mut tx, conversation_id, wrapping).await?;
 
     tx.commit().await.context("recording a pull request")?;
 
@@ -1090,7 +1094,7 @@ pub(crate) async fn on_timeline(
 /// ordinarily the oldest: the Conversation that was closed to make way, offered
 /// as the way on.
 ///
-/// **And shut is every word for shut**, which is [`Lifecycle::shut`] and not the
+/// **And shut is every word for shut**, which is [`State::shut_words`] and not the
 /// two states spelled out here. SQL compares words where the rest of the store
 /// reads them into states, so a spelling left out of that list is a row sorted as
 /// though it were open — and `aborted`, which is what Closed was called before
@@ -1148,7 +1152,7 @@ async fn on_pull_request(
     number: i64,
     besides: Option<i64>,
 ) -> Result<Option<i64>> {
-    let shut = Lifecycle::shut();
+    let shut = State::shut_words();
 
     let row: Option<(i64,)> = sqlx::query_as(
         "SELECT p.conversation_id
@@ -1622,7 +1626,7 @@ pub async fn unfinished_pull_requests(pool: &SqlitePool) -> Result<Vec<Unfinishe
            AND (s.standing IS NULL OR s.standing = ?)
          ORDER BY p.conversation_id, p.event_id",
     )
-    .bind(Lifecycle::Done.stored())
+    .bind(State::DONE)
     .bind(Standing::Open.stored())
     .fetch_all(pool)
     .await

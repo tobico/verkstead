@@ -14,7 +14,7 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Adding, Lifecycle, Repointing, Unregistering, add_companion, load_repo, open_database,
+    Adding, Repointing, State, Unregistering, add_companion, load_repo, open_database,
     record_the_repo_authors, recorded_repos, register_repo, register_repo_as, registered_repo,
     registered_repos, repoint_repo, set_state, start_adoption, start_conversation, unregister_repo,
 };
@@ -165,7 +165,7 @@ async fn an_unregistered_repo_still_resolves_by_id() {
         .await
         .unwrap()
         .unwrap();
-    set_state(&pool, over, Lifecycle::Done).await.unwrap();
+    set_state(&pool, over, State::done()).await.unwrap();
 
     unregister_repo(&pool, repo.id).await.unwrap();
 
@@ -196,7 +196,7 @@ async fn a_repo_with_live_work_on_it_cannot_be_unregistered() {
     assert_eq!(registered_repos(&pool).await.unwrap().len(), 1);
 
     // And once that Conversation is over, there is nothing left to refuse for.
-    set_state(&pool, going, Lifecycle::Closed).await.unwrap();
+    set_state(&pool, going, State::closed()).await.unwrap();
 
     assert_eq!(
         unregister_repo(&pool, repo.id).await.unwrap(),
@@ -595,7 +595,7 @@ async fn an_idle_repo_is_repointed() {
         .await
         .unwrap()
         .unwrap();
-    set_state(&pool, going, Lifecycle::Done).await.unwrap();
+    set_state(&pool, going, State::done()).await.unwrap();
 
     let Repointing::Repointed(repointed) = repoint_repo(&pool, repo.id, "home").await.unwrap()
     else {
@@ -642,13 +642,15 @@ async fn a_repo_in_live_work_is_not_repointed() {
         .await
         .unwrap()
         .unwrap();
-    set_state(&pool, finished, Lifecycle::Closed).await.unwrap();
+    set_state(&pool, finished, State::closed()).await.unwrap();
 
     assert_eq!(
         add_companion(&pool, on, beside.id).await.unwrap(),
         Adding::Added,
     );
-    set_state(&pool, on, Lifecycle::Grilling).await.unwrap();
+    set_state(&pool, on, State::named("grilling"))
+        .await
+        .unwrap();
 
     assert_eq!(
         repoint_repo(&pool, own.id, "home").await.unwrap(),
@@ -675,7 +677,7 @@ async fn a_repo_in_live_work_is_not_repointed() {
         "nothing was recorded",
     );
 
-    set_state(&pool, on, Lifecycle::Done).await.unwrap();
+    set_state(&pool, on, State::done()).await.unwrap();
 
     assert!(matches!(
         repoint_repo(&pool, beside.id, "home").await.unwrap(),

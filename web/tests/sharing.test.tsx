@@ -46,7 +46,7 @@ import { UNNAMED } from "../src/workbench/Brief";
 // landed in where that is worth saying, and how much it moved.
 import commitStyles from "../src/workbench/Commit.module.css";
 // And the words a Process is said in, read rather than spelled out again here.
-import { PROCESS } from "../src/workbench/processes";
+import { named } from "./processes";
 // And the cards the record is walked by.
 import timeline from "../src/workbench/Timeline.module.css";
 import alongside from "./fixtures/set-alongside.json" with { type: "json" };
@@ -150,7 +150,8 @@ describe("a shared conversation", () => {
           ...SHARED,
           conversation: {
             ...SHARED.conversation,
-            state: "Draft",
+            state: "draft",
+
             ready_to_grill: true,
             ready_to_resume: true,
             ready_to_stop: true,
@@ -318,7 +319,8 @@ describe("a shared conversation", () => {
             Steer: {
               id: 4001,
               at: "2026-08-24T11:00:00Z",
-              target: "Implementing",
+              target: "implementing",
+
               html: "<p>Count against the window.</p>",
               record: {
                 digest: false,
@@ -459,7 +461,7 @@ describe("a shared conversation", () => {
     });
 
     expect(process.querySelector("dd")?.textContent).toBe(
-      PROCESS[SHARED.conversation.process],
+      named(SHARED.conversation.process.id),
     );
   });
 
@@ -484,7 +486,8 @@ describe("a shared conversation", () => {
           ...unnamed,
           conversation: {
             ...unnamed.conversation,
-            state: "Draft",
+            state: "draft",
+
             branch_named: false,
           },
         }}

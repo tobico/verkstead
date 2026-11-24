@@ -747,8 +747,9 @@ pub const STAYS_BEHIND: &[&str] = &[
     // own, its own Repo being somewhere else entirely.
     "worktrees",
     "companion_worktrees",
-    // The Pairings and the roles picked away, which cross on the Conversation's
-    // own row as ids of the far end's — see [`super::arrivals`].
+    // The Pairings and the roles picked away, which cross in the Conversation's
+    // own leg as ids of the far end's — see [`super::arrivals`].
+    "conversation_pairings",
     "pairing_models",
     "skipped_roles",
     // The birth key, which is stamped on the arriving row out of the move

@@ -21,7 +21,9 @@ use verkstead_render::{
     PluginCapability, PluginConsent, PluginFieldRefused, PluginFieldValue, PluginFix, PluginNeed,
     PluginRow, PluginSettingsSaved, PluginSettingsView, PluginSource, PluginUpdated, PluginsView,
 };
-use verkstead_server::plugins::built_in::{ACTIVITIES, FIXTURE, VERKSTEAD};
+use verkstead_server::plugins::built_in::{
+    ACTIVITIES, DEVELOP, FIX_MERGE_ISSUES, FIXTURE, INVESTIGATE, REVIEW, TINKER, VERKSTEAD,
+};
 use verkstead_server::settings::Settings;
 use verkstead_server::{open_database, router_keeping};
 
@@ -51,7 +53,7 @@ fn manifest(uuid: &str, name: &str, capabilities: &[&str]) -> String {
          author:\n  name: Ada Lovelace\n  email: ada@example.com\n\
          version: 1.4.0\n\
          interface: 1\n\
-         provides:\n  - category: forge\n  - category: process\n  - category: forge\n\
+         provides:\n  - category: forge\n  - category: forge\n\
          {capabilities}"
     )
 }
@@ -149,7 +151,7 @@ async fn kept() -> (Router, tempfile::TempDir) {
 /// the Skill Pack `pack` holding the one skill `reviewing`.
 fn packing(dir: &Path, uuid: &str, name: &str, pack: &str) -> String {
     let text = manifest(uuid, name, &[]).replace(
-        "provides:\n  - category: forge\n  - category: process\n  - category: forge\n",
+        "provides:\n  - category: forge\n  - category: forge\n",
         &format!("provides:\n  - category: skills\n    name: {pack}\n    directory: skills\n"),
     );
     let at = plugin(dir, name, &text);
@@ -194,16 +196,25 @@ fn activity_component() -> Vec<u8> {
         .expect("the activity should encode as a component")
 }
 
+/// A Process, *Review watch*, of one state over the Activity [`acting`]
+/// provides.
+const WATCHING: &str = "  - category: process\n    id: review-watch\n    name: Review watch\n    \
+     description: Watch a review through its rounds.\n    roles:\n      \
+     - {name: review, label: Review, building: true}\n    states:\n      \
+     - {id: reviewing, word: Reviewing, activity: review-rounds}\n    transitions:\n      \
+     reviewing: {approved: done, abandoned: stopped}\n";
+
 /// `text` with an Activity, *Review rounds*, provided after what it provides
-/// already, its component `rounds.wasm` and launching each of `skills`.
+/// already, its component `rounds.wasm` and launching each of `skills`, and a
+/// Process, *Review watch*, running it.
 fn acting(text: &str, skills: &str) -> String {
     text.replace(
-        "  - category: forge\n  - category: process\n  - category: forge\n",
+        "  - category: forge\n  - category: forge\n",
         &format!(
-            "  - category: forge\n  - category: process\n  - category: forge\n  \
+            "  - category: forge\n  - category: forge\n  \
              - category: activity\n    id: review-rounds\n    name: Review rounds\n    \
              component: rounds.wasm\n    outcomes: [approved, abandoned]\n    \
-             skills: {skills}\n"
+             skills: {skills}\n{WATCHING}"
         ),
     )
 }
@@ -233,7 +244,7 @@ async fn a_plugin_providing_an_activity_loads_and_its_row_names_it() {
 
     let row = row(&view, PLUGIN);
     assert_eq!(row.trouble, None);
-    assert_eq!(row.provides, ["forge", "process", "activity"]);
+    assert_eq!(row.provides, ["forge", "activity", "process"]);
     assert_eq!(row.activities, ["Review rounds"]);
 }
 
@@ -281,7 +292,7 @@ async fn an_activity_naming_a_skill_from_a_pack_it_cannot_reach_is_refused() {
 
     assert_eq!(status, StatusCode::BAD_REQUEST, "{said}");
     assert!(
-        said.contains("`provides[3].skills[0]` is `verkstead/following-up`"),
+        said.contains("`provides[2].skills[0]` is `verkstead/following-up`"),
         "{said}"
     );
 }
@@ -315,6 +326,206 @@ async fn an_activity_naming_a_skill_its_dependency_lacks_loads_in_trouble() {
              plugin it depends on provides that skill."
         )
     );
+}
+
+/// `text` providing, in place of what it provides, a Process, *Triage*, of one
+/// state over the Activity `activity` with `transitions` as its row.
+fn processing(text: &str, activity: &str, transitions: &str) -> String {
+    text.replace(
+        "provides:\n  - category: forge\n  - category: forge\n",
+        &format!(
+            "provides:\n  - category: process\n    id: triage\n    name: Triage\n    \
+             description: Sort what came in.\n    roles:\n      \
+             - {{name: review, label: Review, building: true}}\n    states:\n      \
+             - {{id: sorting, word: Sorting, activity: {activity}}}\n    transitions:\n      \
+             sorting: {transitions}\n"
+        ),
+    )
+}
+
+/// Base, ANOTHER, providing the Activity *Review rounds* and the Process
+/// *Review watch* over it, and a plugin depending on it whose Process
+/// *Triage* runs `activity` with `transitions`, both installed.
+async fn watching_theirs(
+    app: &Router,
+    dir: &Path,
+    activity: &str,
+    transitions: &str,
+) -> PluginsView {
+    let base = with_activity(
+        dir,
+        "base",
+        &acting(&manifest(ANOTHER, BASE, &[]), "[]"),
+        &activity_component(),
+    );
+    installs(app, &base).await;
+    let path = plugin(
+        dir,
+        "triage",
+        &depending(
+            &processing(&manifest(PLUGIN, "Triage", &[]), activity, transitions),
+            ANOTHER,
+            BASE,
+            "^1",
+            None,
+        ),
+    );
+    installs(app, &path).await
+}
+
+/// A Process over an installed dependency's Activity loads, its row naming
+/// it, and so does the dependency's own Process.
+#[tokio::test]
+async fn a_process_over_its_dependencys_activity_loads_and_its_row_names_it() {
+    let (app, dir) = kept().await;
+
+    let view = watching_theirs(
+        &app,
+        dir.path(),
+        "review-rounds",
+        "{approved: done, abandoned: closed}",
+    )
+    .await;
+
+    assert_eq!(row(&view, PLUGIN).trouble, None);
+    assert_eq!(row(&view, PLUGIN).provides, ["process"]);
+    assert_eq!(row(&view, PLUGIN).processes, ["Triage"]);
+    assert_eq!(row(&view, ANOTHER).processes, ["Review watch"]);
+}
+
+/// One naming an Activity its installed dependency doesn't provide is in
+/// trouble once the dependency has loaded, naming the Activity.
+#[tokio::test]
+async fn a_process_naming_an_activity_its_dependency_lacks_loads_in_trouble() {
+    let (app, dir) = kept().await;
+
+    let view = watching_theirs(&app, dir.path(), "sorting-hat", "{sorted: done}").await;
+
+    let trouble = row(&view, PLUGIN).trouble.clone().expect("trouble");
+    assert!(
+        trouble.contains("`provides[0].states[0].activity` is `sorting-hat`"),
+        "{trouble}"
+    );
+}
+
+/// And one leaving an Outcome of its dependency's Activity unmapped is in
+/// trouble the same way, naming the state and the Outcome.
+#[tokio::test]
+async fn a_process_leaving_its_dependencys_outcome_unmapped_loads_in_trouble() {
+    let (app, dir) = kept().await;
+
+    let view = watching_theirs(&app, dir.path(), "review-rounds", "{approved: done}").await;
+
+    let trouble = row(&view, PLUGIN).trouble.clone().expect("trouble");
+    assert!(
+        trouble
+            .contains("`provides[0].transitions.sorting` leaves the Outcome `abandoned` unmapped"),
+        "{trouble}"
+    );
+}
+
+/// A Process naming an Activity from no plugin it depends on is refused at
+/// the card, naming it.
+#[tokio::test]
+async fn a_process_naming_an_activity_it_does_not_depend_on_is_refused() {
+    let (app, dir) = kept().await;
+    let path = plugin(
+        dir.path(),
+        "triage",
+        &processing(
+            &manifest(PLUGIN, "Triage", &[]),
+            "wrap-up",
+            "{settled: done}",
+        ),
+    );
+
+    let (status, said) = pressing(
+        &app,
+        "/api/ui/plugins/read",
+        serde_json::json!({ "source": path }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{said}");
+    assert!(
+        said.contains("`provides[0].states[0].activity` is `wrap-up`"),
+        "{said}"
+    );
+}
+
+/// And a state naming a role the Process declares none of is refused at the
+/// card the same way, naming it: what a Process names, it declares — its roles
+/// as much as its Activities (Set 1765, Q26).
+#[tokio::test]
+async fn a_state_naming_a_role_the_process_does_not_declare_is_refused() {
+    let (app, dir) = kept().await;
+    let path = plugin(
+        dir.path(),
+        "triage",
+        &processing(
+            &manifest(PLUGIN, "Triage", &[]),
+            "wrap-up",
+            "{settled: done}",
+        )
+        .replace(
+            "- {id: sorting, word: Sorting, activity: wrap-up}",
+            "- {id: sorting, word: Sorting, activity: wrap-up, roles: [sorter]}",
+        ),
+    );
+
+    let (status, said) = pressing(
+        &app,
+        "/api/ui/plugins/read",
+        serde_json::json!({ "source": path }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{said}");
+    assert!(
+        said.contains("`provides[0].states[0].roles[0]` is `sorter`"),
+        "{said}"
+    );
+}
+
+/// Unticking the plugin whose Activity a Process runs puts the Process's
+/// plugin in trouble, saying which dependency is wanted; ticked again, it
+/// loads.
+#[tokio::test]
+async fn a_process_whose_dependency_is_unticked_is_in_trouble_until_ticked() {
+    let (app, dir) = kept().await;
+    let view = watching_theirs(
+        &app,
+        dir.path(),
+        "review-rounds",
+        "{approved: done, abandoned: stopped}",
+    )
+    .await;
+    assert_eq!(row(&view, PLUGIN).trouble, None);
+
+    let ticked = |enabled: bool| {
+        let app = app.clone();
+        async move {
+            let (status, said) = pressing(
+                &app,
+                &format!("/api/ui/plugins/{ANOTHER}/enabled"),
+                serde_json::json!({ "enabled": enabled }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{said}");
+            serde_json::from_str::<PluginsView>(&said).unwrap()
+        }
+    };
+
+    let view = ticked(false).await;
+    let trouble = row(&view, PLUGIN).trouble.clone().expect("trouble");
+    assert!(
+        trouble.contains("needs Base, which is disabled"),
+        "{trouble}"
+    );
+    assert_eq!(row(&view, PLUGIN).processes, ["Triage"], "still named");
+
+    let view = ticked(true).await;
+    assert_eq!(row(&view, PLUGIN).trouble, None);
 }
 
 /// The Activities Verkstead ships are a Built-in row of their own after the
@@ -575,7 +786,7 @@ async fn a_local_plugin_installed_through_the_card_is_listed_on_its_row() {
 
     let consent = read(&app, &path).await;
     assert_eq!(consent.name, "GitLab");
-    assert_eq!(consent.provides, ["forge", "process"]);
+    assert_eq!(consent.provides, ["forge"]);
     assert_eq!(
         consent.capabilities,
         [PluginCapability::Outbound {
@@ -593,7 +804,7 @@ async fn a_local_plugin_installed_through_the_card_is_listed_on_its_row() {
     assert_eq!(row.name, "GitLab");
     assert_eq!(row.version, "1.4.0");
     assert_eq!(row.author, "Ada Lovelace");
-    assert_eq!(row.provides, ["forge", "process"]);
+    assert_eq!(row.provides, ["forge"]);
     assert_eq!(row.source, PluginSource::Local { path: path.clone() });
     assert!(row.enabled);
     assert_eq!(row.trouble, None);
@@ -761,8 +972,8 @@ async fn the_language_plugins_are_listed_under_built_in() {
     let names: Vec<&str> = view.built_in.iter().map(|row| row.name.as_str()).collect();
     assert_eq!(
         names.len(),
-        9,
-        "the pack, the Activities, Codex and six languages: {names:?}"
+        14,
+        "the pack, the Activities, Codex, six languages and five Processes: {names:?}"
     );
     assert!(!view.built_in.iter().any(|row| row.uuid == FIXTURE));
 
@@ -1052,7 +1263,7 @@ async fn an_installers_own_language_is_a_row_of_its_own() {
 /// `size` setting.
 fn languaging(dir: &Path, uuid: &str, name: &str, language: &str) -> String {
     let text = manifest(uuid, name, &[]).replace(
-        "provides:\n  - category: forge\n  - category: process\n  - category: forge\n",
+        "provides:\n  - category: forge\n  - category: forge\n",
         &format!(
             "settings:\n  - key: size\n    label: Store size limit\n    kind: size\n\
              provides:\n  - category: language\n    language: {language}\n    label: Zig\n    \
@@ -2049,6 +2260,41 @@ async fn a_plugin_in_trouble_still_draws_its_fields() {
     assert!(saved.refused.is_empty());
 }
 
+/// And leave the viewer's tests the Processes the picker is sent, as a server
+/// with nothing installed lists them: the five Verkstead ships, in the order
+/// their rows are drawn.
+///
+/// Every word the viewer says about a Process or one of its states is read off
+/// this list now (Set 1765, Q29) — the picker's rows and their sentences, the
+/// state on a card, the Target field — so its own tests start from what the
+/// endpoint actually said rather than from a table of their own.
+#[tokio::test]
+async fn the_processes_are_written_for_the_viewer() {
+    let (app, _dir) = kept().await;
+    let listed = processes(&app).await;
+
+    assert_eq!(
+        listed
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "Develop",
+            "Tinker",
+            "Investigate",
+            "Review",
+            "Fix merge issues"
+        ],
+        "in the order the picker draws them",
+    );
+
+    let mut pretty = serde_json::to_string_pretty(&listed).unwrap();
+    pretty.push('\n');
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join(FIXTURES);
+    std::fs::create_dir_all(&fixtures).unwrap();
+    std::fs::write(fixtures.join("processes.json"), pretty).unwrap();
+}
+
 /// Leave the viewer's tests the page and the consent card as the server writes
 /// them: a plugin that loaded, one in trouble, one from git, one whose
 /// dependency isn't installed, an installer's own language, the card for one asking for a host, and the
@@ -2154,6 +2400,238 @@ async fn the_page_and_the_card_are_written_for_the_viewer() {
     written("plugin-settings.json", settings);
 }
 
+/// A router over a Data Directory of its own, with the plugin `install` writes
+/// there installed and a Conversation drafting in a Repo of its own.
+///
+/// The Repo is a git repository with one empty commit, which is the least a
+/// Start will accept — and what it is for is a Conversation whose record can be
+/// moved about by hand.
+async fn drafting_on(
+    install: impl FnOnce(&Path) -> String,
+) -> (Router, tempfile::TempDir, sqlx::SqlitePool, i64) {
+    use std::process::{Command, Stdio};
+    use verkstead_render::{Registered, RepoEntry, Started};
+
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    let app = router_keeping(pool.clone(), dir.path().to_owned());
+
+    let path = install(dir.path());
+    assert_eq!(row(&installs(&app, &path).await, PLUGIN).trouble, None);
+
+    let repo = dir.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    for args in [
+        &["init", "--initial-branch", "main"][..],
+        &["config", "user.email", "test@verkstead.invalid"],
+        &["config", "user.name", "Verkstead Test"],
+        &["commit", "--allow-empty", "-m", "first"],
+    ] {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(&repo)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+
+    let registered: Registered =
+        answered(&app, "/api/ui/repos", serde_json::json!({ "path": repo })).await;
+    assert!(matches!(registered, Registered::Added(_)), "{registered:?}");
+    let repos: Vec<RepoEntry> = got(&app, "/api/ui/repos").await;
+    let started: Started = answered(
+        &app,
+        "/api/ui/conversations",
+        serde_json::json!({ "repo_id": repos[0].id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("the Conversation starts: {started:?}");
+    };
+
+    (app, dir, pool, id)
+}
+
+/// A press that is expected to land, read back as whatever it answers with.
+async fn answered<T: serde::de::DeserializeOwned>(
+    app: &Router,
+    path: &str,
+    body: serde_json::Value,
+) -> T {
+    let (status, said) = pressing(app, path, body).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    serde_json::from_str(&said).unwrap_or_else(|error| panic!("{error}: {said}"))
+}
+
+/// **What is drawn on a Set is decided by the Activity running**, never by what
+/// the state it is asked from happens to be called (Set 1765, Q29).
+///
+/// A Process names its own states, so a Follow-up rounds state called anything
+/// at all is still the rounds the Nothing-else box belongs to — and whether
+/// that box promises a wrap-up or promises nothing committed is its options'
+/// to say, exactly as the Activity's own component reads them.
+mod drawing {
+    use super::*;
+    use verkstead_render::{Ending, SetReading};
+    use verkstead_server::store;
+
+    /// A whole plugin, PLUGIN, providing the Process *Rounds*: an interview
+    /// under a word of its own, rounds of follow-up under another, and an
+    /// investigation under a third.
+    fn rounds() -> String {
+        format!(
+            "uuid: {PLUGIN}\n\
+             name: Rounds\n\
+             author:\n  name: Ada Lovelace\n  email: ada@example.com\n\
+             version: 1.0.0\n\
+             interface: 1\n\
+             dependencies:\n\
+             \x20 - uuid: {ACTIVITIES}\n\
+             \x20   name: Activities\n\
+             \x20   author:\n      name: Tobias Cohen\n      email: tobi@tobico.net\n\
+             \x20   version: ^0.1\n\
+             \x20 - uuid: {VERKSTEAD}\n\
+             \x20   name: Verkstead\n\
+             \x20   author:\n      name: Tobias Cohen\n      email: tobi@tobico.net\n\
+             \x20   version: ^0.1\n\
+             provides:\n\
+             \x20 - category: process\n\
+             \x20   id: rounds\n\
+             \x20   name: Rounds\n\
+             \x20   description: Ask, then chat, then probe.\n\
+             \x20   roles:\n\
+             \x20     - {{ name: sketching, label: Sketching, building: true }}\n\
+             \x20   directions: {{ inline: chatting }}\n\
+             \x20   states:\n\
+             \x20     - {{ id: asking, word: Asking, activity: interview, options: {{ skill: verkstead/grilling }} }}\n\
+             \x20     - {{ id: chatting, word: Chatting, activity: follow-up-rounds, options: {{ skill: verkstead/following-up }} }}\n\
+             \x20     - {{ id: probing, word: Probing, activity: follow-up-rounds, options: {{ skill: verkstead/investigating, evidence: investigated }} }}\n\
+             \x20   transitions:\n\
+             \x20     asking: {{ gone: stopped }}\n\
+             \x20     chatting: {{ committed: probing, nothing: done }}\n\
+             \x20     probing: {{ committed: done, nothing: done }}\n\
+             capabilities: []\n"
+        )
+    }
+
+    /// Which ending the Nothing-else box on a Set of `id` would bring about,
+    /// with the Conversation standing in the state `state`.
+    async fn box_in(app: &Router, pool: &sqlx::SqlitePool, id: i64, state: &str) -> Option<Ending> {
+        store::set_state(pool, id, state).await.unwrap();
+
+        let set = verkstead_schema::QuestionSet::from_yaml(
+            "title: the rate limiter\n\
+             questions:\n\
+             \x20 - label: Q1\n\
+             \x20   text: where does the counter live?\n",
+        )
+        .unwrap();
+        let asked = store::ask(pool, id, &set, store::Ask::Blocking)
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+
+        let reading: SetReading = got(app, &format!("/api/ui/sets/{asked}")).await;
+        let SetReading::Set(view) = reading else {
+            panic!("the Set reads back: {reading:?}");
+        };
+
+        view.ending
+    }
+
+    /// A state called `chatting` carries the box, and a state called `probing`
+    /// carries it worded for what an investigation ends in — the Activity and
+    /// its `evidence` deciding both, so neither word has to be one Verkstead
+    /// knows. And the interview's state carries none, nothing there taking the
+    /// mark.
+    #[tokio::test]
+    async fn a_follow_up_rounds_state_carries_the_box_whatever_it_is_called() {
+        let (app, _dir, pool, id) = drafting_on(|dir| plugin(dir, "rounds", &rounds())).await;
+        on_rounds(&app, id).await;
+
+        assert_eq!(
+            box_in(&app, &pool, id, "chatting").await,
+            Some(Ending::FollowUp),
+            "a state running Follow-up rounds carries the box"
+        );
+        assert_eq!(
+            box_in(&app, &pool, id, "probing").await,
+            Some(Ending::Investigation),
+            "and `evidence: investigated` is what words it as an investigation"
+        );
+        assert_eq!(
+            box_in(&app, &pool, id, "asking").await,
+            None,
+            "the interview's state takes no such mark"
+        );
+    }
+
+    /// And a `proposal` on a Set asked from the state running the **Interview**
+    /// is honoured there, whatever that state is called: the pick is recorded,
+    /// which is what decides the artefact the session is held to.
+    #[tokio::test]
+    async fn a_proposal_is_honoured_from_an_interview_state_whatever_it_is_called() {
+        let (app, _dir, pool, id) = drafting_on(|dir| plugin(dir, "rounds", &rounds())).await;
+        on_rounds(&app, id).await;
+        store::set_state(&pool, id, "asking").await.unwrap();
+
+        let proposing = verkstead_schema::QuestionSet::from_yaml(
+            "title: the rate limiter\n\
+             proposal:\n\
+             \x20 direction: task-list\n\
+             \x20 rationale: There is more here than one session should carry.\n\
+             questions:\n\
+             \x20 - label: Q1\n\
+             \x20   text: where does the counter live?\n",
+        )
+        .unwrap();
+        let set = store::ask(&pool, id, &proposing, store::Ask::Blocking)
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+
+        let submitted: verkstead_render::Submitted = answered(
+            &app,
+            &format!("/api/ui/sets/{set}/response"),
+            serde_json::json!({
+                "answers": [{ "label": "Q1", "free_text": "in Redis" }],
+                "direction": "task-list",
+            }),
+        )
+        .await;
+        assert_eq!(submitted, verkstead_render::Submitted::Accepted);
+
+        assert_eq!(
+            store::picked_direction(&pool, id).await.unwrap(),
+            Some(verkstead_schema::Direction::TaskList),
+            "the pick stands, so the artefact the session is held to is settled"
+        );
+    }
+
+    /// Put the Conversation on the fixture Process, which is what makes its
+    /// states the ones the record's words are read against.
+    async fn on_rounds(app: &Router, id: i64) {
+        let picked: verkstead_render::ProcessPicked = answered(
+            app,
+            &format!("/api/ui/conversations/{id}/process"),
+            serde_json::json!({ "process": { "plugin": PLUGIN, "id": "rounds" } }),
+        )
+        .await;
+        assert_eq!(
+            picked,
+            verkstead_render::ProcessPicked::Picked,
+            "{picked:?}"
+        );
+    }
+}
+
 /// **A Skill Pack attached to a Conversation** while its round drafts, the way
 /// an MCP server is (ADR-0030, *Skill packs*): offered on the Attach menu once
 /// an installed plugin's pack has loaded, kept as a chip read back from the
@@ -2163,56 +2641,14 @@ mod packs {
     use sqlx::SqlitePool;
     use verkstead_render::{
         Added, AdditionMade, AdditionState, ConversationView, OfferedPack, PackAttached,
-        PackRemoved, Registered, RepoEntry, SetReading, Started, Submitted,
+        PackRemoved, SetReading, Submitted,
     };
     use verkstead_server::store;
 
     /// A router over a Data Directory of its own, with the plugin providing
     /// `rust-review` installed and a Conversation drafting in a Repo.
     async fn drafting() -> (Router, tempfile::TempDir, SqlitePool, i64) {
-        let dir = tempfile::tempdir().unwrap();
-        let pool = open_database(&dir.path().join("verkstead.db"))
-            .await
-            .unwrap();
-        let app = router_keeping(pool.clone(), dir.path().to_owned());
-
-        let path = packing(dir.path(), PLUGIN, "Rust review", "rust-review");
-        assert_eq!(row(&installs(&app, &path).await, PLUGIN).trouble, None);
-
-        let repo = dir.path().join("repo");
-        std::fs::create_dir_all(&repo).unwrap();
-        for args in [
-            &["init", "--initial-branch", "main"][..],
-            &["config", "user.email", "test@verkstead.invalid"],
-            &["config", "user.name", "Verkstead Test"],
-            &["commit", "--allow-empty", "-m", "first"],
-        ] {
-            let status = Command::new("git")
-                .args(args)
-                .current_dir(&repo)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .unwrap();
-            assert!(status.success(), "git {args:?}");
-        }
-
-        let registered: Registered =
-            answer(&app, "/api/ui/repos", serde_json::json!({ "path": repo })).await;
-        assert!(matches!(registered, Registered::Added(_)), "{registered:?}");
-        let repos: Vec<RepoEntry> = reading(&app, "/api/ui/repos").await;
-        let started: Started = answer(
-            &app,
-            "/api/ui/conversations",
-            serde_json::json!({ "repo_id": repos[0].id }),
-        )
-        .await;
-        let Started::Started { id } = started else {
-            panic!("the Conversation starts: {started:?}");
-        };
-
-        (app, dir, pool, id)
+        super::drafting_on(|dir| packing(dir, PLUGIN, "Rust review", "rust-review")).await
     }
 
     async fn answer<T: serde::de::DeserializeOwned>(
@@ -2362,7 +2798,7 @@ mod packs {
             PackAttached::Attached
         );
 
-        store::set_state(&pool, id, store::Lifecycle::Implementing)
+        store::set_state(&pool, id, store::State::named("implementing"))
             .await
             .unwrap();
 
@@ -2420,7 +2856,7 @@ mod packs {
     #[tokio::test]
     async fn a_pack_picked_on_an_answer_is_attached_by_the_submit() {
         let (app, _dir, pool, id) = drafting().await;
-        store::set_state(&pool, id, store::Lifecycle::Implementing)
+        store::set_state(&pool, id, store::State::named("implementing"))
             .await
             .unwrap();
         let set = asked(&pool, id).await;
@@ -2637,4 +3073,197 @@ async fn got<T: serde::de::DeserializeOwned>(app: &Router, path: &str) -> T {
     assert_eq!(answered.status(), StatusCode::OK);
     let bytes = answered.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).unwrap()
+}
+
+/// A whole plugin, PLUGIN, providing the Process *Two steps* over the One
+/// session Activity Verkstead ships.
+fn two_steps() -> String {
+    format!(
+        "uuid: {PLUGIN}\n\
+         name: Two steps\n\
+         author:\n  name: Ada Lovelace\n  email: ada@example.com\n\
+         version: 1.0.0\n\
+         interface: 1\n\
+         dependencies:\n\
+         \x20 - uuid: {ACTIVITIES}\n\
+         \x20   name: Activities\n\
+         \x20   author:\n      name: Tobias Cohen\n      email: tobi@tobico.net\n\
+         \x20   version: ^0.1\n\
+         \x20 - uuid: {VERKSTEAD}\n\
+         \x20   name: Verkstead\n\
+         \x20   author:\n      name: Tobias Cohen\n      email: tobi@tobico.net\n\
+         \x20   version: ^0.1\n\
+         provides:\n\
+         \x20 - category: process\n\
+         \x20   id: two-steps\n\
+         \x20   name: Two steps\n\
+         \x20   description: Draft the change, then check it.\n\
+         \x20   roles:\n\
+         \x20     - {{ name: implementation, label: Implementation, building: true }}\n\
+         \x20   states:\n\
+         \x20     - {{ id: drafting, word: Drafting, activity: one-session, options: {{ skill: verkstead/instruction }} }}\n\
+         \x20     - {{ id: checking, word: Checking, activity: one-session, options: {{ skill: verkstead/instruction }} }}\n\
+         \x20   transitions:\n\
+         \x20     drafting: {{ done: checking, refused: stopped }}\n\
+         \x20     checking: {{ done: done, refused: stopped }}\n\
+         capabilities: []\n"
+    )
+}
+
+/// The Processes the picker is sent, as `GET /api/ui/processes` answers.
+async fn processes(app: &Router) -> Vec<verkstead_render::ProcessEntry> {
+    let answered = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/ui/processes")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(answered.status(), StatusCode::OK);
+    let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+/// An installed plugin's Process is on the list the picker is sent, with its
+/// name, its description and its states' words, and offered; unticked, it is
+/// no longer offered, and ticked again it is back.
+#[tokio::test]
+async fn an_installed_process_is_offered_to_the_picker_until_its_plugin_is_disabled() {
+    let (app, dir) = kept().await;
+    let path = plugin(dir.path(), "two-steps", &two_steps());
+
+    let theirs = |listed: Vec<verkstead_render::ProcessEntry>| {
+        listed
+            .into_iter()
+            .filter(|entry| entry.plugin == PLUGIN)
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        theirs(processes(&app).await).is_empty(),
+        "nothing installed yet"
+    );
+
+    let view = installs(&app, &path).await;
+    assert_eq!(row(&view, PLUGIN).trouble, None);
+
+    let listed = theirs(processes(&app).await);
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    assert_eq!(listed[0].plugin, PLUGIN);
+    assert_eq!(listed[0].id, "two-steps");
+    assert_eq!(listed[0].name, "Two steps");
+    assert_eq!(listed[0].description, "Draft the change, then check it.");
+    assert!(listed[0].offered);
+    assert_eq!(
+        listed[0]
+            .states
+            .iter()
+            .map(|state| (state.id.as_str(), state.word.as_str()))
+            .collect::<Vec<_>>(),
+        [("drafting", "Drafting"), ("checking", "Checking")],
+    );
+
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{PLUGIN}/enabled"),
+        serde_json::json!({ "enabled": false }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert!(
+        theirs(processes(&app).await)
+            .iter()
+            .all(|entry| !entry.offered),
+        "a disabled plugin's Process is off the picker: {:?}",
+        processes(&app).await,
+    );
+
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{PLUGIN}/enabled"),
+        serde_json::json!({ "enabled": true }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert!(
+        theirs(processes(&app).await)[0].offered,
+        "ticked, it is back"
+    );
+}
+
+/// Develop, Tinker, Investigate, Review and Fix merge issues are built-in
+/// plugins of their own, each listed under Built-in with a tick and naming its
+/// Process; unticking one takes it off the picker and leaves the other four on
+/// it.
+#[tokio::test]
+async fn verksteads_own_processes_are_built_ins_each_with_a_tick() {
+    let (app, _dir) = kept().await;
+
+    let view = page(&app).await;
+    for (uuid, name) in [
+        (DEVELOP, "Develop"),
+        (TINKER, "Tinker"),
+        (INVESTIGATE, "Investigate"),
+        (REVIEW, "Review"),
+        (FIX_MERGE_ISSUES, "Fix merge issues"),
+    ] {
+        let row = view
+            .built_in
+            .iter()
+            .find(|row| row.uuid == uuid)
+            .unwrap_or_else(|| panic!("{name} is listed under Built-in: {view:?}"));
+        assert_eq!(row.source, PluginSource::BuiltIn);
+        assert!(row.enabled, "{name} is ticked to begin with");
+        assert_eq!(row.trouble, None, "{name}");
+        assert_eq!(row.processes, [name]);
+    }
+
+    let offered = |listed: &[verkstead_render::ProcessEntry], plugin: &str| {
+        listed
+            .iter()
+            .find(|entry| entry.plugin == plugin)
+            .unwrap_or_else(|| panic!("the Process of {plugin} is listed: {listed:?}"))
+            .offered
+    };
+    let listed = processes(&app).await;
+    assert!(offered(&listed, DEVELOP));
+    assert!(offered(&listed, TINKER));
+    assert!(offered(&listed, FIX_MERGE_ISSUES));
+
+    // Develop as well as Tinker: the ladder every Draft defaults to comes off
+    // the picker with its tick like any other row.
+    for unticked in [DEVELOP, TINKER] {
+        let (status, said) = pressing(
+            &app,
+            &format!("/api/ui/plugins/{unticked}/enabled"),
+            serde_json::json!({ "enabled": false }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+    }
+
+    let listed = processes(&app).await;
+    for off in [DEVELOP, TINKER] {
+        assert!(
+            !offered(&listed, off),
+            "unticked, the Process of {off} is off the picker"
+        );
+    }
+    for process in [INVESTIGATE, REVIEW, FIX_MERGE_ISSUES] {
+        assert!(
+            offered(&listed, process),
+            "the Process of {process} is still offered"
+        );
+    }
+    let view = page(&app).await;
+    for unticked in [DEVELOP, TINKER] {
+        assert!(
+            view.built_in
+                .iter()
+                .any(|row| row.uuid == unticked && !row.enabled),
+            "and its row's tick is off"
+        );
+    }
 }

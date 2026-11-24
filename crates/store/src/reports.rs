@@ -29,7 +29,7 @@ use anyhow::{Context, Result};
 use sqlx::SqlitePool;
 
 use super::births::Birth;
-use super::conversations::{Event, Lifecycle};
+use super::conversations::{Event, MOVED, State, WRAPPING};
 use super::stops::Decision;
 
 /// What a roadmap reads of one stage: where its live copy is, whether it has
@@ -42,7 +42,7 @@ use super::stops::Decision;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveStanding {
     /// The state it is in now.
-    pub state: Lifecycle,
+    pub state: State,
 
     /// Whether it has ever moved to Done.
     pub done: bool,
@@ -207,10 +207,10 @@ pub async fn live_standing(
                 c.stopped_at IS NOT NULL
          FROM conversations c WHERE c.id = ?",
     )
-    .bind(Event::Moved(Lifecycle::Done).kind())
-    .bind(Lifecycle::Done.stored())
-    .bind(Event::Moved(Lifecycle::Wrapping).kind())
-    .bind(Lifecycle::Wrapping.stored())
+    .bind(MOVED)
+    .bind(State::DONE)
+    .bind(MOVED)
+    .bind(WRAPPING)
     .bind(conversation_id)
     .fetch_optional(pool)
     .await
@@ -238,9 +238,9 @@ pub async fn live_standing(
     })?;
 
     Ok(Some(LiveStanding {
-        state: Lifecycle::read(&state)?,
+        state: State::named(&state),
         // In Done now is in Done ever, whether or not the move was written.
-        done: done || Lifecycle::reads_as(&state, Lifecycle::Done),
+        done: done || State::named(&state) == State::DONE,
         wrapped,
         stopped,
         joined: joined.map(|(branch, number, title, url, base)| JoinedAway {
@@ -284,7 +284,7 @@ pub async fn told(pool: &SqlitePool, conversation_id: i64) -> Result<Option<Live
     row.map(
         |(state, done, wrapped, stopped, branch, number, title, url, base)| {
             Ok(LiveStanding {
-                state: Lifecycle::read(&state)?,
+                state: State::named(&state),
                 done,
                 wrapped,
                 stopped,
@@ -393,7 +393,7 @@ pub async fn follow(
         return Ok(Followed { settled: false });
     };
 
-    let was_done = Lifecycle::reads_as(&was, Lifecycle::Done);
+    let was_done = State::named(&was) == State::DONE;
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
         .bind(standing.state.stored())
@@ -408,15 +408,15 @@ pub async fn follow(
         })?;
 
     for (ever, state) in [
-        (standing.wrapped, Lifecycle::Wrapping),
-        (standing.done, Lifecycle::Done),
+        (standing.wrapped, State::named(WRAPPING)),
+        (standing.done, State::done()),
     ] {
         let moved: (bool,) = sqlx::query_as(
             "SELECT EXISTS (SELECT 1 FROM timeline_events
                             WHERE conversation_id = ? AND kind = ? AND body = ?)",
         )
         .bind(conversation_id)
-        .bind(Event::Moved(state).kind())
+        .bind(MOVED)
         .bind(state.stored())
         .fetch_one(&mut *tx)
         .await
@@ -428,7 +428,7 @@ pub async fn follow(
         })?;
 
         if ever && !moved.0 {
-            super::conversations::moved(&mut tx, conversation_id, state).await?;
+            super::conversations::moved(&mut tx, conversation_id, &state).await?;
         }
     }
 
@@ -527,6 +527,6 @@ pub async fn follow(
         .context("writing a stage's standing onto its tombstone")?;
 
     Ok(Followed {
-        settled: !was_done && standing.state == Lifecycle::Done,
+        settled: !was_done && standing.state == State::DONE,
     })
 }

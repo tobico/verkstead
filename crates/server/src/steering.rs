@@ -168,15 +168,15 @@ use std::path::{Path, PathBuf};
 
 use verkstead_render::{
     CompanionAddition, CompanionMode, CompanionUpgrade, ConversationSteered, ProfileChoice,
-    SteerCancelled, SteerCompanionRefusal, SteerForm, SteerOpened, SteerSaved, SteerSubmission,
-    SteerTarget,
+    SteerBrief, SteerCancelled, SteerCompanionRefusal, SteerForm, SteerOpened, SteerRow,
+    SteerSaved, SteerSubmission, SteerTarget,
 };
 use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
 use crate::grillings::Digest;
 use crate::profiles::Unlisted;
-use crate::store::{self, Conversation, Lifecycle, Role, Settling};
+use crate::store::{self, Conversation, Role, Settling, State};
 
 /// Press Steer: stop the drive and open the pending steer the form is written
 /// on.
@@ -270,7 +270,9 @@ pub(crate) async fn save(
 /// companion the work reaches.
 fn held(form: &SteerForm) -> store::PendingForm {
     store::PendingForm {
-        target: form.target.map(target),
+        target: form
+            .target
+            .and_then(|picked| target(picked, form.state.as_deref())),
         brief: form.brief.clone(),
         digest: form.digest,
         instruction: form.instruction.clone(),
@@ -310,7 +312,15 @@ fn held(form: &SteerForm) -> store::PendingForm {
 /// place — which is what a form nobody has answered yet holds anyway.
 pub(crate) fn filled(form: store::PendingForm) -> SteerForm {
     SteerForm {
-        target: form.target.and_then(steered),
+        // The state's own id where the target is one a Process declared
+        // itself, and nothing for Verkstead's own rows — which is the field's
+        // own rule, read the way [`held`] wrote it.
+        state: form
+            .target
+            .as_ref()
+            .filter(|state| steered(state) == Some(SteerTarget::Declared))
+            .map(|state| state.stored().to_owned()),
+        target: form.target.as_ref().and_then(steered),
         brief: form.brief,
         digest: form.digest,
         instruction: form.instruction,
@@ -426,11 +436,34 @@ pub(crate) async fn submit(
         return Ok(ConversationSteered::NoSuchConversation);
     };
 
-    let target = target(submission.target);
+    // A Declared row with no state named is a body no form could have sent —
+    // see [`target`] — so it is the refusal every unsteerable target gets.
+    let Some(target) = target(submission.target, submission.state.as_deref()) else {
+        return Ok(ConversationSteered::NotSteerable {
+            state: submission.state.clone().unwrap_or_default(),
+        });
+    };
 
     if let Some(refusal) = refusal(state, &conversation, submission).await? {
         return Ok(refusal);
     }
+
+    // Close, which is Verkstead's and on every form: the ordinary Close, which
+    // takes the pending steer with it.
+    if submission.target == SteerTarget::Close {
+        crate::conversations::close(state, conversation_id).await?;
+
+        tracing::info!(
+            conversation_id,
+            "the human closed a Conversation from the Steer form"
+        );
+
+        return Ok(ConversationSteered::Steered);
+    }
+
+    // And the mark of the declared state it goes into, where it is one.
+    let marked = declared_mark(state, &conversation, submission);
+    let written = marked.and_then(|mark| written(submission, mark.brief));
 
     // Taken before the Worktree is touched and held across the spawn, which is
     // what [`crate::resume`] does with its own and for the same reason: from
@@ -552,6 +585,13 @@ pub(crate) async fn submit(
     let follow_up = follow_up(submission);
     let investigation = investigation(submission);
 
+    // A declared state's round brief lands as a Brief, as a grilling's does;
+    // the rest of what it takes is the Steer Event's own body.
+    let round = marked
+        .filter(|mark| mark.brief == crate::plugins::manifest::process::Brief::Round)
+        .and(written);
+    let written = written.filter(|_| round.is_none());
+
     // The rows the added companions become, borrowed off what was read back
     // above rather than off the submit: an empty branch name is *mirroring* and
     // a whitespace base is the rule, and both were settled once already.
@@ -590,17 +630,29 @@ pub(crate) async fn submit(
 
     let said = announced(&added, &opened, &branch, made_way.as_deref());
 
-    let settling = settling(&conversation, submission);
+    let settling = settling(state, &conversation, submission);
 
-    // And what every checkout the session may write in already holds, for the one
-    // target whose ending has to put them back to it. Read here — after `make`,
-    // so a checkout this steer cut or rebuilt reads clean, and before anything is
-    // started in any of them — and written down beside the Event, because by the
-    // time the ending wants it the investigation has been writing in there for
-    // hours. See [`crate::investigations::tidied`].
-    let scratch = match submission.target {
-        SteerTarget::Investigating => already_held(&conversation, &added, &opened).await,
-        _ => Vec::new(),
+    // And what every checkout the session may write in already holds, for the
+    // targets whose ending has to put them back to it: every state its Process
+    // marks as a **detour**, which is the mark that says the Conversation comes
+    // back to where it was steered from and so that whatever was written in
+    // there is in the way the moment it is over (ADR-0030, *Process*). The five
+    // Verkstead ships mark their Investigating, which is the target this used to
+    // name on its own; a plugin's Process marks its own.
+    //
+    // Read here — after `make`, so a checkout this steer cut or rebuilt reads
+    // clean, and before anything is started in any of them — and written down
+    // beside the Event, because by the time the ending wants it the detour has
+    // been writing in there for hours. See [`crate::investigations::tidied`],
+    // which is what reads it back, for a declared detour as for an
+    // investigation.
+    let detour = crate::processes::of(state, &conversation.process)
+        .and_then(|loaded| crate::processes::mark(&loaded, target.stored()))
+        .is_some_and(|mark| mark.detour);
+
+    let scratch = match detour {
+        true => already_held(&conversation, &added, &opened).await,
+        false => Vec::new(),
     };
 
     let scratch: Vec<store::Scratch<'_>> = scratch
@@ -611,14 +663,33 @@ pub(crate) async fn submit(
         })
         .collect();
 
+    // Both read off the target's own manifest, which is where what a state does
+    // is written (ADR-0030, *Process*): a steer into the state that runs the
+    // Interview opens a round, and one into the state that wraps up reads the
+    // branch afresh.
+    let opens_a_round = crate::processes::runs(
+        state,
+        &conversation.process,
+        target.stored(),
+        crate::processes::INTERVIEW,
+    );
+    let wraps_up = crate::processes::runs(
+        state,
+        &conversation.process,
+        target.stored(),
+        crate::processes::WRAP_UP,
+    );
+
     let steer = store::Steer {
-        target,
+        target: target.clone(),
+        opens_a_round,
+        wraps_up,
         pairings: &settling,
-        brief: brief(submission),
+        brief: brief(submission).or(round),
         // Whichever of the three the target takes, all of them landing in the
         // one place: the Steer Event's own body is what the human wrote to steer
         // it with, whatever field the form drew it in.
-        instruction: instruction.or(follow_up).or(investigation),
+        instruction: instruction.or(follow_up).or(investigation).or(written),
         direction: directing(&conversation, instruction),
         worktree: made.worktree.as_deref(),
         base: made.base_commit.as_deref().map(|commit| store::Base {
@@ -803,6 +874,20 @@ pub(crate) async fn submit(
 
         // And nothing at all: a steer into Done is the move alone.
         SteerTarget::Done => drop(driving),
+
+        // A declared state's Activity, run by the Process engine, which reads
+        // what was written under the steer back off the record — see
+        // [`crate::processes::run`].
+        SteerTarget::Declared => {
+            tokio::spawn(crate::processes::run(
+                state.clone(),
+                conversation_id,
+                driving,
+            ));
+        }
+
+        // Closed above, before anything was made.
+        SteerTarget::Close => drop(driving),
     }
 
     state.nudges.announce(Nudge::Conversation {
@@ -811,8 +896,8 @@ pub(crate) async fn submit(
 
     tracing::info!(
         conversation_id,
-        was = ?conversation.state,
-        ?target,
+        was = conversation.state.stored(),
+        target = target.stored(),
         interrupted = submission.interrupt,
         "the human steered a Conversation",
     );
@@ -947,6 +1032,43 @@ async fn refusal(
     conversation: &Conversation,
     submission: &SteerSubmission,
 ) -> anyhow::Result<Option<ConversationSteered>> {
+    // Every steer target but Close is a state the Process marks as taking one,
+    // where its Process is data: refused naming the state otherwise.
+    if let Some(state) = unmarked(state, conversation, submission) {
+        return Ok(Some(ConversationSteered::NotSteerable { state }));
+    }
+
+    if submission.target == SteerTarget::Close {
+        return Ok(None);
+    }
+
+    // And what a declared state's brief requires, as the same targets' briefs
+    // require it: a follow-up and a question are always written, and a round
+    // needs a Brief from somewhere.
+    if let Some(mark) = declared_mark(state, conversation, submission) {
+        use crate::plugins::manifest::process::Brief;
+
+        let written = written(submission, mark.brief);
+        match mark.brief {
+            Brief::FollowUp if written.is_none() => {
+                return Ok(Some(ConversationSteered::NoFollowUpBrief));
+            }
+            Brief::Question if written.is_none() => {
+                return Ok(Some(ConversationSteered::NoInvestigationBrief));
+            }
+            Brief::Round
+                if written.is_none()
+                    && crate::conversations::brief(&state.pool, conversation.id)
+                        .await?
+                        .trim()
+                        .is_empty() =>
+            {
+                return Ok(Some(ConversationSteered::EmptyBrief));
+            }
+            _ => {}
+        }
+    }
+
     // A wrapping Conversation is defined by the pull request under it, so a steer
     // into Wrapping is a move onto one that is already there — and a follow-up is
     // the human taking something up about work that is already pushed, so it
@@ -1022,7 +1144,7 @@ async fn refusal(
         return Ok(Some(ConversationSteered::EmptyBrief));
     }
 
-    let roles = roles(submission.target, conversation.process);
+    let roles = roles(state, conversation, submission);
 
     if roles.is_empty() {
         return Ok(None);
@@ -1051,7 +1173,7 @@ async fn refusal(
     // session there, which is not a session that could not be started.
     Ok(roles
         .iter()
-        .any(|role| !fixed(conversation, *role).picked())
+        .any(|role| !fixed(conversation, role).picked())
         .then_some(ConversationSteered::NoPairing))
 }
 
@@ -1267,29 +1389,35 @@ fn directing(conversation: &Conversation, instruction: Option<&str>) -> Option<D
 /// what the sessions run under, and a role that runs none is not among them:
 /// writing a Pairing over it would turn a review back on that nobody asked for.
 ///
-/// **The review role is filled rather than rewritten**, which is the one role
-/// this treats differently and the reason is what the picker says. It is
-/// labelled for the state's own work and prefilled with what builds, so a human
-/// who steers a wrap-up and changes nothing has picked nothing about the
-/// review — and writing that prefill over an account they chose on the setup
-/// card to be a fresh set of eyes would undo the whole point of picking it
-/// apart. So it takes the pick only where nothing was picked for it, which is
-/// still what lets a Conversation that never fixed one — a steered Draft — be
-/// steered into a wrap-up at all.
-fn settling<'a>(conversation: &Conversation, submission: &'a SteerSubmission) -> Vec<Settling<'a>> {
+/// **The state's first role is settled and the rest are filled**, which is the
+/// difference the one picker on the form makes. It is labelled for the state's
+/// own work, so a human who steers a wrap-up and changes nothing has picked
+/// nothing about its review — and writing that over an account they chose on
+/// the setup card to be a fresh set of eyes would undo the whole point of
+/// picking it apart. So every role after the first takes the pick only where
+/// nothing was picked for it, which is still what lets a Conversation that
+/// never fixed one — a steered Draft — be steered into a wrap-up at all.
+fn settling<'a>(
+    state: &AppState,
+    conversation: &Conversation,
+    submission: &'a SteerSubmission,
+) -> Vec<Settling<'a>> {
     let Some(choice) = submission.pairing.as_ref() else {
         return Vec::new();
     };
 
-    roles(submission.target, conversation.process)
-        .iter()
-        .copied()
-        .filter(|role| {
-            let fixed = fixed(conversation, *role);
+    let roles = roles(state, conversation, submission);
 
-            // Nothing picked or nothing at all: the review takes this pick only
-            // to fill a role that has none, never to replace one that has.
-            if *role == Role::Review {
+    roles
+        .iter()
+        .enumerate()
+        .filter(|(index, role)| {
+            let fixed = fixed(conversation, role);
+
+            // Nothing picked or nothing at all: a role the picker is not
+            // labelled for takes this pick only to fill one that has none,
+            // never to replace one that has.
+            if *index > 0 {
                 return !fixed.picked();
             }
 
@@ -1309,8 +1437,8 @@ fn settling<'a>(conversation: &Conversation, submission: &'a SteerSubmission) ->
                         && pairing.model.as_deref() == Some(&choice.model)
                 })
         })
-        .map(|role| Settling {
-            role,
+        .map(|(_, role)| Settling {
+            role: role.clone(),
             profile_id: &choice.profile_id,
             model: &choice.model,
         })
@@ -1471,42 +1599,64 @@ pub(crate) async fn standing(
 /// Which roles' Pairings a target's sessions run under, empty where nothing
 /// runs there.
 ///
-/// Implementing, Wrapping and Follow-up share the implementation Pairing,
-/// because they are one run seen at three moments: the task sessions build the
-/// work, the wrap-up's watchers dispatch the fix and comment sessions that see
-/// it through, and a follow-up session does whatever the human wants doing
-/// about it afterwards. Every one of those is the work itself, so all of them
-/// run under what builds. Investigating is under the same one for the same
-/// reason read the other way: what an investigation does is read, write and run
-/// the code, which is building in everything but what it leaves behind. A
-/// grilling is its own, which is what an interview runs under whatever else has
+/// **Read off the target state's own `roles`** (Set 1765, Q26), which is why
+/// the Process is asked about here at all: a state declares the roles its
+/// sessions run under, or none and runs under the building role, and that is
+/// what a steer into it settles. The five Verkstead ships declare exactly what
+/// this used to be a table of, and the table is gone.
+///
+/// Which is one role for most of them, because Implementing, Follow-up and
+/// Investigating are one run seen at three moments: the task sessions build the
+/// work, a follow-up session does whatever the human wants doing about it
+/// afterwards, and what an investigation does is read, write and run the code,
+/// which is building in everything but what it leaves behind. A grilling
+/// declares its own, which is what an interview runs under whatever else has
 /// happened since.
 ///
-/// Wrapping is the one target that names two, because a wrap-up both builds and
-/// reviews. What the human's one pick does to each of them is not the same
-/// thing, though — see [`settling`]: it settles what builds, and it fills the
-/// review role only where nothing was picked for it, which is what lets a
-/// Conversation that has never fixed a review Pairing — a steered draft — be
-/// steered into a wrap-up at all without replacing one that was chosen.
+/// Wrapping is the state that declares two, because a wrap-up both builds and
+/// reviews — unless its own `review` option is off, which is how **Fix Merge
+/// Issues** declares the one: that wrap-up never reads the branch, so waiting
+/// on a review Pairing here would refuse the steer on account of a role whose
+/// sessions this Conversation has none of. What the human's one pick does to
+/// each of the two is not the same thing — see [`settling`]: it settles what
+/// builds, and it fills the review role only where nothing was picked for it,
+/// which is what lets a Conversation that has never fixed a review Pairing — a
+/// steered draft — be steered into a wrap-up at all without replacing one that
+/// was chosen.
 ///
-/// **Unless the wrap-up is a narrowed one**, which is why the Process is asked
-/// about here at all. A **Fix Merge Issues** wraps up without ever reading the
-/// branch, so its Wrapping runs under the Implementation Pairing alone — the same
-/// reading its own Start press makes, where the Agent control is one picker and no
-/// Review Pairing is ever waited on. Waiting on one here would refuse the steer on
-/// account of a role whose sessions this Conversation has none of. See
-/// [`crate::conversations::narrows_the_wrap_up`].
-fn roles(target: SteerTarget, process: store::Process) -> &'static [Role] {
-    match target {
-        SteerTarget::Grilling => &[Role::Grilling],
-        SteerTarget::Implementing | SteerTarget::FollowUp | SteerTarget::Investigating => {
-            &[Role::Implementation]
-        }
-        SteerTarget::Wrapping if crate::conversations::narrows_the_wrap_up(process) => {
-            &[Role::Implementation]
-        }
-        SteerTarget::Wrapping => &[Role::Implementation, Role::Review],
-        SteerTarget::Done => &[],
+/// **Close is Verkstead's own and runs nothing**, as is Done, so neither has a
+/// state to read roles off.
+///
+/// **And one of Verkstead's own targets its Process declares no state for**
+/// falls back to what that state has always run under. The five built-ins still
+/// steer by Verkstead's own targets and every one of those is on their form —
+/// so a **Tinker** can be steered into a Grilling its manifest declares no
+/// state for, and the round that opens runs an interview whether or not the
+/// Process has a word for one. Which is the last of the table, and it goes with
+/// the targets when the five are Processes a plugin provides like any other.
+fn roles(state: &AppState, conversation: &Conversation, submission: &SteerSubmission) -> Vec<Role> {
+    // A declared state is named by the form rather than by its target, every
+    // one of them arriving as [`SteerTarget::Declared`].
+    let Some(standing) = target(submission.target, submission.state.as_deref())
+        .filter(|state| state.declared().is_some())
+    else {
+        return Vec::new();
+    };
+
+    let declared: Vec<Role> =
+        crate::processes::roles_in(state, &conversation.process, standing.stored())
+            .iter()
+            .map(|role| Role::named(&role.name))
+            .collect();
+
+    if !declared.is_empty() || submission.target == SteerTarget::Declared {
+        return declared;
+    }
+
+    match submission.target {
+        SteerTarget::Grilling => vec![Role::grilling()],
+        SteerTarget::Wrapping => vec![Role::implementation(), Role::review()],
+        _ => vec![Role::implementation()],
     }
 }
 
@@ -1519,24 +1669,13 @@ fn roles(target: SteerTarget, process: store::Process) -> &'static [Role] {
 ///
 /// And whether the role was picked away rather than paired, which is settled
 /// too: a Conversation that will not be reviewed is not one with a Pairing
-/// missing, and the difference is what the two readers below turn on. The
-/// grilling role reads as a Pairing or as nothing — its own such row retired
-/// with *No grilling*, and a skip left on a record from before it did is read as
-/// nothing chosen, which is what lets a steer settle the role afresh.
-fn fixed(conversation: &Conversation, role: Role) -> store::Picked {
-    match role {
-        Role::Grilling => carried(conversation.grilling_pairing.as_ref()),
-        Role::Implementation => carried(conversation.implementation_pairing.as_ref()),
-        Role::Review => conversation.review_pairing.clone(),
-    }
-}
-
-/// A role that can only be paired or unpicked, read the same way as one that
-/// can be picked away.
-fn carried(pairing: Option<&store::Pairing>) -> store::Picked {
-    pairing
-        .cloned()
-        .map_or(store::Picked::Nothing, store::Picked::Under)
+/// missing, and the difference is what the readers below turn on. A skip stored
+/// for the grilling role is read as nothing chosen — *No grilling* retired —
+/// which is what lets a steer settle that role afresh; the reading is
+/// [`crate::conversations::picked_for`]'s, so the press and the pane cannot come
+/// to different answers about it.
+fn fixed(conversation: &Conversation, role: &Role) -> store::Picked {
+    crate::conversations::picked_for(conversation, role)
 }
 
 /// The line that goes under the Steer, naming every companion the steer put in
@@ -2030,7 +2169,7 @@ async fn plan(
     // Everything else steered through here has worked before: picking its own
     // branch back up is the whole point of this path, and the name on it is
     // either the human's or the one a session settled.
-    let prefill = conversation.state == Lifecycle::Draft && !conversation.branch_named;
+    let prefill = conversation.state == State::DRAFT && !conversation.branch_named;
 
     // What a branch that has never been cut comes off, named rather than
     // resolved: a drafting Conversation's column holds the *branch* the human
@@ -2689,21 +2828,29 @@ struct Made {
     checkouts: Vec<store::CompanionWorktree>,
 }
 
-/// The state a target names.
+/// The state a target names, by the word the record holds for it.
 ///
 /// The one place the form's vocabulary and the record's are held to each other,
-/// the way [`crate::ui`] holds the lifecycle's two spellings together — and the
-/// reason the two are separate lists at all: every state is somewhere to steer
-/// *from*, and only some of them are somewhere to steer *to*.
-fn target(target: SteerTarget) -> Lifecycle {
-    match target {
-        SteerTarget::Grilling => Lifecycle::Grilling,
-        SteerTarget::Implementing => Lifecycle::Implementing,
-        SteerTarget::Wrapping => Lifecycle::Wrapping,
-        SteerTarget::FollowUp => Lifecycle::FollowUp,
-        SteerTarget::Investigating => Lifecycle::Investigating,
-        SteerTarget::Done => Lifecycle::Done,
-    }
+/// and the reason the two are separate lists at all: every state is somewhere to
+/// steer *from*, and only some of them are somewhere to steer *to*.
+///
+/// **Verkstead's own five targets carry the words the column has always held**,
+/// which is what the five Processes it ships name their states — see
+/// [`rows`], which words those rows off the manifest all the same. A
+/// [`SteerTarget::Declared`] carries the state's own id, which the form sends
+/// beside the target. `None` is a Declared row with no state named, which is a
+/// body no form could have sent.
+fn target(target: SteerTarget, declared: Option<&str>) -> Option<State> {
+    Some(match target {
+        SteerTarget::Grilling => State::named("grilling"),
+        SteerTarget::Implementing => State::named("implementing"),
+        SteerTarget::Wrapping => State::named(crate::processes::WRAPPING),
+        SteerTarget::FollowUp => State::named("follow-up"),
+        SteerTarget::Investigating => State::named("investigating"),
+        SteerTarget::Done => State::done(),
+        SteerTarget::Close => State::closed(),
+        SteerTarget::Declared => State::named(declared?),
+    })
 }
 
 /// And the target a state names, which is the same rule read the other way.
@@ -2713,15 +2860,18 @@ fn target(target: SteerTarget) -> Lifecycle {
 /// Timeline says it in the form's own words. `None` is a state nothing can be
 /// steered into — Draft and Closed, each of which has a way in of its own — and
 /// no form can have been left on one, so it reads as a target nobody picked.
-pub(crate) fn steered(state: Lifecycle) -> Option<SteerTarget> {
-    Some(match state {
-        Lifecycle::Grilling => SteerTarget::Grilling,
-        Lifecycle::Implementing => SteerTarget::Implementing,
-        Lifecycle::Wrapping => SteerTarget::Wrapping,
-        Lifecycle::FollowUp => SteerTarget::FollowUp,
-        Lifecycle::Investigating => SteerTarget::Investigating,
-        Lifecycle::Done => SteerTarget::Done,
-        Lifecycle::Draft | Lifecycle::Closed => return None,
+pub(crate) fn steered(state: &State) -> Option<SteerTarget> {
+    Some(match state.stored() {
+        "grilling" => SteerTarget::Grilling,
+        "implementing" => SteerTarget::Implementing,
+        crate::processes::WRAPPING => SteerTarget::Wrapping,
+        "follow-up" => SteerTarget::FollowUp,
+        "investigating" => SteerTarget::Investigating,
+        State::DONE => SteerTarget::Done,
+        State::CLOSED => SteerTarget::Close,
+        State::DRAFT => return None,
+        // Any other word is a state a Process declared itself.
+        _ => SteerTarget::Declared,
     })
 }
 
@@ -2750,4 +2900,178 @@ async fn clear(state: &AppState, conversation_id: i64) -> anyhow::Result<()> {
     store::take_up_the_conversation(&state.pool, conversation_id).await?;
 
     Ok(())
+}
+
+/// The state a submission names, as the record and the manifest spell it: a
+/// declared state by its id, one of Verkstead's by its word.
+fn named(submission: &SteerSubmission) -> String {
+    target(submission.target, submission.state.as_deref())
+        .map(|state| state.stored().to_owned())
+        .unwrap_or_default()
+}
+
+/// The state a submission names where the Conversation's Process does not
+/// mark it as taking a steer — `None` where the steer may go there.
+///
+/// **Every target is a state the manifest marks** (ADR-0030, *Process*;
+/// Set 1765, Q28), which is the same rule read from the submit side that
+/// [`rows`] draws the form by: a plugin's Process names its states through
+/// `Declared`, and the five Verkstead ships name theirs through Verkstead's
+/// own targets, so a target whose state a manifest leaves unmarked is refused
+/// naming it — a Grilling on an Investigate as much as a `Declared` state a
+/// plugin never wrote. Close is Verkstead's and on every form; Done is
+/// Verkstead's too, on the five's.
+fn unmarked(
+    state: &AppState,
+    conversation: &Conversation,
+    submission: &SteerSubmission,
+) -> Option<String> {
+    if submission.target == SteerTarget::Close {
+        return None;
+    }
+
+    let provided = !conversation.process.built_in();
+    if provided != (submission.target == SteerTarget::Declared) {
+        return Some(named(submission));
+    }
+    if !provided && submission.target == SteerTarget::Done {
+        return None;
+    }
+
+    let Some(loaded) = crate::processes::of(state, &conversation.process) else {
+        return Some(named(submission));
+    };
+
+    let word = named(submission);
+    crate::processes::mark(&loaded, &word)
+        .is_none()
+        .then_some(word)
+}
+
+/// The mark of the declared state a submission names, where it names one
+/// its Process marks.
+fn declared_mark(
+    state: &AppState,
+    conversation: &Conversation,
+    submission: &SteerSubmission,
+) -> Option<crate::processes::Mark> {
+    if submission.target != SteerTarget::Declared {
+        return None;
+    }
+
+    let loaded = crate::processes::of(state, &conversation.process)?;
+    crate::processes::mark(&loaded, submission.state.as_deref()?)
+}
+
+/// What the human wrote under a declared state's brief of kind `brief`: the
+/// field of the form that kind draws, whitespace alone being nothing.
+fn written(
+    submission: &SteerSubmission,
+    brief: crate::plugins::manifest::process::Brief,
+) -> Option<&str> {
+    use crate::plugins::manifest::process::Brief;
+
+    let field = match brief {
+        Brief::Round => &submission.brief,
+        Brief::Instruction => &submission.instruction,
+        Brief::FollowUp => &submission.follow_up,
+        Brief::Question => &submission.investigation,
+        Brief::None => return None,
+    };
+
+    field
+        .as_deref()
+        .map(str::trim)
+        .filter(|written| !written.is_empty())
+}
+
+/// The rows the Steer form draws for `conversation`: each state its Process
+/// marks as taking a steer, in the order written, then Close.
+///
+/// **The five Verkstead ships draw theirs from their marks too** (Set 1765,
+/// Q28), through Verkstead's own targets rather than `Declared`, since its own
+/// targets are still what drives them: the row is the state each target names
+/// — see [`target`] — worded, briefed and detoured as its manifest marks it,
+/// and run under the first of the roles that state declares, which is the role
+/// its one picker settles (see [`settling`]). A state its manifest leaves
+/// unmarked draws no row, so Review's form offers no Grilling and Investigate's
+/// is its Investigating alone. Then Done, which is Verkstead's own and no
+/// manifest may declare, on the five's forms as it has always been — and Close,
+/// as on every form at all.
+///
+/// And a Process in trouble — its plugin missing, switched off or unreadable —
+/// has no marks to draw, so its form is Close alone: a Conversation on one
+/// stops where it stands and carries on from its state once the plugin is
+/// back, which is a steer nowhere.
+pub(crate) fn rows(state: &AppState, conversation: &Conversation) -> Vec<SteerRow> {
+    let provided = !conversation.process.built_in();
+    let mut rows: Vec<SteerRow> = match crate::processes::of(state, &conversation.process) {
+        None => Vec::new(),
+        Some(loaded) => crate::processes::steerable(&loaded)
+            .into_iter()
+            .filter_map(|(declared, mark)| {
+                // For a plugin's Process every target is `Declared`, naming
+                // the state by its id. For one of the five it is Verkstead's
+                // own target for that state — and a marked state no target
+                // names is no row, which none of the five has: their states
+                // are exactly the words [`target`] knows.
+                let (target, named) = match provided {
+                    true => (SteerTarget::Declared, Some(declared.id.clone())),
+                    false => (
+                        steered(&State::named(&declared.id))
+                            .filter(|target| *target != SteerTarget::Declared)?,
+                        None,
+                    ),
+                };
+
+                Some(SteerRow {
+                    target,
+                    state: named,
+                    word: declared.word.clone(),
+                    brief: briefed(mark.brief),
+                    detour: mark.detour,
+                    role: loaded
+                        .process
+                        .roles_in(&declared.id)
+                        .first()
+                        .map(|role| role.name.clone()),
+                })
+            })
+            .collect(),
+    };
+
+    if !provided {
+        rows.push(SteerRow {
+            target: SteerTarget::Done,
+            state: None,
+            word: "Done".to_owned(),
+            brief: SteerBrief::None,
+            detour: false,
+            role: None,
+        });
+    }
+
+    rows.push(SteerRow {
+        target: SteerTarget::Close,
+        state: None,
+        word: "Close".to_owned(),
+        brief: SteerBrief::None,
+        detour: false,
+        role: None,
+    });
+
+    rows
+}
+
+/// The brief a mark's kind draws on the form.
+fn briefed(brief: crate::plugins::manifest::process::Brief) -> SteerBrief {
+    use crate::plugins::manifest::process::Brief;
+
+    match brief {
+        Brief::Round => SteerBrief::Round,
+        Brief::Instruction => SteerBrief::Instruction,
+        Brief::FollowUp => SteerBrief::FollowUp,
+        Brief::Question => SteerBrief::Question,
+        Brief::None => SteerBrief::None,
+    }
 }

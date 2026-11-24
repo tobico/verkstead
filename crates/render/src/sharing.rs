@@ -46,7 +46,7 @@ use crate::conversations::{
     CommitPane, CompanionView, ConversationView, SteerEvent, SteerPairingView, SteerRecordView,
     TimelineEvent,
 };
-use crate::profiles::{HarnessEntry, PairingView, PickedView, ProfileAccount, ProfileEntry};
+use crate::profiles::{HarnessEntry, PairingView, ProfileAccount, ProfileEntry};
 use crate::repos::RepoEntry;
 use crate::view::SetView;
 
@@ -294,6 +294,10 @@ pub fn shared(
             // work might be going rather than where it went.
             pending_steer: None,
 
+            // And where a steer could send it, which is the same: nothing the
+            // reader has a form to submit.
+            steer_rows: Vec::new(),
+
             // And the Previews suggested for trying the work, which are not on
             // the record either: a press in a Code pane the reader does not
             // have, typing a command into a terminal that is not theirs.
@@ -329,9 +333,7 @@ pub fn shared(
             repo,
             companions,
             worktree: None,
-            grilling_pairing: None,
-            implementation_pairing: None,
-            review_pairing: PickedView::Nothing,
+            pairings: Vec::new(),
 
             ..conversation
         },

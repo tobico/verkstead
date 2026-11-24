@@ -15,3 +15,8 @@
 *.blend1
 /plugins/target
 /plugins/dist
+
+# A core dump lands beside the checkout's root named after the process that
+# left it, and is a gigabyte of someone else's memory: ignored, so that nothing
+# sweeping the tree into a commit carries one in.
+/core.*

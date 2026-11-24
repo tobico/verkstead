@@ -520,7 +520,7 @@ async fn out_of_window(
     // What ought to have been happening, in the words every other stop names it
     // in: the Notice opens with it, and a stop for a window is not a different
     // kind of sentence.
-    let lifecycle = match store::load_conversation(pool, conversation_id).await {
+    let standing = match store::load_conversation(pool, conversation_id).await {
         Ok(Some(conversation)) => conversation.state,
         Ok(None) => return false,
         Err(error) => {
@@ -537,7 +537,7 @@ async fn out_of_window(
             profile,
             resets: resets.as_deref(),
         },
-        crate::stalls::driving(lifecycle),
+        crate::stalls::driving(&standing),
         &crate::stopping::out_of_window(profile, said),
         Some(session),
     )

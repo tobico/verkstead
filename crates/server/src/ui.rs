@@ -45,11 +45,11 @@ use verkstead_render::{
     Cursor, DevicesView, DiskUse, DroppedRow, Eviction, FileDeleted, FileDeleting, FileListsView,
     FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView,
     FileWrite, FileWritten, FolderListing, GrillingStarted, HeaderEdit, IgnoreRule,
-    IgnoredCommentsEdit, InstallPress, InstructionsEdit, LanguageCleared, LanguageView, Lifecycle,
-    Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption,
-    NewAnnex, NewCompanion, NewConversation, NewJoin, NewRank, OfferedPack, OpenTerminal,
-    PackAttached, PackRemoved, PairingView, Parked, PendingSteerView, Permitting, Picking, Process,
-    ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
+    IgnoredCommentsEdit, InstallPress, InstructionsEdit, LanguageCleared, LanguageView, Locked,
+    McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption, NewAnnex,
+    NewCompanion, NewConversation, NewJoin, NewRank, OfferedPack, OpenTerminal, PackAttached,
+    PackRemoved, PairingView, Parked, PendingSteerView, Permitting, Picking, ProcessChoice,
+    ProcessEntry, ProcessPicked, ProfileEdit, ProfileEntry, ProvidedProcess, PushKey, Registration,
     RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
     RuleField, RuleRefused, Running, ServeEdit, ServePress, ServerAttached, ServerField,
     ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
@@ -658,19 +658,15 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/steer/submit",
             post(steer_submit),
         )
+        // One route for every role, named by the role: which roles a
+        // Conversation has is its Process's to say, so three routes would be
+        // three of the roles Verkstead happens to know.
         .route(
-            "/api/ui/conversations/{id}/grilling-pairing",
-            post(choose_grilling_pairing),
-        )
-        .route(
-            "/api/ui/conversations/{id}/implementation-pairing",
-            post(choose_implementation_pairing),
-        )
-        .route(
-            "/api/ui/conversations/{id}/review-pairing",
-            post(choose_review_pairing),
+            "/api/ui/conversations/{id}/pairings/{role}",
+            post(choose_pairing),
         )
         .route("/api/ui/harnesses", get(harnesses))
+        .route("/api/ui/processes", get(processes))
         .route("/api/ui/profiles", get(profiles).post(create_profile))
         .route("/api/ui/profiles/{id}", post(edit_profile))
         // Setting a Profile up on this device, a press of its own rather than
@@ -989,26 +985,27 @@ pub(crate) async fn set_reading(
     );
 
     // Whether the closing section carries the Nothing-else option, and which
-    // ending it would bring about — a fact about the Conversation rather than
-    // about the Set: a follow-up's rounds and an investigation's are both
-    // ordinary Sets, and what makes one either is where the work stands while it
-    // is being answered. A Conversation that cannot be read draws no option,
-    // which is what every state but those two gets anyway.
-    let lifecycle = match store::state(&state.pool, conversation).await {
-        Ok(state) => state,
+    // ending it would bring about — a fact about what is *running* rather than
+    // about the Set or about what the state is called: a follow-up's rounds and
+    // an investigation's are both ordinary Sets asked from the one Follow-up
+    // rounds Activity, and its options are what say which (Set 1765, Q29). A
+    // Conversation that cannot be read draws no option, which is what every
+    // state running something else gets anyway.
+    let ending = crate::processes::ending(state, conversation).await;
+
+    // And whether the Conversation has been closed, which is what strikes an
+    // addition nothing is ever going to apply — a word of Verkstead's own
+    // whatever the Process, so it is read as one.
+    let closed = match store::state(&state.pool, conversation).await {
+        Ok(state) => state.is_some_and(|state| state == store::State::CLOSED),
         Err(error) => {
             tracing::error!(
                 error = ?error,
                 conversation,
-                "reading where a Set's Conversation stands failed"
+                "reading whether a Set's Conversation is closed failed"
             );
-            None
+            false
         }
-    };
-    let ending = match lifecycle {
-        Some(store::Lifecycle::FollowUp) => Some(verkstead_render::Ending::FollowUp),
-        Some(store::Lifecycle::Investigating) => Some(verkstead_render::Ending::Investigation),
-        _ => None,
     };
 
     // And the files the human put on its Answers, which the sheet draws under
@@ -1037,9 +1034,9 @@ pub(crate) async fn set_reading(
     };
     // What a lock, or the Conversation closing, left unapplied is struck on the
     // record: nothing is ever going to put it on.
-    let additions = match (&standing, lifecycle) {
+    let additions = match (&standing, closed) {
         (verkstead_render::Standing::LockedUnanswered(_), _)
-        | (verkstead_render::Standing::Waiting(_), Some(store::Lifecycle::Closed)) => {
+        | (verkstead_render::Standing::Waiting(_), true) => {
             crate::answer_additions::unapplied(additions)
         }
         _ => additions,
@@ -1829,7 +1826,13 @@ async fn conversations(
                 branch_named: conversation.branch_named,
                 naming: conversation.naming,
                 repo: conversation.repo,
-                state: row_state(conversation.id, conversation.state),
+                state: conversation.state.stored().to_owned(),
+                // And which Process to read that word against, as the plugin
+                // providing it: a plugin's names itself, and one of
+                // Verkstead's own is the built-in plugin that holds it. The
+                // row's word is read off that Process's manifest either way
+                // (Set 1765, Q29).
+                process: provided(&conversation.process),
                 working,
                 // Idle is a thing a running session is, and the two sets are
                 // read a moment apart — so the pair is made consistent here
@@ -2062,6 +2065,9 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // Where the Steer form may send it, out of its Process's steer marks.
+    let steer_rows = crate::steering::rows(state, &conversation);
+
     // Which of this Conversation's output Events is still being written into,
     // which is a question about a process rather than about the record: a
     // restarted server has no sessions, and every Capture it holds is of one
@@ -2135,37 +2141,33 @@ pub(crate) async fn conversation_view(
 
     // The Pairings are read as rows rather than as ids: what the pane says
     // about a Profile, and whether it can still be run under, is the same
-    // reading the Profile list gets.
-    let grilling_pairing = match crate::profiles::pairing(state, conversation.grilling_pairing)
+    // reading the Profile list gets. One per role the Process declares, in the
+    // order its manifest writes them, which is the order the Agent control
+    // draws their pickers in.
+    let mut pairings: Vec<verkstead_render::RolePairingView> = Vec::new();
+
+    for role in crate::processes::roles(state, &conversation.process) {
+        let picked = match crate::profiles::picked(
+            state,
+            crate::conversations::picked_for(&conversation, &store::Role::named(&role.name)),
+        )
         .await
-    {
-        Ok(pairing) => pairing,
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "reading a grilling Pairing failed");
-            return Err(unavailable("The conversation couldn't be read."));
-        }
-    };
+        {
+            Ok(picked) => picked,
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id = id, role = role.name, "reading a Pairing failed");
+                return Err(unavailable("The conversation couldn't be read."));
+            }
+        };
 
-    let implementation_pairing = match crate::profiles::pairing(
-        state,
-        conversation.implementation_pairing,
-    )
-    .await
-    {
-        Ok(pairing) => pairing,
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "reading an implementation Pairing failed");
-            return Err(unavailable("The conversation couldn't be read."));
-        }
-    };
-
-    let review_pairing = match crate::profiles::picked(state, conversation.review_pairing).await {
-        Ok(pairing) => pairing,
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "reading a review Pairing failed");
-            return Err(unavailable("The conversation couldn't be read."));
-        }
-    };
+        pairings.push(verkstead_render::RolePairingView {
+            role: role.name,
+            label: role.label,
+            building: role.building,
+            away: role.away,
+            picked,
+        });
+    }
 
     // What the worktree holds rather than what the record remembers: the
     // backlog, as `.tasks/` stands right now. Read off the filesystem for the
@@ -2383,13 +2385,11 @@ pub(crate) async fn conversation_view(
         .unwrap_or_default();
 
     let ready_to_grill = crate::conversations::ready_to_grill(
-        conversation.state,
-        conversation.process,
-        grilling_pairing.as_ref(),
-        implementation_pairing.as_ref(),
-        &review_pairing,
+        &conversation.state,
+        &pairings,
         brief,
         conversation.target.as_deref(),
+        crate::conversations::takes_a_target(state, &conversation.process),
     );
 
     // And whether this Repo is one the missing sccache costs anything — see
@@ -2429,7 +2429,7 @@ pub(crate) async fn conversation_view(
         })
         .collect();
 
-    let open_brief = (conversation.state == store::Lifecycle::Draft)
+    let open_brief = (conversation.state == store::State::DRAFT)
         .then(|| briefs.last().copied())
         .flatten()
         .filter(|open| !(conversation.adopting.is_some() && briefs.first() == Some(open)));
@@ -2477,14 +2477,20 @@ pub(crate) async fn conversation_view(
     // fact about the other end of the ladder: the Conversation says it is being
     // worked on and nothing is working on it. Asked of the running server as
     // much as of the record — see [`crate::resume::ready`].
-    let ready_to_resume = crate::resume::ready(state, id, conversation.state, stopped.is_some());
+    let ready_to_resume = crate::resume::ready(
+        state,
+        id,
+        &conversation.process,
+        &conversation.state,
+        stopped.is_some(),
+    );
 
     // And whether there is driving to stop, which is the same fact read the
     // other way: a Conversation that says it is being worked on and has not
     // stopped is one the human may pull the brake on. Nothing about the register
     // here — a run between two steps is as much a run to stop as a busy one. See
     // [`crate::stops::ready`].
-    let ready_to_stop = crate::stops::ready(conversation.state, stopped.is_some());
+    let ready_to_stop = crate::stops::ready(&conversation.state, stopped.is_some());
 
     // And whether the press has already been made and is waiting for the step
     // the run is on to finish, which is what takes Stop off the menu: the
@@ -2529,7 +2535,7 @@ pub(crate) async fn conversation_view(
     // is history, and the Notice it points at is still on the Timeline.
     let marked = stopped
         .as_ref()
-        .filter(|_| conversation.state != store::Lifecycle::Closed);
+        .filter(|_| conversation.state != store::State::CLOSED);
 
     // And the mark points at the stop's own Notice, whatever wrote it: a run
     // that has stopped is stopped, and a mark with nowhere to go would be one
@@ -2539,8 +2545,8 @@ pub(crate) async fn conversation_view(
     // not a stop, but the one thing on the record the human is waiting on the
     // session over. A read that fails reads as none, which leaves the page
     // quiet. See [`crate::rescues`].
-    let escalated = match (&marked, conversation.state) {
-        (None, lifecycle) if lifecycle != store::Lifecycle::Closed => {
+    let escalated = match (&marked, &conversation.state) {
+        (None, standing) if *standing != store::State::CLOSED => {
             store::escalated(&state.pool, id).await.unwrap_or_else(|error| {
                 tracing::error!(error = ?error, conversation_id = id, "reading whether a Conversation was escalated over failed");
                 None
@@ -2831,13 +2837,13 @@ pub(crate) async fn conversation_view(
     let view = ConversationView {
         id: conversation.id,
         repo: crate::repos::entry(conversation.repo, config.authors()),
-        process: process(conversation.process),
+        process: provided(&conversation.process),
         branch: conversation.branch,
         branch_named: conversation.branch_named,
         naming: conversation.naming,
         base_commit: conversation.base_commit,
         companions,
-        state: lifecycle(conversation.state),
+        state: conversation.state.stored().to_owned(),
         ready_to_grill,
         compiles_uncached,
         ready_to_resume,
@@ -2846,9 +2852,7 @@ pub(crate) async fn conversation_view(
         ready_to_continue,
         adopting,
         target: conversation.target,
-        grilling_pairing,
-        implementation_pairing,
-        review_pairing,
+        pairings,
         worktree,
         direction: conversation.direction,
         pinned,
@@ -2877,6 +2881,7 @@ pub(crate) async fn conversation_view(
         mcp_servers: servers,
         skill_packs: packs,
         pending_steer,
+        steer_rows,
         previews,
         // And where the live record is, where this copy is not it: what takes
         // the page off a tombstone and onto the device doing the work — see
@@ -2923,7 +2928,7 @@ pub(crate) async fn conversation_view(
                         Some(event.id) != open_brief,
                     ),
                     store::Event::Moved(state) => {
-                        verkstead_render::moved_event(event.id, event.at, lifecycle(state))
+                        verkstead_render::moved_event(event.id, event.at, state.stored().to_owned())
                     }
                     // The summary and not the Capture: a Timeline is read every
                     // time an open page hears the world moved, and a session's
@@ -3070,7 +3075,11 @@ pub(crate) async fn conversation_view(
                         verkstead_render::steer_event(
                             event.id,
                             event.at,
-                            lifecycle(target),
+                            // The word the record holds, which is what the
+                            // card's word is read off: a plugin's Process
+                            // names its own states, and Verkstead's five name
+                            // theirs with the words the record holds.
+                            target.stored().to_owned(),
                             instruction.as_deref(),
                             // And the rest of the form that press filled, where
                             // the record has it: the pane this Event opens
@@ -5437,7 +5446,7 @@ async fn pick_process(
         return Json(ProcessPicked::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::pick_process(&state.pool, id, choice.process).await {
+    match crate::conversations::pick_process(&state, id, choice).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "picking a conversation's Process failed");
@@ -5907,6 +5916,10 @@ async fn preflight(
         &state.pool,
         &state.settings.config(),
         &conversation,
+        &crate::processes::labels(&state, &conversation.process),
+        crate::processes::of(&state, &conversation.process)
+            .map(|loaded| loaded.process.name)
+            .as_deref(),
         &device,
     )
     .await
@@ -6224,65 +6237,44 @@ async fn show_archived(
     }
 }
 
-/// `POST /api/ui/conversations/{id}/grilling-pairing` — which account and model
-/// the grilling session runs under.
-async fn choose_grilling_pairing(
+/// `POST /api/ui/conversations/{id}/pairings/{role}` — which account and model
+/// the sessions of one of the Conversation's roles run under, or the row that
+/// says there is to be no session for it at all.
+///
+/// The role by name, whichever its Process declares (Set 1765, Q26): the
+/// grilling, the implementation and the review come through here, and so does a
+/// role a plugin's Process named itself.
+async fn choose_pairing(
     State(state): State<AppState>,
-    Path(id): Path<String>,
-    Json(choice): Json<ProfileChoice>,
-) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return Json(verkstead_render::ProfileChosen::NoSuchConversation).into_response();
-    };
-
-    match crate::profiles::choose_grilling(&state.pool, id, &choice).await {
-        Ok(outcome) => Json(outcome).into_response(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "choosing a grilling Pairing failed");
-            unavailable("The grilling pairing couldn't be chosen.")
-        }
-    }
-}
-
-/// `POST /api/ui/conversations/{id}/implementation-pairing` — and the one the
-/// implementation runs under, which is a separate choice.
-async fn choose_implementation_pairing(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Json(choice): Json<ProfileChoice>,
-) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return Json(verkstead_render::ProfileChosen::NoSuchConversation).into_response();
-    };
-
-    match crate::profiles::choose_implementation(&state.pool, id, &choice).await {
-        Ok(outcome) => Json(outcome).into_response(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "choosing an implementation Pairing failed");
-            unavailable("The implementation pairing couldn't be chosen.")
-        }
-    }
-}
-
-/// `POST /api/ui/conversations/{id}/review-pairing` — and the one the wrap-up's
-/// review runs under, which is a third separate choice: a Pairing, or the row
-/// that says there is to be no review at all.
-async fn choose_review_pairing(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path((id, role)): Path<(String, String)>,
     Json(choice): Json<RoleChoice>,
 ) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(verkstead_render::ProfileChosen::NoSuchConversation).into_response();
     };
 
-    match crate::profiles::choose_review(&state.pool, id, &choice).await {
+    match crate::profiles::choose_for(&state.pool, id, &store::Role::named(&role), &choice).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "choosing a review Pairing failed");
-            unavailable("The review pairing couldn't be chosen.")
+            tracing::error!(error = ?error, conversation_id = id, role, "choosing a Pairing failed");
+            unavailable("The pairing couldn't be chosen.")
         }
     }
+}
+
+/// `GET /api/ui/processes` — every Process the built-in plugins provide, then
+/// those the plugins loaded here provide in the order they were installed:
+/// what the picker offers, and what a Conversation on one is worded from. An
+/// unticked plugin's are listed, not offered, while Conversations on them run
+/// to the end.
+async fn processes(State(state): State<AppState>) -> Json<Vec<ProcessEntry>> {
+    Json(
+        crate::processes::listed(&state)
+            .await
+            .iter()
+            .map(crate::processes::Loaded::entry)
+            .collect(),
+    )
 }
 
 /// `GET /api/ui/harnesses` — every harness this server can run a session on,
@@ -6686,33 +6678,6 @@ fn session(
     }
 }
 
-/// A sidebar row's state as the viewer receives it, including the row whose
-/// stored word this Verkstead has never heard of.
-///
-/// Such a row is drawn as a **Draft**, and the word it really held goes in the
-/// log. Draft rather than anything else because of what the row is *for* here:
-/// it is the way to the Conversation's own page, and the page's own read still
-/// refuses a word it cannot parse — so what the human lands on is the pane's
-/// error state and the escape hatch in it. That hatch offers Archive on a state
-/// of Closed and Close-and-archive on anything else, and Archive on a row like
-/// this would answer `NotClosed` and go nowhere. So the fallback has to read as
-/// *not closed*, and Draft is the one that does while drawing harmlessly.
-fn row_state(id: i64, state: store::RowState) -> Lifecycle {
-    match state {
-        store::RowState::Known(state) => lifecycle(state),
-        store::RowState::Unknown(word) => {
-            tracing::warn!(
-                conversation_id = id,
-                state = word,
-                "a Conversation's stored state is a word this Verkstead does not know, so its \
-                 row is drawn as a draft"
-            );
-
-            Lifecycle::Draft
-        }
-    }
-}
-
 /// The register's reading of a session sitting there without asking, as the
 /// viewer receives it — see [`crate::sessions::Parked`].
 ///
@@ -6727,62 +6692,25 @@ fn parked(sitting: &crate::sessions::Parked) -> Parked {
     }
 }
 
-/// The store's lifecycle state as the viewer receives it. One word either side,
-/// and this is where the two vocabularies are held to each other.
-pub(crate) fn lifecycle(state: store::Lifecycle) -> Lifecycle {
-    match state {
-        store::Lifecycle::Draft => Lifecycle::Draft,
-        store::Lifecycle::Grilling => Lifecycle::Grilling,
-        store::Lifecycle::Implementing => Lifecycle::Implementing,
-        store::Lifecycle::Wrapping => Lifecycle::Wrapping,
-        store::Lifecycle::FollowUp => Lifecycle::FollowUp,
-        store::Lifecycle::Investigating => Lifecycle::Investigating,
-        store::Lifecycle::Done => Lifecycle::Done,
-        store::Lifecycle::Closed => Lifecycle::Closed,
-    }
-}
-
-/// And the store's Process as the viewer receives it. One word either side, and
-/// this is where those two vocabularies are held to each other — the pair
-/// [`lifecycle`] above is, for the fact beside it.
-pub(crate) fn process(process: store::Process) -> Process {
-    match process {
-        store::Process::Develop => Process::Develop,
-        store::Process::Investigate => Process::Investigate,
-        store::Process::Review => Process::Review,
-        store::Process::Tinker => Process::Tinker,
-        store::Process::FixMergeIssues => Process::FixMergeIssues,
+/// Which Process the record holds, as the viewer receives it: the plugin
+/// providing it and its id there, whichever Process it is.
+///
+/// No table of words beside it, and none for the state either: a Process is a
+/// reference to a manifest on both sides of the wire, a state is the word the
+/// column holds, and what either of them is called is read off the Process
+/// list — see [`processes`] (Set 1765, Q29).
+pub(crate) fn provided(process: &store::Process) -> ProvidedProcess {
+    ProvidedProcess {
+        plugin: process.plugin.clone(),
+        id: process.id.clone(),
     }
 }
 
 /// And back the other way, for the one press that writes one.
-pub(crate) fn picked_process(process: Process) -> store::Process {
-    match process {
-        Process::Develop => store::Process::Develop,
-        Process::Investigate => store::Process::Investigate,
-        Process::Review => store::Process::Review,
-        Process::Tinker => store::Process::Tinker,
-        Process::FixMergeIssues => store::Process::FixMergeIssues,
-    }
-}
-
-/// And the same word read the other way, which is what a Conversation arriving
-/// from another device is written down as.
-///
-/// Beside its opposite number rather than where it is used, because the two
-/// vocabularies are held to each other in one place or in none: a state added to
-/// the ladder is two arms here, and a build that added one to only this one
-/// would land somebody's work in the wrong state.
-pub(crate) fn state_of(lifecycle: Lifecycle) -> store::Lifecycle {
-    match lifecycle {
-        Lifecycle::Draft => store::Lifecycle::Draft,
-        Lifecycle::Grilling => store::Lifecycle::Grilling,
-        Lifecycle::Implementing => store::Lifecycle::Implementing,
-        Lifecycle::Wrapping => store::Lifecycle::Wrapping,
-        Lifecycle::FollowUp => store::Lifecycle::FollowUp,
-        Lifecycle::Investigating => store::Lifecycle::Investigating,
-        Lifecycle::Done => store::Lifecycle::Done,
-        Lifecycle::Closed => store::Lifecycle::Closed,
+pub(crate) fn picked_process(choice: ProcessChoice) -> store::Process {
+    store::Process {
+        plugin: choice.process.plugin,
+        id: choice.process.id,
     }
 }
 
@@ -8973,9 +8901,11 @@ async fn running_here(state: &AppState) -> (Vec<String>, u32) {
         .into_iter()
         .filter(|conversation| working.contains(&conversation.id))
     {
-        let state = row_state(conversation.id, conversation.state);
-
-        match crate::merging::settled(conversation.branch_named, state, conversation.naming) {
+        match crate::merging::settled(
+            conversation.branch_named,
+            conversation.state.stored(),
+            conversation.naming,
+        ) {
             true => named.push(conversation.branch),
             false => drafts += 1,
         }

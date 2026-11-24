@@ -4487,11 +4487,21 @@ work, the wrap-up's review — of which a Conversation fixes the ones its
 **Process** uses before the work starts: all three for Develop, the second and
 third for Review and Tinker, the second alone for Investigate and Fix Merge
 Issues. They are roles rather than kinds of Pairing: the same Profile, even the
-same model, may fill all three. The first line between them is planning
-against building: the grilling session's tail — writing the handoff, the backlog
-or the roadmap — is the Grilling Pairing's, and the Implementation Pairing
-drives what builds. Distinct accounts are why an inline implementation is a
-fresh session rather than the grilling session carrying on.
+same model, may fill all three.
+
+**Which roles there are is the Process's** (2026-11-22): each declares them in
+its manifest by name and label, marks the one that **builds**, and says which
+of them offer the row that runs no session — see
+[ADR-0030](docs/adr/0030-plugins.md), *Process*. These three are what the five
+Verkstead ships declare, and nothing but a plugin's Process names anything else;
+a role is a word from the store up, so a name nobody has used before is a role
+with a Pairing memory of its own the first time something is picked for it.
+
+The first line between the three roles is planning against building: the
+grilling session's tail — writing the handoff, the backlog or the roadmap — is
+the Grilling Pairing's, and the Implementation Pairing drives what builds.
+Distinct accounts are why an inline implementation is a fresh session rather
+than the grilling session carrying on.
 
 The second line is reviewing against fixing. The Review Pairing reaches exactly
 one kind of session — the wrap-up's review, including the fresh one that runs
@@ -5433,16 +5443,22 @@ _Avoid_: retry, remedy, restart (that is the server's), continue, unblock
 **Steer**:
 The human saying where the work goes, from wherever it has got to: a row in the
 Conversation's own menu beside **Stop**, and a form over one question — where
-does this go? Targets are **Grilling**, **Implementing**, **Wrapping**,
-**Investigating**, **Follow-up** and **Done** — the states the work is done in,
-Investigating among them because a question about the work can arise in any
-state and it takes a brief the way Follow-up does; Draft and Closed are
-not among them, each having a way in of its own. **What state it was steered
-from is written down beside the Steer**, because one target reads it back:
-Investigating ends in the state it left rather than at Done — see
-**Investigating**. So is **what each checkout was already holding uncommitted**,
-for the same target and the same ending: what the investigation wrote comes out
-on the way back to work, and what the human had left half done stays.
+does this go? **The targets are the states the Conversation's Process marks as
+taking one** (2026-11-23), each with the kind of brief it takes, and beside them
+**Done**, which is Verkstead's own and a word no Process declares, and **Close**,
+which is on every form at all. The five Verkstead ships mark the states the work
+is done in — **Grilling**, **Implementing**, **Wrapping**, **Follow-up** and
+**Investigating**, the last of them among the targets because a question about
+the work can arise in any state and it takes a brief the way Follow-up does —
+and each marks only the states it has, so an Investigate's form is its
+Investigating alone and a Review's offers no Grilling. Draft and Closed are
+never targets, each having a way in of its own. **What state it was steered
+from is written down beside the Steer**, because a **detour** reads it back: a
+state marked as one ends in the state it left rather than at Done — see
+**Investigating**, which is the detour all five of them mark. So is **what each
+checkout was already holding uncommitted**, for every detour and the same
+ending: what its session wrote comes out on the way back to work, and what the
+human had left half done stays.
 Sources are every state there
 is — a Draft nothing has run in, a run in flight, work Verkstead has finished
 with — because a steer is the human stepping outside the pipeline's path rather
@@ -5733,7 +5749,7 @@ that one is waiting on is somebody resolving a conflict rather than GitHub
 finishing something.
 
 A condition of Wrapping rather than a state, exactly as *blocked on you* is a
-condition of an active state: the Lifecycle is untouched, and the only thing
+condition of an active state: the state word is untouched, and the only thing
 stored is the mark saying the line has been written. What it is drawn from is
 the wrap-up's own settle facts and the sessions register, read together every
 time they are asked.
@@ -5764,7 +5780,7 @@ settles. So two Stages finishing close together are let in one at a time, in the
 order their tasks finished, and the first one *joining* releases nobody.
 
 A condition of Implementing rather than a state, drawn exactly as *Waiting on
-checks* is drawn one state later: the Lifecycle is untouched, nothing is pushed
+checks* is drawn one state later: the state word is untouched, nothing is pushed
 to any device, and the run holds its registration across the whole wait, so a
 held Stage is one being driven rather than one standing still. The hold itself is
 stored nowhere — it is a task of the running server, so a restart is holding

@@ -68,6 +68,7 @@ use verkstead_schema::{ApiError, Nudge};
 use super::built_in::{self, BUILT_INS};
 use super::component;
 use super::git::{self, Staged};
+use super::manifest::process::Found;
 use super::manifest::{Access, Capability, Dependency, Files, Manifest, Mark};
 use crate::AppState;
 use crate::github::Credential;
@@ -101,6 +102,12 @@ pub(crate) struct Installed {
     /// they were installed: what this server offers beside its built-ins —
     /// see [`crate::harness::plugged`].
     harnesses: Arc<Mutex<Vec<crate::store::AgentType>>>,
+
+    /// The Processes the plugins that loaded here provide, in the order they
+    /// were installed, each with the Activities its states run found — see
+    /// [`crate::processes`]. A switched-off plugin's are kept, not offered,
+    /// for the Conversations already on them.
+    processes: Arc<Mutex<Vec<crate::processes::Loaded>>>,
 }
 
 impl Installed {
@@ -138,6 +145,31 @@ impl Installed {
             .lock()
             .expect("nothing panics holding the harnesses")
             .clone()
+    }
+
+    /// Every Process held here, offered or not.
+    pub(crate) fn processes(&self) -> Vec<crate::processes::Loaded> {
+        self.processes
+            .lock()
+            .expect("nothing panics holding the processes")
+            .clone()
+    }
+
+    /// The Process `id` of the plugin `plugin`, where it is held here —
+    /// offered, or kept for the Conversations on a plugin switched off.
+    pub(crate) fn process(&self, plugin: &str, id: &str) -> Option<crate::processes::Loaded> {
+        self.processes
+            .lock()
+            .expect("nothing panics holding the processes")
+            .iter()
+            .find(|loaded| loaded.plugin == plugin && loaded.process.id == id)
+            .cloned()
+    }
+
+    /// Whether a new Conversation may be started on that Process.
+    pub(crate) fn offers(&self, plugin: &str, id: &str) -> bool {
+        self.process(plugin, id)
+            .is_some_and(|loaded| loaded.offered)
     }
 
     /// The presses that would put right the dependencies `uuid` is in
@@ -262,30 +294,37 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
         }
     }
 
-    for (uuid, trouble) in resolved(state, &records, &mut manifests) {
-        tracing::warn!(
-            uuid,
-            trouble = trouble.why,
-            "an installed plugin's dependency isn't there, and it counts as disabled",
-        );
-        troubles.insert(uuid, trouble);
-    }
+    // Each plugin taken out for what it can't reach counts as disabled for
+    // those depending on it in turn, so this goes round until nothing moves.
+    loop {
+        for (uuid, trouble) in resolved(state, &records, &mut manifests) {
+            tracing::warn!(
+                uuid,
+                trouble = trouble.why,
+                "an installed plugin's dependency isn't there, and it counts as disabled",
+            );
+            troubles.insert(uuid, trouble);
+        }
 
-    for (uuid, why) in unreached(&manifests) {
-        tracing::warn!(
-            uuid,
-            trouble = why,
-            "an installed plugin's Activity launches a skill it can't reach, and it counts as \
-             disabled",
-        );
-        manifests.remove(&uuid);
-        troubles.insert(
-            uuid,
-            Trouble {
-                why,
-                needs: Vec::new(),
-            },
-        );
+        let unreached = unreached(&manifests);
+        if unreached.is_empty() {
+            break;
+        }
+        for (uuid, why) in unreached {
+            tracing::warn!(
+                uuid,
+                trouble = why,
+                "an installed plugin names something it can't reach, and it counts as disabled",
+            );
+            manifests.remove(&uuid);
+            troubles.insert(
+                uuid,
+                Trouble {
+                    why,
+                    needs: Vec::new(),
+                },
+            );
+        }
     }
 
     let placing: Vec<crate::skills::Placing<'_>> = manifests
@@ -348,6 +387,27 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
         offered
     };
 
+    // And the Processes the plugins in no trouble provide, a switched-off
+    // plugin's kept from the last load for the Conversations still on them.
+    let processes = {
+        let before = state.plugins.processes();
+        provided(&records, &manifests, &dirs, &before)
+    };
+    let processes_moved = {
+        let mut held = state
+            .plugins
+            .processes
+            .lock()
+            .expect("nothing panics holding the processes");
+        let moved = processes_differ(&held, &processes);
+        *held = processes;
+        moved
+    };
+    if processes_moved {
+        let state = state.clone();
+        tokio::spawn(async move { crate::processes::taken_back(&state).await });
+    }
+
     let moved = {
         let mut held = state
             .plugins
@@ -361,7 +421,7 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
 
     // A harness offered or taken away moves the harness list the viewer
     // reads with the Plugins, and which Profiles are runnable.
-    if moved || offered {
+    if moved || offered || processes_moved {
         state.nudges.announce_here(Nudge::Plugins);
     }
     if offered {
@@ -384,6 +444,139 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
     // session — an installer's language this device has only now read taken
     // up first.
     crate::replicating::plugins::taken_up(&state.pool, &state.settings, &state.device).await
+}
+
+/// The Processes the installed plugins in `manifests` provide — every one of
+/// them in no trouble — in the order `records` installed them, each with the Activities
+/// its states run found in the plugin itself or a dependency, in the order
+/// written. A plugin switched off keeps what `before` held of it, not offered.
+fn provided(
+    records: &[Record<Fields>],
+    manifests: &BTreeMap<String, Manifest>,
+    dirs: &BTreeMap<String, PathBuf>,
+    before: &[crate::processes::Loaded],
+) -> Vec<crate::processes::Loaded> {
+    use crate::processes::{Loaded, Source};
+
+    let built_ins: Vec<(super::built_in::BuiltIn, Manifest)> = BUILT_INS
+        .iter()
+        .filter_map(|built_in| Some((*built_in, built_in.manifest(Platform::HERE).ok()?)))
+        .collect();
+
+    // Where a plugin's files are, and what it was granted.
+    let source = |uuid: &str| -> Option<(Source, &Manifest)> {
+        if let (Some(manifest), Some(dir)) = (manifests.get(uuid), dirs.get(uuid)) {
+            return Some((Source::Dir(dir.clone()), manifest));
+        }
+        built_ins
+            .iter()
+            .find(|(_, manifest)| manifest.uuid == uuid)
+            .map(|(built_in, manifest)| (Source::BuiltIn(*built_in), manifest))
+    };
+
+    let mut held = Vec::new();
+
+    for record in records {
+        let Some(manifest) = manifests.get(&record.uuid) else {
+            if !record.fields.enabled {
+                held.extend(
+                    before
+                        .iter()
+                        .filter(|loaded| loaded.plugin == record.uuid)
+                        .map(|loaded| Loaded {
+                            offered: false,
+                            ..loaded.clone()
+                        }),
+                );
+            }
+            continue;
+        };
+
+        held.extend(
+            reaching(manifest, &source)
+                .into_iter()
+                .map(|(process, activities)| Loaded {
+                    plugin: record.uuid.clone(),
+                    process,
+                    offered: true,
+                    activities,
+                }),
+        );
+    }
+    held
+}
+
+/// Each of `manifest`'s Processes with every Activity its states run, found
+/// in the plugin itself and then each dependency in the order written, where
+/// `source` says where a plugin's files are. A Process naming an Activity
+/// nothing reached provides is left out: the can't-reach check refuses one,
+/// so that is only ever a plugin it took out already.
+pub(crate) fn reaching<'a>(
+    manifest: &'a Manifest,
+    source: &impl Fn(&str) -> Option<(crate::processes::Source, &'a Manifest)>,
+) -> Vec<(
+    super::manifest::process::Process,
+    Vec<crate::processes::Provided>,
+)> {
+    use crate::processes::{Provided, Source};
+
+    let reached: Vec<(Source, &Manifest)> = std::iter::once(manifest.uuid.as_str())
+        .chain(
+            manifest
+                .dependencies
+                .iter()
+                .map(|dependency| dependency.uuid.as_str()),
+        )
+        .filter_map(source)
+        .collect();
+
+    let mut each = Vec::new();
+    for process in &manifest.processes {
+        let mut activities: Vec<Provided> = Vec::new();
+        let mut found = true;
+        for state in &process.states {
+            for (_, id) in state.activity.activities() {
+                if activities.iter().any(|provided| provided.activity.id == id) {
+                    continue;
+                }
+                match reached.iter().find_map(|(source, theirs)| {
+                    theirs
+                        .activities
+                        .iter()
+                        .find(|activity| activity.id == id)
+                        .map(|activity| (source, theirs, activity))
+                }) {
+                    Some((source, theirs, activity)) => activities.push(Provided {
+                        activity: activity.clone(),
+                        files: source.clone(),
+                        capabilities: theirs.capabilities.clone(),
+                    }),
+                    None => found = false,
+                }
+            }
+        }
+
+        if found {
+            each.push((process.clone(), activities));
+        }
+    }
+    each
+}
+
+/// Whether two holdings of the Processes say anything different: which are
+/// held, and which offered.
+fn processes_differ(
+    before: &[crate::processes::Loaded],
+    after: &[crate::processes::Loaded],
+) -> bool {
+    let key = |loaded: &crate::processes::Loaded| {
+        (
+            loaded.plugin.clone(),
+            loaded.process.clone(),
+            loaded.offered,
+        )
+    };
+    before.iter().map(key).ne(after.iter().map(key))
 }
 
 /// The harness `manifest` declares, stood up with its mark read out of `dir`
@@ -508,11 +701,13 @@ fn resolved(
     }
 }
 
-/// Every plugin in `loaded` with an Activity launching a skill from a pack
-/// that neither it nor any of its dependencies provides, and why, naming the
-/// skill (Set 1771, Q1). The manifest reader has refused what it could know
-/// alone — the plugin's own packs, a built-in's — and this is the rest: a pack
-/// of an installed dependency, known once that dependency has loaded.
+/// Every plugin in `loaded` that names what neither it nor any of its
+/// dependencies provides, and why, naming it (Set 1771, Q1): an Activity
+/// launching a skill from a pack it can't reach, or a Process whose state runs
+/// such an Activity, names such a skill in its options, or leaves an Outcome
+/// of an Activity unmapped. The manifest reader has refused what it could know
+/// alone — the plugin's own, a built-in's — and this is the rest: what an
+/// installed dependency provides, known once that dependency has loaded.
 fn unreached(loaded: &BTreeMap<String, Manifest>) -> Vec<(String, String)> {
     let built_ins: Vec<Manifest> = BUILT_INS
         .iter()
@@ -522,40 +717,71 @@ fn unreached(loaded: &BTreeMap<String, Manifest>) -> Vec<(String, String)> {
     loaded
         .iter()
         .filter_map(|(uuid, manifest)| {
-            let reachable: Vec<&super::manifest::Pack> = manifest
-                .packs
-                .iter()
-                .chain(manifest.dependencies.iter().flat_map(|dependency| {
-                    loaded
-                        .get(&dependency.uuid)
-                        .into_iter()
-                        .chain(
-                            built_ins
-                                .iter()
-                                .filter(|built_in| built_in.uuid == dependency.uuid),
-                        )
-                        .flat_map(|theirs| theirs.packs.iter())
+            // The plugin itself, then each dependency in the order written.
+            let reached: Vec<&Manifest> = std::iter::once(manifest)
+                .chain(manifest.dependencies.iter().filter_map(|dependency| {
+                    loaded.get(&dependency.uuid).or_else(|| {
+                        built_ins
+                            .iter()
+                            .find(|built_in| built_in.uuid == dependency.uuid)
+                    })
                 }))
                 .collect();
-
-            manifest.activities.iter().find_map(|activity| {
-                activity.skills.iter().find_map(|skill| {
-                    let (pack, name) = skill.split_once('/')?;
-                    let held = reachable.iter().any(|reached| {
+            let held = |skill: &str| {
+                let Some((pack, name)) = skill.split_once('/') else {
+                    return true;
+                };
+                reached
+                    .iter()
+                    .flat_map(|theirs| theirs.packs.iter())
+                    .any(|reached| {
                         reached.name == pack && reached.skills.iter().any(|known| known == name)
+                    })
+            };
+
+            let activity =
+                manifest.activities.iter().find_map(|activity| {
+                    activity.skills.iter().find(|skill| !held(skill)).map(|skill| {
+                    format!(
+                        "Its activity {} launches `{skill}`, and neither it nor a plugin it \
+                         depends on provides that skill.",
+                        activity.name
+                    )
+                })
+                });
+            let process = || {
+                manifest.processes.iter().find_map(|process| {
+                    let skill = process.states.iter().find_map(|state| {
+                        state
+                            .options
+                            .iter()
+                            .find(|(key, skill)| key == "skill" && !held(skill))
+                            .map(|(_, skill)| {
+                                format!(
+                                    "Its process {} launches `{skill}` in its state `{}`, and \
+                                     neither it nor a plugin it depends on provides that skill.",
+                                    process.name, state.id
+                                )
+                            })
                     });
-                    (!held).then(|| {
-                        (
-                            uuid.clone(),
-                            format!(
-                                "Its activity {} launches `{skill}`, and neither it nor a \
-                                 plugin it depends on provides that skill.",
-                                activity.name
-                            ),
-                        )
+                    skill.or_else(|| {
+                        process
+                            .checked(|id| {
+                                reached
+                                    .iter()
+                                    .find_map(|theirs| {
+                                        theirs.activities.iter().find(|activity| activity.id == id)
+                                    })
+                                    .map_or(Found::Unreachable, |activity| {
+                                        Found::Known(activity.clone())
+                                    })
+                            })
+                            .err()
+                            .map(|refusal| refusal.why)
                     })
                 })
-            })
+            };
+            activity.or_else(process).map(|why| (uuid.clone(), why))
         })
         .collect()
 }
@@ -800,6 +1026,16 @@ fn activities(manifest: &Manifest) -> Vec<String> {
         .collect()
 }
 
+/// The drawn names of the Processes a manifest provides, in the order
+/// written.
+fn processes(manifest: &Manifest) -> Vec<String> {
+    manifest
+        .processes
+        .iter()
+        .map(|process| process.name.clone())
+        .collect()
+}
+
 fn consent(manifest: &Manifest) -> PluginConsent {
     PluginConsent {
         uuid: manifest.uuid.clone(),
@@ -810,6 +1046,7 @@ fn consent(manifest: &Manifest) -> PluginConsent {
         description: manifest.description.clone(),
         provides: provides(manifest),
         activities: activities(manifest),
+        processes: processes(manifest),
         capabilities: capabilities(manifest),
     }
 }
@@ -825,6 +1062,7 @@ fn fields(manifest: &Manifest, source: Source, enabled: bool) -> Fields {
         author: manifest.author.name.clone(),
         provides: provides(manifest),
         activities: activities(manifest),
+        processes: processes(manifest),
         dependencies: manifest
             .dependencies
             .iter()
@@ -929,6 +1167,7 @@ pub(crate) fn installer_fields(
         author: String::new(),
         provides: vec![super::manifest::Category::Language.word().to_owned()],
         activities: Vec::new(),
+        processes: Vec::new(),
         dependencies: Vec::new(),
         declared,
         values: kept.map(|kept| kept.values.clone()).unwrap_or_default(),
@@ -1032,6 +1271,7 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
                 settings: u32::try_from(fields.declared.len()).unwrap_or(u32::MAX),
                 languages: vec![fields.name.clone()],
                 activities: Vec::new(),
+                processes: Vec::new(),
                 uuid,
                 name: fields.name,
                 version: fields.version,
@@ -1117,6 +1357,7 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
                     })
                     .collect(),
                 activities: record.fields.activities,
+                processes: record.fields.processes,
                 enabled: record.fields.enabled,
             }
         })
@@ -1152,6 +1393,7 @@ fn built_ins(
                 provides: provides(&manifest),
                 languages: languages(&manifest),
                 activities: activities(&manifest),
+                processes: processes(&manifest),
                 source: PluginSource::BuiltIn,
                 enabled: !built_in::switched(&manifest)
                     || records
@@ -1180,6 +1422,7 @@ fn built_ins(
                 provides: Vec::new(),
                 languages: Vec::new(),
                 activities: Vec::new(),
+                processes: Vec::new(),
                 source: PluginSource::BuiltIn,
                 enabled: true,
                 trouble: Some(refusal.why),

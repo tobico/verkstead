@@ -94,17 +94,17 @@ use std::path::PathBuf;
 use sqlx::SqlitePool;
 use verkstead_store::replicated::{Record, merge, records};
 use verkstead_store::{
-    Account, Binding, Bindings, Clash, Commit, Decision, Event, Finished, Lifecycle, Merging,
-    Minted, Pairing, ProfileFacts, ProfileRecord, Profiles, PullRequest, RanUnder, RoadmapStage,
-    Rollup, Saving, StageOf, Standing, WaitingOn, asked_to_stop, binding_uuid, check_rollup,
-    clear_stop, commit_repo, conflict_fix_attempts, conversations, create_profile, finish_wrap_up,
+    Account, Binding, Bindings, Clash, Commit, Decision, Event, Finished, Merging, Minted, Pairing,
+    ProfileFacts, ProfileRecord, Profiles, PullRequest, RanUnder, RoadmapStage, Rollup, Saving,
+    StageOf, Standing, State, WaitingOn, asked_to_stop, binding_uuid, check_rollup, clear_stop,
+    commit_repo, conflict_fix_attempts, conversations, create_profile, finish_wrap_up,
     fix_attempts, load_conversation, load_profile, merging, open_database, open_pending_steer,
     pending_steer, profiles, pull_request, pull_request_repo, pull_requests,
     record_another_pull_request, record_check_rollup, record_commit, record_conflict_fix_attempt,
     record_fix_attempt, recorded_commits, register_repo, renumbered_profiles, save_brief,
     save_pending_steer, settle_wrap_up, stack, stage_roadmap, stamp_the_profiles, standing,
-    start_capture, start_conversation, start_grilling, start_stage, start_unnamed_conversation,
-    stop, stopped, timeline, update_profile, wrap_up_settled,
+    start_capture, start_conversation, start_in, start_stage, start_unnamed_conversation, stop,
+    stopped, timeline, update_profile, wrap_up_settled,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -129,9 +129,10 @@ async fn before(dir: &Path) -> (SqlitePool, i64) {
         .unwrap()
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/data/worktrees/verkstead-rate-limiting"),
         &[],
@@ -462,9 +463,10 @@ async fn beside(dir: &Path) -> (SqlitePool, i64) {
         .unwrap()
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/data/worktrees/verkstead-rate-limiting"),
         &[],
@@ -746,7 +748,7 @@ async fn a_stop_read_across_is_not_read_across_twice() {
 }
 
 /// The states a Conversation's moves say it went through, in Timeline order.
-async fn moves(pool: &SqlitePool, id: i64) -> Vec<Lifecycle> {
+async fn moves(pool: &SqlitePool, id: i64) -> Vec<State> {
     timeline(pool, id)
         .await
         .unwrap()
@@ -791,11 +793,11 @@ async fn a_conversation_that_was_aborted_reads_as_closed() {
 
     assert_eq!(
         load_conversation(&pool, id).await.unwrap().unwrap().state,
-        Lifecycle::Closed,
+        State::closed(),
     );
     assert_eq!(
         moves(&pool, id).await,
-        [Lifecycle::Grilling, Lifecycle::Closed]
+        [State::named("grilling"), State::closed()]
     );
 
     let (stored,): (String,) = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
@@ -870,7 +872,7 @@ async fn the_old_word_is_still_a_state_this_verkstead_can_read() {
 
     assert_eq!(
         load_conversation(&pool, id).await.unwrap().unwrap().state,
-        Lifecycle::Closed,
+        State::closed(),
     );
 }
 
@@ -1546,9 +1548,10 @@ async fn wrap_up_of_before(dir: &Path) -> (i64, i64) {
         .unwrap()
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         Path::new("/state/worktrees/rate-limiting"),
         &[],
@@ -1572,6 +1575,7 @@ async fn wrap_up_of_before(dir: &Path) -> (i64, i64) {
             base: None,
             repo: None,
         },
+        &State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -1791,7 +1795,9 @@ async fn every_settled_suite_of_before_is_the_conversations_own_pull_requests() 
     // either, and *not asked* is not *conflicted* — so the wrap-up waits for the
     // answer the watcher brings a poll after the server comes up.
     assert_eq!(
-        finish_wrap_up(&pool, id).await.unwrap(),
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
         Finished::StillWaiting,
     );
 
@@ -1806,7 +1812,12 @@ async fn every_settled_suite_of_before_is_the_conversations_own_pull_requests() 
     .await
     .unwrap();
 
-    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+    assert_eq!(
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
+        Finished::Done
+    );
 
     pool.close().await;
 
@@ -1861,9 +1872,10 @@ async fn wrap_up_bookkeeping_of_before(dir: &Path) -> (i64, i64, i64) {
         .unwrap()
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         Path::new("/state/worktrees/rate-limiting"),
         &[],
@@ -1887,6 +1899,7 @@ async fn wrap_up_bookkeeping_of_before(dir: &Path) -> (i64, i64, i64) {
             base: None,
             repo: None,
         },
+        &State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -2052,7 +2065,9 @@ async fn a_wrap_up_of_before_is_still_waiting_on_what_it_was() {
     // Which leaves the wrap-up one thing short of over, exactly as it was: what
     // was said on the companion's pull request, and whether GitHub can merge it.
     assert_eq!(
-        finish_wrap_up(&pool, id).await.unwrap(),
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
         Finished::StillWaiting,
     );
 
@@ -2069,7 +2084,12 @@ async fn a_wrap_up_of_before_is_still_waiting_on_what_it_was() {
         settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
 
-    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+    assert_eq!(
+        finish_wrap_up(&pool, id, &State::named("wrapping"))
+            .await
+            .unwrap(),
+        Finished::Done
+    );
 }
 
 /// And the rule the rebuilt tables carry is the new one: a second pull request of
@@ -2155,14 +2175,15 @@ async fn the_rebuilt_wrap_up_tables_hold_a_stack_and_are_rewritten_once() {
     );
 }
 
-/// A Conversation written before there was a Review role opens with the column
-/// that holds one, unchosen.
+/// A Conversation whose Pairings were columns opens with them rows of
+/// `conversation_pairings`, keyed by the role's name — and the review role of a
+/// database from before there was one reads as unchosen.
 ///
 /// Unchosen rather than filled in from what it was built by: what such a
 /// Conversation was reviewed under was the implementation Pairing, and writing
 /// that in would be recording a choice nobody made.
 #[tokio::test]
-async fn a_conversation_from_before_the_review_role_opens_with_it_unchosen() {
+async fn pairings_that_were_columns_open_as_rows_keyed_by_the_roles_name() {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
@@ -2179,12 +2200,45 @@ async fn a_conversation_from_before_the_review_role_opens_with_it_unchosen() {
         .unwrap()
         .unwrap();
 
-    // The column off, which is the whole of what says this database is one from
-    // before: nothing else about such a Conversation is any different.
-    sqlx::query("ALTER TABLE conversations DROP COLUMN review_profile_id")
-        .execute(&pool)
-        .await
-        .unwrap();
+    let profile = create_profile(
+        &pool,
+        &ProfileFacts {
+            name: Some("fable".to_owned()),
+            account: Account::claude(
+                PathBuf::from("/watched/accounts/fable/.claude"),
+                PathBuf::from("/watched/accounts/fable/.claude.json"),
+            ),
+            models: vec!["claude-fable-5".to_owned()],
+            memory: true,
+        },
+    )
+    .await
+    .unwrap()
+    .expect("a Profile to be paired with");
+
+    // The two columns the Pairings lived in, back on the table with the
+    // review's one absent and the rows gone, which is the whole of what says
+    // this database is one from before: nothing else about such a Conversation
+    // is any different.
+    for statement in [
+        "DELETE FROM conversation_pairings",
+        "ALTER TABLE conversations ADD COLUMN grilling_profile_id TEXT",
+        "ALTER TABLE conversations ADD COLUMN implementation_profile_id TEXT",
+    ] {
+        sqlx::query(statement).execute(&pool).await.unwrap();
+    }
+
+    sqlx::query(
+        "UPDATE conversations
+         SET grilling_profile_id = ?, implementation_profile_id = ?
+         WHERE id = ?",
+    )
+    .bind(&profile.id)
+    .bind(&profile.id)
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     pool.close().await;
 
@@ -2197,27 +2251,49 @@ async fn a_conversation_from_before_the_review_role_opens_with_it_unchosen() {
         .unwrap()
         .expect("it opens, which is most of what this is about");
 
+    for role in [
+        verkstead_store::Role::grilling(),
+        verkstead_store::Role::implementation(),
+    ] {
+        assert_eq!(
+            conversation
+                .pairings
+                .under(&role)
+                .map(|pairing| pairing.profile.id.clone()),
+            Some(profile.id.clone()),
+            "the column's Profile reads back under the role's name",
+        );
+    }
+
     assert!(
-        !conversation.review_pairing.picked(),
+        !conversation
+            .pairings
+            .of(&verkstead_store::Role::review())
+            .picked(),
         "and the picker it arrives with is the one a Conversation with no memory gets",
     );
 
     pool.close().await;
 
     // And a database opened twice is rewritten once: the second run finds the
-    // column there and leaves it alone.
+    // columns gone and leaves the rows alone.
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
 
-    assert!(
-        !load_conversation(&pool, id)
-            .await
-            .unwrap()
-            .expect("it opens again")
-            .review_pairing
-            .picked()
+    let again = load_conversation(&pool, id)
+        .await
+        .unwrap()
+        .expect("it opens again");
+
+    assert_eq!(
+        again
+            .pairings
+            .under(&verkstead_store::Role::grilling())
+            .map(|pairing| pairing.profile.id.clone()),
+        Some(profile.id.clone()),
     );
+    assert!(!again.pairings.of(&verkstead_store::Role::review()).picked());
 }
 
 /// A Conversation written before a branch name had an owner keeps the name it
@@ -2298,9 +2374,10 @@ async fn a_conversation_from_before_the_base_branch_was_kept_records_none() {
         .unwrap()
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         Path::new("/data/worktrees/rate-limiting"),
         &[],
@@ -2444,9 +2521,10 @@ async fn a_conversation_from_before_the_naming_instruction_is_waiting_on_nobody(
         .unwrap()
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         Path::new("/data/worktrees/brave-otter"),
         &[],
@@ -3249,7 +3327,7 @@ async fn a_half_written_steer_from_before_investigating_has_no_question_on_it() 
         &pool,
         id,
         &verkstead_store::PendingForm {
-            target: Some(Lifecycle::FollowUp),
+            target: Some(State::named("follow-up")),
             follow_up: Some("Does it count the 429s it sends?".to_owned()),
             ..verkstead_store::PendingForm::default()
         },
@@ -3285,7 +3363,7 @@ async fn a_half_written_steer_from_before_investigating_has_no_question_on_it() 
             Some("Does it count the 429s it sends?"),
             "and what they had written is where they left it",
         );
-        assert_eq!(form.target, Some(Lifecycle::FollowUp));
+        assert_eq!(form.target, Some(State::named("follow-up")));
 
         pool.close().await;
     }
@@ -3491,6 +3569,7 @@ async fn a_stage_recorded_before_the_label_keeps_its_roadmap_and_no_stage() {
     start_stage(
         &pool,
         id,
+        &State::named("implementing"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/data/worktrees/verkstead-stage"),
         Some("roadmaps/mvp/04-implementation"),
@@ -3560,9 +3639,10 @@ async fn profiles_numbered_before_uuids(dir: &Path) -> (i64, i64) {
         .unwrap()
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/data/worktrees/verkstead-rate-limiting"),
         &[],
@@ -3609,12 +3689,10 @@ async fn profiles_numbered_before_uuids(dir: &Path) -> (i64, i64) {
              model      TEXT NOT NULL,
              PRIMARY KEY (repo_id, role)
          ) STRICT",
-        "ALTER TABLE conversations DROP COLUMN grilling_profile_id",
+        "DELETE FROM conversation_pairings",
         "ALTER TABLE conversations ADD COLUMN grilling_profile_id INTEGER REFERENCES profiles(id)",
-        "ALTER TABLE conversations DROP COLUMN implementation_profile_id",
         "ALTER TABLE conversations ADD COLUMN implementation_profile_id INTEGER \
          REFERENCES profiles(id)",
-        "ALTER TABLE conversations DROP COLUMN review_profile_id",
         "ALTER TABLE conversations ADD COLUMN review_profile_id INTEGER REFERENCES profiles(id)",
         "ALTER TABLE conversations DROP COLUMN stopped_signed_out",
         "ALTER TABLE conversations ADD COLUMN stopped_signed_out INTEGER",
@@ -3783,23 +3861,34 @@ async fn the_profiles_of_before_the_uuids_are_named_by_one_everywhere() {
         let model = Some("claude-fable-5".to_owned());
 
         assert_eq!(
-            named(conversation.grilling_pairing.as_ref()),
+            named(
+                conversation
+                    .pairings
+                    .under(&verkstead_store::Role::grilling())
+                    .as_ref()
+            ),
             Some((ours.id.clone(), model.clone())),
             "the grilling Pairing: {opening}",
         );
-        let (implementation,): (Option<String>,) =
-            sqlx::query_as("SELECT implementation_profile_id FROM conversations WHERE id = ?")
-                .bind(id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let (implementation,): (String,) = sqlx::query_as(
+            "SELECT profile_id FROM conversation_pairings
+             WHERE conversation_id = ? AND role = 'implementation'",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(
-            implementation.as_ref(),
-            Some(&theirs),
+            implementation, theirs,
             "the implementation Pairing still names the mirror: {opening}",
         );
         assert_eq!(
-            named(conversation.review_pairing.pairing()),
+            named(
+                conversation
+                    .pairings
+                    .under(&verkstead_store::Role::review())
+                    .as_ref()
+            ),
             Some((ours.id.clone(), model.clone())),
             "the review Pairing: {opening}",
         );
@@ -3947,12 +4036,15 @@ async fn a_mirror_under_its_homes_uuid_is_written_down_as_a_record() {
         .await
         .unwrap()
         .unwrap();
-    sqlx::query("UPDATE conversations SET grilling_profile_id = ? WHERE id = ?")
-        .bind(theirs)
-        .bind(id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "INSERT INTO conversation_pairings (conversation_id, role, profile_id)
+         VALUES (?, 'grilling', ?)",
+    )
+    .bind(id)
+    .bind(theirs)
+    .execute(&pool)
+    .await
+    .unwrap();
     sqlx::query(
         "INSERT INTO pairing_models (conversation_id, role, model)
          VALUES (?, 'grilling', 'claude-opus-5')",
@@ -4007,7 +4099,8 @@ async fn a_mirror_under_its_homes_uuid_is_written_down_as_a_record() {
                 .await
                 .unwrap()
                 .unwrap()
-                .grilling_pairing
+                .pairings
+                .under(&verkstead_store::Role::grilling())
                 .map(|pairing| pairing.profile.id),
             Some(theirs.to_owned()),
             "the Pairing that named the mirror draws the record: {opening}",

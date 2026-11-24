@@ -275,9 +275,10 @@ async fn everything(pool: &SqlitePool) -> i64 {
     .unwrap()
     .unwrap();
 
-    store::start_grilling(
+    store::start_in(
         pool,
         id,
+        &store::State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-sharing"),
         &[],
@@ -293,7 +294,14 @@ async fn everything(pool: &SqlitePool) -> i64 {
         .await
         .unwrap();
     store::record_backlog(pool, id).await.unwrap();
-    store::start_implementing(pool, id).await.unwrap();
+    store::transition(
+        pool,
+        id,
+        &store::State::named("grilling"),
+        &store::State::named("implementing"),
+    )
+    .await
+    .unwrap();
 
     store::record_commit(
         pool,
@@ -326,6 +334,7 @@ async fn everything(pool: &SqlitePool) -> i64 {
             base: None,
             repo: None,
         },
+        &store::State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -350,7 +359,9 @@ async fn everything(pool: &SqlitePool) -> i64 {
         pool,
         id,
         verkstead_store::Steer {
-            target: store::Lifecycle::Implementing,
+            target: store::State::named("implementing"),
+            opens_a_round: false,
+            wraps_up: false,
             pairings: &[],
             brief: None,
             instruction: Some("Take the diffs out of the bundle and see what it weighs."),
@@ -600,10 +611,7 @@ async fn a_share_has_nothing_left_on_it_to_act_on() {
     // which repository it was done in.
     assert_eq!(conversation.branch, "sharing");
     assert_eq!(conversation.repo.name, "verkstead");
-    assert_eq!(
-        conversation.state,
-        verkstead_render::Lifecycle::Implementing
-    );
+    assert_eq!(conversation.state, "implementing");
 
     // And the moment it was taken, which is what makes it a snapshot rather
     // than a window.
@@ -670,9 +678,10 @@ async fn a_share_says_nothing_about_the_machine_it_was_taken_on() {
 
     // And the checkouts, which is what puts a path on the Conversation and on
     // the companion beside it.
-    store::start_grilling(
+    store::start_in(
         &pool,
         id,
+        &store::State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         &dir.path().join("worktrees/verkstead-sharing"),
         &[store::CompanionWorktree {
@@ -704,10 +713,10 @@ async fn a_share_says_nothing_about_the_machine_it_was_taken_on() {
     assert_eq!(companions[0].repo.path, "");
 
     // And which account wrote it.
-    assert_eq!(conversation.grilling_pairing, None);
-    assert!(conversation.implementation_pairing.is_none());
+    assert_eq!(conversation.under("grilling"), None);
+    assert!(conversation.under("implementation").is_none());
     assert_eq!(
-        conversation.review_pairing,
+        conversation.paired("review"),
         verkstead_render::PickedView::Nothing,
     );
 
@@ -1678,7 +1687,7 @@ async fn a_pending_steer_never_boards_a_share() {
         &pool,
         id,
         &store::PendingForm {
-            target: Some(store::Lifecycle::Implementing),
+            target: Some(store::State::named("implementing")),
             instruction: Some("Take the counter out of the process".to_owned()),
             ..store::PendingForm::default()
         },
@@ -1743,7 +1752,9 @@ async fn a_steer_that_boards_carries_no_path_to_the_account_it_picked() {
         &pool,
         id,
         verkstead_store::Steer {
-            target: store::Lifecycle::Wrapping,
+            target: store::State::named("wrapping"),
+            opens_a_round: false,
+            wraps_up: false,
             pairings: &[],
             brief: None,
             instruction: None,

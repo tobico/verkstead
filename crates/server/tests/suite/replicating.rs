@@ -1502,7 +1502,7 @@ async fn a_repo_with_a_live_conversation_refuses_repointing_them_all_and_the_aut
         .await
         .unwrap()
         .unwrap();
-    verkstead_store::set_state(&a.pool, going, verkstead_store::Lifecycle::Grilling)
+    verkstead_store::set_state(&a.pool, going, verkstead_store::State::named("grilling"))
         .await
         .unwrap();
 

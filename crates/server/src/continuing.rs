@@ -763,7 +763,11 @@ async fn start(
     // Every Profile is the predecessor's: a stage is the same work by the same
     // hands, one branch further on. The implementation one is what the session
     // runs under, and without it there is nothing to run.
-    if conversation.implementation_pairing.is_none() {
+    if conversation
+        .pairings
+        .under(&store::Role::implementation())
+        .is_none()
+    {
         return halting(
             state,
             brought,
@@ -1108,9 +1112,14 @@ async fn start(
         }
     };
 
+    // Where a stage lands is its Process's to say: the state its manifest maps
+    // the task-list Direction to, a stage being worked as a backlog.
+    let building = crate::processes::staging(state, id).await;
+
     match store::start_stage(
         &state.pool,
         id,
+        &building,
         store::Base {
             commit: &commit,
             named: Some(&from),
@@ -1837,7 +1846,7 @@ pub(crate) async fn settle(
     // — a roadmap Conversation started before *No grilling* retired can be
     // carrying a skip, and a stage of it is grilled by an account or by nobody
     // it could have inherited.
-    if let Some(grilling) = &conversation.grilling_pairing {
+    if let Some(grilling) = &conversation.pairings.under(&store::Role::grilling()) {
         store::set_grilling_pairing(
             &state.pool,
             id,
@@ -1847,7 +1856,7 @@ pub(crate) async fn settle(
         .await?;
     }
 
-    if let Some(implementation) = &conversation.implementation_pairing {
+    if let Some(implementation) = &conversation.pairings.under(&store::Role::implementation()) {
         store::set_implementation_pairing(
             &state.pool,
             id,
@@ -1857,7 +1866,7 @@ pub(crate) async fn settle(
         .await?;
     }
 
-    match &conversation.review_pairing {
+    match &conversation.pairings.of(&store::Role::review()) {
         store::Picked::Nothing => {}
         store::Picked::Skipped => {
             store::skip_review(&state.pool, id).await?;

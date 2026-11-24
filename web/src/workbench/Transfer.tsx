@@ -56,7 +56,6 @@ import type {
   ClonableRepo,
   ConversationView,
   Lacking,
-  PairingRole,
   Preflight,
   Transferring,
 } from "../api/types";
@@ -83,18 +82,6 @@ const REFUSAL: Record<string, string> = {
     "The work has already moved to another device. Transfer it again from " +
     "there.",
   NoSuchConversation: "This conversation is gone.",
-};
-
-/// What each of a Conversation's three roles is called, which is what a missing
-/// harness is named against.
-///
-/// The words the pickers on the setup row are labelled with, because those are
-/// the controls the human would go and change — see `PairingPicker` in
-/// `Setup.tsx`.
-const ROLE_NAME: Record<PairingRole, string> = {
-  Grilling: "Grilling",
-  Implementation: "Implementation",
-  Review: "Review",
 };
 
 /// One finding of the preflight, said.
@@ -153,6 +140,16 @@ function lacking(
     );
   }
 
+  if ("Process" in said) {
+    return (
+      <>
+        No plugin on {device} provides the {said.Process.name} process, so
+        nothing there could drive this conversation. Install it there to move the
+        work.
+      </>
+    );
+  }
+
   if ("RepoAuthorUnpicked" in said) {
     return (
       <>
@@ -165,7 +162,7 @@ function lacking(
     );
   }
 
-  return `${ROLE_NAME[said.Harness.role]} is paired with ${
+  return `${said.Harness.role} is paired with ${
     said.Harness.profile ?? DEFAULT_PROFILE
   }, which runs ${harnessName(said.Harness.agent_type)}. ${harnessAbsentOn(
     said.Harness.agent_type,

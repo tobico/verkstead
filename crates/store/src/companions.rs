@@ -44,7 +44,7 @@ pub enum CompanionMode {
 }
 
 impl CompanionMode {
-    /// The word the column holds. Spelled out for the reason a Lifecycle's is:
+    /// The word the column holds. Spelled out for the reason a state's is:
     /// the table should read as something rather than as a number nobody can
     /// look up.
     pub(crate) fn stored(self) -> &'static str {

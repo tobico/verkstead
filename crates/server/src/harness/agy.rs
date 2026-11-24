@@ -355,10 +355,10 @@ impl Harness for Agy {
 
     /// Gemini 3.8 Flash at two of its three thinking levels, high for the
     /// grilling and medium for the rest — see [`crate::pairing_defaults`].
-    fn model(&self, role: store::Role) -> &str {
-        match role {
-            store::Role::Grilling => "gemini-3.8-flash-high",
-            store::Role::Implementation | store::Role::Review => "gemini-3.8-flash-medium",
+    fn model(&self, role: &store::Role) -> &str {
+        match role.stored() {
+            store::Role::GRILLING => "gemini-3.8-flash-high",
+            _ => "gemini-3.8-flash-medium",
         }
     }
 

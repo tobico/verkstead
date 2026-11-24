@@ -83,8 +83,9 @@ describe("a row", () => {
     const row = await theRow("GitLab");
 
     expect(row.textContent).toContain("1.4.0 · Ada Lovelace");
-    expect(row.textContent).toContain("Provides forge, process, activity.");
+    expect(row.textContent).toContain("Provides forge, activity, process.");
     expect(row.textContent).toContain("Its activity is Review rounds.");
+    expect(row.textContent).toContain("Its process is Review watch.");
     expect(row.textContent).toContain("/home/you/src/gitlab");
     expect(row.querySelector("input[type=checkbox]")).toHaveProperty(
       "checked",
@@ -126,7 +127,7 @@ describe("a row", () => {
     const row = await theRow("Shared skills");
 
     expect(row.textContent).toContain(
-      "file:///home/you/src/sources/skills at d9327cd",
+      "file:///home/you/src/sources/skills at 0b45903",
     );
     expect(row.textContent).toContain("Update");
   });
@@ -235,12 +236,17 @@ describe("the Built-in group", () => {
       "Verkstead",
       "Activities",
       "Codex",
+      "Develop",
       ".NET",
+      "Fix merge issues",
       "Go",
+      "Investigate",
       "JVM",
       "Node",
       "Python",
+      "Review",
       "Rust & C/C++",
+      "Tinker",
     ]);
   });
 });
@@ -269,6 +275,39 @@ describe("Codex's row", () => {
         ),
       ).toBe(true),
     );
+  });
+});
+
+describe("a Process plugin's row", () => {
+  /// A built-in Process plugin: its process by name, ticked, and the tick is
+  /// the one switch for whether the picker offers Develop at all. The server
+  /// takes the press — `plugins::built_in::switched` counts a manifest's
+  /// processes — so the row has to draw it.
+  it("has a tick that presses, and says its process", async () => {
+    const develop = PLUGINS.built_in.find((row) => row.name === "Develop")!;
+    const fetching = serving(
+      whenever("/api/ui/plugins", json(PLUGINS)),
+      whenever(
+        `/api/ui/plugins/${develop.uuid}/enabled`,
+        json(PLUGINS),
+        "POST",
+      ),
+    );
+    pane();
+
+    const row = await theRow("Develop");
+    expect(row.textContent).toContain("Its process is Develop.");
+    const tick = row.querySelector("input[type=checkbox]") as HTMLInputElement;
+    expect(tick.checked).toBe(true);
+
+    fireEvent.click(tick);
+    await waitFor(() => {
+      const press = fetching.mock.calls.find(([asked]) =>
+        String(asked).endsWith(`/plugins/${develop.uuid}/enabled`),
+      );
+      expect(press).toBeDefined();
+      expect(JSON.parse(String(press![1]!.body))).toEqual({ enabled: false });
+    });
   });
 });
 

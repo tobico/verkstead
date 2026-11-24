@@ -57,7 +57,8 @@ import * as pairing from "../pairing";
 import { authorLabel, useAuthors } from "../authors";
 import styles from "./Brief.module.css";
 import { chosen } from "./naming";
-import { PROCESS, ROLE, uses } from "./processes";
+import { away } from "./roles";
+import { processName } from "./provided";
 import { PaneHead } from "./PaneHead";
 import { ABBREVIATED } from "./Timeline";
 
@@ -197,7 +198,9 @@ function Configuration(props: {
             because a Process is a fact about the work rather than about the
             machine it was worked on — so a share says it, as it says the three
             around it. */}
-        <Fact term="Process">{PROCESS[props.conversation.process]}</Fact>
+        <Fact term="Process">
+          {processName(props.conversation.process)}
+        </Fact>
         {/* The name where there is one, and the rule that will pick one where
             there is not — which is what a Conversation adopting a roadmap
             reads, its Brief being frozen from the start and its branch being
@@ -359,35 +362,21 @@ function Machine(props: { conversation: ConversationView }): JSX.Element {
       <Fact term="Worktree">
         <Where worktree={props.conversation.worktree} />
       </Fact>
-      {/* An account or nothing, this role having had no row that runs no
-          session since *No grilling* retired. */}
-      <Show when={uses(props.conversation.process, "grilling")}>
-        <Fact term={ROLE.grilling}>
-          <Paired
-            pairing={props.conversation.grilling_pairing}
-            saved={profiles.data}
-          />
-        </Fact>
-      </Show>
-      {/* Drawn whatever the Process is: every one of them uses this role, there
-          being no work without something building it. */}
-      <Show when={uses(props.conversation.process, "implementation")}>
-        <Fact term={ROLE.implementation}>
-          <Paired
-            pairing={props.conversation.implementation_pairing}
-            saved={profiles.data}
-          />
-        </Fact>
-      </Show>
-      <Show when={uses(props.conversation.process, "review")}>
-        <Fact term={ROLE.review}>
-          <Picked
-            picked={props.conversation.review_pairing}
-            saved={profiles.data}
-            away="No review."
-          />
-        </Fact>
-      </Show>
+      {/* One row per role the Process declares, under the label its manifest
+          gives it and in the order it writes them — so a Conversation holding a
+          pull request reads as a Review and has no *Grilling* row, the manifest
+          declaring no such role rather than this pane testing for one. */}
+      <For each={props.conversation.pairings}>
+        {(role) => (
+          <Fact term={role.label}>
+            <Picked
+              picked={role.picked}
+              saved={profiles.data}
+              away={away(role)}
+            />
+          </Fact>
+        )}
+      </For>
     </>
   );
 }
@@ -517,21 +506,24 @@ function Paired(props: {
   );
 }
 
-/// And the role that could be picked away as well as paired, which is the
-/// review.
+/// And what one role settled, which may be the row that runs no session at all
+/// where its manifest offers one.
 ///
 /// Said as the choice it was rather than as an absence: *no review* is what the
 /// human picked, and a pane that read it as "not chosen" would show a settled
-/// conversation as an unsettled one.
+/// conversation as an unsettled one. A role whose picker offers no such row has
+/// no words for it, and nothing could have settled one.
 function Picked(props: {
   picked: PickedView;
   saved: ProfileEntry[] | undefined;
-  away: string;
+  away: string | undefined;
 }): JSX.Element {
   return (
     <Show
       when={props.picked !== "Skipped"}
-      fallback={<span class={styles.rule}>{props.away}</span>}
+      fallback={
+        <span class={styles.rule}>{`${props.away ?? "Not chosen"}.`}</span>
+      }
     >
       <Paired pairing={pairing.under(props.picked)} saved={props.saved} />
     </Show>

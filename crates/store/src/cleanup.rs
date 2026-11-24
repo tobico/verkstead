@@ -206,6 +206,7 @@ const CONVERSATION_KEYED: &[&str] = &[
     "stage_roadmaps",
     "stage_joinings",
     "stage_joined_at",
+    "conversation_pairings",
     "pairing_models",
     "skipped_roles",
     "adoptions",

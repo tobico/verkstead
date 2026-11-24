@@ -24,11 +24,11 @@ use sqlx::SqlitePool;
 use verkstead_schema::Response;
 use verkstead_store::{
     Account, Addition, AdditionState, AgentType, Arrival, ArrivingPicked, Ask, Birth, Cell, Commit,
-    CompanionMode, Event, Lifecycle, Memo, ProfileFacts, Renaming, STAYS_BEHIND, Settlements,
-    Slice, Submission, add_to_set, arrive, ask, capture, carried_tables, companions,
-    create_profile, deleted_tables, insert_response, land, load_conversation, load_response,
-    queue_to_join, record_commit, register_repo, session_id, set_additions, sets_as_they_landed,
-    slice, standing_previews, start_conversation, submit_response, timeline, transcript,
+    CompanionMode, Event, Memo, ProfileFacts, Renaming, STAYS_BEHIND, Settlements, Slice, State,
+    Submission, add_to_set, arrive, ask, capture, carried_tables, companions, create_profile,
+    deleted_tables, insert_response, land, load_conversation, load_response, queue_to_join,
+    record_commit, register_repo, session_id, set_additions, sets_as_they_landed, slice,
+    standing_previews, start_conversation, submit_response, timeline, transcript,
 };
 
 use super::owning::{Worked, a_conversations_tables, fresh_pool, owning, rows};
@@ -983,15 +983,14 @@ async fn arrived(pool: &SqlitePool, repo_id: i64) -> i64 {
                 device: BORN_ON.to_owned(),
                 id: 7,
             },
+            process: Some(verkstead_store::Process::develop()),
             repo_id,
             branch: "rate-limiting".to_owned(),
             branch_named: true,
             naming: false,
-            state: Lifecycle::Implementing,
+            state: State::named("implementing"),
             rank: RANK.to_owned(),
-            grilling: ArrivingPicked::Nothing,
-            implementation: ArrivingPicked::Nothing,
-            review: ArrivingPicked::Skipped,
+            pairings: vec![(verkstead_store::Role::review(), ArrivingPicked::Skipped)],
         },
     )
     .await

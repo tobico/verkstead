@@ -395,7 +395,7 @@ pub(crate) trait Harness: Send + Sync {
 
     /// The model a default Pairing on this harness runs for `role` — see
     /// [`crate::pairing_defaults`].
-    fn model(&self, role: store::Role) -> &str;
+    fn model(&self, role: &store::Role) -> &str;
 
     /// The models a Profile of it is offered, each by its id and the name a
     /// human reads instead, in the order the form offers them.

@@ -43,7 +43,7 @@ use crate::AppState;
 use crate::memos::Building;
 use crate::reply::yaml;
 use crate::runner::Landing;
-use crate::store::{self, Lifecycle};
+use crate::store;
 
 /// What each Conversation's running session is being seen out for, where a
 /// driver is seeing one out on the Done signal.
@@ -123,26 +123,24 @@ pub(crate) enum Evidence {
 }
 
 impl Evidence {
-    /// Which state's Nothing-else mark bears a signal of this kind out, and what
-    /// one given without it is refused with — or `None` where what says the work
-    /// is done is on the branch rather than in the human's hands.
+    /// What a signal of this kind is refused with where the human has not said
+    /// there is nothing else — or `None` where what says the work is done is on
+    /// the branch rather than in their hands.
     ///
     /// Two kinds are the human's to end and each is refused in its own words: a
     /// follow-up is not over, and an investigation has more to find out. The
     /// mechanism is one and the sentences are two, because an agent acts on the
     /// sentence.
-    fn mark(&self) -> Option<(Lifecycle, &'static str)> {
+    fn unmarked(&self) -> Option<&'static str> {
         match self {
-            Evidence::NothingElse => Some((
-                Lifecycle::FollowUp,
+            Evidence::NothingElse => Some(
                 "the human has not said there is nothing else, so this follow-up is not over: \
                  put the next round to them as a Set with `verkstead ask`",
-            )),
-            Evidence::Investigated => Some((
-                Lifecycle::Investigating,
+            ),
+            Evidence::Investigated => Some(
                 "the human has not said there is nothing else, so there is more they want found \
                  out: put the next round to them as a Set with `verkstead ask`",
-            )),
+            ),
             Evidence::Landed { .. } | Evidence::Committed { .. } | Evidence::Nothing => None,
         }
     }
@@ -349,8 +347,8 @@ async fn verdict(state: &AppState, conversation_id: i64) -> Verdict {
     // Set. Read inside the window of the state the kind is had in, because a
     // Conversation can have been through more than one of them — see
     // [`Evidence::mark`].
-    if let Some((within, unmarked)) = evidence.mark()
-        && !crate::activities::follow_up_rounds::marked(state, conversation_id, within).await
+    if let Some(unmarked) = evidence.unmarked()
+        && !crate::activities::follow_up_rounds::marked(state, conversation_id).await
     {
         return Verdict::Refused(unmarked.to_owned());
     }
@@ -789,10 +787,7 @@ async fn abandoned(state: &AppState, conversation_id: i64, event_id: i64) {
 /// artifact, and says so — unless it is one the interview does not offer, which
 /// it never moves onto, and that is said with what it does offer.
 async fn unexpected(state: &AppState, conversation_id: i64) -> String {
-    let grilling = matches!(
-        store::state(&state.pool, conversation_id).await,
-        Ok(Some(Lifecycle::Grilling))
-    );
+    let grilling = crate::processes::interviewing(state, conversation_id).await;
 
     if !grilling {
         return "Verkstead ends this session by itself once its work is there, so there is \

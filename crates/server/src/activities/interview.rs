@@ -1,7 +1,8 @@
 //! The **Interview**: where the grilling session is started under the
 //! built-in Activity, and where the Direction it ends in takes the
 //! Conversation — the backlog run, the inline build or the roadmap's pull
-//! request — until a Process says that as data (stage 11).
+//! request — each of them a state its Process's `directions` map names: see
+//! [`crate::processes::directed`].
 //!
 //! Called by name from [`crate::conversations::start_grilling`], and from
 //! [`crate::grillings::again`] for one started again.
@@ -12,6 +13,9 @@ use crate::AppState;
 use crate::activities::built_in;
 use crate::drivers::Driving;
 use crate::lending::Lent;
+/// The id the **Interview** Activity has in the Activities plugin's manifest,
+/// which is also what a Process's state names to run it.
+use crate::processes::INTERVIEW;
 use crate::runner::{base, broken_down, staged};
 use crate::skills;
 
@@ -31,8 +35,11 @@ use super::one_session::follow_inline;
 /// second.
 ///
 /// The three Directions differ in what the artifact is and in where landing it
-/// leaves the Conversation, which is this function's mapping until a Process
-/// says it (stage 11). A backlog is the start of a run — the tasks it names are
+/// leaves the Conversation, which the Process's `directions` map says rather
+/// than this function: [`crate::conversations::grilling_over`] reads the state
+/// a Direction leads to through [`crate::processes::directed`]. What the five
+/// Verkstead ships declare there, and why they declare it, is this. A backlog
+/// is the start of a run — the tasks it names are
 /// worked one fresh session each, under the Profile that builds — so the
 /// Conversation goes on to Implementing. The handoff an inline pick asks for
 /// leaves it in the same place, one session rather than a run standing on the
@@ -52,11 +59,14 @@ use super::one_session::follow_inline;
 /// the host's own, held through to wherever the Direction leaves the
 /// Conversation.
 ///
-/// **It offers the Directions declared for the Conversation** — all three until
-/// a Process narrows them (stage 11), which the suite stands in for through
-/// [`crate::followers::Followers::declare`] — handed to the component as its
-/// `offers` start fact, read back by the host for what the chooser draws, and
-/// said to the session under its prompt where they are fewer than three.
+/// **It offers the Directions the Conversation's Process declares** (Set 1765,
+/// Q27): its manifest's `directions`, which for Develop is all three, each
+/// leading to `implementing` — handed to the component as its `offers` start
+/// fact, read back by the host for what the chooser draws, and said to the
+/// session under its prompt where they are fewer than three. A narrowing the
+/// bench declared wins over the manifest, which is how the suite narrows a
+/// Process Verkstead still runs itself — see
+/// [`crate::followers::Followers::narrowed`].
 ///
 /// Whether a session was launched at all, which is what a relaunch holding Sets
 /// open owes them on: see [`crate::grillings::again`]. Answered once the
@@ -76,7 +86,7 @@ pub(crate) async fn run(
         return false;
     };
 
-    let offers = state.followers.declared(conversation_id);
+    let offers = offered(&state, conversation_id).await;
     let words: Vec<&str> = offers.iter().map(|direction| direction.word()).collect();
 
     let (outcome, seen) = crate::activities::run_seeing(
@@ -144,9 +154,24 @@ pub(crate) async fn run(
     true
 }
 
-/// The id the **Interview** Activity has in the built-in Activities plugin's
-/// manifest.
-const INTERVIEW: &str = "interview";
+/// The Directions `conversation_id`'s interview offers: what the bench
+/// narrowed them to where it narrowed them, and otherwise what the
+/// Conversation's Process declares — see [`crate::processes::directions`]. A
+/// record that will not be read offers all three, which is what every
+/// interview offered before a Process said otherwise.
+async fn offered(state: &AppState, conversation_id: i64) -> Vec<Direction> {
+    if let Some(narrowed) = state.followers.narrowed(conversation_id) {
+        return narrowed;
+    }
+
+    match crate::store::process(&state.pool, conversation_id).await {
+        Ok(process) => crate::processes::directions(state, &process),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading which Directions a Conversation's Process offers failed");
+            Direction::ALL.to_vec()
+        }
+    }
+}
 
 /// Start the session that builds from the handoff the grilling session wrote.
 ///

@@ -123,9 +123,16 @@ async fn grilling(pool: &SqlitePool, dir: &Path) -> (i64, PathBuf, Vec<PathBuf>)
         });
     }
 
-    store::start_grilling(pool, conversation, &base, &worktree, &checkouts)
-        .await
-        .unwrap();
+    store::start_in(
+        pool,
+        conversation,
+        &store::State::named("grilling"),
+        &base,
+        &worktree,
+        &checkouts,
+    )
+    .await
+    .unwrap();
 
     (
         conversation,

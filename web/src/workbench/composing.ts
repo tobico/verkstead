@@ -77,9 +77,7 @@ import {
   attachFile,
   attachPack,
   attachServer,
-  chooseGrillingPairing,
-  chooseImplementationPairing,
-  chooseReviewPairing,
+  choosePairing,
   draftMovedTo,
   nameTarget,
   permitDevice,
@@ -102,7 +100,7 @@ import type {
   AttachmentView,
   CompanionMode,
   ConversationView,
-  Process,
+  ProvidedProcess,
   RepoEntry,
   Started,
   TakenUp,
@@ -113,7 +111,7 @@ import { rowKey, type Device } from "../reaching";
 import { draftingOn, forget, read, write } from "../remembered";
 import { adoptRefusal } from "./Adoption";
 import { ATTACH_REFUSAL, PACK_REFUSAL, SERVER_REFUSAL } from "./Composer";
-import { PROCESS, targeted } from "./processes";
+import { filledFromAPullRequest, targeted } from "./provided";
 import {
   BASE_REFUSAL,
   BRANCH_REFUSAL,
@@ -254,15 +252,19 @@ export type Composed = {
   /// Process is the one thing about a Conversation likeliest to differ from the
   /// last. So the control stands on Develop for every repo, and this is `null`
   /// until somebody says otherwise.
-  process: Process | null;
+  process: ProvidedProcess | null;
   /// And what the fill last wrote into [`Composed.process`], `null` until it
   /// has written anything.
-  processFilled: Process | null;
-  /// Who runs each of the three roles, as a picker writes it — `null` for a
-  /// role nobody has touched. See `src/pairing.ts`.
-  grilling: string | null;
-  implementation: string | null;
-  review: string | null;
+  processFilled: ProvidedProcess | null;
+  /// Who runs each role, as that role's picker writes it, keyed by the role's
+  /// name — a role nobody has touched has no entry at all.
+  ///
+  /// By name rather than one field per role, which roles there are being the
+  /// Process's to say (ADR-0030, *Process*): a plugin's Process may name one
+  /// nobody has used before, and the picker drawn for it writes here under that
+  /// name. A body held from before this reads its three fields in — see
+  /// [`composed`]. See `src/pairing.ts`.
+  pairings: Record<string, string>;
   /// The roadmap this page is loaded with, or `null` where it is composing a
   /// piece of work of its own.
   ///
@@ -347,11 +349,12 @@ export function written(
     return next;
   }
 
-  if (next.process === next.processFilled) {
+  const filled = filledFromAPullRequest();
+  if (filled !== null && same(next.process, next.processFilled)) {
     next = {
       ...next,
-      process: "FixMergeIssues",
-      processFilled: "FixMergeIssues",
+      process: filled.process,
+      processFilled: filled.process,
     };
   }
 
@@ -409,9 +412,7 @@ export function blank(): Composed {
     companions: [],
     process: null,
     processFilled: null,
-    grilling: null,
-    implementation: null,
-    review: null,
+    pairings: {},
     adopting: null,
     permitted: [],
     servers: [],
@@ -448,9 +449,7 @@ export function elsewhere(state: Composed, device: Device): Composed {
     repoFilled: null,
     base: null,
     companions: [],
-    grilling: null,
-    implementation: null,
-    review: null,
+    pairings: {},
   };
 }
 
@@ -480,9 +479,7 @@ export function empty(state: Composed): boolean {
     state.base === null &&
     state.companions.length === 0 &&
     state.process === null &&
-    state.grilling === null &&
-    state.implementation === null &&
-    state.review === null &&
+    Object.keys(state.pairings).length === 0 &&
     state.adopting === null &&
     state.permitted.length === 0 &&
     state.servers.length === 0 &&
@@ -695,39 +692,14 @@ export async function create(
     );
   }
 
-  if (state.grilling !== null) {
-    const outcome = await chooseGrillingPairing(
-      to,
-      id,
-      pairing.choice(state.grilling),
-    );
+  // One press per role the human touched a picker for, by the role's name:
+  // which roles there are is the Process's, so what is sent is what was picked
+  // rather than three fields.
+  for (const [role, picked] of Object.entries(state.pairings)) {
+    const outcome = await choosePairing(to, id, role, pairing.role(picked));
     said(
       outcome === "Chosen",
-      `The grilling profile couldn't be chosen. ${CHOICE_REFUSAL[outcome]}`,
-    );
-  }
-
-  if (state.implementation !== null) {
-    const outcome = await chooseImplementationPairing(
-      to,
-      id,
-      pairing.choice(state.implementation),
-    );
-    said(
-      outcome === "Chosen",
-      `The implementation profile couldn't be chosen. ${CHOICE_REFUSAL[outcome]}`,
-    );
-  }
-
-  if (state.review !== null) {
-    const outcome = await chooseReviewPairing(
-      to,
-      id,
-      pairing.role(state.review),
-    );
-    said(
-      outcome === "Chosen",
-      `The review profile couldn't be chosen. ${CHOICE_REFUSAL[outcome]}`,
+      `The ${role} profile couldn't be chosen. ${CHOICE_REFUSAL[outcome]}`,
     );
   }
 
@@ -788,10 +760,11 @@ export async function create(
       // the Target, puts the Conversation on what it names and moves it into
       // Wrapping, and what runs from there is the wrap-up's own watchers.
       //
-      // Asked of the Process's own list rather than of its name — a **Review**
-      // and a **Fix Merge Issues** are both pointed at work that is already
-      // somewhere else, and both reach it by this one endpoint. Nothing picked
-      // is the Develop every draft defaults to, which is pointed at nothing.
+      // Asked of the Process's own manifest rather than of its name — a
+      // **Review** and a **Fix Merge Issues** are both pointed at work that is
+      // already somewhere else, and both reach it by this one endpoint.
+      // Nothing picked is the Develop every draft defaults to, which is
+      // pointed at nothing.
       const outcome = await takeUpPullRequest(to, id);
 
       // And the two outcomes that are not refusals: the press stopped to ask what
@@ -1075,13 +1048,10 @@ export async function moveTo(
     );
   }
 
-  // And the target and the Process, which are the human's words rather than
-  // ids — a URL, a `#number` or a branch, and one of a fixed list — so they mean
-  // the same over there. Develop is what the new Conversation already arrived
-  // under, and no target is what it already has, so either left alone sends
-  // nothing, as the compose page's do — except Develop under a Brief that is one
-  // pull request URL, which the fill over there would otherwise have made Fix
-  // Merge Issues.
+  // And the target, which is the human's words rather than an id — a URL, a
+  // `#number` or a branch — so it means the same over there. No target is what
+  // the new Conversation already has, so an empty one sends nothing, as the
+  // compose page's does.
   if (draft.target !== null && draft.target !== "") {
     const outcome = await nameTarget(to.reaching, id, draft.target);
     said(
@@ -1090,7 +1060,14 @@ export async function moveTo(
     );
   }
 
-  if (draft.process !== "Develop" || oneUrl) {
+  // And the Process this draft is on, always: it is the plugin providing it and
+  // its id there, which mean the same on either device — and the fill over
+  // there would otherwise make a Brief that is one pull request URL a Fix
+  // merge issues, whatever this draft was. A device whose plugin for it is
+  // switched off or missing refuses the pick and says so, which is the move
+  // arriving somewhere that cannot run this work rather than something to pass
+  // over in silence.
+  {
     const outcome = await pickProcess(to.reaching, id, draft.process);
     said(
       outcome === "Picked",
@@ -1272,7 +1249,10 @@ function parsed(body: string): Composed | null {
     return null;
   }
 
-  const held = payload as Partial<Composed>;
+  // Loosely, because a body held from an older build carries fields `Composed`
+  // no longer has — the three Pairing fields the roles were before they were a
+  // map, which [`carried`] reads in.
+  const held = payload as Partial<Composed> & Record<string, unknown>;
 
   if (
     !onDevice(held.device) ||
@@ -1289,13 +1269,26 @@ function parsed(body: string): Composed | null {
     // And a body from before the Repo and the Process were filled has neither
     // mark, which is the fill owning nothing it did not write.
     !(held.repoFilled === undefined || whole(held.repoFilled)) ||
-    !kind(held.processFilled) ||
+    // A body from before a Process was the plugin providing it holds a word in
+    // these two instead, which names no Process this build could send: it
+    // reads as a picker nobody touched rather than as a fault, and [`composed`]
+    // drops it.
+    !(typeof held.processFilled === "string" || whose(held.processFilled)) ||
     !(held.base === null || typeof held.base === "string") ||
     !Array.isArray(held.companions) ||
-    !kind(held.process) ||
+    !(typeof held.process === "string" || whose(held.process)) ||
+    // A body from before the roles were a map holds the three fields instead,
+    // each of which reads in as an entry — see [`carried`].
     !picked(held.grilling) ||
     !picked(held.implementation) ||
     !picked(held.review) ||
+    !(
+      held.pairings === undefined ||
+      (typeof held.pairings === "object" &&
+        held.pairings !== null &&
+        !Array.isArray(held.pairings) &&
+        Object.values(held.pairings).every((one) => typeof one === "string"))
+    ) ||
     !loaded(held.adopting) ||
     // A body from before the ticks has none, which is nothing ticked.
     !(
@@ -1354,11 +1347,9 @@ function parsed(body: string): Composed | null {
     filled: held.filled ?? "",
     base: held.base,
     companions,
-    process: held.process ?? null,
-    processFilled: held.processFilled ?? null,
-    grilling: held.grilling,
-    implementation: held.implementation,
-    review: held.review,
+    process: picks(held.process),
+    processFilled: picks(held.processFilled),
+    pairings: held.pairings ?? carried(held),
     adopting: held.adopting ?? null,
     permitted: held.permitted ?? [],
     servers: held.servers ?? [],
@@ -1398,20 +1389,44 @@ function loaded(value: unknown): value is Adopting | null | undefined {
   );
 }
 
-/// Whether this is a Process the wire knows, or the absence of one.
+/// Whether this names a Process — the plugin providing it and its id there —
+/// or nothing at all.
 ///
-/// Checked against the words rather than merely for a string, because a Process
-/// goes straight back out on the wire: a body left by some other build holding a
-/// word this one has never heard of would be a request refused for a reason
-/// nobody could act on. A body from before this field has no `process` at all,
-/// which is untouched rather than a fault — [`loaded`]'s absence, read the same
-/// way.
-function kind(value: unknown): value is Process | null | undefined {
-  return (
-    value === null ||
-    value === undefined ||
-    (typeof value === "string" && Object.hasOwn(PROCESS, value))
-  );
+/// Checked for its shape rather than against a list of Processes: which ones
+/// there are is the server's to say, and a body naming one this install has not
+/// got is refused by the press that sends it, naming the plugin. A body from
+/// before this field has no `process` at all, which is untouched rather than a
+/// fault — [`loaded`]'s absence, read the same way. One from before a Process
+/// was a plugin's holds a word instead, which is no Process this build can
+/// name and reads as untouched too.
+function whose(value: unknown): value is ProvidedProcess | null | undefined {
+  if (value === null || value === undefined) {
+    return true;
+  }
+  if (typeof value !== "object") {
+    return false;
+  }
+  const named = value as Record<string, unknown>;
+  return typeof named.plugin === "string" && typeof named.id === "string";
+}
+
+/// The Process a held body names, or nothing at all — a word from a body
+/// written before a Process was the plugin providing it among them, that being
+/// no Process this build could send.
+function picks(value: unknown): ProvidedProcess | null {
+  return whose(value) ? (value ?? null) : null;
+}
+
+/// Whether two picks are the same Process, or both nothing: the plugin and the
+/// id, rather than the object, so a pick read back out of the browser compares
+/// against one made here.
+function same(
+  one: ProvidedProcess | null,
+  other: ProvidedProcess | null,
+): boolean {
+  return one === null || other === null
+    ? one === other
+    : one.plugin === other.plugin && one.id === other.id;
 }
 
 /// Whether this is a Device Id, this device, or a body that never said — the
@@ -1426,6 +1441,24 @@ function whole(value: unknown): value is number | null {
 }
 
 /// And whether this is a role's choice or the absence of one.
-function picked(value: unknown): value is string | null {
-  return value === null || typeof value === "string";
+function picked(value: unknown): value is string | null | undefined {
+  return value === null || value === undefined || typeof value === "string";
+}
+
+/// The roles a body held from before they were a map had picked, read in as the
+/// map: the three fields it kept, each under its own name, and nothing for the
+/// ones nobody had touched.
+///
+/// A draft left on a picker before this build is still a draft somebody filled
+/// in, and it is the three roles of the five Processes Verkstead ships — so the
+/// picks read back exactly where their pickers draw them.
+function carried(held: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(
+    ["grilling", "implementation", "review"]
+      .map((role) => [role, held[role]] as const)
+      .filter(
+        (entry): entry is readonly [string, string] =>
+          typeof entry[1] === "string",
+      ),
+  );
 }

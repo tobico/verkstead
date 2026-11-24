@@ -289,14 +289,38 @@ pub fn providing(name: &str) -> Option<&'static Manifest> {
 
 /// Whether `manifest`'s built-in has a tick: a Language plugin's is whether
 /// sessions get its languages, an Agent plugin's whether its harness is
-/// offered, and every other built-in is always on.
+/// offered, a Process plugin's whether the picker offers its Processes, and
+/// every other built-in is always on.
 pub fn switched(manifest: &Manifest) -> bool {
     languages(manifest).next().is_some()
+        || !manifest.processes.is_empty()
         || manifest
             .provides
             .iter()
             .any(|provision| provision.agent().is_some())
 }
+
+/// The uuids of the five built-ins that are Verkstead's own Processes written
+/// as data (ADR-0030, *Process*), each a plugin of its own with a tick.
+///
+/// The store's own, because it is the record that reads a bare Process word as
+/// one of these plugins — see [`crate::store::BUILT_IN_PROCESSES`], which the
+/// suite below holds to the manifests under `plugins/`.
+pub const DEVELOP: &str = "2bcf359e-071a-4237-8741-9897cf06ac15";
+pub const TINKER: &str = "591db9f3-2cb1-4adb-bf35-ff046f5be6f0";
+pub const INVESTIGATE: &str = "53f22a43-806b-4019-8798-c014fa9a0239";
+pub const REVIEW: &str = "0b55843a-7c93-47cc-9655-e5f6ec3cf019";
+pub const FIX_MERGE_ISSUES: &str = "0b4f33da-1f61-46dd-aa82-3983d627e192";
+
+/// And the order the picker draws their rows in, which is the order the
+/// Processes are listed and a new Draft is prefilled from: the ladder first,
+/// then the two that start without an interview, then the review — with *Fix
+/// merge issues* under the Review it is the narrowed form of.
+///
+/// Written here because it is a fact about the five together rather than
+/// about any one of them, and because `plugins/` is embedded in directory
+/// order, which spells no order anybody chose.
+pub(crate) const PROCESSES: &[&str] = &[DEVELOP, TINKER, INVESTIGATE, REVIEW, FIX_MERGE_ISSUES];
 
 /// The languages `manifest` provides, by the name `config.yaml` keys each by,
 /// in the order it lists them.
@@ -527,6 +551,41 @@ mod tests {
                     .iter()
                     .any(|(name, bytes)| *name == component && bytes.starts_with(b"\0asm")),
                 "each block's component is embedded beside the manifest: {component}",
+            );
+        }
+    }
+
+    /// Each of the five Processes Verkstead ships is the plugin the record
+    /// reads its bare word as: the store's own table of the five, held to the
+    /// manifests under `plugins/` so that a uuid moved in one and not the
+    /// other is a failure here rather than a Conversation in trouble.
+    #[tokio::test]
+    async fn the_five_are_the_plugins_the_record_reads_their_words_as() {
+        for built_in in crate::store::BUILT_IN_PROCESSES {
+            let manifest = BUILT_INS
+                .iter()
+                .filter_map(|shipped| shipped.manifest(Platform::HERE).ok())
+                .find(|manifest| manifest.uuid == built_in.uuid)
+                .unwrap_or_else(|| panic!("a built-in is {}", built_in.word));
+
+            assert!(
+                manifest
+                    .processes
+                    .iter()
+                    .any(|process| process.id == built_in.word),
+                "{} provides the Process {}: {:?}",
+                manifest.name,
+                built_in.word,
+                manifest.processes,
+            );
+            assert_eq!(
+                crate::store::Process::named(built_in.word),
+                Some(built_in.process()),
+            );
+            assert!(
+                PROCESSES.contains(&built_in.uuid),
+                "{} is one of the rows the picker draws",
+                manifest.name,
             );
         }
     }

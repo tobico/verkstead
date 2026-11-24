@@ -50,7 +50,7 @@
 //! [`narrowing`]. A wrap-up whose review, comments and merge have settled and
 //! whose checks have not, with nothing running in its Worktree, is **Waiting on
 //! checks**: a label on the card and a line on the Timeline, drawn off the same
-//! facts the Activity already reads on a cadence, and nothing on the Lifecycle. A
+//! facts the Activity already reads on a cadence, and nothing on the state word. A
 //! conflicted pull request is not that, and says nothing: what it is waiting on
 //! is a resolution rather than a suite.
 //!
@@ -106,7 +106,11 @@ pub(crate) async fn standing(state: &AppState, conversation_id: i64) -> Standing
     // everything but the checks has settled.
     narrowing(state, conversation_id).await;
 
-    match store::wrap_up_would_finish(&state.pool, conversation_id).await {
+    let Some(standing) = standing_in(state, conversation_id).await else {
+        return Standing::Over;
+    };
+
+    match store::wrap_up_would_finish(&state.pool, conversation_id, &standing).await {
         Ok(store::Finished::Done) => Standing::Settled,
         Ok(store::Finished::StillWaiting) => Standing::Waiting,
         // Closed out from under the watchers, or finished by something else —
@@ -136,9 +140,15 @@ pub(crate) enum Standing {
 /// A rule no longer true by the time it is applied — something unsettled
 /// between the Activity's last look and this — starts the Activity again.
 pub(crate) async fn settled(state: &AppState, conversation_id: i64, rule: bool) {
+    // The state it is wrapping up in, which is what the move is out of: the word
+    // the record holds, whatever its Process calls that state.
+    let Some(standing) = standing_in(state, conversation_id).await else {
+        return;
+    };
+
     let finished = match rule {
-        true => store::finish_wrap_up(&state.pool, conversation_id).await,
-        false => store::finish_merged_wrap_up(&state.pool, conversation_id).await,
+        true => store::finish_wrap_up(&state.pool, conversation_id, &standing).await,
+        false => store::finish_merged_wrap_up(&state.pool, conversation_id, &standing).await,
     };
 
     match finished {
@@ -231,7 +241,7 @@ pub(crate) async fn settled(state: &AppState, conversation_id: i64, rule: bool) 
 /// pull request is not it — what that waits on is a resolution rather than a
 /// suite — and it says nothing. Nothing is stored about it beyond the mark
 /// that says the Notice has been written — see [`store::narrowing`] — and the
-/// Lifecycle is untouched. It is read off the settle facts and the sessions
+/// state word is untouched. It is read off the settle facts and the sessions
 /// register the same way *blocked on you* is read off a stop.
 ///
 /// Here rather than anywhere else because this loop already reads those facts
@@ -496,6 +506,19 @@ async fn say(state: &AppState, conversation_id: i64, markdown: &str) {
         ),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "putting a notice on a Timeline failed")
+        }
+    }
+}
+
+/// The state a Conversation stands in, or nothing where the record will not say
+/// — which is a Conversation that has gone, and a wrap-up with nothing left to
+/// finish.
+async fn standing_in(state: &AppState, conversation_id: i64) -> Option<store::State> {
+    match store::state(&state.pool, conversation_id).await {
+        Ok(standing) => standing,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading where a wrapping Conversation stood failed");
+            None
         }
     }
 }

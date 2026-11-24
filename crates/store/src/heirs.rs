@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 use super::births::{Birth, Transferred};
-use super::conversations::Lifecycle;
+use super::conversations::State;
 use super::replicated::{self, Kind, Written};
 
 /// The heirs, as a kind of record.
@@ -189,7 +189,7 @@ pub struct Adopting {
     pub stacks_on: Option<String>,
 
     /// The state the live copy is in, which the tombstone starts in.
-    pub state: Lifecycle,
+    pub state: State,
 }
 
 /// Make the tombstone of stage `born`, whose live copy is `live`, on the device

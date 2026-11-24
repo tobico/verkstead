@@ -278,8 +278,8 @@ async fn opened(app: &Router, id: i64) -> ConversationView {
 async fn choose_grilling(app: &Router, id: i64, profile_id: &str, model: &str) -> ProfileChosen {
     post(
         app,
-        &format!("/api/ui/conversations/{id}/grilling-pairing"),
-        &serde_json::json!({ "profile_id": profile_id, "model": model }),
+        &format!("/api/ui/conversations/{id}/pairings/grilling"),
+        &serde_json::json!({ "pairing": { "profile_id": profile_id, "model": model } }),
     )
     .await
 }
@@ -292,8 +292,8 @@ async fn choose_implementation(
 ) -> ProfileChosen {
     post(
         app,
-        &format!("/api/ui/conversations/{id}/implementation-pairing"),
-        &serde_json::json!({ "profile_id": profile_id, "model": model }),
+        &format!("/api/ui/conversations/{id}/pairings/implementation"),
+        &serde_json::json!({ "pairing": { "profile_id": profile_id, "model": model } }),
     )
     .await
 }
@@ -301,7 +301,7 @@ async fn choose_implementation(
 async fn choose_review(app: &Router, id: i64, profile_id: &str, model: &str) -> ProfileChosen {
     post(
         app,
-        &format!("/api/ui/conversations/{id}/review-pairing"),
+        &format!("/api/ui/conversations/{id}/pairings/review"),
         &serde_json::json!({
             "pairing": { "profile_id": profile_id, "model": model },
         }),
@@ -313,7 +313,7 @@ async fn choose_review(app: &Router, id: i64, profile_id: &str, model: &str) -> 
 async fn no_review(app: &Router, id: i64) -> ProfileChosen {
     post(
         app,
-        &format!("/api/ui/conversations/{id}/review-pairing"),
+        &format!("/api/ui/conversations/{id}/pairings/review"),
         &serde_json::json!({ "pairing": null }),
     )
     .await
@@ -1103,12 +1103,11 @@ async fn a_conversation_chooses_its_two_pairings_independently() {
 
     let half = opened(&app, id).await;
     assert_eq!(
-        half.grilling_pairing
-            .as_ref()
+        half.under("grilling")
             .and_then(|p| p.profile.name.as_deref()),
         Some("fable")
     );
-    assert_eq!(half.implementation_pairing, None);
+    assert_eq!(half.under("implementation"), None);
 
     assert_eq!(
         choose_implementation(&app, id, &opus.id, MODEL).await,
@@ -1117,13 +1116,12 @@ async fn a_conversation_chooses_its_two_pairings_independently() {
 
     let both = opened(&app, id).await;
     assert_eq!(
-        both.grilling_pairing
-            .as_ref()
-            .and_then(|p| p.profile.name.clone()),
+        both.under("grilling").and_then(|p| p.profile.name.clone()),
         Some("fable".to_owned())
     );
     assert_eq!(
-        both.implementation_pairing.and_then(|p| p.profile.name),
+        both.under("implementation")
+            .and_then(|p| p.profile.name.clone()),
         Some("opus".to_owned())
     );
 }
@@ -1142,11 +1140,13 @@ async fn a_pairing_says_back_the_model_it_was_chosen_with() {
 
     let view = opened(&app, id).await;
     assert_eq!(
-        view.grilling_pairing.as_ref().and_then(|p| p.model.clone()),
+        view.under("grilling")
+            .as_ref()
+            .and_then(|p| p.model.clone()),
         Some(MODELS[1].to_owned())
     );
     assert_eq!(
-        view.implementation_pairing.and_then(|p| p.model),
+        view.under("implementation").and_then(|p| p.model.clone()),
         Some(MODELS[0].to_owned())
     );
 }
@@ -1170,8 +1170,8 @@ async fn a_model_the_profile_does_not_list_cannot_be_paired_with_it() {
     );
 
     let view = opened(&app, id).await;
-    assert_eq!(view.grilling_pairing, None);
-    assert_eq!(view.implementation_pairing, None);
+    assert_eq!(view.under("grilling"), None);
+    assert_eq!(view.under("implementation"), None);
 }
 
 /// The whole point of the record: a Conversation missing any one Pairing is not
@@ -1231,7 +1231,9 @@ async fn a_drafting_conversation_with_an_unpaired_profile_is_not_ready_to_grill(
 
     let view = opened(&app, id).await;
     assert_eq!(
-        view.grilling_pairing.as_ref().and_then(|p| p.model.clone()),
+        view.under("grilling")
+            .as_ref()
+            .and_then(|p| p.model.clone()),
         None
     );
     assert!(!view.ready_to_grill);
@@ -1256,7 +1258,7 @@ async fn a_conversation_holding_a_broken_profile_is_not_ready_to_grill() {
 
     let view = opened(&app, id).await;
     assert_eq!(
-        view.implementation_pairing.map(|p| p.profile.broken),
+        view.under("implementation").map(|p| p.profile.broken),
         Some(Some(Broken::ConfigMissing)),
         "the pane says which Profile it is, and what is wrong with it"
     );
@@ -1277,15 +1279,19 @@ async fn one_profile_can_be_every_one_of_a_conversations_choices() {
 
     let view = opened(&app, id).await;
     assert_eq!(
-        view.grilling_pairing.as_ref().map(|p| p.profile.id.clone()),
+        view.under("grilling")
+            .as_ref()
+            .map(|p| p.profile.id.clone()),
         Some(only.id.clone())
     );
     assert_eq!(
-        view.implementation_pairing.map(|p| p.profile.id.clone()),
+        view.under("implementation").map(|p| p.profile.id.clone()),
         Some(only.id.clone())
     );
     assert_eq!(
-        view.review_pairing.pairing().map(|p| p.profile.id.clone()),
+        view.paired("review")
+            .pairing()
+            .map(|p| p.profile.id.clone()),
         Some(only.id.clone())
     );
     assert!(view.ready_to_grill);
@@ -1315,9 +1321,9 @@ async fn a_profile_a_conversation_has_chosen_is_removed_and_nulled_out_of_it() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.grilling_pairing, None);
-    assert_eq!(view.implementation_pairing, None);
-    assert_eq!(view.review_pairing, PickedView::Nothing);
+    assert_eq!(view.under("grilling"), None);
+    assert_eq!(view.under("implementation"), None);
+    assert_eq!(view.paired("review"), PickedView::Nothing);
     assert!(
         !view.ready_to_grill,
         "a Conversation with no account to run under is not one to start",
@@ -1407,9 +1413,16 @@ async fn nothing_saved_means_an_empty_list() {
 async fn grill(dir: &Path, id: i64) {
     let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
 
-    store::start_grilling(&pool, id, "deadbeef", &dir.join("worktree"), &[])
-        .await
-        .unwrap();
+    store::start_in(
+        &pool,
+        id,
+        &store::State::named("grilling"),
+        "deadbeef",
+        &dir.join("worktree"),
+        &[],
+    )
+    .await
+    .unwrap();
 }
 
 /// A second Conversation on the same Repo as the first, started the way the
@@ -1450,22 +1463,18 @@ async fn a_new_conversation_arrives_with_what_its_repo_was_last_grilled_with() {
     let view = opened(&app, next).await;
 
     let grilling = view
-        .grilling_pairing
-        .as_ref()
+        .under("grilling")
         .expect("the grilling picker is filled");
     assert_eq!(grilling.profile.id, fable.id);
     assert_eq!(grilling.model.as_deref(), Some(MODEL));
 
     let implementation = view
-        .implementation_pairing
+        .under("implementation")
         .expect("and so is the implementation one");
     assert_eq!(implementation.profile.id, opus.id);
     assert_eq!(implementation.model.as_deref(), Some(MODEL));
 
-    let review = view
-        .review_pairing
-        .pairing()
-        .expect("and so is the review one");
+    let review = view.under("review").expect("and so is the review one");
     assert_eq!(review.profile.id, haiku.id);
     assert_eq!(review.model.as_deref(), Some(MODEL));
 
@@ -1504,12 +1513,14 @@ async fn changing_the_prefill_before_grilling_is_what_gets_remembered() {
 
     let view = opened(&app, another(&app).await).await;
     assert_eq!(
-        view.grilling_pairing.as_ref().map(|p| p.profile.id.clone()),
+        view.under("grilling")
+            .as_ref()
+            .map(|p| p.profile.id.clone()),
         Some(fable.id.clone()),
         "the half nobody touched is still what it was"
     );
 
-    let implementation = view.implementation_pairing.expect("and the changed half");
+    let implementation = view.under("implementation").expect("and the changed half");
     assert_eq!(implementation.profile.id, opus.id);
     assert_eq!(implementation.model.as_deref(), Some(MODELS[0]));
 }
@@ -1531,11 +1542,13 @@ async fn a_remembered_profile_whose_pair_has_gone_is_not_prefilled() {
 
     let view = opened(&app, another(&app).await).await;
     assert_eq!(
-        view.grilling_pairing.as_ref().map(|p| p.profile.id.clone()),
+        view.under("grilling")
+            .as_ref()
+            .map(|p| p.profile.id.clone()),
         Some(fable.id.clone()),
         "the half that is still there is still prefilled"
     );
-    assert_eq!(view.implementation_pairing, None);
+    assert_eq!(view.under("implementation"), None);
 }
 
 /// And a remembered model the Profile has since stopped listing, the same way:
@@ -1561,8 +1574,8 @@ async fn a_remembered_model_a_profile_no_longer_lists_is_not_prefilled() {
     assert_eq!(rewritten, ProfileSaved::Saved);
 
     let view = opened(&app, another(&app).await).await;
-    assert_eq!(view.grilling_pairing, None);
-    assert_eq!(view.implementation_pairing, None);
+    assert_eq!(view.under("grilling"), None);
+    assert_eq!(view.under("implementation"), None);
 }
 
 /// And the row that runs no session is remembered the same way, because it is a
@@ -1579,7 +1592,7 @@ async fn a_new_conversation_arrives_with_no_review_where_that_is_what_was_grille
     grill(dir.path(), id).await;
 
     assert_eq!(
-        opened(&app, another(&app).await).await.review_pairing,
+        opened(&app, another(&app).await).await.paired("review"),
         PickedView::Skipped,
         "what the human last picked, ready for them to change",
     );
@@ -1607,17 +1620,18 @@ async fn a_remembered_grilling_skip_is_read_as_nothing_and_never_written_again()
     let view = opened(&app, another(&app).await).await;
 
     assert_eq!(
-        view.grilling_pairing, None,
+        view.under("grilling"),
+        None,
         "the skip is read and not applied, which is an empty picker",
     );
     assert_eq!(
-        view.implementation_pairing
+        view.under("implementation")
             .map(|pairing| pairing.profile.id.clone()),
         Some(fable.id.clone()),
         "and the pickers beside it are filled as they always were",
     );
     assert_eq!(
-        prefill(&app, only_repo(&app).await).await.grilling,
+        prefill(&app, only_repo(&app).await).await.under("grilling"),
         None,
         "and the page composing one reads the same memory the same way",
     );
@@ -1634,8 +1648,7 @@ async fn a_remembered_grilling_skip_is_read_as_nothing_and_never_written_again()
     assert_eq!(
         opened(&app, another(&app).await)
             .await
-            .grilling_pairing
-            .as_ref()
+            .under("grilling")
             .map(|pairing| pairing.profile.id.clone()),
         Some(fable.id.clone()),
         "the account that interviewed last, with the row before it gone",
@@ -1688,32 +1701,30 @@ async fn a_repos_pairings_are_offered_before_anything_is_created() {
     let offered = prefill(&app, only_repo(&app).await).await;
 
     let grilling = offered
-        .grilling
-        .as_ref()
+        .under("grilling")
         .expect("the grilling picker has something to show");
     assert_eq!(grilling.profile.id, fable.id);
     assert_eq!(grilling.model.as_deref(), Some(MODEL));
 
     let implementation = offered
-        .implementation
-        .clone()
+        .under("implementation")
         .expect("and so does the implementation one");
     assert_eq!(implementation.profile.id, opus.id);
     assert_eq!(implementation.model.as_deref(), Some(MODEL));
 
-    let review = offered
-        .review
-        .pairing()
-        .expect("and so does the review one");
+    let review = offered.under("review").expect("and so does the review one");
     assert_eq!(review.profile.id, haiku.id);
     assert_eq!(review.model.as_deref(), Some(MODEL));
 
     // The very thing creation would have applied: a Conversation started on this
     // Repo now arrives showing exactly what was offered above.
     let view = opened(&app, another(&app).await).await;
-    assert_eq!(view.grilling_pairing, offered.grilling);
-    assert_eq!(view.implementation_pairing, offered.implementation);
-    assert_eq!(view.review_pairing, offered.review);
+    assert_eq!(view.under("grilling"), offered.under("grilling"));
+    assert_eq!(
+        view.under("implementation"),
+        offered.under("implementation")
+    );
+    assert_eq!(view.paired("review"), offered.of("review"));
 }
 
 /// And the row that runs no session, which is a pick like any other and comes
@@ -1730,7 +1741,7 @@ async fn a_repo_that_last_ran_no_review_offers_that() {
     grill(dir.path(), id).await;
 
     assert_eq!(
-        prefill(&app, only_repo(&app).await).await.review,
+        prefill(&app, only_repo(&app).await).await.of("review"),
         PickedView::Skipped,
     );
 }
@@ -1755,13 +1766,12 @@ async fn a_memory_that_no_longer_applies_is_offered_as_nothing() {
     let offered = prefill(&app, only_repo(&app).await).await;
     assert_eq!(
         offered
-            .grilling
-            .as_ref()
+            .under("grilling")
             .map(|pairing| pairing.profile.id.clone()),
         Some(fable.id.clone()),
         "the half that is still there is still offered"
     );
-    assert_eq!(offered.implementation, None);
+    assert_eq!(offered.under("implementation"), None);
 }
 
 /// And a remembered model the Profile has since stopped listing, the same way:
@@ -1787,8 +1797,8 @@ async fn a_model_a_profile_no_longer_lists_is_offered_as_nothing() {
     assert_eq!(rewritten, ProfileSaved::Saved);
 
     let offered = prefill(&app, only_repo(&app).await).await;
-    assert_eq!(offered.grilling, None);
-    assert_eq!(offered.implementation, None);
+    assert_eq!(offered.under("grilling"), None);
+    assert_eq!(offered.under("implementation"), None);
 }
 
 /// A Repo nothing has been grilled on has nothing to offer, which is three
@@ -1799,9 +1809,9 @@ async fn a_repo_with_no_memory_offers_nothing_at_all() {
     conversation(&app, accounts.path()).await;
 
     let offered = prefill(&app, only_repo(&app).await).await;
-    assert_eq!(offered.grilling, None);
-    assert_eq!(offered.implementation, None);
-    assert_eq!(offered.review, PickedView::Nothing);
+    assert_eq!(offered.under("grilling"), None);
+    assert_eq!(offered.under("implementation"), None);
+    assert_eq!(offered.of("review"), PickedView::Nothing);
 }
 
 /// And a Repo that is not registered has no memory to read, which is a 404 for
@@ -1889,22 +1899,25 @@ async fn a_repo_never_grilled_is_offered_what_the_last_start_anywhere_ran_under(
     let offered = prefill(&app, askance).await;
 
     assert_eq!(
-        on(offered.grilling.as_ref()),
+        on(offered.under("grilling")),
         Some((opus.id.as_str(), MODEL))
     );
     assert_eq!(
-        on(offered.implementation.as_ref()),
+        on(offered.under("implementation")),
         Some((haiku.id.as_str(), MODELS[0]))
     );
     assert_eq!(
-        on(offered.review.pairing()),
+        on(offered.under("review")),
         Some((fable.id.as_str(), MODEL))
     );
 
     let view = opened(&app, started_on(&app, askance).await).await;
-    assert_eq!(view.grilling_pairing, offered.grilling);
-    assert_eq!(view.implementation_pairing, offered.implementation);
-    assert_eq!(view.review_pairing, offered.review);
+    assert_eq!(view.under("grilling"), offered.under("grilling"));
+    assert_eq!(
+        view.under("implementation"),
+        offered.under("implementation")
+    );
+    assert_eq!(view.paired("review"), offered.of("review"));
 }
 
 /// A draft is not a start, however recently its pickers were filled: the copy
@@ -1928,17 +1941,14 @@ async fn a_draft_filled_since_the_last_start_is_not_what_a_fresh_repo_copies() {
 
     let offered = prefill(&app, fresh_repo(&app, accounts.path(), "askance").await).await;
     assert_eq!(
-        on(offered.grilling.as_ref()),
+        on(offered.under("grilling")),
         Some((opus.id.as_str(), MODEL))
     );
     assert_eq!(
-        on(offered.implementation.as_ref()),
+        on(offered.under("implementation")),
         Some((opus.id.as_str(), MODEL))
     );
-    assert_eq!(
-        on(offered.review.pairing()),
-        Some((opus.id.as_str(), MODEL))
-    );
+    assert_eq!(on(offered.under("review")), Some((opus.id.as_str(), MODEL)));
 }
 
 /// The role the last start picked away is not picked away on a fresh Repo: it
@@ -1958,18 +1968,18 @@ async fn a_skip_on_the_last_start_is_not_carried_to_a_fresh_repo() {
     let offered = prefill(&app, fresh_repo(&app, accounts.path(), "askance").await).await;
 
     assert_eq!(
-        on(offered.grilling.as_ref()),
+        on(offered.under("grilling")),
         Some((opus.id.as_str(), MODEL))
     );
     assert_eq!(
-        on(offered.implementation.as_ref()),
+        on(offered.under("implementation")),
         Some((opus.id.as_str(), MODEL))
     );
 
     // The default is the earliest Claude Profile, on the table's model for the
     // role — which that Profile lists.
     assert_eq!(
-        on(offered.review.pairing()),
+        on(offered.under("review")),
         Some((fable.id.as_str(), "claude-opus-5"))
     );
 }
@@ -1987,15 +1997,15 @@ async fn a_repo_with_partial_memory_is_not_filled_from_anywhere_else() {
 
     let offered = prefill(&app, only_repo(&app).await).await;
     assert_eq!(
-        on(offered.grilling.as_ref()),
+        on(offered.under("grilling")),
         Some((fable.id.as_str(), MODEL))
     );
-    assert_eq!(offered.implementation, None);
-    assert_eq!(offered.review, PickedView::Nothing);
+    assert_eq!(offered.under("implementation"), None);
+    assert_eq!(offered.of("review"), PickedView::Nothing);
 
     let view = opened(&app, another(&app).await).await;
-    assert_eq!(view.implementation_pairing, None);
-    assert_eq!(view.review_pairing, PickedView::Nothing);
+    assert_eq!(view.under("implementation"), None);
+    assert_eq!(view.paired("review"), PickedView::Nothing);
 }
 
 /// With nothing started anywhere, the platform default: Claude Code before any
@@ -2040,15 +2050,15 @@ async fn the_platform_default_prefers_claude_code_and_its_unnamed_profile() {
 
     let offered = prefill(&app, repo).await;
     assert_eq!(
-        on(offered.grilling.as_ref()),
+        on(offered.under("grilling")),
         Some((unnamed.id.as_str(), "claude-fable-5"))
     );
     assert_eq!(
-        on(offered.implementation.as_ref()),
+        on(offered.under("implementation")),
         Some((unnamed.id.as_str(), "claude-opus-5"))
     );
     assert_eq!(
-        on(offered.review.pairing()),
+        on(offered.under("review")),
         Some((unnamed.id.as_str(), "claude-opus-5"))
     );
 }
@@ -2064,11 +2074,11 @@ async fn the_platform_default_takes_the_earliest_named_profile() {
 
     let offered = prefill(&app, repo).await;
     assert_eq!(
-        on(offered.grilling.as_ref()),
+        on(offered.under("grilling")),
         Some((zeta.id.as_str(), "claude-fable-5"))
     );
     assert_eq!(
-        on(offered.implementation.as_ref()),
+        on(offered.under("implementation")),
         Some((zeta.id.as_str(), "claude-opus-5"))
     );
 }
@@ -2093,8 +2103,7 @@ async fn the_platform_default_falls_to_the_first_listed_model_where_its_own_is_n
     let offered = prefill(&app, repo).await;
     assert_eq!(
         offered
-            .implementation
-            .as_ref()
+            .under("implementation")
             .and_then(|pairing| pairing.model.as_deref()),
         Some("gpt-5-codex"),
         "Codex's own model, which this Profile lists second",
@@ -2118,16 +2127,14 @@ async fn the_platform_default_falls_to_the_first_listed_model_where_its_own_is_n
     let offered = prefill(&app, repo).await;
     assert_eq!(
         offered
-            .grilling
-            .as_ref()
+            .under("grilling")
             .and_then(|pairing| pairing.model.as_deref()),
         Some("claude-sonnet-5"),
         "Fable 5 is not on the list, so the first model that is",
     );
     assert_eq!(
         offered
-            .implementation
-            .as_ref()
+            .under("implementation")
             .and_then(|pairing| pairing.model.as_deref()),
         Some("claude-opus-5"),
     );
@@ -2161,12 +2168,12 @@ async fn an_unusable_candidate_falls_through_to_the_default_and_then_to_nothing(
 
     let offered = prefill(&app, askance).await;
     assert_eq!(
-        on(offered.grilling.as_ref()),
+        on(offered.under("grilling")),
         Some((fable.id.as_str(), "claude-fable-5")),
         "the broken copy falls to the default",
     );
     assert_eq!(
-        on(offered.implementation.as_ref()),
+        on(offered.under("implementation")),
         Some((fable.id.as_str(), MODEL))
     );
 
@@ -2174,11 +2181,12 @@ async fn an_unusable_candidate_falls_through_to_the_default_and_then_to_nothing(
 
     let offered = prefill(&app, askance).await;
     assert_eq!(
-        offered.grilling, None,
+        offered.under("grilling"),
+        None,
         "the default is broken too, and the Codex Profile is not hunted for",
     );
-    assert_eq!(offered.implementation, None);
-    assert_eq!(offered.review, PickedView::Nothing);
+    assert_eq!(offered.under("implementation"), None);
+    assert_eq!(offered.of("review"), PickedView::Nothing);
 }
 
 /// **A Profile naming a harness this server has not got** — a plugin installed
@@ -2387,12 +2395,12 @@ async fn a_plugin_harness_offers_its_declared_models_and_defaults_to_its_declare
 
     let offered = prefill(&app, repo).await;
     assert_eq!(
-        on(offered.grilling.as_ref()),
+        on(offered.under("grilling")),
         Some((stubbed.id.as_str(), "stub-grilling")),
         "the model the manifest names for the grilling"
     );
     assert_eq!(
-        on(offered.implementation.as_ref()),
+        on(offered.under("implementation")),
         Some((stubbed.id.as_str(), "stub-large")),
         "and its default for a role it names nothing for"
     );
@@ -2400,7 +2408,7 @@ async fn a_plugin_harness_offers_its_declared_models_and_defaults_to_its_declare
     let claude = saved(&app, accounts.path(), "work").await;
     let offered = prefill(&app, repo).await;
     assert_eq!(
-        on(offered.grilling.as_ref()).map(|(profile, _)| profile),
+        on(offered.under("grilling")).map(|(profile, _)| profile),
         Some(claude.id.as_str()),
         "a built-in's Profile is preferred, whenever it was saved"
     );
@@ -2595,8 +2603,7 @@ async fn codex_is_a_built_in_row_whose_tick_is_the_switch_for_its_profiles() {
     grill(dir.path(), id).await;
 
     let picked = |view: &ConversationView| {
-        view.grilling_pairing
-            .as_ref()
+        view.under("grilling")
             .map(|pairing| pairing.profile.id.clone())
     };
     assert_eq!(
@@ -2650,7 +2657,7 @@ async fn codex_is_a_built_in_row_whose_tick_is_the_switch_for_its_profiles() {
         "the remembered Pairing is not applied: the role starts empty",
     );
     assert_eq!(
-        view.implementation_pairing
+        view.under("implementation")
             .map(|pairing| pairing.profile.id.clone()),
         Some(fable.id.clone()),
         "and the roles beside it are filled as they were",
@@ -2709,7 +2716,7 @@ async fn an_unticked_codex_is_no_platform_default_and_no_wizard_row() {
         async move {
             prefill(&app, repo)
                 .await
-                .grilling
+                .under("grilling")
                 .map(|pairing| pairing.profile.id.clone())
         }
     };
@@ -2805,8 +2812,7 @@ async fn a_disabled_plugins_profiles_stay_and_are_offered_on_no_picker() {
     grill(dir.path(), id).await;
 
     let picked = |view: &ConversationView| {
-        view.grilling_pairing
-            .as_ref()
+        view.under("grilling")
             .map(|pairing| pairing.profile.id.clone())
     };
     assert_eq!(
@@ -2869,7 +2875,7 @@ async fn a_disabled_plugins_profiles_stay_and_are_offered_on_no_picker() {
         "the remembered Pairing is not applied: the role starts empty",
     );
     assert_eq!(
-        view.implementation_pairing
+        view.under("implementation")
             .map(|pairing| pairing.profile.id.clone()),
         Some(fable.id.clone()),
         "and the roles beside it are filled as they were",

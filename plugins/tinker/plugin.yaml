@@ -1,0 +1,70 @@
+# Tinker as data: rounds of follow-up on a fresh branch, primed with the
+# Brief, then the wrap-up where they left commits and Done where they left
+# none. Built in with a tick: unticked, it is off the Process picker, and the
+# conversations already on it run to the end. The state ids are the words the
+# conversations table already holds, so a Tinker stored before this reads on.
+# Each state marked `steer` is a row on the Steer form: a follow-up and the
+# wrap-up, and `investigating`, the detour a question takes, which goes back
+# to where it was steered from.
+uuid: 591db9f3-2cb1-4adb-bf35-ff046f5be6f0
+name: Tinker
+author:
+  name: Tobias Cohen
+  email: tobi@tobico.net
+version: 0.1.0
+interface: 1
+description: Simple one-off changes with minimal fuss.
+dependencies:
+  - uuid: d7a5e719-8491-46a7-b7d7-8f9f85e57bd6
+    name: Activities
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+  - uuid: 15447a8d-f28d-4573-8b8b-a7226d477755
+    name: Verkstead
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+provides:
+  - category: process
+    id: tinker
+    name: Tinker
+    description: Make a series of simple one-off changes with minimal fuss
+    roles:
+      - { name: implementation, label: Implementation, building: true }
+      - { name: review, label: Review, away: true }
+    # Where a backlog is built: this Process interviews nobody, so the only
+    # Direction it answers is the one a review decides for it — work split out
+    # of the wrap-up is a task list from that moment, and `implementing` is
+    # where that list is worked.
+    directions: { task-list: implementing }
+    states:
+      - id: follow-up
+        word: Follow-up
+        activity: follow-up-rounds
+        options: { skill: verkstead/following-up }
+        steer: { brief: follow-up }
+      - id: wrapping
+        word: Wrapping
+        activity: wrap-up
+        roles: [implementation, review]
+        steer: { brief: none }
+      # The backlog a review split out of the wrap-up, worked as any other is
+      # and wrapped up again on the pull request there already. Nothing steers
+      # into it: the way in is a review answered into splitting work out.
+      - id: implementing
+        word: Implementing
+        activity: backlog-runner
+        roles: [implementation]
+      - id: investigating
+        word: Investigating
+        activity: follow-up-rounds
+        options: { skill: verkstead/investigating, evidence: investigated }
+        steer: { brief: question }
+        detour: true
+    transitions:
+      follow-up: { committed: wrapping, nothing: done }
+      wrapping: { settled: done, merged: done, closed: stopped, given-up: stopped }
+      implementing: { finished: wrapping }

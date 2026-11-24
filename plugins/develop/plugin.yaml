@@ -1,0 +1,84 @@
+# Develop as data: the ladder every Draft defaults to and every Conversation
+# from before there were Processes reads as. The interview offers all three
+# Directions, each leading to the one `implementing` state, whose Activity is
+# the Direction's own — One session inline, the Backlog runner for a task list,
+# the Stage runner for a roadmap — so a row already stored under any of them
+# reads on. Then the wrap-up, with `follow-up` hanging off it and
+# `investigating` the detour a question takes, which goes back to wherever it
+# was steered from. Built in with a tick: unticked, Develop is off the Process
+# picker and a new Draft defaults to the first Process still offered, while the
+# conversations already on it run to the end. The state ids are the words the
+# conversations table already holds.
+uuid: 2bcf359e-071a-4237-8741-9897cf06ac15
+name: Develop
+author:
+  name: Tobias Cohen
+  email: tobi@tobico.net
+version: 0.1.0
+interface: 1
+description: The ladder a complex piece of work climbs, from the interview to the pull request.
+dependencies:
+  - uuid: d7a5e719-8491-46a7-b7d7-8f9f85e57bd6
+    name: Activities
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+  - uuid: 15447a8d-f28d-4573-8b8b-a7226d477755
+    name: Verkstead
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+provides:
+  - category: process
+    id: develop
+    name: Develop
+    description: Work on something complex, starting with a grilling session and proceeding through a step-by-step development process
+    roles:
+      - { name: grilling, label: Grilling }
+      - { name: implementation, label: Implementation, building: true }
+      - { name: review, label: Review, away: true }
+    directions: { inline: implementing, task-list: implementing, roadmap: implementing }
+    states:
+      - id: grilling
+        word: Grilling
+        activity: interview
+        roles: [grilling]
+        options: { skill: verkstead/grilling }
+        steer: { brief: round }
+      # No options: the three Activities this state runs are each told the work
+      # a different way — the implementing skill inline, a task list's own
+      # skills per step, nothing at all for a roadmap's stages — and one
+      # `skill` cannot say three things. What each is started on is Verkstead's
+      # own while its drivers run the ladder.
+      - id: implementing
+        word: Implementing
+        activity: { inline: one-session, task-list: backlog-runner, roadmap: stage-runner }
+        steer: { brief: instruction }
+      - id: wrapping
+        word: Wrapping
+        activity: wrap-up
+        roles: [implementation, review]
+        steer: { brief: none }
+      - id: follow-up
+        word: Follow-up
+        activity: follow-up-rounds
+        options: { skill: verkstead/following-up }
+        steer: { brief: follow-up }
+      - id: investigating
+        word: Investigating
+        activity: follow-up-rounds
+        options: { skill: verkstead/investigating, evidence: investigated }
+        steer: { brief: question }
+        detour: true
+    transitions:
+      grilling: { gone: stopped }
+      implementing: { done: wrapping, refused: stopped, finished: wrapping, continued: wrapping }
+      wrapping: { settled: done, merged: done, closed: stopped, given-up: stopped }
+      # Develop's follow-up is reached by a steer alone, and a steer into it is
+      # refused where the work is on no pull request — so it is something taken
+      # up about a pull request that is already there, and what is left when it
+      # is over is that pull request and a wrap-up to see it out, whether or not
+      # the rounds committed anything.
+      follow-up: { committed: wrapping, nothing: wrapping }

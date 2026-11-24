@@ -23,7 +23,7 @@
 //! it says read aloud, the pane header, the setup card's field, and the summary
 //! under a frozen Brief.
 
-import type { Lifecycle } from "../api/types";
+
 
 /// The three facts either shape carries about its branch: what it is called,
 /// whether anybody chose that, and where the work has got to.
@@ -33,7 +33,7 @@ import type { Lifecycle } from "../api/types";
 interface Named {
   branch: string;
   branch_named: boolean;
-  state: Lifecycle;
+  state: string;
 }
 
 /// And the fourth, which only the title reads: whether the name is still the
@@ -59,7 +59,7 @@ export const AUTOMATIC = "Automatically select";
 /// What a field prefilled with the branch holds, and what a companion mirroring
 /// it comes to until there is a name to mirror.
 export function chosen(conversation: Named): string {
-  return conversation.branch_named || conversation.state !== "Draft"
+  return conversation.branch_named || conversation.state !== "draft"
     ? conversation.branch
     : "";
 }
@@ -75,7 +75,7 @@ export function chosen(conversation: Named): string {
 export function titled(conversation: Titled): string {
   const settled =
     conversation.branch_named ||
-    (conversation.state !== "Draft" && !conversation.naming);
+    (conversation.state !== "draft" && !conversation.naming);
 
   return settled ? conversation.branch : DRAFT;
 }

@@ -151,7 +151,7 @@ import {
   loadSettings,
   loadSkillPacks,
 } from "../api/client";
-import type { Process, RepoEntry } from "../api/types";
+import type { ProcessChoice, RepoEntry } from "../api/types";
 import { useReading } from "../freshness";
 import { Reaching, keyOf, type Device } from "../reaching";
 import { setDraftingOn } from "../remembered";
@@ -199,15 +199,8 @@ import {
   type Composed,
 } from "./composing";
 import { pathOf } from "./openings";
-import {
-  away,
-  label,
-  needed,
-  ROLES,
-  targeted,
-  uses,
-  type Role,
-} from "./processes";
+import { away, label, needed, type Role } from "./roles";
+import { defaultChoice, rolesFor, targetedFor } from "./provided";
 import { namesPullRequest, pullRequestRepository } from "./targets";
 import { useZero } from "./zero";
 
@@ -485,8 +478,8 @@ function Compose(props: {
   /// simply reads another memory, and a role the human did touch stands through
   /// it.
   const showing = (role: Role): string => {
-    const picked = state()[role];
-    if (picked !== null) {
+    const picked = state().pairings[role];
+    if (picked !== undefined) {
       return picked;
     }
 
@@ -495,21 +488,29 @@ function Compose(props: {
       return "";
     }
 
-    // The review is the one role whose memory can say *no session at all*; the
-    // other two are an account or nothing.
-    return role === "review"
-      ? pairing.settled(prefill.review)
-      : pairing.chosen(prefill[role]);
+    // Whichever the memory holds, by the role's name, and read as what was
+    // picked: a Pairing, the row that runs no session at all, or nothing.
+    const remembers = prefill.roles.find((one) => one.role === role);
+
+    return remembers === undefined
+      ? ""
+      : pairing.settled(remembers.picked);
   };
 
-  /// What kind of work this page is composing: what the picker was moved to, and
-  /// Develop until it is moved at all.
+  /// What kind of work this page is composing: what the picker was moved to,
+  /// and the row an untouched picker stands on until it is moved at all —
+  /// Develop while its tick stands, and the first Process still offered where
+  /// it does not, which is what the server prefills a new Draft with. See
+  /// [`defaultChoice`].
   ///
   /// The one reading the row is drawn off, the way [`on`] is the one reading of
   /// the repo: which pickers stand in it, what the press waits on, and what an
-  /// inert press says it is waiting on all come off this and the table it
-  /// indexes.
-  const process = (): Process => state().process ?? "Develop";
+  /// inert press says it is waiting on all come off this and the roles its
+  /// manifest declares.
+  const chosen = (): ProcessChoice | null =>
+    state().process === null
+      ? defaultChoice()
+      : { process: state().process! };
 
   /// Whether there is anything to create at all, which is the repo and nothing
   /// else: everything else on this page may stay empty, as it always may while
@@ -539,13 +540,17 @@ function Compose(props: {
   /// own base along, and a branch's base is what its pull request will be
   /// opened against.
   const onAPullRequest = () =>
-    targeted(process()) && namesPullRequest(state().target);
+    targetedFor(chosen()) && namesPullRequest(state().target);
+
+  /// The roles the Process picked declares, in the order their pickers are
+  /// drawn — its manifest's, read off the list the server sends.
+  const roles = () => rolesFor(chosen());
 
   const startable = () =>
     ready() &&
     (adopting() !== null || state().brief.trim() !== "") &&
-    (!targeted(process()) || state().target.trim() !== "") &&
-    ROLES[process()].uses.every((role) => showing(role) !== "");
+    (!targetedFor(chosen()) || state().target.trim() !== "") &&
+    roles().every((role) => showing(role.role) !== "");
 
   /// What starting is waiting on, in the words the composer's own start says
   /// them in — the brief left out where a roadmap answers for it, and the roles
@@ -556,9 +561,9 @@ function Compose(props: {
   /// or not anybody wanted it is the page explaining itself unasked — see the
   /// composer's own start, where the same words moved for the same reason.
   const waiting = () =>
-    `Starting needs ${needed(process(), {
+    `Starting needs ${needed(roles().length, {
       brief: adopting() === null,
-      target: true,
+      target: targetedFor(chosen()),
     })}.`;
 
   const [gone, setGone] = createSignal(false);
@@ -933,7 +938,7 @@ function Compose(props: {
                       </RepoChoice>
 
                       <Show when={repo()}>
-                        {(chosen) => (
+                        {(registered) => (
                           <>
                             {/* Neither is asked of a page adopting a roadmap: a
                                 stage is worked on its own slug, and the base went
@@ -950,13 +955,13 @@ function Compose(props: {
                               />
 
                               {/* And what the work is pointed at, for the
-                                  Processes that are pointed at work already
-                                  somewhere else — `processes.ts`'s list, so a
+                                  Processes whose manifest says they are
+                                  pointed at work already somewhere else, so a
                                   Process that gains a target gains the field
                                   here without a line changing. Held on the
                                   device like everything else in this panel, and
                                   filled from the box while it is empty. */}
-                              <Show when={targeted(process())}>
+                              <Show when={targetedFor(chosen())}>
                                 <BranchField
                                   id="target"
                                   label="Target"
@@ -976,7 +981,7 @@ function Compose(props: {
                                 <BasePicker
                                   id="base-branch"
                                   label="Base branch"
-                                  repo={chosen()}
+                                  repo={registered()}
                                   chosen={state().base ?? RULE}
                                   pick={(branch) => change({ base: branch })}
                                 />
@@ -1027,21 +1032,24 @@ function Compose(props: {
                   field in this row that is *not* remembered per repo: the
                   pairings are the same answer most of the time, and a Process is
                   the one thing about a Conversation likeliest to differ from the
-                  last. So it stands on Develop for every repo, and a picker left
-                  on it sends nothing when this is created. */}
+                  last. So it stands on the first Process offered for every repo,
+                  and a picker left on it sends nothing when this is created —
+                  the server prefills the same row where Develop is unticked.
+                  */}
               <ProcessPicker
-                chosen={process()}
+                chosen={chosen()}
                 disabled={make.isPending}
-                pick={(picked) => change({ process: picked })}
+                pick={(picked) => change({ process: picked.process })}
               />
 
               {/* And who runs it, which is one control: a picker per role the
-                  Process uses, in the shape the Process asks for — a panel behind
-                  one trigger where there are several, and the one picker itself
-                  where there is one. Both of those are [`ROLES`]'s to say and not
-                  this page's. The composer's own option drawn over what this
-                  device is holding rather than over a record, so the two pages
-                  cannot come to ask this question in two shapes.
+                  Process declares, in the shape the count of them asks for — a
+                  panel behind one trigger where there are several, and the one
+                  picker itself where there is one. Both of those are the
+                  manifest's to say and not this page's. The composer's own
+                  option drawn over what this device is holding rather than over
+                  a record, so the two pages cannot come to ask this question in
+                  two shapes.
 
                   Each picker stands on what the repo was last grilled with (or
                   its prefill, where nothing has grilled it) until it is touched,
@@ -1051,53 +1059,40 @@ function Compose(props: {
               <ProfileChoices>
                 {(saved) => (
                   <AgentOptions
-                    process={process()}
+                    roles={roles()}
                     saved={saved()}
                     // Composed off what the pickers are showing rather than off
                     // what the device is holding, so the trigger and the panel
                     // read as one thing: a page whose repo memory has not landed
                     // reads *Not chosen* until it does, and switching repos simply
                     // reads another memory.
-                    picked={{
-                      grilling: showing("grilling"),
-                      implementation: showing("implementation"),
-                      review: showing("review"),
-                    }}
+                    picked={Object.fromEntries(
+                      roles().map((role) => [role.role, showing(role.role)]),
+                    )}
                   >
                     {() => (
-                      <>
-                        {/* Drawn by the table rather than by a test for a Process:
-                            a Review has no round for a grilling to open, and it is
-                            the table that says so. */}
-                        <Show when={uses(process(), "grilling")}>
+                      <For each={roles()}>
+                        {/* Drawn by the manifest rather than by a test for a
+                            Process: a Review has no round for a grilling to
+                            open, and it is the manifest that says so. */}
+                        {(role) => (
                           <RolePicker
                             saved={saved()}
-                            role="grilling"
-                            label={label(process(), "grilling")}
-                            chosen={showing("grilling")}
-                            pick={(picked) => change({ grilling: picked })}
+                            role={role.role}
+                            label={label(roles().length, role)}
+                            away={away(role)}
+                            chosen={showing(role.role)}
+                            pick={(picked) =>
+                              change({
+                                pairings: {
+                                  ...state().pairings,
+                                  [role.role]: picked,
+                                },
+                              })
+                            }
                           />
-                        </Show>
-                        <Show when={uses(process(), "implementation")}>
-                          <RolePicker
-                            saved={saved()}
-                            role="implementation"
-                            label={label(process(), "implementation")}
-                            chosen={showing("implementation")}
-                            pick={(picked) => change({ implementation: picked })}
-                          />
-                        </Show>
-                        <Show when={uses(process(), "review")}>
-                          <RolePicker
-                            saved={saved()}
-                            role="review"
-                            label={label(process(), "review")}
-                            away={away(process(), "review")}
-                            chosen={showing("review")}
-                            pick={(picked) => change({ review: picked })}
-                          />
-                        </Show>
-                      </>
+                        )}
+                      </For>
                     )}
                   </AgentOptions>
                 )}

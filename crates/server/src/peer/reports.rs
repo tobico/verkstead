@@ -78,7 +78,7 @@ pub(crate) async fn heard(
     let adopting = report
         .adopting
         .as_ref()
-        .map(|adopting| (adopting, crate::ui::state_of(report.state)));
+        .map(|adopting| (adopting, store::State::named(&report.state)));
 
     let tombstone = match tombstone_of(&state, &caller, &report.born, adopting).await {
         Ok(tombstone) => tombstone,
@@ -86,7 +86,7 @@ pub(crate) async fn heard(
     };
 
     let standing = store::LiveStanding {
-        state: crate::ui::state_of(report.state),
+        state: store::State::named(&report.state),
         done: report.done,
         wrapped: report.wrapped,
         stopped: report.stopped,
@@ -141,7 +141,7 @@ pub(super) async fn tombstone_of(
     state: &AppState,
     caller: &Caller,
     born: &BirthKey,
-    adopting: Option<(&StageAdopting, store::Lifecycle)>,
+    adopting: Option<(&StageAdopting, store::State)>,
 ) -> Result<i64, Response> {
     let Some(presented) = caller.fingerprint() else {
         return Err(refused(
@@ -311,7 +311,7 @@ async fn adopted(
     born: &store::Birth,
     caller: &str,
     adopting: &StageAdopting,
-    state_now: store::Lifecycle,
+    state_now: store::State,
 ) -> Result<i64, Response> {
     let live = store::Transferred {
         device: caller.to_owned(),

@@ -83,17 +83,19 @@
     "direction": "inline",
     "drafted_on": null,
     "driven": false,
-    "grilling_pairing": null,
     "id": 4,
-    "implementation_pairing": null,
     "mcp_servers": [],
     "naming": false,
+    "pairings": [],
     "parked": null,
     "pending_steer": null,
     "permitted": [],
     "pinned": [],
     "previews": [],
-    "process": "Develop",
+    "process": {
+      "id": "develop",
+      "plugin": "2bcf359e-071a-4237-8741-9897cf06ac15"
+    },
     "ready_to_continue": false,
     "ready_to_grill": false,
     "ready_to_resume": false,
@@ -109,10 +111,10 @@
       "path": ""
     },
     "resets": null,
-    "review_pairing": "Nothing",
     "shared": null,
     "skill_packs": [],
-    "state": "Implementing",
+    "state": "implementing",
+    "steer_rows": [],
     "stop_asked": false,
     "stopped_by_hand": false,
     "target": null,
@@ -130,7 +132,7 @@
         "Moved": {
           "at": "2026-08-03T09:07:11.000Z",
           "id": 11,
-          "state": "Grilling"
+          "state": "grilling"
         }
       },
       {
@@ -171,7 +173,7 @@
         "Moved": {
           "at": "2026-08-03T09:07:11.000Z",
           "id": 14,
-          "state": "Implementing"
+          "state": "implementing"
         }
       },
       {

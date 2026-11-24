@@ -118,25 +118,25 @@ pub use continuations::{
     take_up_the_conversation, the_last_session,
 };
 pub use conversations::{
-    AdoptedPullRequest, Base, Chosen, Closable, ClosableCompanion, Closing, Conversation,
-    ConversationRow, Directing, Driven, Edited, Ending, Entering, Event, Grilling, Implementing,
-    Investigated, Joined, Landed, Landing, Lifecycle, Planned, Process, Queued, Rebuilding,
-    Resolving, RoadmapStage, Role, RowState, SetOnTimeline, Settling, StageOf, StageStanding,
-    StageStandings, Staged, Steer, Steering, Switched, Taking, TimelineEvent, Work,
-    adopted_pull_request, adopting, ask, ask_on_our_own, asked_from, closable, close_conversation,
-    conversation_at_worktree, conversation_branch, conversation_rank, conversation_ranks,
-    conversation_standing, conversations, driven_roadmaps, fill_process, fill_repo, fill_target,
-    follow_branch, follow_up_done, follow_up_over, hold_pull_request, implement_again,
+    AdoptedPullRequest, BUILT_IN_PROCESSES, Base, BuiltInProcess, Chosen, Closable,
+    ClosableCompanion, Closing, Conversation, ConversationRow, Directing, Driven, Edited, Ending,
+    Entering, Event, Grilling, Investigated, Joined, Landed, Landing, Pairings, Planned, Process,
+    Queued, Rebuilding, Resolving, RoadmapStage, Role, SetOnTimeline, Settling, StageOf,
+    StageStanding, StageStandings, Staged, State, Steer, Steering, Switched, Taking, TimelineEvent,
+    Transitioned, Work, adopted_pull_request, adopting, ask, ask_on_our_own, asked_from, closable,
+    close_conversation, conversation_at_worktree, conversation_branch, conversation_rank,
+    conversation_ranks, conversation_standing, conversations, driven_roadmaps, fill_process,
+    fill_repo, fill_target, follow_branch, follow_up_over, hold_pull_request, implement_again,
     investigation_over, join_queue, last_batch_proposal, last_proposal, load_conversation, note,
     open_set, opened_at, pick_direction, picked_direction, picked_wants, process, queue_to_join,
     rank_conversation, record_backlog, record_handoff, record_roadmap, recorded_conversations,
     recorded_worktrees, reinvent_branch, rename_branch, repo_to_fill, resolve_conflicts,
     roadmap_planner, save_brief, set_asked_from, set_base_commit, set_grilling_pairing,
-    set_implementation_pairing, set_process, set_review_pairing, set_state, set_target,
-    settle_naming, skip_review, stacks_on, stage_chain, stage_roadmap, stage_standings,
-    start_adoption, start_conversation, start_grilling, start_implementing, start_investigating,
-    start_stage, start_tinkering, start_unnamed_conversation, state, steer_conversation,
-    switch_repo, take_up, target, timeline, timeline_as_held, unfinished_conversations, waiting,
+    set_implementation_pairing, set_pairing, set_process, set_review_pairing, set_state,
+    set_target, settle_naming, skip_review, skip_role, stacks_on, stage_chain, stage_roadmap,
+    stage_standings, start_adoption, start_conversation, start_in, start_stage,
+    start_unnamed_conversation, state, state_under, steer_conversation, switch_repo, take_up,
+    target, timeline, timeline_as_held, transition, unfinished_conversations, waiting,
     work_on_repo,
 };
 pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, unfolded};
@@ -221,8 +221,8 @@ pub use slices::{
     Cell, MOST_A_SLICE_IS, Marks, Renaming, Rows, STAYS_BEHIND, Slice, carried_tables, land, slice,
 };
 pub use steers::{
-    PickedPairing, Recorded, RecordedPairing, Scratch, SteerAddition, SteerRecord, SteerUpgrade,
-    scratch,
+    LatestSteer, PickedPairing, Recorded, RecordedPairing, Scratch, SteerAddition, SteerRecord,
+    SteerUpgrade, latest_steer, scratch,
 };
 pub use stops::{
     Decision, Stopped, Stopping, ask_to_stop, asked_to_stop, clear_stop, forget_stop,
@@ -629,6 +629,19 @@ pub async fn unresolved(
 /// raised because the Response is stored by the time this runs, and failing the
 /// submission now would leave a waiting agent holding a Set that has in fact been
 /// answered.
+///
+/// **And a pick that arrives after the interview that proposed is over informs
+/// nothing**, which is [`Directing::NotGrilling`]. What says the interview is
+/// over is a move on the Timeline above the Set: the Conversation went
+/// somewhere, so the session that put the proposal up has been seen out and the
+/// Direction the work is being built as is settled. A pick landing then would
+/// write over it — see [`pick_direction`], whose upsert is *latest pick wins*
+/// while a round is still being had.
+///
+/// **The Timeline rather than the state**, because what state an interview runs
+/// in is its Process's to declare and no column holds it (ADR-0030, *Process*):
+/// a Set was asked at a position, and anything that moved the Conversation since
+/// is past it.
 async fn accept_proposal(
     pool: &SqlitePool,
     set_id: i64,
@@ -638,7 +651,34 @@ async fn accept_proposal(
         return Ok(Directing::NoSuchConversation);
     };
 
+    if moved_since(pool, set_id).await? {
+        return Ok(Directing::NotGrilling);
+    }
+
     pick_direction(pool, conversation_id, direction).await
+}
+
+/// Whether the Conversation has moved since Set `set_id` was put to the human —
+/// see [`accept_proposal`], which is the one caller.
+async fn moved_since(pool: &SqlitePool, set_id: i64) -> Result<bool> {
+    let moved: (bool,) = sqlx::query_as(
+        "SELECT EXISTS (
+                   SELECT 1
+                   FROM timeline_events m
+                   JOIN set_events s ON s.set_id = ?
+                   JOIN timeline_events a ON a.id = s.event_id
+                   WHERE m.conversation_id = a.conversation_id
+                     AND m.kind = ?
+                     AND m.id > a.id
+               )",
+    )
+    .bind(set_id)
+    .bind(conversations::MOVED)
+    .fetch_one(pool)
+    .await
+    .with_context(|| format!("reading whether a Conversation moved since set {set_id}"))?;
+
+    Ok(moved.0)
 }
 
 /// What became of locking a Set unanswered.

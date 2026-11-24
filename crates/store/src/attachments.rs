@@ -131,7 +131,7 @@ impl Origin {
     ///
     /// A word this does not know is a database written by a Verkstead this one
     /// does not understand, which is worth saying rather than guessing past —
-    /// the same reading `Lifecycle` is given. An `answer` row that names no Set
+    /// the same reading a state word is given. An `answer` row that names no Set
     /// or no Question is the same kind of thing said the other way round: the
     /// word says what the two columns are for, so a row where they disagree is
     /// one nothing here can make an Answer's file out of.

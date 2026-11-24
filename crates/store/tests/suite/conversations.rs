@@ -7,19 +7,18 @@ use sqlx::SqlitePool;
 use verkstead_schema::Direction;
 use verkstead_store::{
     Account, AdoptedPullRequest, Archiving, Attaching, Birth, Closing, Decision, Driven, Edited,
-    Event, Grilling, Joined, Lifecycle, Linking, Planned, ProfileFacts, PullRequest, Queued,
-    Recorded, RoadmapStage, RowState, StageOf, StageStanding, Staged, Steer, Switched, Transferred,
-    Unarchiving, add_companion, adopted_pull_request, adopting, any_archived, archive_conversation,
-    archived, attach_mcp_server_to_draft, attach_to_draft, attachments, clear_stop,
-    close_conversation, conversation_branch, conversations, create_profile, driven_roadmaps,
-    follow_branch, hold_pull_request, join_queue, load_conversation, mcp_servers, open_database,
-    pick_direction, queue_to_join, record_another_pull_request, record_birth, record_member,
-    record_pull_request, record_roadmap, register_repo, reinvent_branch, rename_branch,
-    roadmap_planner, save_brief, set_base_commit, set_grilling_pairing, set_state, set_target,
-    settle_naming, show_archived, showing_archived, stacks_on, stage_chain, stage_roadmap,
-    stage_standings, start_adoption, start_conversation, start_grilling, start_stage,
-    start_tinkering, start_unnamed_conversation, state, steer_conversation, stop, switch_repo,
-    target, timeline, transfer_away, unarchive_conversation,
+    Event, Grilling, Joined, Linking, Planned, ProfileFacts, PullRequest, Queued, Recorded,
+    RoadmapStage, StageOf, StageStanding, Staged, State, Steer, Switched, Transferred, Unarchiving,
+    add_companion, adopted_pull_request, adopting, any_archived, archive_conversation, archived,
+    attach_mcp_server_to_draft, attach_to_draft, attachments, clear_stop, close_conversation,
+    conversation_branch, conversations, create_profile, driven_roadmaps, follow_branch,
+    hold_pull_request, join_queue, load_conversation, mcp_servers, open_database, pick_direction,
+    queue_to_join, record_another_pull_request, record_birth, record_member, record_pull_request,
+    record_roadmap, register_repo, reinvent_branch, rename_branch, roadmap_planner, save_brief,
+    set_base_commit, set_grilling_pairing, set_state, set_target, settle_naming, show_archived,
+    showing_archived, stacks_on, stage_chain, stage_roadmap, stage_standings, start_adoption,
+    start_conversation, start_in, start_stage, start_unnamed_conversation, state,
+    steer_conversation, stop, switch_repo, target, timeline, transfer_away, unarchive_conversation,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -89,13 +88,13 @@ async fn briefs(pool: &SqlitePool, id: i64) -> Vec<String> {
 }
 
 /// The states a Conversation's Timeline says it has moved through, in order.
-async fn moves(pool: &SqlitePool, id: i64) -> Vec<Lifecycle> {
+async fn moves(pool: &SqlitePool, id: i64) -> Vec<State> {
     timeline(pool, id)
         .await
         .unwrap()
         .iter()
-        .filter_map(|event| match event.event {
-            Event::Moved(state) => Some(state),
+        .filter_map(|event| match &event.event {
+            Event::Moved(state) => Some(state.clone()),
             _ => None,
         })
         .collect()
@@ -126,7 +125,7 @@ async fn a_started_conversation_holds_its_repo_its_branch_and_the_default_rule()
     assert_eq!(conversation.repo.id, repo_id);
     assert_eq!(conversation.repo.name, "verkstead");
     assert_eq!(conversation.branch, "amber-kestrel");
-    assert_eq!(conversation.state, Lifecycle::Draft);
+    assert_eq!(conversation.state, State::draft());
 
     // Not a missing value: no override means the default branch's tip at grill
     // start, which is a rule to resolve then rather than a commit to record now.
@@ -292,9 +291,10 @@ async fn starting_the_work_leaves_an_invented_branch_name_to_be_replaced() {
     );
 
     for (id, worktree) in [(invented, "amber-kestrel"), (typed, "rate-limiting")] {
-        start_grilling(
+        start_in(
             &pool,
             id,
+            &State::named("grilling"),
             "c0ffee",
             &Path::new("/data/worktrees").join(worktree),
             &[],
@@ -338,9 +338,10 @@ async fn a_branch_stops_waiting_to_be_named_by_being_renamed_or_by_being_settled
         .unwrap();
 
     for (id, worktree) in [(renamed, "amber-kestrel"), (left, "brave-otter")] {
-        start_grilling(
+        start_in(
             &pool,
             id,
+            &State::named("grilling"),
             "c0ffee",
             &Path::new("/data/worktrees").join(worktree),
             &[],
@@ -380,9 +381,10 @@ async fn a_row_says_whether_its_branch_is_still_to_be_named() {
         .unwrap()
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         Path::new("/data/worktrees/amber-kestrel"),
         &[],
@@ -594,7 +596,9 @@ async fn nothing_about_a_conversation_past_drafting_can_be_edited() {
         .unwrap();
     save_brief(&pool, id, "# Rate limiting\n").await.unwrap();
 
-    set_state(&pool, id, Lifecycle::Grilling).await.unwrap();
+    set_state(&pool, id, State::named("grilling"))
+        .await
+        .unwrap();
 
     assert_eq!(
         save_brief(&pool, id, "# Something else\n").await.unwrap(),
@@ -733,7 +737,12 @@ async fn switching_a_drafts_repo_resets_its_base_and_drops_only_the_companion_it
     );
     assert_eq!(conversation.branch, "rate-limiting");
     assert!(conversation.branch_named);
-    assert!(conversation.grilling_pairing.is_some());
+    assert!(
+        conversation
+            .pairings
+            .under(&verkstead_store::Role::grilling())
+            .is_some()
+    );
 }
 
 /// The freeze: a checkout is of one repository, so from the moment there is one
@@ -745,9 +754,16 @@ async fn a_repo_switch_is_refused_once_the_branch_has_been_cut() {
     let id = drafted(&pool).await;
     let elsewhere = repo(&pool, "askance").await;
 
-    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
-        .await
-        .unwrap();
+    start_in(
+        &pool,
+        id,
+        &State::named("grilling"),
+        "deadbeef",
+        Path::new("/state/worktrees/x"),
+        &[],
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         switch_repo(&pool, id, elsewhere).await.unwrap(),
@@ -756,7 +772,7 @@ async fn a_repo_switch_is_refused_once_the_branch_has_been_cut() {
 
     // And still refused where the state has come back to Draft, the worktree
     // having stayed: that is a round steered onto work that is already built.
-    set_state(&pool, id, Lifecycle::Draft).await.unwrap();
+    set_state(&pool, id, State::draft()).await.unwrap();
 
     assert_eq!(
         switch_repo(&pool, id, elsewhere).await.unwrap(),
@@ -961,9 +977,10 @@ async fn starting_to_grill_records_the_base_commit_the_worktree_and_the_move() {
     let id = drafted(&pool).await;
 
     assert_eq!(
-        start_grilling(
+        start_in(
             &pool,
             id,
+            &State::named("grilling"),
             "deadbeef",
             Path::new("/state/worktrees/verkstead-rate-limiting"),
             &[],
@@ -974,13 +991,13 @@ async fn starting_to_grill_records_the_base_commit_the_worktree_and_the_move() {
     );
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Grilling);
+    assert_eq!(conversation.state, State::named("grilling"));
     assert_eq!(conversation.base_commit.as_deref(), Some("deadbeef"));
     assert_eq!(
         conversation.worktree.as_deref(),
         Some(Path::new("/state/worktrees/verkstead-rate-limiting"))
     );
-    assert_eq!(moves(&pool, id).await, [Lifecycle::Grilling]);
+    assert_eq!(moves(&pool, id).await, [State::named("grilling")]);
 }
 
 /// And the **Tinker** landing writes the same three things and leaves the
@@ -991,9 +1008,10 @@ async fn starting_a_tinker_records_the_same_things_and_lands_in_follow_up() {
     let id = drafted(&pool).await;
 
     assert_eq!(
-        start_tinkering(
+        start_in(
             &pool,
             id,
+            &State::named("follow-up"),
             "deadbeef",
             Path::new("/state/worktrees/verkstead-rate-limiting"),
             &[],
@@ -1006,7 +1024,7 @@ async fn starting_a_tinker_records_the_same_things_and_lands_in_follow_up() {
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(
         conversation.state,
-        Lifecycle::FollowUp,
+        State::named("follow-up"),
         "a Tinker is never interviewed, so there is no grilling to land in",
     );
     assert_eq!(conversation.base_commit.as_deref(), Some("deadbeef"));
@@ -1014,12 +1032,19 @@ async fn starting_a_tinker_records_the_same_things_and_lands_in_follow_up() {
         conversation.worktree.as_deref(),
         Some(Path::new("/state/worktrees/verkstead-rate-limiting"))
     );
-    assert_eq!(moves(&pool, id).await, [Lifecycle::FollowUp]);
+    assert_eq!(moves(&pool, id).await, [State::named("follow-up")]);
 
     assert_eq!(
-        start_tinkering(&pool, id, "cafe", Path::new("/state/worktrees/y"), &[])
-            .await
-            .unwrap(),
+        start_in(
+            &pool,
+            id,
+            &State::named("follow-up"),
+            "cafe",
+            Path::new("/state/worktrees/y"),
+            &[]
+        )
+        .await
+        .unwrap(),
         Grilling::NotDrafting,
         "and it cannot be started twice, for the reason no start can",
     );
@@ -1035,18 +1060,18 @@ async fn a_conversation_set_investigating_reads_back_investigating() {
     let (_dir, pool) = fresh_pool().await;
     let id = drafted(&pool).await;
 
-    set_state(&pool, id, Lifecycle::Investigating)
+    set_state(&pool, id, State::named("investigating"))
         .await
         .unwrap();
 
     assert_eq!(
         load_conversation(&pool, id).await.unwrap().unwrap().state,
-        Lifecycle::Investigating,
+        State::named("investigating"),
         "the word the column holds is one this Verkstead reads",
     );
     assert_eq!(
         state(&pool, id).await.unwrap(),
-        Some(Lifecycle::Investigating),
+        Some(State::named("investigating")),
         "and the cheap reading of it says the same thing",
     );
 }
@@ -1068,9 +1093,16 @@ async fn the_base_commit_is_written_even_where_the_human_overrode_nothing() {
         "nothing was overridden, so there is only the rule"
     );
 
-    start_grilling(&pool, id, "0123456", Path::new("/state/worktrees/x"), &[])
-        .await
-        .unwrap();
+    start_in(
+        &pool,
+        id,
+        &State::named("grilling"),
+        "0123456",
+        Path::new("/state/worktrees/x"),
+        &[],
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         load_conversation(&pool, id)
@@ -1090,14 +1122,28 @@ async fn a_conversation_that_is_not_drafting_cannot_start_grilling() {
     let (_dir, pool) = fresh_pool().await;
     let id = drafted(&pool).await;
 
-    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
-        .await
-        .unwrap();
+    start_in(
+        &pool,
+        id,
+        &State::named("grilling"),
+        "deadbeef",
+        Path::new("/state/worktrees/x"),
+        &[],
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
-        start_grilling(&pool, id, "cafe", Path::new("/state/worktrees/y"), &[])
-            .await
-            .unwrap(),
+        start_in(
+            &pool,
+            id,
+            &State::named("grilling"),
+            "cafe",
+            Path::new("/state/worktrees/y"),
+            &[]
+        )
+        .await
+        .unwrap(),
         Grilling::NotDrafting
     );
 
@@ -1108,7 +1154,7 @@ async fn a_conversation_that_is_not_drafting_cannot_start_grilling() {
         conversation.worktree.as_deref(),
         Some(Path::new("/state/worktrees/x"))
     );
-    assert_eq!(moves(&pool, id).await, [Lifecycle::Grilling]);
+    assert_eq!(moves(&pool, id).await, [State::named("grilling")]);
 }
 
 #[tokio::test]
@@ -1116,9 +1162,16 @@ async fn grilling_a_conversation_that_is_not_there_says_so() {
     let (_dir, pool) = fresh_pool().await;
 
     assert_eq!(
-        start_grilling(&pool, 404, "deadbeef", Path::new("/state/worktrees/x"), &[])
-            .await
-            .unwrap(),
+        start_in(
+            &pool,
+            404,
+            &State::named("grilling"),
+            "deadbeef",
+            Path::new("/state/worktrees/x"),
+            &[]
+        )
+        .await
+        .unwrap(),
         Grilling::NoSuchConversation
     );
 }
@@ -1131,9 +1184,16 @@ async fn grilling_freezes_the_brief_and_the_branch_name() {
     let (_dir, pool) = fresh_pool().await;
     let id = drafted(&pool).await;
 
-    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
-        .await
-        .unwrap();
+    start_in(
+        &pool,
+        id,
+        &State::named("grilling"),
+        "deadbeef",
+        Path::new("/state/worktrees/x"),
+        &[],
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         save_brief(&pool, id, "# Something else\n").await.unwrap(),
@@ -1163,9 +1223,16 @@ async fn grilling_freezes_the_brief_and_the_branch_name() {
 async fn closing_forgets_the_worktree_and_keeps_the_branch() {
     let (_dir, pool) = fresh_pool().await;
     let id = drafted(&pool).await;
-    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
-        .await
-        .unwrap();
+    start_in(
+        &pool,
+        id,
+        &State::named("grilling"),
+        "deadbeef",
+        Path::new("/state/worktrees/x"),
+        &[],
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         close_conversation(&pool, id).await.unwrap(),
@@ -1173,13 +1240,13 @@ async fn closing_forgets_the_worktree_and_keeps_the_branch() {
     );
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Closed);
+    assert_eq!(conversation.state, State::closed());
     assert_eq!(conversation.worktree, None);
     assert_eq!(conversation.branch, "rate-limiting");
     assert_eq!(conversation.base_commit.as_deref(), Some("deadbeef"));
     assert_eq!(
         moves(&pool, id).await,
-        [Lifecycle::Grilling, Lifecycle::Closed]
+        [State::named("grilling"), State::closed()]
     );
 }
 
@@ -1189,9 +1256,16 @@ async fn closing_forgets_the_worktree_and_keeps_the_branch() {
 async fn closing_twice_is_not_an_error() {
     let (_dir, pool) = fresh_pool().await;
     let id = drafted(&pool).await;
-    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
-        .await
-        .unwrap();
+    start_in(
+        &pool,
+        id,
+        &State::named("grilling"),
+        "deadbeef",
+        Path::new("/state/worktrees/x"),
+        &[],
+    )
+    .await
+    .unwrap();
 
     close_conversation(&pool, id).await.unwrap();
     assert_eq!(
@@ -1201,7 +1275,7 @@ async fn closing_twice_is_not_an_error() {
 
     assert_eq!(
         moves(&pool, id).await,
-        [Lifecycle::Grilling, Lifecycle::Closed]
+        [State::named("grilling"), State::closed()]
     );
 }
 
@@ -1218,9 +1292,9 @@ async fn a_drafting_conversation_can_be_closed_without_ever_having_grilled() {
     );
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Closed);
+    assert_eq!(conversation.state, State::closed());
     assert_eq!(conversation.worktree, None);
-    assert_eq!(moves(&pool, id).await, [Lifecycle::Closed]);
+    assert_eq!(moves(&pool, id).await, [State::closed()]);
 }
 
 /// A closed Conversation is past drafting, so it cannot be started either.
@@ -1231,9 +1305,16 @@ async fn a_closed_conversation_cannot_start_grilling() {
     close_conversation(&pool, id).await.unwrap();
 
     assert_eq!(
-        start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
-            .await
-            .unwrap(),
+        start_in(
+            &pool,
+            id,
+            &State::named("grilling"),
+            "deadbeef",
+            Path::new("/state/worktrees/x"),
+            &[]
+        )
+        .await
+        .unwrap(),
         Grilling::NotDrafting
     );
 }
@@ -1274,25 +1355,34 @@ async fn stored_state(pool: &SqlitePool, id: i64) -> String {
     state
 }
 
-/// The close is the way out of a state word nothing can read — and the way the
-/// word itself is repaired.
+/// The close is the way out of a state no Process declares — a plugin removed
+/// from under the Conversation, or a word somebody wrote by hand.
 ///
-/// A word this Verkstead does not know is not Closed, so the close goes ahead;
-/// the write it makes is unconditional, so what the row holds afterwards is
-/// `closed`. The Conversation comes back readable, which is the whole point:
-/// everything else about it was locked behind that one column.
+/// A state is a word, so the read never refuses one: it comes back as the word
+/// it is, and the Conversation draws under it. What the close does is move it to
+/// one Verkstead owns, which it does unconditionally — the word nothing
+/// declares is not Closed, so the close goes ahead and the row holds `closed`
+/// afterwards.
 #[tokio::test]
-async fn closing_a_conversation_whose_state_word_is_unreadable_closes_and_heals_it() {
+async fn closing_a_conversation_whose_state_nothing_declares_closes_it() {
     let (_dir, pool) = fresh_pool().await;
     let id = drafted(&pool).await;
-    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
-        .await
-        .unwrap();
+    start_in(
+        &pool,
+        id,
+        &State::named("grilling"),
+        "deadbeef",
+        Path::new("/state/worktrees/x"),
+        &[],
+    )
+    .await
+    .unwrap();
     corrupt_the_state(&pool, id).await;
 
-    assert!(
-        load_conversation(&pool, id).await.is_err(),
-        "the ordinary read refuses it, which is what the close has to work past"
+    assert_eq!(
+        load_conversation(&pool, id).await.unwrap().unwrap().state,
+        "meandering",
+        "the read carries the word it found, a state being a word",
     );
 
     assert_eq!(
@@ -1303,7 +1393,7 @@ async fn closing_a_conversation_whose_state_word_is_unreadable_closes_and_heals_
     assert_eq!(stored_state(&pool, id).await, "closed");
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Closed);
+    assert_eq!(conversation.state, State::closed());
     assert_eq!(conversation.worktree, None);
 }
 
@@ -1356,12 +1446,10 @@ async fn the_list_carries_a_row_whose_state_word_is_unreadable() {
         "both rows, newest first"
     );
     assert_eq!(
-        rows[0].state,
-        RowState::Unknown("meandering".to_owned()),
-        "with the word it could not read carried, for whoever draws the row to say"
+        rows[0].state, "meandering",
+        "with the word nothing declares carried, for whoever draws the row to say"
     );
-    assert_eq!(rows[0].state.known(), None);
-    assert_eq!(rows[1].state, RowState::Known(Lifecycle::Draft));
+    assert_eq!(rows[1].state, State::draft());
 }
 
 /// Archiving takes a Closed Conversation off the sidebar and leaves everything
@@ -1381,7 +1469,7 @@ async fn archiving_a_closed_conversation_takes_it_off_the_list() {
     assert!(conversations(&pool, false).await.unwrap().is_empty());
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Closed);
+    assert_eq!(conversation.state, State::closed());
     assert_eq!(conversation.branch, "rate-limiting");
     assert_eq!(brief(&pool, id).await, "# Rate limiting\n");
 }
@@ -1440,9 +1528,16 @@ async fn a_conversation_that_is_not_closed_cannot_be_archived() {
         Archiving::NotClosed
     );
 
-    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
-        .await
-        .unwrap();
+    start_in(
+        &pool,
+        id,
+        &State::named("grilling"),
+        "deadbeef",
+        Path::new("/state/worktrees/x"),
+        &[],
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         archive_conversation(&pool, id).await.unwrap(),
@@ -1480,7 +1575,7 @@ async fn unarchiving_puts_a_conversation_back_on_the_list() {
 
     let list = conversations(&pool, false).await.unwrap();
     assert_eq!(list.len(), 1);
-    assert_eq!(list[0].state, RowState::Known(Lifecycle::Closed));
+    assert_eq!(list[0].state, State::closed());
 }
 
 /// And it holds: what was taken back out stays out, so a reload does not put
@@ -1654,9 +1749,10 @@ async fn a_worktree_survives_the_database_being_reopened() {
 
     let pool = open_database(&database).await.unwrap();
     let id = drafted(&pool).await;
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "deadbeef",
         Path::new("/state/worktrees/verkstead-rate-limiting"),
         &[],
@@ -1668,7 +1764,7 @@ async fn a_worktree_survives_the_database_being_reopened() {
     let pool = open_database(&database).await.unwrap();
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
 
-    assert_eq!(conversation.state, Lifecycle::Grilling);
+    assert_eq!(conversation.state, State::named("grilling"));
     assert_eq!(
         conversation.worktree.as_deref(),
         Some(Path::new("/state/worktrees/verkstead-rate-limiting"))
@@ -1692,7 +1788,7 @@ async fn an_adopting_conversation_records_the_roadmap_it_is_adopting() {
 
     // And it is a Conversation like any other otherwise: drafting, on the branch
     // it was given, with an empty Brief nobody here writes.
-    assert_eq!(conversation.state, Lifecycle::Draft);
+    assert_eq!(conversation.state, State::draft());
     assert_eq!(conversation.branch, "spring-otter");
     assert_eq!(brief(&pool, id).await, "");
 }
@@ -1770,6 +1866,7 @@ async fn starting_a_stage_records_which_stage_of_which_roadmap_it_is() {
         start_stage(
             &pool,
             id,
+            &State::named("implementing"),
             "c0ffee",
             Path::new("/data/worktrees/stage"),
             Some("roadmaps/mvp/04-wrap-up"),
@@ -1815,6 +1912,7 @@ async fn a_stage_with_no_label_is_told_from_a_conversation_with_no_row() {
     start_stage(
         &pool,
         before,
+        &State::named("implementing"),
         "c0ffee",
         Path::new("/data/worktrees/before"),
         None,
@@ -1871,9 +1969,10 @@ async fn directed(pool: &SqlitePool, repo_id: i64, branch: &str, direction: Dire
         .unwrap()
         .unwrap();
 
-    start_grilling(
+    start_in(
         pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         &Path::new("/data/worktrees").join(branch.replace('/', "-")),
         &[],
@@ -1905,6 +2004,7 @@ async fn stage(pool: &SqlitePool, repo_id: i64, roadmap: &str, label: &str) -> i
     start_stage(
         pool,
         id,
+        &State::named("implementing"),
         "c0ffee",
         &PathBuf::from("/data/worktrees").join(format!("{roadmap}-{label}")),
         None,
@@ -1920,8 +2020,13 @@ async fn stage(pool: &SqlitePool, repo_id: i64, roadmap: &str, label: &str) -> i
 /// A steer into `target` and nothing else with it, which is how a test walks a
 /// stage up the ladder: the move is written the way every move is, so the
 /// Timeline says where it has been.
-fn steer(target: Lifecycle) -> Steer<'static> {
+fn steer(target: State) -> Steer<'static> {
     Steer {
+        // As the server reads them off the target state's own manifest: the
+        // state running the Interview opens a round, and the one running the
+        // Wrap-up reads the branch afresh — see `steering::submit`.
+        opens_a_round: target == "grilling",
+        wraps_up: target == "wrapping",
         target,
         pairings: &[],
         brief: None,
@@ -1952,14 +2057,18 @@ async fn the_record_says_which_stages_settled_which_are_in_flight_and_which_were
     let repo_id = repo(&pool, "verkstead").await;
 
     let done = stage(&pool, repo_id, "mvp", "01").await;
-    steer_conversation(&pool, done, steer(Lifecycle::Done))
+    steer_conversation(&pool, done, steer(State::done()))
         .await
         .unwrap();
 
     let wrapped_up_then_closed = stage(&pool, repo_id, "mvp", "02").await;
-    steer_conversation(&pool, wrapped_up_then_closed, steer(Lifecycle::Wrapping))
-        .await
-        .unwrap();
+    steer_conversation(
+        &pool,
+        wrapped_up_then_closed,
+        steer(State::named("wrapping")),
+    )
+    .await
+    .unwrap();
     close_conversation(&pool, wrapped_up_then_closed)
         .await
         .unwrap();
@@ -2005,7 +2114,7 @@ async fn the_record_says_which_stages_settled_which_are_in_flight_and_which_were
     // same. Whether its branch is moving again is the chain's question rather than
     // this reading's, and reading it as in flight is what stopped the adoption
     // dead at a stage that was done.
-    steer_conversation(&pool, done, steer(Lifecycle::Implementing))
+    steer_conversation(&pool, done, steer(State::named("implementing")))
         .await
         .unwrap();
 
@@ -2020,7 +2129,7 @@ async fn the_record_says_which_stages_settled_which_are_in_flight_and_which_were
     // Where *never in Done* is the whole of what in flight means: the stage still
     // being implemented has been nowhere else, and steering it into Wrapping — one
     // rung short — leaves it there.
-    steer_conversation(&pool, implementing, steer(Lifecycle::Wrapping))
+    steer_conversation(&pool, implementing, steer(State::named("wrapping")))
         .await
         .unwrap();
 
@@ -2178,7 +2287,7 @@ async fn the_furthest_of_two_attempts_at_one_stage_is_what_the_record_says() {
 
     // And once that one finishes, the stage has settled — whichever order the
     // rows come back in.
-    steer_conversation(&pool, second, steer(Lifecycle::Done))
+    steer_conversation(&pool, second, steer(State::done()))
         .await
         .unwrap();
 
@@ -2295,7 +2404,7 @@ async fn one_repos_stages_do_not_answer_for_anothers() {
     let theirs = repo(&pool, "askance").await;
 
     let elsewhere = stage(&pool, theirs, "mvp", "01").await;
-    steer_conversation(&pool, elsewhere, steer(Lifecycle::Done))
+    steer_conversation(&pool, elsewhere, steer(State::done()))
         .await
         .unwrap();
 
@@ -2322,7 +2431,7 @@ async fn a_row_with_no_label_stands_for_no_stage() {
     let repo_id = repo(&pool, "verkstead").await;
 
     let before = stage(&pool, repo_id, "mvp", "01").await;
-    steer_conversation(&pool, before, steer(Lifecycle::Done))
+    steer_conversation(&pool, before, steer(State::done()))
         .await
         .unwrap();
 
@@ -2363,6 +2472,7 @@ async fn opened(pool: &SqlitePool, repo_id: i64, id: i64, number: i64) {
             base: None,
             repo: None,
         },
+        &State::named("wrapping"),
     )
     .await
     .unwrap();
@@ -2712,7 +2822,7 @@ async fn the_record_says_how_far_the_conversation_that_wrote_a_roadmap_got() {
 
     let wrote = directed(&pool, ours, "roadmaps/mvp", Direction::Roadmap).await;
     record_roadmap(&pool, wrote, Some("mvp")).await.unwrap();
-    steer_conversation(&pool, wrote, steer(Lifecycle::Wrapping))
+    steer_conversation(&pool, wrote, steer(State::named("wrapping")))
         .await
         .unwrap();
 
@@ -2729,7 +2839,7 @@ async fn the_record_says_how_far_the_conversation_that_wrote_a_roadmap_got() {
         "and nothing answers for it under a stage's label",
     );
 
-    steer_conversation(&pool, wrote, steer(Lifecycle::Done))
+    steer_conversation(&pool, wrote, steer(State::done()))
         .await
         .unwrap();
 

@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AgentOutputEvent, ConversationView } from "../src/api/types";
 import { status } from "../src/workbench/StatusButton";
+import { knowProvidedProcesses } from "../src/workbench/provided";
 
 import building from "./fixtures/conversation-building.json" with {
   type: "json",
@@ -27,8 +28,8 @@ import building from "./fixtures/conversation-building.json" with {
 /// from.
 const QUIET: ConversationView = {
   ...(building as ConversationView),
-  state: "Implementing",
-  waiting: false,
+  state: "implementing",
+    waiting: false,
   blocked_on: null,
   stopped_by_hand: false,
   ready_to_resume: false,
@@ -134,7 +135,7 @@ describe("the status word", () => {
   /// GitHub, which is nobody here.
   it("says a wrap-up is waiting on its checks", () => {
     expect(
-      status(like({ state: "Wrapping", waiting_on_checks: true })),
+      status(like({ state: "wrapping", waiting_on_checks: true })),
     ).toEqual({
       word: "Waiting on checks",
       state: "Wrapping",
@@ -167,7 +168,7 @@ describe("the status word", () => {
     expect(
       status(
         like({
-          state: "Wrapping",
+          state: "wrapping",
           waiting_on_checks: true,
           ready_to_resume: true,
         }),
@@ -254,10 +255,14 @@ describe("the status word", () => {
   /// The three states no status applies to: nothing is supposed to be driving
   /// one, and for two of them the word for where it got to *is* the state.
   it("says the bare state on a Draft, a Done and a Closed conversation", () => {
-    for (const state of ["Draft", "Done", "Closed"] as const) {
+    for (const [state, word] of [
+      ["draft", "Draft"],
+      ["done", "Done"],
+      ["closed", "Closed"],
+    ] as const) {
       expect(
         status(like({ state, waiting: true, blocked_on: 12, working: true })),
-      ).toEqual({ word: null, state, attention: false });
+      ).toEqual({ word: null, state: word, attention: false });
     }
   });
 
@@ -301,12 +306,56 @@ describe("the status word", () => {
       ).word,
     ).toBe("Transferring to the-laptop");
 
-    expect(status(like({ state: "Done", transferring: "the-laptop" }))).toEqual(
+    expect(status(like({ state: "done", transferring: "the-laptop" }))).toEqual(
       {
         word: "Transferring to the-laptop",
         state: "Done",
         attention: false,
       },
     );
+  });
+});
+
+describe("a declared state", () => {
+  /// A state a plugin's Process declares is said in the word its manifest
+  /// gives it, read off the list the server sends — and as its id where the
+  /// server holds no such Process any more, which is a plugin removed under it.
+  it("says the word its Process's manifest gives it, or its id", () => {
+    const provided = {
+      plugin: "5e0c9a7e-2f4b-4c1d-8a3e-6b9f0d2c7a41",
+      id: "two-steps",
+    };
+    const declared = like({
+      state: "checking",
+      process: provided,
+      waiting: true,
+    });
+
+    expect(status(declared).state).toBe("checking");
+
+    knowProvidedProcesses([
+      {
+        ...provided,
+        name: "Two steps",
+        description: "Draft the change, then check it.",
+        offered: true,
+        states: [
+          { id: "drafting", word: "Drafting", interviews: false },
+          { id: "checking", word: "Checking", interviews: false },
+        ],
+        roles: [
+          { role: "sketching", label: "Sketching", building: true, away: false },
+        ],
+        target: false,
+        narrowed: false,
+        filled_from_a_pull_request: false,
+      },
+    ]);
+
+    expect(status(declared)).toEqual({
+      word: "Waiting on you",
+      state: "Checking",
+      attention: true,
+    });
   });
 });

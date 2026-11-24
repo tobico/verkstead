@@ -45,15 +45,16 @@
 //! The role pairings are separate choices because they are genuinely separate
 //! accounts — grill on fable, implement on opus, review on whatever did not
 //! build it — and because the implementation session cannot simply carry the
-//! grilling one on. Two of the pickers carry one row that is not an account at
-//! all: a conversation can be built without being grilled and wrapped up
-//! without being reviewed. They are one **Agent** control all the same, because
-//! *who runs this* is one question however many roles a Process puts it in:
-//! which roles those are is [`ROLES`](./processes.ts)'s to say, and so is the
-//! shape the control takes over them: a panel under a trigger reading the
-//! Implementation Pairing and counting the rest, or — where the Process is run
-//! under one role — that one picker standing in the row as the control itself.
-//! See [`AgentOptions`] and [`./agent.ts`](./agent.ts).
+//! grilling one on. A picker whose role says so carries one row that is not an
+//! account at all: a conversation can be wrapped up without being reviewed.
+//! They are one **Agent** control all the same, because *who runs this* is one
+//! question however many roles a Process puts it in: which roles those are is
+//! the Process's manifest's to say, and the record sends them with the
+//! conversation. The shape the control takes follows how many there are: a
+//! panel under a trigger reading the building role's Pairing and counting the
+//! rest, or — where the Process declares one role — that one picker standing in
+//! the row as the control itself. See [`AgentOptions`] and
+//! [`./agent.ts`](./agent.ts).
 
 import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
 import { A } from "@solidjs/router";
@@ -79,9 +80,7 @@ import { DEFAULT_PROFILE, type AgentType } from "../agents";
 import { deviceShown, osIcon, useDevices, useRepoParent } from "../devices";
 import {
   addCompanion,
-  chooseGrillingPairing,
-  chooseImplementationPairing,
-  chooseReviewPairing,
+  choosePairing,
   listBranches,
   listProfiles,
   listClonable,
@@ -113,12 +112,13 @@ import type {
   DeviceIdentity,
   PairingView,
   Permitting,
-  Process,
+  ProcessChoice,
   ProcessPicked,
   ProfileChosen,
   ProfileEntry,
   RepoEntry,
   RepoSwitched,
+  RoleEntry,
   TargetRecorded,
 } from "../api/types";
 import { brokenReading } from "../broken";
@@ -132,16 +132,14 @@ import type { Device } from "../reaching";
 import { CloneRepo, CreateRepo, OpenRepo, useCloning } from "../repos/RepoList";
 import { reading, type Picked } from "./agent";
 import { AUTOMATIC, chosen } from "./naming";
+import { away, control, label } from "./roles";
 import {
-  away,
-  DESCRIPTION,
-  label,
-  OFFERED,
-  PROCESS,
-  ROLES,
+  choiceValue,
+  offeredProcesses,
+  processDescription,
+  processName,
   targeted,
-  uses,
-} from "./processes";
+} from "./provided";
 import { namesPullRequest } from "./targets";
 import styles from "./Setup.module.css";
 import { keeping } from "./settling";
@@ -190,7 +188,8 @@ export const PROCESS_REFUSAL: Record<ProcessPicked, string> = {
   NoSuchConversation: "This conversation is gone.",
   NotDrafting:
     "The branch exists now, so the process is settled.",
-  NotLanded: "Verkstead can't run that process yet.",
+  NotOffered:
+    "That process's plugin is switched off or in trouble here. Check it in Settings.",
 };
 
 /// And naming what the work is pointed at.
@@ -414,9 +413,9 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
             </Show>
 
             {/* And what the work is pointed at, under the branch it will be
-                done on — drawn for the Processes that are pointed at work
-                already somewhere else and for no other, which is
-                `processes.ts`'s list to keep. */}
+                done on — drawn for the Processes whose manifest says they are
+                pointed at work already somewhere else and for no other, which
+                is `provided.ts`'s question to put. */}
             <Show when={targeted(props.conversation.process)}>
               <TargetName conversation={props.conversation} />
             </Show>
@@ -1289,8 +1288,8 @@ function ProcessOption(props: { conversation: ConversationView }): JSX.Element {
   const [refused, setRefused] = createSignal<ProcessPicked | null>(null);
 
   const say = useMutation(() => ({
-    mutationFn: (picked: Process) =>
-      pickProcess(device(), props.conversation.id, picked),
+    mutationFn: (picked: ProcessChoice) =>
+      pickProcess(device(), props.conversation.id, picked.process),
     onSuccess: (outcome: ProcessPicked) => {
       if (outcome !== "Picked") {
         setRefused(outcome);
@@ -1317,7 +1316,7 @@ function ProcessOption(props: { conversation: ConversationView }): JSX.Element {
 
   return (
     <ProcessPicker
-      chosen={props.conversation.process}
+      chosen={{ process: props.conversation.process }}
       disabled={branched() || say.isPending}
       pick={(picked) => say.mutate(picked)}
     >
@@ -1345,24 +1344,38 @@ function ProcessOption(props: { conversation: ConversationView }): JSX.Element {
 /// about. What a pick *does* is the caller's, and so is everything said under
 /// it.
 ///
-/// Which Processes it offers is [`OFFERED`]'s, and the server keeps the other
-/// list — a Process is offered only once its stage has landed, as an agent type
-/// is offered only once it can launch the real thing.
+/// Which Processes it offers is the server's, in the order it lists them: the
+/// five Verkstead ships, each while its plugin's tick stands, then every
+/// Process a plugin loaded there offers. Each is worded as its own manifest
+/// words it, name and sentence alike — see `provided.ts`, which is where this
+/// asks (Set 1765, Q29).
 export function ProcessPicker(props: {
-  chosen: Process;
-  pick: (picked: Process) => void;
+  /// What it stands on, `null` being nothing at all: a composer whose Process
+  /// list has not landed, and a server offering none.
+  chosen: ProcessChoice | null;
+  pick: (picked: ProcessChoice) => void;
   disabled?: boolean;
   /// What the caller has to say under it — the refusals above all, which are
   /// facts about the caller's record rather than about this control.
   children?: JSX.Element;
 }): JSX.Element {
   /// The rows, and whatever is chosen wherever the list does not hold it —
-  /// [`RepoChoice.also`]'s reason, and the same shape: a Conversation that took
-  /// a pull request up reads *Review*, which cannot be picked until its own
-  /// stage lands, and a control showing nothing there would be the row missing
-  /// the one thing that tells a Review apart.
-  const options = (): Process[] =>
-    OFFERED.includes(props.chosen) ? OFFERED : [props.chosen, ...OFFERED];
+  /// [`RepoChoice.also`]'s reason, and the same shape: a Conversation on a
+  /// Process whose plugin is switched off reads that Process all the same, and
+  /// a control showing nothing there would be the row missing the one thing
+  /// that says what kind of work this is.
+  ///
+  /// The offered rows alone where nothing at all is chosen, which is a composer
+  /// whose Process list has not landed yet.
+  const options = (): ProcessChoice[] => {
+    const offered = offeredProcesses();
+    const chosen = choiceValue(props.chosen);
+
+    return props.chosen === null ||
+      offered.some((choice) => choiceValue(choice) === chosen)
+      ? offered
+      : [props.chosen, ...offered];
+  };
 
   return (
     <div class={styles.processChoice}>
@@ -1377,12 +1390,19 @@ export function ProcessPicker(props: {
         class={styles.processPick}
         heading={{ words: "Process", class: styles.optionLabel }}
         options={options()}
-        value={(process) => process}
-        label={(process) => PROCESS[process]}
-        says={(process) => DESCRIPTION[process]}
-        chosen={props.chosen}
+        value={choiceValue}
+        label={(choice) => processName(choice.process)}
+        says={processDescription}
+        chosen={choiceValue(props.chosen)}
         disabled={props.disabled}
-        pick={(picked) => props.pick(picked as Process)}
+        pick={(picked) => {
+          const choice = options().find(
+            (option) => choiceValue(option) === picked,
+          );
+          if (choice !== undefined) {
+            props.pick(choice);
+          }
+        }}
       />
 
       {props.children}
@@ -1428,11 +1448,13 @@ function UncachedCompiles(props: {
 /// pairings are made of it here: a row per profile-and-model combination, which
 /// is what a picker offers.
 ///
-/// **One picker per role the Process uses**, which is [`ROLES`]'s to say rather
-/// than this pane's. A Conversation holding a pull request reads as a Review, and
-/// Review does not use Grilling — so the picker that was taken away by a test
-/// for the held pull request is taken away by the table instead, and the two
-/// composers stop saying the same thing twice.
+/// **One picker per role the Process declares**, which is its manifest's to say
+/// rather than this pane's — the record sends them in the order the control
+/// draws them, each with its label and whether it offers the row that is no
+/// account at all. A Conversation holding a pull request reads as a Review, and
+/// Review declares no grilling role, so the picker that was taken away by a
+/// test for the held pull request is taken away by the manifest instead, and the
+/// two composers stop saying the same thing twice.
 ///
 /// [`ProfileChoices`] stands outside the option rather than inside its panel:
 /// what it draws in place of the pickers is a workbench with no account saved in
@@ -1440,74 +1462,38 @@ function UncachedCompiles(props: {
 /// has a reason to press.
 function AgentOption(props: { conversation: ConversationView }): JSX.Element {
   const device = useDevice();
+  const roles = () => props.conversation.pairings;
 
   return (
     <ProfileChoices>
       {(saved) => (
         <AgentOptions
-          process={props.conversation.process}
+          roles={roles()}
           saved={saved()}
           // What each picker inside is showing, which is what the trigger
           // reads — the record's own choices, read exactly as the pickers below
           // read them.
-          picked={{
-            grilling: pairing.chosen(props.conversation.grilling_pairing),
-            implementation: pairing.chosen(
-              props.conversation.implementation_pairing,
-            ),
-            review: pairing.settled(props.conversation.review_pairing),
-          }}
+          picked={Object.fromEntries(
+            roles().map((role) => [role.role, pairing.settled(role.picked)]),
+          )}
         >
           {() => (
-            <>
-              {/* An account and nothing else: *No grilling* is retired, and a
-                  Brief that wants no interview is a Tinker. */}
-              <Show when={uses(props.conversation.process, "grilling")}>
+            <For each={roles()}>
+              {(role) => (
                 <PairingPicker
                   conversation={props.conversation}
                   saved={saved()}
-                  role="grilling"
-                  label={label(props.conversation.process, "grilling")}
-                  chosen={pairing.chosen(props.conversation.grilling_pairing)}
-                  pairing={props.conversation.grilling_pairing}
+                  role={role.role}
+                  label={label(roles().length, role)}
+                  away={away(role)}
+                  chosen={pairing.settled(role.picked)}
+                  pairing={pairing.under(role.picked)}
                   choose={(id, picked) =>
-                    chooseGrillingPairing(device(), id, pairing.choice(picked))
+                    choosePairing(device(), id, role.role, pairing.role(picked))
                   }
                 />
-              </Show>
-              <Show when={uses(props.conversation.process, "implementation")}>
-                <PairingPicker
-                  conversation={props.conversation}
-                  saved={saved()}
-                  role="implementation"
-                  label={label(props.conversation.process, "implementation")}
-                  chosen={pairing.chosen(
-                    props.conversation.implementation_pairing,
-                  )}
-                  pairing={props.conversation.implementation_pairing}
-                  choose={(id, picked) =>
-                    chooseImplementationPairing(device(), id, pairing.choice(picked))
-                  }
-                />
-              </Show>
-              {/* And the other: a conversation can be wrapped up without being
-                  reviewed at all, and that is picked here rather than anywhere
-                  else. */}
-              <Show when={uses(props.conversation.process, "review")}>
-                <PairingPicker
-                  conversation={props.conversation}
-                  saved={saved()}
-                  role="review"
-                  label={label(props.conversation.process, "review")}
-                  away={away(props.conversation.process, "review")}
-                  chosen={pairing.settled(props.conversation.review_pairing)}
-                  pairing={pairing.under(props.conversation.review_pairing)}
-                  choose={(id, picked) =>
-                    chooseReviewPairing(device(), id, pairing.role(picked))
-                  }
-                />
-              </Show>
-            </>
+              )}
+            </For>
           )}
         </AgentOptions>
       )}
@@ -1520,10 +1506,10 @@ function AgentOption(props: { conversation: ConversationView }): JSX.Element {
 /// where the Process is run under one role — that one picker standing in the row
 /// where the trigger would have stood, with no panel drawn at all.
 ///
-/// **Which shape is the table's third column** rather than a count taken here,
-/// so a Process arriving later is a row added to [`ROLES`](./processes.ts)
-/// rather than a branch added in each of the two places this is drawn. A panel
-/// over one picker would be a press to reach a press.
+/// **Which shape is how many roles the Process declares** — see
+/// [`control`](./processes.ts), which both of the two places this is drawn ask,
+/// so a Process arriving later is a manifest rather than a branch added in each
+/// of them. A panel over one picker would be a press to reach a press.
 ///
 /// Presentational, for [`RepoOptions`]'s reason, and the panel drawn its way —
 /// a `Menu` with `panel`, one flat card, because the Repo option beside it is
@@ -1534,16 +1520,16 @@ function AgentOption(props: { conversation: ConversationView }): JSX.Element {
 /// drawn here — it is the Implementation picker whichever shape asks for it, and
 /// a role is a role rather than a place.
 ///
-/// **The label is *Agent* and the labels inside the panel are the roles'.** The
-/// tests, the Brief's setup facts and the Steer form all speak Grilling,
-/// Implementation and Review, and a panel that renamed them would be the one
-/// place they are called something else. Under the dropdown there is no panel
-/// and nothing to tell apart, so the one picker wears the row's own label — see
-/// [`label`](./processes.ts).
+/// **The label is *Agent* and the labels inside the panel are the roles'.** A
+/// role's label is its manifest's, so the Brief's setup facts, the Steer form
+/// and this panel all read it off the same place, and a panel that renamed one
+/// would be the one place it is called something else. Under the dropdown there
+/// is no panel and nothing to tell apart, so the one picker wears the row's own
+/// label — see [`label`](./processes.ts).
 export function AgentOptions(props: {
-  /// Which Process the control is shaped by, which is what says how many roles
-  /// the reading counts over.
-  process: Process;
+  /// The roles the Process declares, in the order they are drawn: what shapes
+  /// the control, and what the reading counts over.
+  roles: RoleEntry[];
   /// The Profiles as they stand, for the reading inside the trigger — see
   /// [`reading`](./agent.ts).
   saved: ProfileEntry[];
@@ -1551,11 +1537,11 @@ export function AgentOptions(props: {
   picked: Picked;
   children: () => JSX.Element;
 }): JSX.Element {
-  const shown = () => reading(props.process, props.picked, props.saved);
+  const shown = () => reading(props.roles, props.picked, props.saved);
 
   return (
     <Show
-      when={ROLES[props.process].control === "panel"}
+      when={control(props.roles.length) === "panel"}
       // The dropdown shape: what the caller drew *is* the control, so there is
       // nothing over it and nothing around it — the row holds the one picker the
       // way it held three of them before they became one option.

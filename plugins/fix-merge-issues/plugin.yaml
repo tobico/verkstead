@@ -1,0 +1,64 @@
+# Fix Merge Issues as data: the wrap-up over the Target narrowed to what
+# GitHub refuses a merge for. The wrap-up's review and comments are turned off
+# by its state's options, which is the whole of the narrowing: nothing reads
+# the branch and nothing said on the pull request is answered. Built in with a
+# tick, as Tinker is; the state id is the word already stored.
+# Each state marked `steer` is a row on the Steer form: the wrap-up, a
+# follow-up of the pull request, and `investigating`, the detour a question
+# takes, which goes back to where it was steered from.
+uuid: 0b4f33da-1f61-46dd-aa82-3983d627e192
+name: Fix merge issues
+author:
+  name: Tobias Cohen
+  email: tobi@tobico.net
+version: 0.1.0
+interface: 1
+description: A pull request that is unable to merge fixed up.
+dependencies:
+  - uuid: d7a5e719-8491-46a7-b7d7-8f9f85e57bd6
+    name: Activities
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+  - uuid: 15447a8d-f28d-4573-8b8b-a7226d477755
+    name: Verkstead
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+provides:
+  - category: process
+    id: fix-merge-issues
+    name: Fix merge issues
+    description: Fix up a PR which is unable to merge
+    target: true
+    roles:
+      - { name: implementation, label: Implementation, building: true }
+    states:
+      - id: wrapping
+        word: Wrapping
+        activity: wrap-up
+        # The one role, because this wrap-up never reads the branch: with the
+        # review switched off there is no review session to pair, so a steer
+        # into it settles what builds and waits on nothing else.
+        roles: [implementation]
+        # The review and the comments off is the whole of the narrowing, and
+        # the stack on is what says this wrap-up is over a link of a chain:
+        # every pull request of it is walked on GitHub and recorded.
+        options: { review: "off", comments: "off", stack: "on" }
+        steer: { brief: none }
+      - id: follow-up
+        word: Follow-up
+        activity: follow-up-rounds
+        options: { skill: verkstead/following-up }
+        steer: { brief: follow-up }
+      - id: investigating
+        word: Investigating
+        activity: follow-up-rounds
+        options: { skill: verkstead/investigating, evidence: investigated }
+        steer: { brief: question }
+        detour: true
+    transitions:
+      wrapping: { settled: done, merged: done, closed: stopped, given-up: stopped }
+      follow-up: { committed: wrapping, nothing: done }

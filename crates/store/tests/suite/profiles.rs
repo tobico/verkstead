@@ -12,14 +12,13 @@ use sqlx::SqlitePool;
 use verkstead_store::replicated::{Record, merge, records};
 use verkstead_store::{
     Account, AgentType, BUILT_IN, Binding, Bindings, CLAUDE_DIR, CONFIG_FILE, Chosen, Clash,
-    Deleting, Event, Lifecycle, Linking, Pairing, PendingForm, PendingPairing, Picked, Profile,
-    ProfileFacts, ProfileRecord, Profiles, Saving, Settled, Unbound, bind_profile_here,
-    binding_uuid, create_profile, create_profile_holding, delete_profile, load_conversation,
-    load_profile, logins_held, open_database, open_pending_steer, profile_arrived, profiles,
-    record_member, register_repo, save_pending_steer, set_grilling_pairing,
-    set_implementation_pairing, set_review_pairing, settle, skip_review, stamp_the_profiles,
-    start_capture, start_conversation, start_grilling, this_device_called, timeline,
-    update_profile, update_profile_holding,
+    Deleting, Event, Linking, Pairing, PendingForm, PendingPairing, Picked, Profile, ProfileFacts,
+    ProfileRecord, Profiles, Saving, Settled, State, Unbound, bind_profile_here, binding_uuid,
+    create_profile, create_profile_holding, delete_profile, load_conversation, load_profile,
+    logins_held, open_database, open_pending_steer, profile_arrived, profiles, record_member,
+    register_repo, save_pending_steer, set_grilling_pairing, set_implementation_pairing,
+    set_review_pairing, settle, skip_review, stamp_the_profiles, start_capture, start_conversation,
+    start_in, this_device_called, timeline, update_profile, update_profile_holding,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -1095,12 +1094,16 @@ async fn a_profile_a_conversation_has_chosen_is_removed_and_nulled_out_of_it() {
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
 
     assert_eq!(
-        conversation.grilling_pairing, None,
+        conversation
+            .pairings
+            .under(&verkstead_store::Role::grilling()),
+        None,
         "the role that named it reads as one nothing has been picked for",
     );
     assert_eq!(
         conversation
-            .implementation_pairing
+            .pairings
+            .under(&verkstead_store::Role::implementation())
             .map(|pairing| pairing.profile.id.clone()),
         Some(implementing.id),
         "and the role that named another account is untouched",
@@ -1138,9 +1141,22 @@ async fn removing_a_profile_nulls_it_out_of_all_three_roles() {
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
 
-    assert_eq!(conversation.grilling_pairing, None);
-    assert_eq!(conversation.implementation_pairing, None);
-    assert_eq!(conversation.review_pairing, Picked::Nothing);
+    assert_eq!(
+        conversation
+            .pairings
+            .under(&verkstead_store::Role::grilling()),
+        None
+    );
+    assert_eq!(
+        conversation
+            .pairings
+            .under(&verkstead_store::Role::implementation()),
+        None
+    );
+    assert_eq!(
+        conversation.pairings.of(&verkstead_store::Role::review()),
+        Picked::Nothing
+    );
 }
 
 /// The model half goes with the Profile half. A Pairing is both, so a role left
@@ -1198,9 +1214,10 @@ async fn a_profile_a_started_conversation_runs_under_is_removed_all_the_same() {
         .await
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
         &[],
@@ -1215,9 +1232,19 @@ async fn a_profile_a_started_conversation_runs_under_is_removed_all_the_same() {
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
 
-    assert_eq!(conversation.state, Lifecycle::Grilling);
-    assert_eq!(conversation.grilling_pairing, None);
-    assert_eq!(conversation.implementation_pairing, None);
+    assert_eq!(conversation.state, State::named("grilling"));
+    assert_eq!(
+        conversation
+            .pairings
+            .under(&verkstead_store::Role::grilling()),
+        None
+    );
+    assert_eq!(
+        conversation
+            .pairings
+            .under(&verkstead_store::Role::implementation()),
+        None
+    );
 }
 
 /// A role the human picked away is not what a removal leaves behind.
@@ -1261,7 +1288,8 @@ async fn a_removal_neither_writes_nor_clears_the_row_that_runs_no_session() {
             .await
             .unwrap()
             .unwrap()
-            .review_pairing,
+            .pairings
+            .of(&verkstead_store::Role::review()),
         Picked::Skipped,
         "the choice they made stands",
     );
@@ -1270,7 +1298,8 @@ async fn a_removal_neither_writes_nor_clears_the_row_that_runs_no_session() {
             .await
             .unwrap()
             .unwrap()
-            .review_pairing,
+            .pairings
+            .of(&verkstead_store::Role::review()),
         Picked::Nothing,
         "and losing an account is not making that choice for them",
     );
@@ -1294,9 +1323,10 @@ async fn removing_a_profile_leaves_what_ran_under_it_on_the_record() {
         .await
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
         &[],
@@ -1356,9 +1386,10 @@ async fn a_session_under_a_profile_nobody_named_records_no_name() {
         .await
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
         &[],
@@ -1446,9 +1477,10 @@ async fn a_removal_leaves_no_row_anywhere_that_names_the_profile() {
 
     // The Repo's memory of what it was last grilled with, which is the one
     // table naming a Profile that is not a Conversation's own column.
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
         &[],
@@ -1550,10 +1582,17 @@ async fn a_conversation_chooses_its_two_pairings_independently() {
     // grill from.
     let half = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(
-        half.grilling_pairing.as_ref().map(|p| p.profile.id.clone()),
+        half.pairings
+            .under(&verkstead_store::Role::grilling())
+            .as_ref()
+            .map(|p| p.profile.id.clone()),
         Some(fable.id)
     );
-    assert_eq!(half.implementation_pairing, None);
+    assert_eq!(
+        half.pairings
+            .under(&verkstead_store::Role::implementation()),
+        None
+    );
 
     assert_eq!(
         set_implementation_pairing(&pool, id, &opus.id, Some(MODEL))
@@ -1564,13 +1603,15 @@ async fn a_conversation_chooses_its_two_pairings_independently() {
 
     let both = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(
-        both.grilling_pairing
-            .as_ref()
+        both.pairings
+            .under(&verkstead_store::Role::grilling())
             .and_then(|p| p.profile.name.clone()),
         Some("fable".to_owned())
     );
     assert_eq!(
-        both.implementation_pairing.and_then(|p| p.profile.name),
+        both.pairings
+            .under(&verkstead_store::Role::implementation())
+            .and_then(|p| p.profile.name),
         Some("opus".to_owned())
     );
 }
@@ -1600,8 +1641,8 @@ async fn a_pairing_holds_the_model_it_was_chosen_with() {
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     let pairing = conversation
-        .grilling_pairing
-        .as_ref()
+        .pairings
+        .under(&verkstead_store::Role::grilling())
         .expect("a Pairing was picked");
 
     assert_eq!(pairing.model.as_deref(), Some("claude-fable-5"));
@@ -1618,8 +1659,8 @@ async fn a_pairing_holds_the_model_it_was_chosen_with() {
             .await
             .unwrap()
             .unwrap()
-            .grilling_pairing
-            .as_ref()
+            .pairings
+            .under(&verkstead_store::Role::grilling())
             .and_then(|pairing| pairing.model.clone()),
         Some("claude-opus-5".to_owned())
     );
@@ -1634,18 +1675,21 @@ async fn a_profile_chosen_before_pairings_runs_on_the_model_it_carried() {
     let id = conversation(&pool).await;
     let profile = saved(&pool, "work").await;
 
-    // The column alone, which is the whole of what an old choice wrote.
-    sqlx::query("UPDATE conversations SET grilling_profile_id = ? WHERE id = ?")
-        .bind(profile.id)
-        .bind(id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    // The Profile half alone, which is the whole of what an old choice wrote.
+    sqlx::query(
+        "INSERT INTO conversation_pairings (conversation_id, role, profile_id)
+         VALUES (?, 'grilling', ?)",
+    )
+    .bind(id)
+    .bind(profile.id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     let pairing = conversation
-        .grilling_pairing
-        .as_ref()
+        .pairings
+        .under(&verkstead_store::Role::grilling())
         .expect("a Pairing was picked");
 
     assert_eq!(pairing.model, None);
@@ -1669,9 +1713,10 @@ async fn a_pairing_cannot_be_chosen_once_grilling_has_started() {
         .await
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
         &[],
@@ -1695,14 +1740,15 @@ async fn a_pairing_cannot_be_chosen_once_grilling_has_started() {
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(
         conversation
-            .grilling_pairing
-            .as_ref()
+            .pairings
+            .under(&verkstead_store::Role::grilling())
             .and_then(|p| p.profile.name.clone()),
         Some("fable".to_owned())
     );
     assert_eq!(
         conversation
-            .implementation_pairing
+            .pairings
+            .under(&verkstead_store::Role::implementation())
             .and_then(|p| p.profile.name),
         Some("fable".to_owned())
     );
@@ -1726,14 +1772,15 @@ async fn one_profile_can_be_both_of_a_conversations_choices() {
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(
         conversation
-            .grilling_pairing
-            .as_ref()
+            .pairings
+            .under(&verkstead_store::Role::grilling())
             .map(|p| p.profile.id.clone()),
         Some(only.id.clone())
     );
     assert_eq!(
         conversation
-            .implementation_pairing
+            .pairings
+            .under(&verkstead_store::Role::implementation())
             .map(|p| p.profile.id.clone()),
         Some(only.id.clone())
     );
@@ -1760,8 +1807,18 @@ async fn a_profile_that_is_not_there_cannot_be_chosen() {
     );
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.grilling_pairing, None);
-    assert_eq!(conversation.implementation_pairing, None);
+    assert_eq!(
+        conversation
+            .pairings
+            .under(&verkstead_store::Role::grilling()),
+        None
+    );
+    assert_eq!(
+        conversation
+            .pairings
+            .under(&verkstead_store::Role::implementation()),
+        None
+    );
 }
 
 #[tokio::test]
@@ -1791,8 +1848,18 @@ async fn a_started_conversation_has_chosen_neither_pairing() {
     let id = conversation(&pool).await;
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.grilling_pairing, None);
-    assert_eq!(conversation.implementation_pairing, None);
+    assert_eq!(
+        conversation
+            .pairings
+            .under(&verkstead_store::Role::grilling()),
+        None
+    );
+    assert_eq!(
+        conversation
+            .pairings
+            .under(&verkstead_store::Role::implementation()),
+        None
+    );
 }
 
 /// The point of it being in SQLite rather than in a page's memory: the server is
@@ -1820,14 +1887,15 @@ async fn profiles_and_the_choices_made_of_them_survive_a_restart() {
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(
         conversation
-            .grilling_pairing
-            .as_ref()
+            .pairings
+            .under(&verkstead_store::Role::grilling())
             .and_then(|p| p.profile.name.clone()),
         Some("fable".to_owned())
     );
     assert_eq!(
         conversation
-            .implementation_pairing
+            .pairings
+            .under(&verkstead_store::Role::implementation())
             .map(|p| (p.profile.models, p.model)),
         Some((
             vec!["claude-opus-5".to_owned()],
@@ -1858,7 +1926,8 @@ async fn no_review_is_a_choice_rather_than_an_empty_picker() {
             .await
             .unwrap()
             .unwrap()
-            .review_pairing,
+            .pairings
+            .of(&verkstead_store::Role::review()),
         Picked::Nothing,
         "nothing has been picked yet",
     );
@@ -1870,7 +1939,8 @@ async fn no_review_is_a_choice_rather_than_an_empty_picker() {
             .await
             .unwrap()
             .unwrap()
-            .review_pairing,
+            .pairings
+            .of(&verkstead_store::Role::review()),
         Picked::Skipped,
         "and now something has",
     );
@@ -1893,7 +1963,8 @@ async fn picking_a_review_pairing_and_picking_none_replace_each_other() {
             .await
             .unwrap()
             .unwrap()
-            .review_pairing,
+            .pairings
+            .of(&verkstead_store::Role::review()),
         Picked::Skipped,
         "the account it was going to be reviewed under is off it",
     );
@@ -1906,7 +1977,8 @@ async fn picking_a_review_pairing_and_picking_none_replace_each_other() {
         .await
         .unwrap()
         .unwrap()
-        .review_pairing;
+        .pairings
+        .of(&verkstead_store::Role::review());
 
     assert_eq!(
         picked.pairing().map(|pairing| pairing.profile.id.clone()),
@@ -1932,9 +2004,10 @@ async fn no_review_cannot_be_picked_once_grilling_has_started() {
         .await
         .unwrap();
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
         &[],
@@ -1949,7 +2022,8 @@ async fn no_review_cannot_be_picked_once_grilling_has_started() {
             .await
             .unwrap()
             .unwrap()
-            .review_pairing
+            .pairings
+            .of(&verkstead_store::Role::review())
             .pairing()
             .map(|pairing| pairing.profile.id.clone()),
         Some(fable.id),
@@ -2304,8 +2378,18 @@ async fn a_record_arriving_removed_nulls_every_pairing_that_named_it() {
     }
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.grilling_pairing, None);
-    assert_eq!(conversation.implementation_pairing, None);
+    assert_eq!(
+        conversation
+            .pairings
+            .under(&verkstead_store::Role::grilling()),
+        None
+    );
+    assert_eq!(
+        conversation
+            .pairings
+            .under(&verkstead_store::Role::implementation()),
+        None
+    );
     assert!(profiles(&pool).await.unwrap().is_empty());
 }
 
@@ -2397,9 +2481,10 @@ async fn a_provisional_mirror_is_bridged_onto_the_record_its_home_published() {
 
     let provisional = provisional(&pool, id).await;
 
-    start_grilling(
+    start_in(
         &pool,
         id,
+        &State::named("grilling"),
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
         &[],
@@ -2467,7 +2552,8 @@ async fn a_provisional_mirror_is_bridged_onto_the_record_its_home_published() {
             .await
             .unwrap()
             .unwrap()
-            .grilling_pairing
+            .pairings
+            .under(&verkstead_store::Role::grilling())
             .map(|pairing| pairing.profile.id),
         Some(AT_HOME.to_owned()),
         "the Pairing draws the record",
@@ -2492,9 +2578,9 @@ async fn a_pair_that_matches_no_mirror_bridges_nothing() {
     assert!(settle(&pool).await.unwrap().bridged.is_empty());
 
     assert_eq!(
-        naming_rows(&pool, "conversations", "grilling_profile_id", &provisional).await,
-        1,
-        "the Pairing still names the mirror",
+        naming_rows(&pool, "conversation_pairings", "profile_id", &provisional).await,
+        3,
+        "all three of the Conversation's Pairings still name the mirror",
     );
 }
 

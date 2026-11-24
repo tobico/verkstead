@@ -11,6 +11,7 @@ import type { PendingSteerView, SteerForm } from "../src/api/types";
 /// ticked, and no companion row touched.
 export const UNANSWERED: SteerForm = {
   target: null,
+  state: null,
   brief: null,
   digest: false,
   instruction: null,

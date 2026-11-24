@@ -11,7 +11,7 @@
 //! one that produces what the pick asked for — the backlog, the roadmap, or the
 //! handoff an inline build is primed from — so the pick records the direction
 //! and leaves the Conversation grilling. What follows a plan commit or a handoff
-//! is [`start_implementing`]; what follows a roadmap commit is the pull request
+//! is [`transition`]; what follows a roadmap commit is the pull request
 //! the same session opens, which `wrapping.rs` is where to look for.
 
 use std::path::Path;
@@ -21,10 +21,11 @@ use verkstead_schema::{
     Direction, Proposal, Question, QuestionOption, QuestionSet, Response, Want, WantedPlatform,
 };
 use verkstead_store::{
-    Ask, Directing, Event, Implementing, Lifecycle, OwnAsking, PlacedWork, Proposed, Settlements,
-    Submission, ask, ask_on_our_own, building_since, load_conversation, open_database, own_sets,
-    pick_direction, picked_wants, record_handoff, register_repo, save_brief, start_conversation,
-    start_grilling, start_implementing, submit_response, timeline,
+    Ask, Directing, Event, OwnAsking, PlacedWork, Process, Proposed, Settlements, State,
+    Submission, Transitioned, ask, ask_on_our_own, building_since, load_conversation,
+    open_database, own_sets, pick_direction, picked_wants, record_handoff, register_repo,
+    save_brief, set_process, set_state, start_conversation, start_in, submit_response, timeline,
+    transition,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -48,7 +49,7 @@ fn settlements() -> Settlements {
 
 /// A Conversation that is grilling, which is where a proposal can reach one.
 ///
-/// Started for real rather than moved by hand: `start_grilling` is what records
+/// Started for real rather than moved by hand: `start_in` is what records
 /// the base commit and the worktree beside the state, and a Conversation moved
 /// straight into Grilling would be one nothing else in the store agrees about.
 async fn grilling(pool: &SqlitePool) -> i64 {
@@ -63,9 +64,10 @@ async fn grilling(pool: &SqlitePool) -> i64 {
         .expect("the Repo was just registered");
 
     save_brief(pool, id, "# Rate limiting\n").await.unwrap();
-    start_grilling(
+    start_in(
         pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         Path::new("/state/worktrees/rate-limiting"),
         &[],
@@ -161,7 +163,7 @@ fn accepting(direction: Direction) -> Response {
 }
 
 /// What state a Conversation is in.
-async fn state(pool: &SqlitePool, id: i64) -> Lifecycle {
+async fn state(pool: &SqlitePool, id: i64) -> State {
     load_conversation(pool, id)
         .await
         .unwrap()
@@ -170,13 +172,13 @@ async fn state(pool: &SqlitePool, id: i64) -> Lifecycle {
 }
 
 /// The states a Conversation's Timeline says it has moved through, in order.
-async fn moves(pool: &SqlitePool, id: i64) -> Vec<Lifecycle> {
+async fn moves(pool: &SqlitePool, id: i64) -> Vec<State> {
     timeline(pool, id)
         .await
         .unwrap()
         .iter()
-        .filter_map(|event| match event.event {
-            Event::Moved(state) => Some(state),
+        .filter_map(|event| match &event.event {
+            Event::Moved(state) => Some(state.clone()),
             _ => None,
         })
         .collect()
@@ -256,12 +258,12 @@ async fn a_pick_records_the_direction_and_leaves_the_conversation_grilling() {
         );
         assert_eq!(
             state(&pool, id).await,
-            Lifecycle::Grilling,
+            State::named("grilling"),
             "picking {picked:?}"
         );
         assert_eq!(
             moves(&pool, id).await,
-            [Lifecycle::Grilling],
+            [State::named("grilling")],
             "so nothing is on the Timeline saying it moved — picking {picked:?}",
         );
         assert_eq!(
@@ -287,14 +289,21 @@ async fn a_grillings_tail_landing_is_what_starts_the_work() {
         pick_direction(&pool, id, picked).await.unwrap();
 
         assert_eq!(
-            start_implementing(&pool, id).await.unwrap(),
-            Implementing::Started,
+            transition(
+                &pool,
+                id,
+                &State::named("grilling"),
+                &State::named("implementing")
+            )
+            .await
+            .unwrap(),
+            Transitioned::Moved,
             "picking {picked:?}",
         );
-        assert_eq!(state(&pool, id).await, Lifecycle::Implementing);
+        assert_eq!(state(&pool, id).await, State::named("implementing"));
         assert_eq!(
             moves(&pool, id).await,
-            [Lifecycle::Grilling, Lifecycle::Implementing],
+            [State::named("grilling"), State::named("implementing")],
             "one move, recorded where the grilling actually ended — picking {picked:?}",
         );
         assert_eq!(
@@ -320,7 +329,14 @@ async fn a_round_of_building_begins_at_the_move_into_implementing() {
     pick_direction(&pool, id, Direction::TaskList)
         .await
         .unwrap();
-    start_implementing(&pool, id).await.unwrap();
+    transition(
+        &pool,
+        id,
+        &State::named("grilling"),
+        &State::named("implementing"),
+    )
+    .await
+    .unwrap();
 
     let since = building_since(&pool, id)
         .await
@@ -363,21 +379,42 @@ async fn only_a_grilling_has_a_tail_to_land() {
     let id = grilling(&pool).await;
 
     pick_direction(&pool, id, Direction::Inline).await.unwrap();
-    start_implementing(&pool, id).await.unwrap();
+    transition(
+        &pool,
+        id,
+        &State::named("grilling"),
+        &State::named("implementing"),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
-        start_implementing(&pool, id).await.unwrap(),
-        Implementing::NotGrilling,
+        transition(
+            &pool,
+            id,
+            &State::named("grilling"),
+            &State::named("implementing")
+        )
+        .await
+        .unwrap(),
+        Transitioned::Elsewhere,
     );
     assert_eq!(
         moves(&pool, id).await,
-        [Lifecycle::Grilling, Lifecycle::Implementing],
+        [State::named("grilling"), State::named("implementing")],
         "so the Timeline does not say it got there twice",
     );
 
     assert_eq!(
-        start_implementing(&pool, 404).await.unwrap(),
-        Implementing::NoSuchConversation,
+        transition(
+            &pool,
+            404,
+            &State::named("grilling"),
+            &State::named("implementing")
+        )
+        .await
+        .unwrap(),
+        Transitioned::NoSuchConversation,
     );
 }
 
@@ -394,12 +431,12 @@ async fn answering_an_ordinary_grilling_set_leaves_it_grilling() {
 
     assert_eq!(
         state(&pool, id).await,
-        Lifecycle::Grilling,
+        State::named("grilling"),
         "an ordinary round of grilling is not the end of one",
     );
     assert_eq!(
         moves(&pool, id).await,
-        [Lifecycle::Grilling],
+        [State::named("grilling")],
         "and nothing moved, so nothing is on the Timeline saying it did",
     );
 }
@@ -480,12 +517,12 @@ async fn any_answer_without_a_pick_leaves_the_conversation_grilling() {
         );
         assert_eq!(
             state(&pool, id).await,
-            Lifecycle::Grilling,
+            State::named("grilling"),
             "so the grilling carries on after {how}",
         );
         assert_eq!(
             moves(&pool, id).await,
-            [Lifecycle::Grilling],
+            [State::named("grilling")],
             "and nothing is on the Timeline saying it moved, after {how}",
         );
     }
@@ -523,7 +560,7 @@ async fn accepting_with_something_to_add_is_still_accepting() {
         }),
     );
     assert_eq!(direction(&pool, id).await, Some(Direction::Inline));
-    assert_eq!(state(&pool, id).await, Lifecycle::Grilling);
+    assert_eq!(state(&pool, id).await, State::named("grilling"));
 }
 
 /// A grilling sent back can propose again, and that one can be accepted.
@@ -562,7 +599,7 @@ async fn a_proposal_put_again_after_a_refusal_can_be_accepted() {
     assert_eq!(direction(&pool, id).await, Some(Direction::Inline));
     assert_eq!(
         moves(&pool, id).await,
-        [Lifecycle::Grilling],
+        [State::named("grilling")],
         "neither the refusal nor the pick moved anything: what moves a \
          Conversation is the artifact the pick asked for",
     );
@@ -615,12 +652,12 @@ async fn a_later_pick_supersedes_the_one_before_it() {
     );
     assert_eq!(
         state(&pool, id).await,
-        Lifecycle::Grilling,
+        State::named("grilling"),
         "with the grilling still running, because no artifact has landed",
     );
     assert_eq!(
         moves(&pool, id).await,
-        [Lifecycle::Grilling],
+        [State::named("grilling")],
         "and neither pick moved anything",
     );
 }
@@ -645,7 +682,14 @@ async fn a_pick_answered_after_the_tail_landed_finds_nothing_to_settle() {
         .unwrap();
 
     answer(&pool, first.id).await;
-    start_implementing(&pool, id).await.unwrap();
+    transition(
+        &pool,
+        id,
+        &State::named("grilling"),
+        &State::named("implementing"),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         proposed(&pool, second.id, &accepting(Direction::Roadmap)).await,
@@ -657,7 +701,7 @@ async fn a_pick_answered_after_the_tail_landed_finds_nothing_to_settle() {
     );
     assert_eq!(
         moves(&pool, id).await,
-        [Lifecycle::Grilling, Lifecycle::Implementing],
+        [State::named("grilling"), State::named("implementing")],
         "so the Timeline does not say it moved twice",
     );
     assert_eq!(
@@ -683,8 +727,81 @@ async fn a_conversation_that_is_not_grilling_has_no_grilling_to_end() {
         pick_direction(&pool, id, Direction::Inline).await.unwrap(),
         Directing::NotGrilling,
     );
-    assert_eq!(state(&pool, id).await, Lifecycle::Draft);
+    assert_eq!(state(&pool, id).await, State::draft());
     assert_eq!(direction(&pool, id).await, None);
+}
+
+/// A Conversation stands in whatever states its Process declares, and which of
+/// them runs the Interview is that manifest's to say — nothing a column holds.
+/// So a pick in any of them is recorded, and the server asks the manifest
+/// before it tells the session waiting (Set 1765, Q29).
+///
+/// Which is why the record makes no case of a word spelled like one of the five's
+/// own: a state *is* a word, and what it means is its Process's.
+#[tokio::test]
+async fn a_pick_on_a_declared_state_is_recorded_for_the_manifest_to_judge() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap();
+    let id = start_conversation(&pool, repo.id, "two-steps", THIS_DEVICE, None)
+        .await
+        .unwrap()
+        .unwrap();
+    set_process(
+        &pool,
+        id,
+        Process {
+            plugin: "5e0c9a7e-2f4b-4c1d-8a3e-6b9f0d2c7a41".to_owned(),
+            id: "two-steps".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    set_state(&pool, id, "interviewing").await.unwrap();
+
+    assert_eq!(
+        pick_direction(&pool, id, Direction::TaskList)
+            .await
+            .unwrap(),
+        Directing::Writing,
+        "the word is none of Verkstead's, so the record takes the pick as far as it goes",
+    );
+    assert_eq!(direction(&pool, id).await, Some(Direction::TaskList));
+    // And the same for a word one of the five uses, on this Process and on a
+    // Develop alike: what a word means is the Process's, so the record says
+    // the same thing about both and the manifest tells them apart.
+    let develop = start_conversation(&pool, repo.id, "rate-limiting", THIS_DEVICE, None)
+        .await
+        .unwrap()
+        .unwrap();
+
+    for conversation in [id, develop] {
+        set_state(&pool, conversation, "wrapping").await.unwrap();
+        assert_eq!(
+            pick_direction(&pool, conversation, Direction::Roadmap)
+                .await
+                .unwrap(),
+            Directing::Writing,
+        );
+        assert_eq!(
+            direction(&pool, conversation).await,
+            Some(Direction::Roadmap)
+        );
+    }
+
+    // Draft is Verkstead's own and nothing interviews in one, so a pick there
+    // is refused — and the pick the round before it made is the one that
+    // stands.
+    set_state(&pool, develop, State::draft()).await.unwrap();
+    assert_eq!(
+        pick_direction(&pool, develop, Direction::Inline)
+            .await
+            .unwrap(),
+        Directing::NotGrilling,
+    );
+    assert_eq!(direction(&pool, develop).await, Some(Direction::Roadmap));
 }
 
 #[tokio::test]
@@ -699,22 +816,49 @@ async fn there_is_no_conversation_to_move() {
 
 /// A second pick on a Conversation already being built changes nothing.
 ///
-/// Not a rule about picking twice so much as the one rule stated once: only a
-/// grilling can be informed, and this one is over. What the work was built as
-/// stands, and it carries on being built as that.
+/// Not a rule about picking twice so much as the one rule stated once: only the
+/// round that proposed can be informed, and this one is over. What the work was
+/// built as stands, and it carries on being built as that.
+///
+/// Read off the Timeline rather than off the state: a move above the Set is the
+/// round that put the proposal up having been seen out, whatever state the
+/// Process left the Conversation in — see `accept_proposal`.
 #[tokio::test]
 async fn a_conversation_that_is_already_being_built_takes_no_second_pick() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
-    pick_direction(&pool, id, Direction::Inline).await.unwrap();
-    start_implementing(&pool, id).await.unwrap();
+    let first = ask(&pool, id, &proposing(Direction::Inline), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
+    let second = ask(&pool, id, &proposing(Direction::TaskList), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(
-        pick_direction(&pool, id, Direction::TaskList)
-            .await
-            .unwrap(),
-        Directing::NotGrilling,
+        proposed(&pool, first.id, &accepting(Direction::Inline)).await,
+        Some(Proposed::Accepted {
+            direction: Direction::Inline,
+            directing: Directing::Writing,
+        }),
+    );
+    transition(
+        &pool,
+        id,
+        &State::named("grilling"),
+        &State::named("implementing"),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        proposed(&pool, second.id, &accepting(Direction::TaskList)).await,
+        Some(Proposed::Accepted {
+            direction: Direction::TaskList,
+            directing: Directing::NotGrilling,
+        }),
     );
     assert_eq!(
         direction(&pool, id).await,
@@ -723,7 +867,7 @@ async fn a_conversation_that_is_already_being_built_takes_no_second_pick() {
     );
     assert_eq!(
         moves(&pool, id).await,
-        [Lifecycle::Grilling, Lifecycle::Implementing],
+        [State::named("grilling"), State::named("implementing")],
         "and the second pick records nothing",
     );
 }
@@ -785,7 +929,7 @@ async fn a_direction_survives_a_restart() {
     let pool = open_database(&database).await.unwrap();
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
 
-    assert_eq!(conversation.state, Lifecycle::Grilling);
+    assert_eq!(conversation.state, State::named("grilling"));
     assert_eq!(conversation.direction, Some(Direction::TaskList));
 }
 
@@ -826,7 +970,7 @@ async fn a_conversation_caught_choosing_a_direction_comes_out_closed() {
 
     assert_eq!(
         conversation.state,
-        Lifecycle::Closed,
+        State::closed(),
         "there is no session to receive anything and no chooser left to press",
     );
     assert_eq!(
@@ -835,7 +979,7 @@ async fn a_conversation_caught_choosing_a_direction_comes_out_closed() {
     );
     assert_eq!(
         moves(&pool, id).await,
-        [Lifecycle::Grilling, Lifecycle::Closed],
+        [State::named("grilling"), State::closed()],
         "the retired move is off the Timeline and the close is on it",
     );
 }

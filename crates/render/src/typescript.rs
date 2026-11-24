@@ -33,15 +33,15 @@ use crate::{
     NewRank, OfferedPack, OfferedView, OnboardingView, OpenTerminal, PackAttached, PackRemoved,
     PendingJoin, Permitting, Picking, PluginAt, PluginConsent, PluginEnabled, PluginInstall,
     PluginLanguageCache, PluginSettingsSave, PluginSettingsSaved, PluginSettingsView, PluginUpdate,
-    PluginUpdated, PluginsView, PortsView, PrefillView, Preflight, ProcessChoice, ProcessPicked,
-    ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved,
-    PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice,
-    RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Repointed, Repointing,
-    Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, ServerAttached,
-    ServerRemoved, SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
-    SharePublished, SharedConversation, ShowArchived, ShowingArchived, Shown, Started,
-    SteerCancelled, SteerForm, SteerOpened, SteerSaved, SteerSubmission, Submitted, Subscribed,
-    Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalClosed, TerminalOpened,
+    PluginUpdated, PluginsView, PortsView, PrefillView, Preflight, ProcessChoice, ProcessEntry,
+    ProcessPicked, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
+    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView,
+    RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Repointed,
+    Repointing, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
+    ServerAttached, ServerRemoved, SetReading, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedConversation, ShowArchived, ShowingArchived, Shown,
+    Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved, SteerSubmission, Submitted,
+    Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalClosed, TerminalOpened,
     TerminalsView, TranscriptView, Transferring, Unsubscribe, UpdateNotice, Watching,
 };
 
@@ -162,11 +162,15 @@ fn the_viewers_types_are_written_from_these() {
     RepoSwitched::export_all(&config).unwrap();
 
     // And what kind of work it is: the Process, picked beside the Repo and
-    // frozen with the Pairings. The `Process` itself rides in on the view above
-    // as well — it is one of the facts the pane reads back — and these two are
+    // frozen with the Pairings. Which Process rides in on the view above as
+    // well — it is one of the facts the pane reads back — and these two are
     // the press that changes it while the Conversation drafts.
     ProcessChoice::export_all(&config).unwrap();
     ProcessPicked::export_all(&config).unwrap();
+
+    // And every Process the plugins loaded here provide, which the picker
+    // offers and the Conversations on them are worded from.
+    ProcessEntry::export_all(&config).unwrap();
 
     // And the other registered Repos it works alongside, which are added and
     // taken away on the same card. What one *is* comes back inside the view

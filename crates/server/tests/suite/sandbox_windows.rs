@@ -81,7 +81,7 @@ use verkstead_server::sandbox::{Bind, Executable, Homes, Reachable, Sandbox, off
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::store;
-use verkstead_server::store::Lifecycle;
+use verkstead_server::store::State;
 
 /// The device every Conversation started here is ranked by, named the way a
 /// cluster names one (ADR-0020, *Ranks*).
@@ -463,9 +463,16 @@ impl Grilling {
 
         std::fs::write(worktree.join(MARKER), SAID).unwrap();
 
-        store::start_grilling(&self.pool, id, &commit, &worktree, &[])
-            .await
-            .unwrap();
+        store::start_in(
+            &self.pool,
+            id,
+            &store::State::named("grilling"),
+            &commit,
+            &worktree,
+            &[],
+        )
+        .await
+        .unwrap();
 
         self.made.lock().unwrap().push(id);
 
@@ -1057,9 +1064,16 @@ async fn grilling() -> Grilling {
         ],
     );
 
-    store::start_grilling(&pool, id, &commit, &worktree, &[])
-        .await
-        .unwrap();
+    store::start_in(
+        &pool,
+        id,
+        &store::State::named("grilling"),
+        &commit,
+        &worktree,
+        &[],
+    )
+    .await
+    .unwrap();
 
     let conversation = store::load_conversation(&pool, id)
         .await
@@ -2865,7 +2879,7 @@ async fn the_entries_a_crash_left_behind_are_swept_at_the_next_startup() {
 
     let granted = fixture.granted();
 
-    store::set_state(&fixture.pool, fixture.conversation.id, Lifecycle::Done)
+    store::set_state(&fixture.pool, fixture.conversation.id, "done")
         .await
         .expect("the Conversation to have finished");
 

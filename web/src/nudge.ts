@@ -512,7 +512,7 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
     // it, since a Language plugin's tick is its languages' switch, which the
     // Sandbox section's sccache line reads. And the harness list is what the
     // Agent ones that loaded here add to — this device's own, read once for the
-    // whole page.
+    // whole page — and so is the list of Processes the plugins here provide.
     //
     // **And every Conversation of that device**, for the declarations' reason
     // above: a pack chip says whether anything loaded here still provides it,
@@ -525,7 +525,7 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
         keyOf(device, "conversation"),
         keyOf(device, "settings"),
       ];
-      return device === null ? [...keys, ["harnesses"]] : keys;
+      return device === null ? [...keys, ["harnesses"], ["processes"]] : keys;
     }
 
     // Where a Profile's login has got to moved — which is what shows a second

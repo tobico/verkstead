@@ -14,8 +14,8 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Event, Landed, StageOf, open_database, record_backlog, record_roadmap, register_repo,
-    save_brief, stage_roadmap, start_conversation, start_grilling, timeline,
+    Event, Landed, StageOf, State, open_database, record_backlog, record_roadmap, register_repo,
+    save_brief, stage_roadmap, start_conversation, start_in, timeline,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -48,9 +48,10 @@ async fn grilling(pool: &SqlitePool) -> i64 {
         .expect("the Repo was just registered");
 
     save_brief(pool, id, "# Rate limiting\n").await.unwrap();
-    start_grilling(
+    start_in(
         pool,
         id,
+        &State::named("grilling"),
         "c0ffee",
         Path::new("/state/worktrees/rate-limiting"),
         &[],

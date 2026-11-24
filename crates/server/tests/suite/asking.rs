@@ -578,7 +578,7 @@ async fn a_deferred_set_leaves_the_conversation_waiting_on_the_human() {
 
     // Out of Draft, which is the state the badge is never drawn on: a draft is
     // drawn as a draft, and nothing has been asked from one.
-    store::set_state(&pool, first, store::Lifecycle::Grilling)
+    store::set_state(&pool, first, store::State::named("grilling"))
         .await
         .unwrap();
 

@@ -1530,9 +1530,7 @@ async fn rename_references(
     to: &str,
 ) -> Result<()> {
     for (table, column) in [
-        ("conversations", "grilling_profile_id"),
-        ("conversations", "implementation_profile_id"),
-        ("conversations", "review_profile_id"),
+        ("conversation_pairings", "profile_id"),
         ("conversations", "stopped_signed_out"),
         ("repo_pairings", "profile_id"),
         ("pending_steers", "profile_id"),
@@ -1869,48 +1867,41 @@ fn kept(agent_type: AgentType, id: &str, home: Option<String>) -> Result<String>
 /// Take a Profile out of every Pairing that named it, on its way to being
 /// removed.
 ///
-/// Four places: a Conversation names one per role, and a Repo remembers the one
-/// it was last grilled with in each of the three. Nothing is refused and nothing
-/// is reported — a Profile nobody has ever picked passes through here without
-/// touching a row, which is what the ordinary removal is.
+/// Three places: a Conversation names one per role it has settled, and a Repo
+/// remembers the one it was last grilled with in each role of its own. Whichever
+/// roles those are, by name — the rows say, rather than a list here. Nothing is
+/// refused and nothing is reported: a Profile nobody has ever picked passes
+/// through here without touching a row, which is what the ordinary removal is.
 ///
-/// The model rows go before the columns they are found by, because that is what
-/// finds them: a role's model is looked up through the Conversation whose column
-/// still names the Profile, so nulling first would leave the model half behind
-/// with nothing left pointing at it.
+/// The model rows go before the Pairing rows they are found by, because that is
+/// what finds them: a role's model is looked up through the Pairing that still
+/// names the Profile, so taking that away first would leave the model half
+/// behind with nothing left pointing at it.
 ///
 /// Nobody is put on the row that runs no session by this. A role picked away is
 /// something the human chose and *no Profile any more* is not: what the removal
 /// leaves is a picker with nothing in it, which is the state a Conversation
 /// starts in.
 async fn forget_pairings(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, id: &str) -> Result<()> {
-    for role in super::conversations::Role::ALL {
-        sqlx::query(&format!(
-            "DELETE FROM pairing_models
-             WHERE role = ?
-               AND conversation_id IN (SELECT id FROM conversations WHERE {} = ?)",
-            role.column(),
-        ))
-        .bind(role.stored())
-        .bind(id)
-        .execute(&mut **tx)
-        .await
-        .with_context(|| {
-            format!("clearing the models paired with Profile {id} in the {role:?} role")
-        })?;
+    sqlx::query(
+        "DELETE FROM pairing_models
+         WHERE (conversation_id, role) IN (
+                 SELECT conversation_id, role FROM conversation_pairings
+                 WHERE profile_id = ?
+               )",
+    )
+    .bind(id)
+    .execute(&mut **tx)
+    .await
+    .with_context(|| format!("clearing the models paired with Profile {id}"))?;
 
-        sqlx::query(&format!(
-            "UPDATE conversations SET {} = NULL WHERE {} = ?",
-            role.column(),
-            role.column(),
-        ))
+    sqlx::query("DELETE FROM conversation_pairings WHERE profile_id = ?")
         .bind(id)
         .execute(&mut **tx)
         .await
         .with_context(|| {
-            format!("clearing Profile {id} off the Conversations that chose it to {role:?}")
+            format!("clearing Profile {id} off the Conversations that chose it for a role")
         })?;
-    }
 
     sqlx::query("DELETE FROM repo_pairings WHERE profile_id = ?")
         .bind(id)

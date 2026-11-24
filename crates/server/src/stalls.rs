@@ -39,7 +39,7 @@ use std::time::Duration;
 use tokio::sync::watch;
 
 use crate::AppState;
-use crate::store::{self, Lifecycle};
+use crate::store::{self, State};
 
 /// How often every Conversation is looked over, as [`crate::Pace`] has it by
 /// default.
@@ -119,13 +119,6 @@ async fn sweep(state: &AppState) {
     let working = state.sessions.working();
 
     for conversation in conversations {
-        // As the resume sweep does: a state word nobody can read is not one to
-        // weigh a stall against. The sidebar carries the row so it can be
-        // ended, and nothing unattended acts on it.
-        let Some(lifecycle) = conversation.state.known() else {
-            continue;
-        };
-
         // And a *Transfer to…* the human pressed, whose session has since ended
         // — which is a Conversation nothing is driving because the thing that
         // was driving it is about to hand it to another machine. Not a stall,
@@ -150,7 +143,23 @@ async fn sweep(state: &AppState) {
             continue;
         }
 
-        if state.drivers.driven(&working, conversation.id, lifecycle) {
+        // Whether its session is what drives it, which is the manifest's to
+        // say: the Interview is the one Activity of Verkstead's whose own
+        // session holds the Conversation up — see
+        // [`crate::drivers::Drivers::driven`].
+        let by_its_session = crate::processes::runs(
+            state,
+            &conversation.process,
+            conversation.state.stored(),
+            crate::processes::INTERVIEW,
+        );
+
+        if state.drivers.driven(
+            &working,
+            conversation.id,
+            &conversation.state,
+            by_its_session,
+        ) {
             continue;
         }
 
@@ -185,7 +194,7 @@ async fn sweep(state: &AppState) {
             continue;
         }
 
-        stalled(state, conversation.id, lifecycle).await;
+        stalled(state, conversation.id, &conversation.state, by_its_session).await;
     }
 }
 
@@ -200,10 +209,10 @@ async fn sweep(state: &AppState) {
 /// decided to stop, a driver went away. What that buys is a restart free to
 /// start the work again without asking — a stop somebody decided is the one
 /// that waits for a press.
-async fn stalled(state: &AppState, conversation_id: i64, lifecycle: Lifecycle) {
+async fn stalled(state: &AppState, conversation_id: i64, standing: &State, by_its_session: bool) {
     tracing::warn!(
         conversation_id,
-        state = ?lifecycle,
+        state = standing.stored(),
         "nothing is driving a Conversation that says it is being worked on",
     );
 
@@ -212,16 +221,19 @@ async fn stalled(state: &AppState, conversation_id: i64, lifecycle: Lifecycle) {
     // a Resume pressed meanwhile has registered by the time it is done. See
     // [`store::stop_undriven`].
     let driven = || {
-        state
-            .drivers
-            .driven(&state.sessions.working(), conversation_id, lifecycle)
+        state.drivers.driven(
+            &state.sessions.working(),
+            conversation_id,
+            standing,
+            by_its_session,
+        )
     };
 
     let stopped = crate::stopping::stall(
         &state.pool,
         &state.nudges,
         conversation_id,
-        driving(lifecycle),
+        driving(standing),
         "Nothing is driving it. No session is running, and nothing is left to start one.",
         said_last(state, conversation_id).await,
         &driven,
@@ -240,27 +252,29 @@ async fn stalled(state: &AppState, conversation_id: i64, lifecycle: Lifecycle) {
 /// What ought to have been happening, in the words the rest of the evidence uses
 /// — the sentence the Timeline draws above how it ended.
 ///
-/// Read off the state, because for a stall the state is the whole of what says
-/// it. Every other stop names a step a session was launched for; this one names
-/// the thing nobody was doing.
+/// **The state it stands in, by the id its Process gives it** (Set 1765, Q29):
+/// for a stall the state is the whole of what says what was not happening, and
+/// what a state is called is the Process's. Every other stop names a step a
+/// session was launched for; this one names the thing nobody was doing.
+///
+/// The id rather than the manifest's `word` because the two places that write
+/// this sentence off the record alone — an account signing out, a window
+/// running out — are watchers inside a session's relay task, which holds the
+/// pool and the Nudges and no register of plugins to read a manifest from. For
+/// every Process Verkstead ships the two are the same sentence anyway, the
+/// state ids being the words the column has always held; the engine's own stops
+/// read the word, see [`crate::processes::doing`].
 ///
 /// The three states nothing drives never reach here — [`sweep`] leaves them
 /// alone, and [`crate::drivers::Drivers::driven`] is where that is decided — so
-/// what they answer is only ever read by a database somebody has been in by
-/// hand.
+/// the plain sentence is only ever read for a Conversation whose state is one of
+/// Verkstead's own three.
 ///
 /// Shared with [`crate::resume::refused`], which is the same sentence about the
 /// same Conversation: what nobody was doing, said as a startup resume gives up on
 /// starting it.
-pub(crate) fn driving(lifecycle: Lifecycle) -> &'static str {
-    match lifecycle {
-        Lifecycle::Grilling => "grilling the work",
-        Lifecycle::Implementing => "implementing the work",
-        Lifecycle::Wrapping => "wrapping the work up",
-        Lifecycle::FollowUp => "following the work up",
-        Lifecycle::Investigating => "finding out what was asked",
-        Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => "driving the conversation",
-    }
+pub(crate) fn driving(standing: &State) -> &str {
+    standing.declared().unwrap_or("driving the conversation")
 }
 
 /// Which Timeline Event the last session to run printed into, so the evidence
@@ -289,37 +303,4 @@ pub(crate) async fn said_last(state: &AppState, conversation_id: i64) -> Option<
         .iter()
         .rev()
         .find_map(|event| matches!(event.event, store::Event::AgentOutput(..)).then_some(event.id))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Every state a stall can be found in says what was not being done, in its
-    /// own words. The evidence is read on a phone, and "nothing is driving it"
-    /// is only half an answer without what *it* was meant to be doing.
-    #[test]
-    fn each_driven_state_says_what_nobody_was_doing() {
-        let said: Vec<&str> = [
-            Lifecycle::Grilling,
-            Lifecycle::Implementing,
-            Lifecycle::Wrapping,
-            Lifecycle::FollowUp,
-            Lifecycle::Investigating,
-        ]
-        .into_iter()
-        .map(driving)
-        .collect();
-
-        assert_eq!(
-            said,
-            vec![
-                "grilling the work",
-                "implementing the work",
-                "wrapping the work up",
-                "following the work up",
-                "finding out what was asked",
-            ],
-        );
-    }
 }

@@ -46,6 +46,7 @@ import type {
   ConversationClosed,
   ConversationEntry,
   ConversationSteered,
+  SteerRow,
   CompanionAdded,
   ConversationStopped,
   ConversationUnarchived,
@@ -71,7 +72,6 @@ import type {
   PendingSteerView,
   PairingView,
   PreviewView,
-  Process,
   ProfileEntry,
   PinnedEvent,
   PullRequestDetails,
@@ -82,6 +82,7 @@ import type {
   Resolved,
   Resumed,
   RoadmapPane,
+  ProcessEntry,
   Screen,
   ShareCommented,
   SharePublished,
@@ -153,7 +154,6 @@ import contents from "../src/set/Contents.module.css";
 import sheet from "../src/set/Sheet.module.css";
 import illegible from "../src/set/Unreadable.module.css";
 import { rowKey } from "../src/reaching";
-import { under } from "../src/pairing";
 // The listbox the app draws for itself, whose own names the setup row's
 // triggers are built out of — the line the reading stands on above all.
 import chrome from "../src/picking.module.css";
@@ -169,7 +169,7 @@ import {
   UNARCHIVE_REFUSAL,
 } from "../src/workbench/Actions";
 import actions from "../src/workbench/Actions.module.css";
-import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
+import { adoptRefusal } from "../src/workbench/Adoption";
 import adoption from "../src/workbench/Adoption.module.css";
 // The detail panes, each a module of its own: the brief and what the
 // conversation was configured with, a commit, a document read whole, one
@@ -207,19 +207,11 @@ import outputCss from "../src/workbench/Output.module.css?raw";
 // source to read the rules that jsdom lays nothing out for.
 import paneHead from "../src/workbench/PaneHead.module.css";
 import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
-// The words a Process is said in, read here rather than spelled out again: the
-// pane and this assertion about it would otherwise be two opinions about what
-// Develop is called.
-import {
-  away,
-  DESCRIPTION,
-  OFFERED,
-  PROCESS,
-  ROLES,
-  TARGETED,
-  targeted,
-  uses,
-} from "../src/workbench/processes";
+// The words a Process is said in, read off the list the server sends rather
+// than spelled out again: the pane and this assertion about it would otherwise
+// be two opinions about what Develop is called.
+import { away } from "../src/workbench/roles";
+import { targeted } from "../src/workbench/provided";
 // The pause card, which is one of the record's and draws itself.
 import { RESOLVE_REFUSAL } from "../src/workbench/PullRequest";
 import prPane from "../src/workbench/PullRequest.module.css";
@@ -303,9 +295,21 @@ import codeCss from "../src/workbench/Code.module.css?raw";
 // What a Conversation is called where nobody has named its branch, which the
 // sidebar and the pane header are both drawn with.
 import { AUTOMATIC, DRAFT, titled } from "../src/workbench/naming";
-// The words a lifecycle state is said in, which the status button draws beside
-// the status and the sidebar's row reads aloud.
-import { STATE } from "../src/workbench/states";
+// The words a state is said in, which the status button draws beside the
+// status and the sidebar's row reads aloud — read off the Process that
+// declares the state, as the page reads them.
+import {
+  described,
+  named,
+  OFFERED,
+  offeringOnly,
+  pairingsOn,
+  PROCESSES,
+  rowProcess,
+  saying,
+  stateOf,
+  whose,
+} from "./processes";
 // And the words a roadmap stage's state is said in, which the card's row, the
 // pane's heading and the pane's nav line are all drawn with.
 import { stageState } from "../src/workbench/stages";
@@ -355,6 +359,9 @@ import {
   mountSidebar,
   nodes,
   nudged,
+  onRole,
+  pairedAs,
+  settledRole,
   openAgent,
   theWorkbench,
 } from "./bench";
@@ -1114,6 +1121,9 @@ describe("the workbench", () => {
 /// The rows are the fixture's, altered: what is being asked here is what a card
 /// does with `state`, `working` and `waiting`, and everything else about a row
 /// should stay whatever the server really said.
+///
+/// The Process travels with the state, a row having no Process field of its
+/// own — see `rowProcess`, which is the Process the row's word is read off.
 function theSidebar(...rows: Array<Partial<ConversationEntry>>) {
   return theWorkbench(
     whenever(
@@ -1123,6 +1133,7 @@ function theSidebar(...rows: Array<Partial<ConversationEntry>>) {
           ...SIDEBAR[0]!,
           id: n + 1,
           branch: `b${n}`,
+          ...rowProcess(),
           ...row,
         })),
       ),
@@ -1183,8 +1194,8 @@ describe("the code icon on a card", () => {
 
   it("is drawn from the row's terminal reading, and says so", async () => {
     theSidebar(
-      { branch: "building", state: "Implementing", terminal_busy: true },
-      { branch: "quiet", state: "Implementing" },
+      { branch: "building", state: "implementing", terminal_busy: true },
+      { branch: "quiet", state: "implementing" },
     );
     const { container } = mount();
 
@@ -1204,8 +1215,8 @@ describe("the code icon on a card", () => {
     unsavedIn(1);
     unsavedIn(2);
     theSidebar(
-      { branch: "editing", state: "Implementing" },
-      { branch: "both", state: "Wrapping", terminal_busy: true },
+      { branch: "editing", state: "implementing" },
+      { branch: "both", state: "wrapping", terminal_busy: true },
     );
     const { container } = mount();
 
@@ -1228,7 +1239,7 @@ describe("the code icon on a card", () => {
   it("is not drawn for unsaved text on a draft or a closed card", async () => {
     unsavedIn(1);
     unsavedIn(2);
-    theSidebar({ state: "Draft" }, { state: "Closed" });
+    theSidebar({ state: "draft" }, { state: "closed" });
     const { container } = mount();
 
     const rows = await cards(container);
@@ -1306,7 +1317,7 @@ describe("the code icon on a card", () => {
     theSidebar(
       {
         branch: "theirs",
-        state: "Implementing",
+        state: "implementing",
         terminal_busy: true,
         rank: `Zz-${member}`,
         device: { id: member, name: "the-laptop", os: null, reachable: true },
@@ -1314,11 +1325,11 @@ describe("the code icon on a card", () => {
       {
         id: 2,
         branch: "edited-there",
-        state: "Implementing",
+        state: "implementing",
         rank: `Zy-${member}`,
         device: { id: member, name: "the-laptop", os: null, reachable: true },
       },
-      { id: 2, branch: "ours", state: "Implementing" },
+      { id: 2, branch: "ours", state: "implementing" },
     );
     const { container } = mount();
 
@@ -1343,7 +1354,7 @@ describe("the code icon on a card", () => {
 /// look at, and all three of those are *this one is under way*.
 describe("how a card says where its conversation has got to", () => {
   it("turns a spinner on a conversation whose session is running", async () => {
-    theSidebar({ state: "Implementing", working: true, waiting: false });
+    theSidebar({ state: "implementing", working: true, waiting: false });
     const { container } = mount();
 
     const [card] = await cards(container);
@@ -1358,7 +1369,7 @@ describe("how a card says where its conversation has got to", () => {
   /// spinner turning the whole time says something is happening when nothing is.
   it("empties the ring on a conversation whose session has gone quiet", async () => {
     theSidebar({
-      state: "Grilling",
+      state: "grilling",
       working: true,
       idle: true,
       waiting: false,
@@ -1375,7 +1386,7 @@ describe("how a card says where its conversation has got to", () => {
   /// round the whole card have both gone, because a waiting card that was also
   /// the open one had two treatments arguing over the one edge.
   it("marks a conversation waiting on the human with the disc alone", async () => {
-    theSidebar({ state: "Grilling", working: false, waiting: true });
+    theSidebar({ state: "grilling", working: false, waiting: true });
     const { container } = mount();
 
     const [card] = await cards(container);
@@ -1395,7 +1406,7 @@ describe("how a card says where its conversation has got to", () => {
   /// The mark is a shape, and a shape is nothing to a screen reader beside the
   /// label that already said it.
   it("keeps the mark out of what is read aloud", async () => {
-    theSidebar({ state: "Grilling", working: false, waiting: true });
+    theSidebar({ state: "grilling", working: false, waiting: true });
     const { container } = mount();
 
     const [card] = await cards(container);
@@ -1409,7 +1420,7 @@ describe("how a card says where its conversation has got to", () => {
   /// idling on the answer. Of the two things true of it, the one the human can do
   /// something about is the ask.
   it("shows the dot and not the spinner when it is both", async () => {
-    theSidebar({ state: "Grilling", working: true, waiting: true });
+    theSidebar({ state: "grilling", working: true, waiting: true });
     const { container } = mount();
 
     const [card] = await cards(container);
@@ -1422,7 +1433,7 @@ describe("how a card says where its conversation has got to", () => {
   /// session that asked has been quiet since it asked. The mark that outranks
   /// both is the one the human can do something about.
   it("shows the dot and not the empty ring when it is both", async () => {
-    theSidebar({ state: "Grilling", working: true, idle: true, waiting: true });
+    theSidebar({ state: "grilling", working: true, idle: true, waiting: true });
     const { container } = mount();
 
     const [card] = await cards(container);
@@ -1465,7 +1476,7 @@ describe("how a card says where its conversation has got to", () => {
   /// is a wrap-up that carried the work to Done while nobody was watching, and
   /// the push that went out about it.
   it("marks a conversation with news on it with the same disc", async () => {
-    theSidebar({ state: "Done", working: false, waiting: false, unseen: true });
+    theSidebar({ state: "done", working: false, waiting: false, unseen: true });
     const { container } = mount();
 
     const [card] = await cards(container);
@@ -1479,11 +1490,11 @@ describe("how a card says where its conversation has got to", () => {
   /// a job nobody had.
   it("says which of the two the disc is about", async () => {
     theSidebar(
-      { branch: "over", state: "Done", working: false, waiting: false, unseen: true },
-      { branch: "asking", state: "Grilling", working: false, waiting: true },
+      { branch: "over", state: "done", working: false, waiting: false, unseen: true },
+      { branch: "asking", state: "grilling", working: false, waiting: true },
       // Both at once, which is a finished Conversation with an ask still
       // answerable on it. The one the human can do something about is the ask.
-      { branch: "both", state: "Done", working: false, waiting: true, unseen: true },
+      { branch: "both", state: "done", working: false, waiting: true, unseen: true },
     );
     const { container } = mount();
 
@@ -1499,7 +1510,7 @@ describe("how a card says where its conversation has got to", () => {
   });
 
   it("marks nothing on a conversation that is neither", async () => {
-    theSidebar({ state: "Implementing", working: false, waiting: false });
+    theSidebar({ state: "implementing", working: false, waiting: false });
     const { container } = mount();
 
     const [card] = await cards(container);
@@ -1508,7 +1519,7 @@ describe("how a card says where its conversation has got to", () => {
   });
 
   it("draws a draft as a draft, and marks nothing on it", async () => {
-    theSidebar({ state: "Draft", working: false, waiting: false });
+    theSidebar({ state: "draft", working: false, waiting: false });
     const { container } = mount();
 
     const [card] = await cards(container);
@@ -1532,8 +1543,8 @@ describe("how a card says where its conversation has got to", () => {
   /// nowhere. A name somebody typed is the row's name exactly as before.
   it("calls a conversation nobody has named a draft", async () => {
     theSidebar(
-      { branch: "amber-kestrel", branch_named: false, state: "Draft" },
-      { branch: "rate-limiting", branch_named: true, state: "Draft" },
+      { branch: "amber-kestrel", branch_named: false, state: "draft" },
+      { branch: "rate-limiting", branch_named: true, state: "draft" },
     );
     const { container } = mount();
     const rows = await cards(container);
@@ -1549,8 +1560,8 @@ describe("how a card says where its conversation has got to", () => {
   /// else. The state it repeats is said once rather than twice over.
   it("reads an unnamed row aloud as the draft it is drawn as", async () => {
     theSidebar(
-      { branch: "amber-kestrel", branch_named: false, state: "Draft" },
-      { branch: "rate-limiting", branch_named: true, state: "Draft" },
+      { branch: "amber-kestrel", branch_named: false, state: "draft" },
+      { branch: "rate-limiting", branch_named: true, state: "draft" },
     );
     const { container } = mount();
 
@@ -1567,9 +1578,9 @@ describe("how a card says where its conversation has got to", () => {
   /// renaming the branch, or by the session ending and leaving it.
   it("keeps calling work on an unnamed branch a draft while it is being named", async () => {
     theSidebar(
-      { branch: "amber-kestrel", branch_named: false, naming: true, state: "Grilling" },
-      { branch: "brave-otter", branch_named: false, naming: false, state: "Grilling" },
-      { branch: "rate-limiting", branch_named: true, naming: false, state: "Implementing" },
+      { branch: "amber-kestrel", branch_named: false, naming: true, state: "grilling" },
+      { branch: "brave-otter", branch_named: false, naming: false, state: "grilling" },
+      { branch: "rate-limiting", branch_named: true, naming: false, state: "implementing" },
     );
     const { container } = mount();
     const rows = await cards(container);
@@ -1583,7 +1594,7 @@ describe("how a card says where its conversation has got to", () => {
   /// Which of the two it was is the details pane's to say. The sidebar's business
   /// is that there is nothing here to do.
   it("dims finished and closed work identically", async () => {
-    theSidebar({ state: "Done" }, { state: "Closed" }, { state: "Wrapping" });
+    theSidebar({ state: "done" }, { state: "closed" }, { state: "wrapping" });
     const { container } = mount();
 
     expect((await cards(container)).map((card) => card.className)).toEqual([
@@ -1638,7 +1649,7 @@ describe("how a card says where its conversation has got to", () => {
 
   /// Dimmed and still a row to press: a Done Conversation can be steered.
   it("opens a dimmed conversation like any other", async () => {
-    theSidebar({ state: "Done" });
+    theSidebar({ state: "done" });
     const { container, history } = mount();
 
     const [card] = await cards(container);
@@ -1655,21 +1666,21 @@ describe("how a card says where its conversation has got to", () => {
       {
         branch: "spinning",
         repo: "verkstead",
-        state: "Implementing",
+        state: "implementing",
         working: true,
         waiting: false,
       },
       {
         branch: "asking",
         repo: "askance",
-        state: "Grilling",
+        state: "grilling",
         working: true,
         waiting: true,
       },
       {
         branch: "sitting",
         repo: "verkstead",
-        state: "Grilling",
+        state: "grilling",
         working: true,
         idle: true,
         waiting: false,
@@ -1677,7 +1688,7 @@ describe("how a card says where its conversation has got to", () => {
       {
         branch: "over",
         repo: "verkstead",
-        state: "Done",
+        state: "done",
         working: false,
         waiting: false,
       },
@@ -1755,9 +1766,9 @@ describe("the collapsed sidebar", () => {
   /// ellipsis, and a draft's in the italic its full name wears.
   it("gives a card the first three characters of its title", async () => {
     theSidebar(
-      { branch: "collapsible-conversations", state: "Implementing" },
-      { branch: "amber-kestrel", state: "Draft", branch_named: false },
-      { branch: "🦀🦀🦀🦀", state: "Implementing" },
+      { branch: "collapsible-conversations", state: "implementing" },
+      { branch: "amber-kestrel", state: "draft", branch_named: false },
+      { branch: "🦀🦀🦀🦀", state: "implementing" },
     );
     const { container } = mount();
 
@@ -1778,8 +1789,8 @@ describe("the collapsed sidebar", () => {
   /// expanded — and nothing on that line for a card with no mark.
   it("puts the card's mark under its characters, or nothing", async () => {
     theSidebar(
-      { state: "Grilling", working: false, waiting: true },
-      { state: "Implementing", working: false, waiting: false },
+      { state: "grilling", working: false, waiting: true },
+      { state: "implementing", working: false, waiting: false },
     );
     const { container } = mount();
 
@@ -2752,7 +2763,11 @@ describe("a press that takes the open conversation off the list", () => {
     theOpenGrilling(
       whenever(
         `/api/ui/conversations/${GRILLING.id}`,
-        json({ ...GRILLING, state: "Closed" } satisfies ConversationView),
+        json({
+          ...GRILLING,
+          state: "closed",
+
+        } satisfies ConversationView),
       ),
     );
     const { container, history } = mount(`/conversations/${GRILLING.id}`);
@@ -3045,7 +3060,7 @@ describe("the adoption page", () => {
   /// the human guessing which.
   it("says which refusal a press came back with", async () => {
     for (const outcome of [
-      "NoImplementationProfile",
+      { NoPairing: { role: "implementation", label: "Implementation", away: false } },
       "RoadmapComplete",
       "StageInFlight",
       "BranchExists",
@@ -3063,7 +3078,7 @@ describe("the adoption page", () => {
 
       await waitFor(() =>
         expect(container.querySelector(`.${adoption.adoption} .${notices.error}`)!.textContent).toBe(
-          ADOPT_REFUSAL[outcome],
+          adoptRefusal(outcome),
         ),
       );
 
@@ -3174,7 +3189,7 @@ describe("the page of a draft from before, holding a pull request", () => {
       screen.getByLabelText("Target"),
     )) as HTMLInputElement;
 
-    expect(HOLDING.process).toBe("Review");
+    expect(HOLDING.process).toEqual(whose("review"));
     expect(target.value).toBe(HOLDING.target);
     expect(target.value).toContain("/pull/41");
   });
@@ -3210,7 +3225,6 @@ describe("the page of a draft from before, holding a pull request", () => {
     expect(screen.queryByLabelText("Grilling")).toBeNull();
 
     // Which is the record's own reading, and the table's answer to it.
-    expect(ROLES.Review.uses).toEqual(["implementation", "review"]);
 
     await openRepo(container);
 
@@ -3356,7 +3370,7 @@ describe("a conversation's timeline", () => {
   /// And on a Draft above all, where the title is the word *Draft* and the Repo
   /// is the whole of what tells this header from the next draft's.
   it("says it on a draft too, where the title is the word Draft", async () => {
-    theRecordedWith({ branch_named: false, state: "Draft" });
+    theRecordedWith({ branch_named: false, state: "draft" });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const head = await drawn(container, `.${shell.middlePane} .${paneHead.head}`);
@@ -3498,7 +3512,9 @@ describe("the escape hatch on a conversation that will not load", () => {
       "/api/ui/conversations",
       json(
         SIDEBAR.map((entry) =>
-          entry.id === OPEN.id ? { ...entry, state } : entry,
+          entry.id === OPEN.id
+            ? { ...entry, state, ...rowProcess() }
+            : entry,
         ),
       ),
     );
@@ -3561,7 +3577,7 @@ describe("the escape hatch on a conversation that will not load", () => {
   /// closed — because Archive on one that is not answers `NotClosed` and goes
   /// nowhere, which is a dead end rather than an escape.
   it("offers archive alone where the list says it is closed", async () => {
-    theBrokenConversation(listedAs("Closed"));
+    theBrokenConversation(listedAs("closed"));
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const menu = await openActions(container);
@@ -3587,7 +3603,7 @@ describe("the escape hatch on a conversation that will not load", () => {
 
   it("posts to the archive route where that is the row it drew", async () => {
     const fetching = theBrokenConversation(
-      listedAs("Closed"),
+      listedAs("closed"),
       whenever(ARCHIVE, json("Archived" satisfies ConversationArchived), "POST"),
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -4562,7 +4578,7 @@ describe("a conversation's setup", () => {
   /// different fact from the path it is checked out at.
   it("shows the repo path, the worktree path and the state nowhere", async () => {
     theWorkbenchWith({
-      state: "Grilling",
+      state: "grilling",
       worktree: { path: "/var/lib/verkstead/worktrees/verkstead-open", missing: false },
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -4626,7 +4642,7 @@ describe("a conversation's setup", () => {
     theRecordedWith({
       branch_named: false,
       naming: true,
-      state: "Grilling",
+      state: "grilling",
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
@@ -4643,7 +4659,7 @@ describe("a conversation's setup", () => {
     theRecordedWith({
       branch_named: false,
       naming: false,
-      state: "Grilling",
+      state: "grilling",
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
@@ -4925,10 +4941,11 @@ describe("a conversation's setup", () => {
 /// well-formed ref, and a pull request URL is not one.
 describe("the target a review is pointed at", () => {
   /// Drawn for the two Processes pointed at work already somewhere else and for
-  /// nothing else, which is `processes.ts`'s list to keep — so the row that adds
-  /// a Process adds the field with it.
+  /// nothing else, which is each manifest's `target` to say — so a Process that
+  /// declares one draws the field with no line changing here.
   it("is drawn under the targeted processes and under no other", async () => {
-    for (const process of ["Develop", "Tinker", "Investigate"] satisfies Process[]) {
+    for (const id of ["develop", "tinker", "investigate"]) {
+      const process = whose(id);
       theWorkbenchWith({ process });
       const { container, unmount } = mount(`/conversations/${OPEN.id}`);
       await openRepo(container);
@@ -4940,8 +4957,8 @@ describe("the target a review is pointed at", () => {
       unmount();
     }
 
-    for (const process of ["Review", "FixMergeIssues"] satisfies Process[]) {
-      theWorkbenchWith({ process });
+    for (const id of ["review", "fix-merge-issues"]) {
+      theWorkbenchWith({ process: whose(id) });
       const { container, unmount } = mount(`/conversations/${OPEN.id}`);
       await openRepo(container);
 
@@ -4953,7 +4970,9 @@ describe("the target a review is pointed at", () => {
       unmount();
     }
 
-    expect(TARGETED).toEqual(["Review", "FixMergeIssues"]);
+    expect(
+      PROCESSES.filter((entry) => entry.target).map((entry) => entry.id),
+    ).toEqual(["review", "fix-merge-issues"]);
   });
 
   /// And it takes the one value the Branch field beside it will not: a pull
@@ -4961,7 +4980,7 @@ describe("the target a review is pointed at", () => {
   it("sends a pull request url the branch field would refuse", async () => {
     const url = "https://github.com/tobico/verkstead/pull/41";
     const fetching = theWorkbenchWith(
-      { process: "Review", target: null },
+      { process: whose("review"), target: null },
       json("Recorded"),
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -4986,7 +5005,7 @@ describe("the target a review is pointed at", () => {
   /// which of the three was typed.
   it("sends a bare branch name too", async () => {
     const fetching = theWorkbenchWith(
-      { process: "Review", target: null },
+      { process: whose("review"), target: null },
       json("Recorded"),
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -5006,7 +5025,7 @@ describe("the target a review is pointed at", () => {
   /// What the record holds is what the field shows, which is how a target the
   /// Brief filled in on the server arrives under the human's eyes.
   it("shows what the record was filled with", async () => {
-    theWorkbenchWith({ process: "Review", target: "#41" });
+    theWorkbenchWith({ process: whose("review"), target: "#41" });
     const { container } = mount(`/conversations/${OPEN.id}`);
     await openRepo(container);
 
@@ -5020,7 +5039,7 @@ describe("the target a review is pointed at", () => {
   /// server refuses by then.
   it("is not drawn once the branch has been cut", async () => {
     theWorkbenchWith({
-      process: "Review",
+      process: whose("review"),
       target: "#41",
       worktree: { path: "/var/lib/verkstead/worktrees/open", missing: false },
     });
@@ -5036,7 +5055,7 @@ describe("the target a review is pointed at", () => {
   /// GitHub's own base along, so there is nothing to pick.
   it("takes the base picker away where the target is a pull request", async () => {
     theWorkbenchWith({
-      process: "Review",
+      process: whose("review"),
       target: "https://github.com/tobico/verkstead/pull/41",
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -5049,7 +5068,7 @@ describe("the target a review is pointed at", () => {
   /// And keeps it where the target is a branch, that base being what the
   /// wrap-up will open the pull request against.
   it("keeps the base picker where the target is a branch", async () => {
-    theWorkbenchWith({ process: "Review", target: "rate-limiting" });
+    theWorkbenchWith({ process: whose("review"), target: "rate-limiting" });
     const { container } = mount(`/conversations/${OPEN.id}`);
     await openRepo(container);
 
@@ -5060,7 +5079,7 @@ describe("the target a review is pointed at", () => {
   /// And an empty one keeps it too: nothing is named yet, and a picker that
   /// vanished on the first keystroke of a URL would be the panel guessing.
   it("keeps the base picker where nothing is named", async () => {
-    theWorkbenchWith({ process: "Review", target: null });
+    theWorkbenchWith({ process: whose("review"), target: null });
     const { container } = mount(`/conversations/${OPEN.id}`);
     await openRepo(container);
 
@@ -5370,27 +5389,25 @@ describe("a conversation's process", () => {
     expect(at(`.${setup.processChoice}`)).toBe(1);
     expect(at(`.${setup.agentOption}`)).toBe(2);
 
-    expect(showing("Process")).toBe(PROCESS[OPEN.process]);
-    expect(OPEN.process).toBe("Develop");
+    expect(showing("Process")).toBe(named(OPEN.process.id));
+    expect(OPEN.process).toEqual(whose("develop"));
   });
 
-  /// All five now, and that list is the one place a Process's row is written: a
-  /// Process is offered only once its stage has landed, and *Fix merge issues*
-  /// is the row this stage added.
-  it("offers the processes that have landed and no others", async () => {
+  /// All five, in the order the server listed them and in the words their
+  /// manifests give them: the rows are `GET /api/ui/processes`'s, and this
+  /// viewer keeps no list of its own (ADR-0030, *Process*).
+  it("offers the processes the server lists and no others", async () => {
     theWorkbench();
     mount(`/conversations/${OPEN.id}`);
     await theProcess();
 
-    expect(offers("Process")).toEqual(OFFERED.map((process) => PROCESS[process]));
-    expect(OFFERED).toEqual([
+    expect(offers("Process")).toEqual([
       "Develop",
       "Tinker",
       "Investigate",
       "Review",
-      "FixMergeIssues",
+      "Fix merge issues",
     ]);
-    expect(offers("Process")).toContain("Fix merge issues");
   });
 
   /// Each row says what kind of work it is under its name, as a row of the
@@ -5403,18 +5420,18 @@ describe("a conversation's process", () => {
     mount(`/conversations/${OPEN.id}`);
     const control = await theProcess();
 
-    expect(control.textContent).not.toContain(DESCRIPTION[OPEN.process]);
+    expect(control.textContent).not.toContain(described(OPEN.process.id));
 
     opened("Process");
 
-    for (const process of OFFERED) {
-      const row = screen.getByRole("option", { name: PROCESS[process] });
+    for (const entry of PROCESSES) {
+      const row = screen.getByRole("option", { name: entry.name });
       const said = document.getElementById(
         row.getAttribute("aria-describedby")!,
       );
 
       expect(row.contains(said)).toBe(true);
-      expect(said!.textContent).toBe(DESCRIPTION[process]);
+      expect(said!.textContent).toBe(entry.description);
     }
   });
 
@@ -5425,13 +5442,90 @@ describe("a conversation's process", () => {
     mount(`/conversations/${OPEN.id}`);
     await theProcess();
 
-    pick("Process", PROCESS.Develop);
+    pick("Process", named("develop"));
 
     await waitFor(() =>
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/process`),
-      ).toEqual({ process: "Develop" }),
+      ).toEqual({ process: whose("develop") }),
     );
+  });
+
+  /// A plugin's Process is offered under the five in the words its manifest
+  /// gives it, and picked by its plugin and its id — the list the server
+  /// sends rather than one kept here.
+  it("offers a plugin's Process under the five, in its own words", async () => {
+    // What this server lists, said here and on the wire both — see `saying`.
+    const theirs = saying([
+      ...PROCESSES,
+      {
+        plugin: "5e0c9a7e-2f4b-4c1d-8a3e-6b9f0d2c7a41",
+        id: "two-steps",
+        name: "Two steps",
+        description: "Draft the change, then check it.",
+        offered: true,
+        states: [
+          { id: "drafting", word: "Drafting", interviews: true },
+          { id: "checking", word: "Checking", interviews: false },
+        ],
+        roles: [
+          { role: "sketching", label: "Sketching", building: true, away: false },
+        ],
+        target: false,
+        narrowed: false,
+        filled_from_a_pull_request: false,
+      },
+    ] satisfies ProcessEntry[]);
+    const fetching = theWorkbench(theirs, json("Picked"));
+    mount(`/conversations/${OPEN.id}`);
+    await theProcess();
+
+    opened("Process");
+
+    const row = await waitFor(() =>
+      screen.getByRole("option", { name: "Two steps" }),
+    );
+    expect(
+      document.getElementById(row.getAttribute("aria-describedby")!)!
+        .textContent,
+    ).toBe("Draft the change, then check it.");
+
+    pick("Process", "Two steps");
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/process`),
+      ).toEqual({
+        process: {
+          plugin: "5e0c9a7e-2f4b-4c1d-8a3e-6b9f0d2c7a41",
+          id: "two-steps",
+        },
+      }),
+    );
+  });
+
+  /// One of Verkstead's own, written as data, whose plugin is unticked is off
+  /// the picker, and the rest of the five stay on it.
+  it("leaves off a built-in Process whose plugin is unticked", async () => {
+    theWorkbench(
+      saying(offeringOnly(["develop", "investigate", "review", "fix-merge-issues"])),
+    );
+    mount(`/conversations/${OPEN.id}`);
+    await theProcess();
+
+    opened("Process");
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("option", { name: named("develop") }),
+      ).toBeTruthy(),
+    );
+    expect(
+      screen.queryByRole("option", { name: named("tinker") }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("option", { name: named("investigate") }),
+    ).toBeTruthy();
   });
 
   /// Every refusal is the server's — a picker offering only the landed
@@ -5443,7 +5537,7 @@ describe("a conversation's process", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
     await theProcess();
 
-    pick("Process", PROCESS.Develop);
+    pick("Process", named("develop"));
 
     const said = await waitFor(() =>
       screen.getByText(PROCESS_REFUSAL.NotDrafting),
@@ -5463,7 +5557,7 @@ describe("a conversation's process", () => {
     mount(`/conversations/${OPEN.id}`);
 
     expect((await theProcess()).disabled).toBe(true);
-    expect(showing("Process")).toBe(PROCESS.Develop);
+    expect(showing("Process")).toBe(named("develop"));
   });
 
   /// And a draft from before there were Processes reads Review off the pull
@@ -5477,9 +5571,9 @@ describe("a conversation's process", () => {
     mount(`/conversations/${HOLDING.id}`);
 
     await theProcess();
-    expect(showing("Process")).toBe(PROCESS.Review);
+    expect(showing("Process")).toBe(named("review"));
     expect(HOLDING.worktree).toBeNull();
-    expect(OFFERED).toContain("Review");
+    expect(OFFERED).toContainEqual({ process: whose("review") });
   });
 });
 
@@ -6049,9 +6143,11 @@ describe("a conversation's pairings", () => {
   /// looks like.
   const UNCHOSEN: ConversationView = {
     ...OPEN,
-    grilling_pairing: null,
-    implementation_pairing: null,
-    review_pairing: "Nothing",
+    pairings: pairedAs(OPEN.pairings, {
+      grilling: "Nothing",
+      implementation: "Nothing",
+      review: "Nothing",
+    }),
     ready_to_grill: false,
   };
 
@@ -6086,14 +6182,14 @@ describe("a conversation's pairings", () => {
     // Separate choices, and in the fixture genuinely separate accounts: grill on
     // fable, implement on opus, review on sonnet.
     //
-    const interviewing = OPEN.grilling_pairing!;
-    const reviewed = under(OPEN.review_pairing)!;
+    const interviewing = onRole(OPEN, "grilling");
+    const reviewed = onRole(OPEN, "review");
 
     // The trigger's own reading, which is the row's less the harness the mark
     // beside it is already drawing.
     expect(showing("Grilling")).toBe(showsAs(interviewing));
     expect(showing("Implementation")).toBe(
-      showsAs(OPEN.implementation_pairing!),
+      showsAs(onRole(OPEN, "implementation")),
     );
     expect(showing("Review")).toBe(showsAs(reviewed));
     expect(
@@ -6132,8 +6228,12 @@ describe("a conversation's pairings", () => {
     await theAgent();
     await waitFor(() => picker("Implementation"));
 
+    // Each pick as the route takes it: the Pairing under `pairing`, which is
+    // the key that tells a choice made from the row that picks the role away.
     const wire = PROFILES.flatMap((profile) =>
-      profile.models.map((model) => ({ profile_id: profile.id, model })),
+      profile.models.map((model) => ({
+        pairing: { profile_id: profile.id, model },
+      })),
     );
 
     for (const [index, reading] of READINGS.entries()) {
@@ -6149,7 +6249,7 @@ describe("a conversation's pairings", () => {
         expect(
           sent(
             fetching,
-            `/api/ui/conversations/${OPEN.id}/implementation-pairing`,
+            `/api/ui/conversations/${OPEN.id}/pairings/implementation`,
             index,
           ),
         ).toEqual(wire[index]),
@@ -6210,7 +6310,10 @@ describe("a conversation's pairings", () => {
   /// mark to be of: it draws its words and no element at all, rather than a gap
   /// where one would have been. And so does the picker sitting on it.
   it("draws the no-session row as words alone", async () => {
-    withConversation({ ...UNCHOSEN, review_pairing: "Skipped" });
+    withConversation({
+      ...UNCHOSEN,
+      pairings: pairedAs(UNCHOSEN.pairings, { review: "Skipped" }),
+    });
     await theAgent();
     await waitFor(() => picker("Review"));
 
@@ -6244,10 +6347,12 @@ describe("a conversation's pairings", () => {
     pick("Grilling", READINGS[0]!);
     await waitFor(() =>
       expect(
-        sent(fetching, `/api/ui/conversations/${OPEN.id}/grilling-pairing`),
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/pairings/grilling`),
       ).toEqual({
-        profile_id: PROFILES[0]!.id,
-        model: PROFILES[0]!.models[0],
+        pairing: {
+          profile_id: PROFILES[0]!.id,
+          model: PROFILES[0]!.models[0],
+        },
       }),
     );
 
@@ -6258,11 +6363,13 @@ describe("a conversation's pairings", () => {
       expect(
         sent(
           fetching,
-          `/api/ui/conversations/${OPEN.id}/implementation-pairing`,
+          `/api/ui/conversations/${OPEN.id}/pairings/implementation`,
         ),
       ).toEqual({
-        profile_id: PROFILES[1]!.id,
-        model: PROFILES[1]!.models[1],
+        pairing: {
+          profile_id: PROFILES[1]!.id,
+          model: PROFILES[1]!.models[1],
+        },
       }),
     );
   });
@@ -6281,13 +6388,18 @@ describe("a conversation's pairings", () => {
     expect(offers("Grilling")).toEqual(READINGS);
     expect(offers("Implementation")).toEqual(READINGS);
 
-    // And it is the table that put it there rather than the pane: which roles
-    // offer one, and the words it is offered in, are both `ROLES`'s — so a row
-    // the ADR retires goes from the picker when its stage takes it out of the
-    // table, rather than living on in a literal nobody thought to look at.
-    expect(offers("Review")[0]).toBe(away(UNCHOSEN.process, "review"));
-    expect(away(UNCHOSEN.process, "grilling")).toBeUndefined();
-    expect(away(UNCHOSEN.process, "implementation")).toBeUndefined();
+    // And it is the manifest that put it there rather than the pane: which
+    // roles offer one is the Process's own `roles`, and the words it is
+    // offered in are read off the role's label — so a role that stops
+    // offering one stops offering it here, rather than living on in a
+    // literal nobody thought to look at.
+    expect(offers("Review")[0]).toBe(
+      away(settledRole(UNCHOSEN, "review")),
+    );
+    expect(away(settledRole(UNCHOSEN, "grilling"))).toBeUndefined();
+    expect(
+      away(settledRole(UNCHOSEN, "implementation")),
+    ).toBeUndefined();
 
     // And nothing picked yet on any of them, which the closed control says
     // rather than offering it as a row.
@@ -6308,7 +6420,7 @@ describe("a conversation's pairings", () => {
 
     await waitFor(() =>
       expect(
-        sent(fetching, `/api/ui/conversations/${OPEN.id}/review-pairing`),
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/pairings/review`),
       ).toEqual({ pairing: null }),
     );
   });
@@ -6324,7 +6436,7 @@ describe("a conversation's pairings", () => {
 
     await waitFor(() =>
       expect(
-        sent(fetching, `/api/ui/conversations/${OPEN.id}/review-pairing`),
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/pairings/review`),
       ).toEqual({
         pairing: {
           profile_id: PROFILES[0]!.id,
@@ -6337,7 +6449,10 @@ describe("a conversation's pairings", () => {
   /// A picker already on that row keeps it: it is a settled choice, so the
   /// placeholder is not drawn over it the way it is over an empty one.
   it("shows no review as what is chosen where it is", async () => {
-    withConversation({ ...UNCHOSEN, review_pairing: "Skipped" });
+    withConversation({
+      ...UNCHOSEN,
+      pairings: pairedAs(UNCHOSEN.pairings, { review: "Skipped" }),
+    });
     await theAgent();
     await waitFor(() => picker("Review"));
 
@@ -6349,7 +6464,9 @@ describe("a conversation's pairings", () => {
   it("reads a profile with no model beside it as nothing chosen", async () => {
     withConversation({
       ...OPEN,
-      grilling_pairing: { ...OPEN.grilling_pairing!, model: null },
+      pairings: pairedAs(OPEN.pairings, {
+        grilling: { Under: { ...onRole(OPEN, "grilling"), model: null } },
+      }),
       ready_to_grill: false,
     });
     await theAgent();
@@ -6422,13 +6539,17 @@ describe("a conversation's pairings", () => {
   it("says what is wrong with a chosen profile that has broken", async () => {
     const broken: ConversationView = {
       ...OPEN,
-      implementation_pairing: {
-        ...OPEN.implementation_pairing!,
-        profile: {
-          ...OPEN.implementation_pairing!.profile,
-          broken: "ConfigMissing",
+      pairings: pairedAs(OPEN.pairings, {
+        implementation: {
+          Under: {
+            ...onRole(OPEN, "implementation"),
+            profile: {
+              ...onRole(OPEN, "implementation").profile,
+              broken: "ConfigMissing",
+            },
+          },
         },
-      },
+      }),
       ready_to_grill: false,
     };
     withConversation(broken);
@@ -6491,7 +6612,7 @@ describe("the agent trigger", () => {
 
     await waitFor(async () =>
       expect(await shown(container)).toBe(
-        `${showsAs(OPEN.implementation_pairing!)} +2`,
+        `${showsAs(onRole(OPEN, "implementation"))} +2`,
       ),
     );
 
@@ -6506,14 +6627,16 @@ describe("the agent trigger", () => {
   /// an answer rather than another account.
   it("reads the pairing once where the other roles match or are skipped", async () => {
     theWorkbenchWith({
-      grilling_pairing: OPEN.implementation_pairing!,
-      review_pairing: "Skipped",
+      pairings: pairedAs(OPEN.pairings, {
+        grilling: { Under: onRole(OPEN, "implementation") },
+        review: "Skipped",
+      }),
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await waitFor(async () =>
       expect(await shown(container)).toBe(
-        showsAs(OPEN.implementation_pairing!),
+        showsAs(onRole(OPEN, "implementation")),
       ),
     );
   });
@@ -6522,13 +6645,15 @@ describe("the agent trigger", () => {
   /// convention for the companions it counts.
   it("counts one for a review on a different pairing", async () => {
     theWorkbenchWith({
-      grilling_pairing: OPEN.implementation_pairing!,
+      pairings: pairedAs(OPEN.pairings, {
+        grilling: { Under: onRole(OPEN, "implementation") },
+      }),
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await waitFor(async () =>
       expect(await shown(container)).toBe(
-        `${showsAs(OPEN.implementation_pairing!)} +1`,
+        `${showsAs(onRole(OPEN, "implementation"))} +1`,
       ),
     );
   });
@@ -6537,7 +6662,10 @@ describe("the agent trigger", () => {
   /// is: the trigger stands over a press that will refuse on exactly that, so it
   /// says so rather than reading out an account the work cannot start under.
   it("reads not chosen while the implementation is empty", async () => {
-    theWorkbenchWith({ implementation_pairing: null, ready_to_grill: false });
+    theWorkbenchWith({
+      pairings: pairedAs(OPEN.pairings, { implementation: "Nothing" }),
+      ready_to_grill: false,
+    });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await waitFor(async () => expect(await shown(container)).toBe("Not chosen"));
@@ -6547,26 +6675,30 @@ describe("the agent trigger", () => {
   });
 
   it("reads not chosen while another role the process uses is empty", async () => {
-    theWorkbenchWith({ grilling_pairing: null, ready_to_grill: false });
+    theWorkbenchWith({
+      pairings: pairedAs(OPEN.pairings, { grilling: "Nothing" }),
+      ready_to_grill: false,
+    });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await waitFor(async () => expect(await shown(container)).toBe("Not chosen"));
   });
 
-  /// A role the Process does not use is not one of them, though — a Review uses
-  /// Implementation and Review, so an empty Grilling on the record is nothing the
-  /// trigger is waiting on.
-  it("says nothing about a role the process does not use", async () => {
+  /// A role the Process does not declare is not one of them, though — a Review
+  /// declares Implementation and Review and no grilling role, so the record
+  /// sends no Grilling picker for the trigger to be waiting on.
+  it("says nothing about a role the process does not declare", async () => {
     theWorkbenchWith({
-      process: "Review",
-      grilling_pairing: null,
-      review_pairing: { Under: OPEN.implementation_pairing! },
+      process: whose("review"),
+      pairings: pairedAs(OPEN.pairings, {
+        review: { Under: onRole(OPEN, "implementation") },
+      }).filter((role) => role.role !== "grilling"),
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await waitFor(async () =>
       expect(await shown(container)).toBe(
-        showsAs(OPEN.implementation_pairing!),
+        showsAs(onRole(OPEN, "implementation")),
       ),
     );
   });
@@ -6579,7 +6711,7 @@ describe("the pickers a conversation's process draws", () => {
   /// Develop uses all three, and with only Develop landed it is the panel every
   /// draft gets.
   it("draws all three under Develop", async () => {
-    theWorkbenchWith({ process: "Develop" });
+    theWorkbenchWith({ process: whose("develop") });
     const { container } = mount(`/conversations/${OPEN.id}`);
     await openAgent(container);
 
@@ -6591,7 +6723,10 @@ describe("the pickers a conversation's process draws", () => {
   /// And a Review draws two: what takes the grilling picker away is the Process
   /// and nothing else.
   it("draws no grilling picker under Review", async () => {
-    theWorkbenchWith({ process: "Review" });
+    theWorkbenchWith({
+      process: whose("review"),
+      pairings: OPEN.pairings.filter((role) => role.role !== "grilling"),
+    });
     const { container } = mount(`/conversations/${OPEN.id}`);
     await openAgent(container);
 
@@ -6599,29 +6734,30 @@ describe("the pickers a conversation's process draws", () => {
     expect(picker("Review")).toBeTruthy();
     expect(screen.queryByLabelText("Grilling")).toBeNull();
 
-    expect(uses("Review", "grilling")).toBe(false);
   });
 
   /// And the Review picker it draws offers accounts and nothing else: a Review
   /// without a review is Fix Merge Issues with the comments answered, so the row
   /// that runs no session is offered nowhere on this Process.
   it("offers no row that runs nothing on a Review", async () => {
-    theWorkbenchWith({ process: "Review" });
+    theWorkbenchWith({
+      process: whose("review"),
+      pairings: OPEN.pairings.filter((role) => role.role !== "grilling"),
+    });
     const { container } = mount(`/conversations/${OPEN.id}`);
     await openAgent(container);
 
     await waitFor(() => picker("Review"));
 
     expect(offers("Review")).toEqual(READINGS);
-    expect(away("Review", "review")).toBeUndefined();
-    expect(OFFERED).toContain("Review");
+    expect(OFFERED).toContainEqual({ process: whose("review") });
   });
 
   /// And the two that keep theirs still have it, which is what makes the row
   /// above a fact about the Process rather than about the picker.
   it("keeps the no-session row on Develop and on Tinker", async () => {
-    for (const process of ["Develop", "Tinker"] satisfies Process[]) {
-      theWorkbenchWith({ process });
+    for (const id of ["develop", "tinker"]) {
+      theWorkbenchWith({ process: whose(id) });
       const { container, unmount } = mount(`/conversations/${OPEN.id}`);
       await openAgent(container);
 
@@ -6637,7 +6773,10 @@ describe("the pickers a conversation's process draws", () => {
   /// picker at all — it is never interviewed, so there is no session for that
   /// role to run.
   it("draws no grilling picker under Tinker", async () => {
-    theWorkbenchWith({ process: "Tinker" });
+    theWorkbenchWith({
+      process: whose("tinker"),
+      pairings: OPEN.pairings.filter((role) => role.role !== "grilling"),
+    });
     const { container } = mount(`/conversations/${OPEN.id}`);
     await openAgent(container);
 
@@ -6645,9 +6784,7 @@ describe("the pickers a conversation's process draws", () => {
     expect(picker("Review")).toBeTruthy();
     expect(screen.queryByLabelText("Grilling")).toBeNull();
 
-    expect(uses("Tinker", "grilling")).toBe(false);
-    expect(away("Tinker", "review")).toBe("No review");
-    expect(OFFERED).toContain("Tinker");
+    expect(OFFERED).toContainEqual({ process: whose("tinker") });
   });
 
   /// And one under an Investigate: one role, so one picker — and one picker is
@@ -6655,7 +6792,12 @@ describe("the pickers a conversation's process draws", () => {
   /// Neither a Grilling picker nor a Review one is drawn, so there is nothing
   /// here to pick a review away on and nothing for the press to wait for.
   it("draws one picker under a process that uses one role", async () => {
-    theWorkbenchWith({ process: "Investigate" });
+    theWorkbenchWith({
+      process: whose("investigate"),
+      pairings: OPEN.pairings.filter(
+        (role) => role.role === "implementation",
+      ),
+    });
     mount(`/conversations/${OPEN.id}`);
 
     await waitFor(() => picker("Agent"));
@@ -6663,8 +6805,7 @@ describe("the pickers a conversation's process draws", () => {
     expect(screen.queryByLabelText("Implementation")).toBeNull();
     expect(screen.queryByLabelText("Review")).toBeNull();
 
-    expect(ROLES.Investigate.uses).toEqual(["implementation"]);
-    expect(OFFERED).toContain("Investigate");
+    expect(OFFERED).toContainEqual({ process: whose("investigate") });
   });
 
   /// And one under a **Fix Merge Issues**, which is the other Process run under
@@ -6672,7 +6813,12 @@ describe("the pickers a conversation's process draws", () => {
   /// nothing ever reads the branch under a Review Pairing and there is no picker
   /// drawn for one — and so no *No review* row anywhere on it either.
   it("draws one picker under a Fix Merge Issues, and no review row", async () => {
-    theWorkbenchWith({ process: "FixMergeIssues" });
+    theWorkbenchWith({
+      process: whose("fix-merge-issues"),
+      pairings: OPEN.pairings.filter(
+        (role) => role.role === "implementation",
+      ),
+    });
     mount(`/conversations/${OPEN.id}`);
 
     await waitFor(() => picker("Agent"));
@@ -6686,9 +6832,7 @@ describe("the pickers a conversation's process draws", () => {
     expect(picker("Agent").id).toBe("implementation-pairing");
     expect(offers("Agent")).toEqual(READINGS);
 
-    expect(ROLES.FixMergeIssues.uses).toEqual(["implementation"]);
-    expect(away("FixMergeIssues", "review")).toBeUndefined();
-    expect(OFFERED).toContain("FixMergeIssues");
+    expect(OFFERED).toContainEqual({ process: whose("fix-merge-issues") });
   });
 });
 
@@ -6703,7 +6847,16 @@ describe("the pickers a conversation's process draws", () => {
 describe("the agent dropdown on a conversation", () => {
   /// The record under a one-role Process, on the account the fixture implements
   /// under.
-  const INVESTIGATING: Partial<ConversationView> = { process: "Investigate" };
+  // The record sends the roles the Process declares, so a conversation on an
+  // Investigate carries the one picker rather than three — see
+  // `the_roles_a_conversation_is_run_under_are_its_processs_own` in the
+  // server suite, which is where that list comes from.
+  const INVESTIGATING: Partial<ConversationView> = {
+    process: whose("investigate"),
+    pairings: OPEN.pairings.filter(
+      (role) => role.role === "implementation",
+    ),
+  };
 
   it("stands in the row as the picker itself, with no panel anywhere", async () => {
     theWorkbenchWith(INVESTIGATING);
@@ -6725,7 +6878,6 @@ describe("the agent dropdown on a conversation", () => {
       "the one picker stands in the row itself",
     ).toHaveLength(1);
 
-    expect(ROLES.Investigate.control).toBe("dropdown");
   });
 
   /// The Implementation role, whichever shape asks for it: the same picker on
@@ -6739,7 +6891,7 @@ describe("the agent dropdown on a conversation", () => {
     await waitFor(() => expect(picker("Agent")).toBeTruthy());
 
     expect(picker("Agent").id).toBe("implementation-pairing");
-    expect(showing("Agent")).toBe(showsAs(OPEN.implementation_pairing!));
+    expect(showing("Agent")).toBe(showsAs(onRole(OPEN, "implementation")));
 
     // The pairings and nothing else: Implementation is the one role that cannot
     // be picked away, there being no work without something building it.
@@ -6757,8 +6909,10 @@ describe("the agent dropdown on a conversation", () => {
 
     await waitFor(() =>
       expect(
-        sent(fetching, `/api/ui/conversations/${OPEN.id}/implementation-pairing`),
-      ).toEqual({ profile_id: PROFILES[0]!.id, model: PROFILES[0]!.models[0]! }),
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/pairings/implementation`),
+      ).toEqual({
+        pairing: { profile_id: PROFILES[0]!.id, model: PROFILES[0]!.models[0]! },
+      }),
     );
 
     for (const role of ["grilling", "review"]) {
@@ -7270,7 +7424,13 @@ function theTrimmed(...answers: Parameters<typeof serving>) {
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(
       `/api/ui/conversations/${GRILLING.id}`,
-      json({ ...GRILLING, state: "Closed", archived: true, trimmed: true }),
+      json({
+        ...GRILLING,
+        state: "closed",
+
+        archived: true,
+        trimmed: true,
+      }),
     ),
     whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
     whenever(CAPTURE_OF_IT, json({ ...CAPTURE, text: "" })),
@@ -7290,16 +7450,36 @@ function lay(element: Element, box: { at: number; wide: number }): void {
 
 /// The workbench with the opened conversation altered, for the states no fixture
 /// holds — a refusal from the server, a worktree that has gone.
+///
+/// The state's own id travels with the state, as the server sends the two
+/// together — which is what the card's word is read off its Process by.
+///
+/// And so do the Pairings: a Conversation put on another Process is sent the
+/// rows *that* Process declares, which is what the server reads off its
+/// manifest (ADR-0030, *Process*). Spread over the Develop fixture alone, a
+/// `process:` override would leave Develop's three rows under a Review's two —
+/// a payload no server sends, and one whose Start would say it waits on *every
+/// role* where a Review waits on both. What the fixture picked under each name
+/// follows the rows it still has; a role the Process declares and the fixture
+/// never picked for reads as nothing chosen, which is a Start waiting.
 function theWorkbenchWith(
   over: Partial<ConversationView>,
   ...answers: Parameters<typeof serving>
 ) {
+  const conversation = { ...OPEN, ...over };
+
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
     whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
-    whenever(`/api/ui/conversations/${OPEN.id}`, json({ ...OPEN, ...over })),
+    whenever(
+      `/api/ui/conversations/${OPEN.id}`,
+      json({
+        ...conversation,
+        pairings: pairingsOn(conversation.process, conversation.pairings),
+      }),
+    ),
     ...answers,
   );
 }
@@ -7696,7 +7876,7 @@ describe("starting the work", () => {
   /// and says *both roles* — and waits on a target besides, which is the same
   /// table's other column.
   it("names two roles and a target where the process has them", async () => {
-    theWorkbenchWith({ process: "Review", ready_to_grill: false });
+    theWorkbenchWith({ process: whose("review"), ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
@@ -7709,7 +7889,7 @@ describe("starting the work", () => {
   /// And a Process with one role says one, which is an Investigate: the words
   /// are counted off the table rather than written into the sentence.
   it("names one role where the process has one", async () => {
-    theWorkbenchWith({ process: "Investigate", ready_to_grill: false });
+    theWorkbenchWith({ process: whose("investigate"), ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
@@ -7723,7 +7903,7 @@ describe("starting the work", () => {
   /// columns of the table read together: it is pointed at work already somewhere
   /// else the way a Review is, and nothing about it reviews anything.
   it("names one role and a target on a fix merge issues", async () => {
-    theWorkbenchWith({ process: "FixMergeIssues", ready_to_grill: false });
+    theWorkbenchWith({ process: whose("fix-merge-issues"), ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
@@ -7744,7 +7924,7 @@ describe("starting the work", () => {
   /// a first press has been stopped over nothing.
   it("posts to the take-up route where the process is a review", async () => {
     const fetching = theWorkbenchWith(
-      { process: "Review" },
+      { process: whose("review") },
       whenever(
         `/api/ui/conversations/${OPEN.id}/take-up`,
         json("TakenUp" satisfies TakenUp),
@@ -7774,7 +7954,7 @@ describe("starting the work", () => {
   /// somewhere else — `processes.ts`'s list — rather than which of the two it is.
   it("posts to the take-up route where the process is a fix merge issues", async () => {
     const fetching = theWorkbenchWith(
-      { process: "FixMergeIssues" },
+      { process: whose("fix-merge-issues") },
       whenever(
         `/api/ui/conversations/${OPEN.id}/take-up`,
         json("TakenUp" satisfies TakenUp),
@@ -7817,7 +7997,7 @@ describe("starting the work", () => {
     "says in words what a refused review means",
     async (outcome, said) => {
       theWorkbenchWith(
-        { process: "Review" },
+        { process: whose("review") },
         whenever(
           `/api/ui/conversations/${OPEN.id}/take-up`,
           json(outcome as TakenUp),
@@ -7840,7 +8020,7 @@ describe("starting the work", () => {
   /// at work on it rather than a second wrap-up over its branch.
   it("leads to the conversation still at work on the pull request", async () => {
     theWorkbenchWith(
-      { process: "Review" },
+      { process: whose("review") },
       whenever(
         `/api/ui/conversations/${OPEN.id}/take-up`,
         json({ AlreadyHeld: { conversation: 77 } } satisfies TakenUp),
@@ -7869,7 +8049,7 @@ describe("starting the work", () => {
   /// which is what says the losses are agreed to.
   it("names what a start would discard, and presses through it", async () => {
     const fetching = theWorkbenchWith(
-      { process: "Review" },
+      { process: whose("review") },
       whenever(
         `/api/ui/conversations/${OPEN.id}/take-up`,
         json({
@@ -7916,7 +8096,7 @@ describe("starting the work", () => {
   /// checkout back by where it is.
   it("names a checkout of the human's own, and switches it on the press after", async () => {
     const fetching = theWorkbenchWith(
-      { process: "FixMergeIssues" },
+      { process: whose("fix-merge-issues") },
       whenever(
         `/api/ui/conversations/${OPEN.id}/take-up`,
         json({
@@ -7984,7 +8164,7 @@ describe("starting the work", () => {
     let pressed = 0;
 
     const fetching = theWorkbenchWith(
-      { process: "FixMergeIssues" },
+      { process: whose("fix-merge-issues") },
       whenever(
         `/api/ui/conversations/${OPEN.id}/take-up`,
         () => json(answers[Math.min(pressed++, answers.length - 1)])(),
@@ -8029,7 +8209,7 @@ describe("starting the work", () => {
   /// And a switch git refused is said in git's own words, which name the files.
   it("says a refused switch in git's words", async () => {
     theWorkbenchWith(
-      { process: "FixMergeIssues" },
+      { process: whose("fix-merge-issues") },
       whenever(
         `/api/ui/conversations/${OPEN.id}/take-up`,
         json({
@@ -8061,7 +8241,7 @@ describe("starting the work", () => {
   /// four conversations sharing one.
   it("names a whole stack of them as several", async () => {
     theWorkbenchWith(
-      { process: "FixMergeIssues" },
+      { process: whose("fix-merge-issues") },
       whenever(
         `/api/ui/conversations/${OPEN.id}/take-up`,
         json({
@@ -8127,9 +8307,18 @@ describe("starting the work", () => {
   /// Every refusal is its own sentence, because each of them is something
   /// different for the human to go and do.
   it.each([
-    ["NoGrillingProfile", /Choose a grilling profile/],
-    ["NoImplementationProfile", /Choose an implementation profile/],
-    ["NoReviewProfile", /Pick a review profile/],
+    [
+      { NoPairing: { role: "grilling", label: "Grilling", away: false } },
+      /Choose a profile and model for Grilling/,
+    ],
+    [
+      { NoPairing: { role: "implementation", label: "Implementation", away: false } },
+      /Choose a profile and model for Implementation/,
+    ],
+    [
+      { NoPairing: { role: "review", label: "Review", away: true } },
+      /Pick a profile and model for Review, or No review,/,
+    ],
     ["EmptyBrief", /Write the brief first/],
     ["NoBaseCommit", /nothing to branch from/],
     ["BranchExists", /branch already exists/],
@@ -10219,7 +10408,7 @@ describe("closing a conversation", () => {
   /// it, and a line of prose about a press that is no longer offered would be
   /// the only thing in the card that was not a press.
   it("offers nothing to close on one that is closed already", async () => {
-    theRecordedWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await openActions(container);
@@ -10257,9 +10446,9 @@ describe("closing a conversation", () => {
 
     // And the conversation is where it was, on the page and in the list both.
     await waitFor(async () =>
-      expect((await standing(container)).state).toBe(STATE.Grilling),
+      expect((await standing(container)).state).toBe(stateOf("grilling")),
     );
-    expect(spokenRow(container, GRILLING.id)).toContain(STATE.Grilling);
+    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("grilling"));
   });
 
   /// A request that never came back is said the same way. Nothing about it is a
@@ -10286,7 +10475,7 @@ describe("closing a conversation", () => {
     expect(said.textContent).toContain("the server is not answering");
 
     await waitFor(async () =>
-      expect((await standing(container)).state).toBe(STATE.Grilling),
+      expect((await standing(container)).state).toBe(stateOf("grilling")),
     );
   });
 });
@@ -10304,7 +10493,7 @@ describe("closing and archiving a conversation", () => {
     );
     expect(offered.slice(-2)).toEqual([actions.close, actions.closeAndArchive]);
 
-    theRecordedWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "closed", ready_to_grill: false });
     const closed = mount(`/conversations/${OPEN.id}`);
 
     await openActions(closed.container);
@@ -10382,7 +10571,7 @@ describe("closing and archiving a conversation", () => {
     expect(refusal()).toBeNull();
 
     await waitFor(() =>
-      expect(spokenRow(container, GRILLING.id)).toContain(STATE.Grilling),
+      expect(spokenRow(container, GRILLING.id)).toContain(stateOf("grilling")),
     );
   });
 });
@@ -10477,8 +10666,8 @@ describe("a close pressed over a run in flight", () => {
     expect(askedFor(fetching, CLOSING_IT), "nothing has been sent").toBe(0);
 
     // And the conversation is where it was, on the page and in the list both.
-    expect((await standing(container)).state).toBe(STATE.Grilling);
-    expect(spokenRow(container, GRILLING.id)).toContain(STATE.Grilling);
+    expect((await standing(container)).state).toBe(stateOf("grilling"));
+    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("grilling"));
   });
 
   /// And the gap between one step and the next, where no session process exists
@@ -10547,7 +10736,7 @@ describe("a close pressed over a run in flight", () => {
 
     await waitFor(() => expect(asking()).toBeNull());
     expect(askedFor(fetching, CLOSING_IT), "and still nothing was sent").toBe(0);
-    expect((await standing(container)).state).toBe(STATE.Grilling);
+    expect((await standing(container)).state).toBe(stateOf("grilling"));
 
     // And the menu drops what it dropped before: both closes, and no archive
     // standing where one of them was.
@@ -10574,7 +10763,7 @@ describe("a close pressed over a run in flight", () => {
 
     await waitFor(() => expect(asking()).toBeNull());
     expect(askedFor(fetching, CLOSING_IT)).toBe(0);
-    expect((await standing(container)).state).toBe(STATE.Grilling);
+    expect((await standing(container)).state).toBe(stateOf("grilling"));
   });
 
   /// And the second press is the first one made: the close goes out and the page
@@ -10602,10 +10791,10 @@ describe("a close pressed over a run in flight", () => {
     // the work has ended in — with the request still out and never coming back.
     await waitFor(async () => {
       const line = await standing(container);
-      expect(line.word).toBe(STATE.Closed);
+      expect(line.word).toBe(stateOf("closed"));
       expect(line.state).toBeNull();
     });
-    expect(spokenRow(container, GRILLING.id)).toContain(STATE.Closed);
+    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("closed"));
   });
 
   /// And the row under it is the same press with the archive already made: the
@@ -10714,7 +10903,7 @@ describe("archiving a conversation", () => {
   });
 
   it("stands where close was, on one that has been closed", async () => {
-    theRecordedWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const menu = await openActions(container);
@@ -10724,7 +10913,7 @@ describe("archiving a conversation", () => {
 
   it("posts to the conversation's own archive route", async () => {
     const fetching = theRecordedWith(
-      { state: "Closed", ready_to_grill: false },
+      { state: "closed", ready_to_grill: false },
       whenever(
         `/api/ui/conversations/${OPEN.id}/archive`,
         json("Archived" satisfies ConversationArchived),
@@ -10744,7 +10933,7 @@ describe("archiving a conversation", () => {
   /// What the human is owed before a press that makes something disappear: that
   /// it is the list it goes off, and that nothing of the record goes with it.
   it("says the record stays where it is", async () => {
-    theRecordedWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await openActions(container);
@@ -10758,7 +10947,7 @@ describe("archiving a conversation", () => {
   /// reason is said in a toast.
   it("puts the row back and says there was nothing to put away", async () => {
     theRecordedWith(
-      { state: "Closed", ready_to_grill: false },
+      { state: "closed", ready_to_grill: false },
       whenever(
         `/api/ui/conversations/${OPEN.id}/archive`,
         json("NotClosed" satisfies ConversationArchived),
@@ -10788,7 +10977,7 @@ describe("unarchiving a conversation", () => {
   /// same conversation.
   it("stands where archive was, on one already put away", async () => {
     theRecordedWith({
-      state: "Closed",
+      state: "closed",
       ready_to_grill: false,
       archived: true,
     });
@@ -10803,7 +10992,7 @@ describe("unarchiving a conversation", () => {
 
   it("posts to the conversation's own unarchive route", async () => {
     const fetching = theRecordedWith(
-      { state: "Closed", ready_to_grill: false, archived: true },
+      { state: "closed", ready_to_grill: false, archived: true },
       whenever(
         `/api/ui/conversations/${OPEN.id}/unarchive`,
         json("Unarchived" satisfies ConversationUnarchived),
@@ -10824,7 +11013,7 @@ describe("unarchiving a conversation", () => {
   /// the list it returns to, and that it stays there.
   it("says the conversation goes back on the list", async () => {
     theRecordedWith({
-      state: "Closed",
+      state: "closed",
       ready_to_grill: false,
       archived: true,
     });
@@ -10841,7 +11030,7 @@ describe("unarchiving a conversation", () => {
   /// since gone. In a toast, as every one of these four presses says a refusal.
   it("says in a toast that the conversation is gone", async () => {
     theRecordedWith(
-      { state: "Closed", ready_to_grill: false, archived: true },
+      { state: "closed", ready_to_grill: false, archived: true },
       whenever(
         `/api/ui/conversations/${OPEN.id}/unarchive`,
         json("NoSuchConversation" satisfies ConversationUnarchived),
@@ -10942,11 +11131,11 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     // conversation the work has ended in.
     await waitFor(async () => {
       const line = await standing(container);
-      expect(line.word).toBe(STATE.Closed);
+      expect(line.word).toBe(stateOf("closed"));
       expect(line.state).toBeNull();
     });
 
-    expect(spokenRow(container, GRILLING.id)).toContain(STATE.Closed);
+    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("closed"));
   });
 
   /// And the menu it drops is a closed conversation's: archive where close was,
@@ -11025,7 +11214,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
   /// which is where a conversation the order says nothing about goes.
   it("puts a row back on the list where the press takes it out of the archive", async () => {
     theRecordedWith(
-      { state: "Closed", ready_to_grill: false, archived: true },
+      { state: "closed", ready_to_grill: false, archived: true },
       whenever(
         "/api/ui/conversations",
         json(SIDEBAR.filter((row) => row.id !== OPEN.id)),
@@ -11063,7 +11252,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     );
 
     await waitFor(async () =>
-      expect((await standing(container)).word).toBe(STATE.Closed),
+      expect((await standing(container)).word).toBe(stateOf("closed")),
     );
 
     // Everything the page is showing, read again — which is the whole of what a
@@ -11071,8 +11260,8 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     // grilled, the close it would be told about not having landed.
     await nudged(client);
 
-    expect((await standing(container)).word).toBe(STATE.Closed);
-    expect(spokenRow(container, GRILLING.id)).toContain(STATE.Closed);
+    expect((await standing(container)).word).toBe(stateOf("closed"));
+    expect(spokenRow(container, GRILLING.id)).toContain(stateOf("closed"));
   });
 
   /// And it is let go of once the read behind the press has landed, so what the
@@ -11089,7 +11278,12 @@ describe("a press whose outcome is drawn before the server has answered", () => 
         () => {
           listed = SIDEBAR.map((row) =>
             row.id === GRILLING.id
-              ? { ...row, state: "Closed" as const, waiting: false }
+              ? {
+                  ...row,
+                  state: "closed" as const,
+                  ...rowProcess(),
+                  waiting: false,
+                }
               : row,
           );
           return json("Closed" satisfies ConversationClosed)();
@@ -11105,7 +11299,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     );
 
     await waitFor(() =>
-      expect(spokenRow(container, GRILLING.id)).toContain(STATE.Closed),
+      expect(spokenRow(container, GRILLING.id)).toContain(stateOf("closed")),
     );
 
     // And then the server says something else about it — a steer on another
@@ -11115,7 +11309,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     await client.invalidateQueries({ queryKey: ["conversations"] });
 
     await waitFor(() =>
-      expect(spokenRow(container, GRILLING.id)).toContain(STATE.Grilling),
+      expect(spokenRow(container, GRILLING.id)).toContain(stateOf("grilling")),
     );
   });
 
@@ -11163,7 +11357,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     // ever lets go of a press is the list's, and the list did not answer.
     for (let turn = 0; turn < 3; turn += 1) {
       await new Promise((settle) => setTimeout(settle, 0));
-      expect((await standing(container)).word).toBe(STATE.Closed);
+      expect((await standing(container)).word).toBe(stateOf("closed"));
     }
 
     // And then one that does land, which lets go of it — and says what the
@@ -11173,7 +11367,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     await client.invalidateQueries({ queryKey: ["conversations"] });
 
     await waitFor(async () =>
-      expect((await standing(container)).state).toBe(STATE.Grilling),
+      expect((await standing(container)).state).toBe(stateOf("grilling")),
     );
   });
 
@@ -11240,7 +11434,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     // the archive that was waiting on it never went out. One thing was said,
     // because one press was made that did nothing.
     await waitFor(() =>
-      expect(spokenRow(container, GRILLING.id)).toContain(STATE.Grilling),
+      expect(spokenRow(container, GRILLING.id)).toContain(stateOf("grilling")),
     );
     expect(askedFor(fetching, ARCHIVING_IT)).toBe(0);
     expect(document.body.querySelectorAll(`.${toasts.toast}`)).toHaveLength(1);
@@ -11261,7 +11455,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     );
 
     await waitFor(async () =>
-      expect((await standing(container)).word).toBe(STATE.Closed),
+      expect((await standing(container)).word).toBe(stateOf("closed")),
     );
 
     expect(document.body.querySelector(`.${toasts.toast}`)).toBeNull();
@@ -11340,10 +11534,10 @@ describe("a second round", () => {
   /// one are the record, and the rounds on them still have to be told apart.
   it("keeps the boundary a reopened round was drawn with", async () => {
     theBuilding({
-      state: "Draft",
+      state: "draft",
       timeline: [
         ...BUILDING.timeline,
-        { Moved: { id: 9007, at: "2026-08-24T11:00:00Z", state: "Draft" } },
+        { Moved: { id: 9007, at: "2026-08-24T11:00:00Z", state: "draft" } },
       ],
     });
     const { container } = mount(`/conversations/${BUILDING.id}`);
@@ -11358,7 +11552,7 @@ describe("a second round", () => {
   /// from here: nothing stands under the timeline, and the steer that opens a
   /// round like this one is in the menu on the header.
   it("offers the steer and nothing else on a finished conversation", async () => {
-    theRecordedWith({ state: "Done" });
+    theRecordedWith({ state: "done" });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await drawn(container, `.${timeline.timeline}`);
@@ -12279,6 +12473,7 @@ describe("steering a conversation", () => {
       "Implementing",
       "Investigating",
       "Done",
+      "Close",
     ]);
     expect(screen.getByText(/Finished. Nothing runs/)).toBeTruthy();
     unmount();
@@ -12297,6 +12492,7 @@ describe("steering a conversation", () => {
       "Wrapping",
       "Investigating",
       "Done",
+      "Close",
     ]);
     expect(screen.getByText(/The checks are watched, the review is run/)).toBeTruthy();
   });
@@ -12312,7 +12508,7 @@ describe("steering a conversation", () => {
         ready_to_stop: true,
         working: true,
         pinned: WRAPPING.pinned,
-        process: "FixMergeIssues",
+        process: whose("fix-merge-issues"),
       },
       whenever(STEERING, PRESSED, "POST"),
     );
@@ -12346,6 +12542,7 @@ describe("steering a conversation", () => {
       "Wrapping",
       "Investigating",
       "Done",
+      "Close",
     ]);
     unmount();
 
@@ -12353,7 +12550,7 @@ describe("steering a conversation", () => {
       {
         ready_to_stop: false,
         working: false,
-        state: "Done",
+        state: "done",
         pinned: WRAPPING.pinned,
       },
       whenever(STEERING, PRESSED, "POST"),
@@ -12367,6 +12564,7 @@ describe("steering a conversation", () => {
       "FollowUp",
       "Investigating",
       "Done",
+      "Close",
     ]);
     expect(screen.getByText(/The agent answers what you ask about the pull request/)).toBeTruthy();
     finished.unmount();
@@ -12377,7 +12575,7 @@ describe("steering a conversation", () => {
       {
         ready_to_stop: false,
         working: false,
-        state: "Closed",
+        state: "closed",
         pinned: WRAPPING.pinned,
       },
       whenever(STEERING, PRESSED, "POST"),
@@ -12396,7 +12594,7 @@ describe("steering a conversation", () => {
       {
         ready_to_stop: false,
         working: false,
-        state: "Done",
+        state: "done",
         ready_to_continue: true,
         pinned: WRAPPING.pinned,
       },
@@ -12431,11 +12629,12 @@ describe("steering a conversation", () => {
     await waitFor(() => expect(press.disabled).toBe(false));
     fireEvent.click(press);
 
-    const building = GRILLING.implementation_pairing!;
+    const building = onRole(GRILLING, "implementation");
 
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
         target: "FollowUp",
+        state: null,
         interrupt: false,
         // Work being built, so it is the implementation pairing a follow-up
         // runs under.
@@ -12526,11 +12725,12 @@ describe("steering a conversation", () => {
     await waitFor(() => expect(press.disabled).toBe(false));
     fireEvent.click(press);
 
-    const building = GRILLING.implementation_pairing!;
+    const building = onRole(GRILLING, "implementation");
 
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
         target: "Investigating",
+        state: null,
         interrupt: false,
         pairing: { profile_id: building.profile.id, model: building.model },
         brief: null,
@@ -12700,11 +12900,12 @@ describe("steering a conversation", () => {
     });
     fireEvent.click(await drawn(pane, `.${steerForm.steerButtons} .${steerForm.steer}`));
 
-    const building = GRILLING.implementation_pairing!;
+    const building = onRole(GRILLING, "implementation");
 
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
         target: "Implementing",
+        state: null,
         interrupt: false,
         pairing: { profile_id: building.profile.id, model: building.model },
         // No round is being opened, so neither half of what one carries is
@@ -12747,7 +12948,7 @@ describe("steering a conversation", () => {
     const pane = await openSteer(container);
 
     await drawn(pane, "#steer-pairing");
-    const interviewing = GRILLING.grilling_pairing!;
+    const interviewing = onRole(GRILLING, "grilling");
 
     await waitFor(() =>
       expect(showing("Run it under")).toBe(readsAs(interviewing)),
@@ -12763,7 +12964,7 @@ describe("steering a conversation", () => {
     // prefilled there — a different choice about different work.
     fireEvent.click(await drawn(pane, `.${steerForm.steerTarget} input[value="Wrapping"]`));
 
-    const building = GRILLING.implementation_pairing!;
+    const building = onRole(GRILLING, "implementation");
 
     await waitFor(() =>
       expect(showing("Run it under")).toBe(readsAs(building)),
@@ -12775,6 +12976,7 @@ describe("steering a conversation", () => {
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
         target: "Wrapping",
+        state: null,
         interrupt: false,
         pairing: { profile_id: PROFILES[0]!.id, model: PROFILES[0]!.models[0] },
         // No round is being opened and no session is being written a job, so
@@ -12836,11 +13038,12 @@ describe("steering a conversation", () => {
     fireEvent.click(await drawn(pane, `.${steerForm.steerDigest} input`));
     fireEvent.click(await drawn(pane, `.${steerForm.steerButtons} .${steerForm.steer}`));
 
-    const own = GRILLING.grilling_pairing!;
+    const own = onRole(GRILLING, "grilling");
 
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
         target: "Grilling",
+        state: null,
         interrupt: false,
         pairing: { profile_id: own.profile.id, model: own.model },
         brief: "# Retries\n\nThe backoff is wrong.\n",
@@ -12996,6 +13199,7 @@ describe("steering a conversation", () => {
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
         target: "Done",
+        state: null,
         interrupt: true,
         // Nothing runs in done and no round is opened there, so none of what
         // those carry is sent.
@@ -13195,6 +13399,7 @@ describe("steering a conversation", () => {
       ready_to_continue: true,
       pending_steer: pending({
         target: "Implementing",
+        state: null,
         instruction: "Note the window the count is against.",
         interrupt: true,
       }),
@@ -13251,6 +13456,7 @@ describe("steering a conversation", () => {
     // Somebody else's save, found on the next read of the conversation.
     elsewhere = pending({
       target: "Implementing",
+      state: null,
       instruction: "From the phone.",
     });
     readAgain();
@@ -13292,6 +13498,7 @@ describe("steering a conversation", () => {
     await waitFor(() => expect(writes(fetching, STEER_SAVE)).toBe(1));
     expect(sent(fetching, STEER_SAVE)).toMatchObject({
       target: "Implementing",
+      state: null,
     });
   });
 
@@ -13325,6 +13532,7 @@ describe("steering a conversation", () => {
     expect(writes(fetching, STEER_SAVE)).toBe(1);
     expect(sent(fetching, STEER_SAVE)).toMatchObject({
       target: "Implementing",
+      state: null,
       instruction: "Rebase this onto main.",
     });
   });
@@ -13375,7 +13583,7 @@ describe("steering a conversation", () => {
     const alongside = REPOS[0]!;
     const fetching = theGrillingSteering(
       {
-        state: "Done",
+        state: "done",
         working: true,
         ready_to_stop: true,
         ready_to_continue: true,
@@ -13450,6 +13658,7 @@ describe("steering a conversation", () => {
         sent(fetching, STEER_SAVE, writes(fetching, STEER_SAVE) - 1),
       ).toEqual({
         target: "Investigating",
+        state: null,
         brief: "# Retries\n",
         digest: true,
         instruction: "Rebase this onto main.",
@@ -13547,6 +13756,7 @@ describe("steering a conversation", () => {
     await waitFor(() => expect(writes(fetching, STEER_SAVE)).toBe(1));
     expect(sent(fetching, STEER_SAVE)).toMatchObject({
       target: "Grilling",
+      state: null,
       pairing: { profile_id: PROFILES[2]!.id, model: "claude-sonnet-5" },
     });
   });
@@ -13559,6 +13769,7 @@ describe("steering a conversation", () => {
     theGrillingSteering({
       pending_steer: pending({
         target: "Grilling",
+        state: null,
         pairing: { profile_id: PROFILES[2]!.id, model: "claude-sonnet-5" },
       }),
     });
@@ -13647,6 +13858,7 @@ describe("steering a conversation", () => {
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toMatchObject({
         target: "Implementing",
+        state: null,
         instruction: "Rebase this onto main.",
       }),
     );
@@ -13866,19 +14078,20 @@ describe("steering a conversation", () => {
   /// between the pipeline arriving somewhere and somebody putting it there.
   it("draws the steer beside the move it wrote", async () => {
     theGrillingSteering({
-      state: "Done",
+      state: "done",
       timeline: [
         ...GRILLING.timeline,
         {
           Steer: {
             id: 9001,
             at: "2026-08-24T11:00:00Z",
-            target: "Done",
+            target: "done",
+
             html: null,
             record: null,
           },
         },
-        { Moved: { id: 9002, at: "2026-08-24T11:00:00Z", state: "Done" } },
+        { Moved: { id: 9002, at: "2026-08-24T11:00:00Z", state: "done" } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -13907,11 +14120,11 @@ describe("steering a conversation", () => {
   /// be readable back for.
   it("draws the resolve press as itself rather than as a steer", async () => {
     theGrillingSteering({
-      state: "Wrapping",
+      state: "wrapping",
       timeline: [
         ...GRILLING.timeline,
         { ResolveConflicts: { id: 9101, at: "2026-08-24T11:00:00Z" } },
-        { Moved: { id: 9102, at: "2026-08-24T11:00:00Z", state: "Wrapping" } },
+        { Moved: { id: 9102, at: "2026-08-24T11:00:00Z", state: "wrapping" } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -13945,19 +14158,20 @@ describe("steering a conversation", () => {
   /// details pane.
   it("draws the instruction a steer carried, and opens the whole of it", async () => {
     theGrillingSteering({
-      state: "Implementing",
+      state: "implementing",
       timeline: [
         ...GRILLING.timeline,
         {
           Steer: {
             id: 9003,
             at: "2026-08-24T11:00:00Z",
-            target: "Implementing",
+            target: "implementing",
+
             html: "<p>Note the window the count is against.</p>",
             record: null,
           },
         },
-        { Moved: { id: 9004, at: "2026-08-24T11:00:00Z", state: "Implementing" } },
+        { Moved: { id: 9004, at: "2026-08-24T11:00:00Z", state: "implementing" } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -13986,14 +14200,15 @@ describe("steering a conversation", () => {
   /// ended are still four questions somebody answered.
   it("opens a steer that carried no document", async () => {
     theGrillingSteering({
-      state: "Done",
+      state: "done",
       timeline: [
         ...GRILLING.timeline,
         {
           Steer: {
             id: 9201,
             at: "2026-08-24T11:00:00Z",
-            target: "Done",
+            target: "done",
+
             html: null,
             record: {
               digest: false,
@@ -14004,7 +14219,7 @@ describe("steering a conversation", () => {
             },
           },
         },
-        { Moved: { id: 9202, at: "2026-08-24T11:00:00Z", state: "Done" } },
+        { Moved: { id: 9202, at: "2026-08-24T11:00:00Z", state: "done" } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -14037,14 +14252,15 @@ describe("steering a conversation", () => {
   /// the repos it asked for, under the labels the form asked for them under.
   it("draws the form a steer was made with, frozen", async () => {
     theGrillingSteering({
-      state: "Implementing",
+      state: "implementing",
       timeline: [
         ...GRILLING.timeline,
         {
           Steer: {
             id: 9301,
             at: "2026-08-24T11:00:00Z",
-            target: "Implementing",
+            target: "implementing",
+
             html: "<p>Count against the window.</p>",
             record: {
               digest: false,
@@ -14064,7 +14280,7 @@ describe("steering a conversation", () => {
             },
           },
         },
-        { Moved: { id: 9302, at: "2026-08-24T11:00:00Z", state: "Implementing" } },
+        { Moved: { id: 9302, at: "2026-08-24T11:00:00Z", state: "implementing" } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -14104,14 +14320,15 @@ describe("steering a conversation", () => {
   /// saying nothing was picked would be the pane rewriting their decision.
   it("says so where the profile a steer picked has been removed", async () => {
     theGrillingSteering({
-      state: "Implementing",
+      state: "implementing",
       timeline: [
         ...GRILLING.timeline,
         {
           Steer: {
             id: 9401,
             at: "2026-08-24T11:00:00Z",
-            target: "Implementing",
+            target: "implementing",
+
             html: null,
             record: {
               digest: false,
@@ -14122,7 +14339,7 @@ describe("steering a conversation", () => {
             },
           },
         },
-        { Moved: { id: 9402, at: "2026-08-24T11:00:00Z", state: "Implementing" } },
+        { Moved: { id: 9402, at: "2026-08-24T11:00:00Z", state: "implementing" } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -14678,7 +14895,7 @@ describe("a grilling that has handed over", () => {
     // The timeline is up, so the pane has drawn the whole of what it was handed.
     await drawn(container, `.${timeline.timeline}`);
 
-    expect(BUILDING.state).toBe("Implementing");
+    expect(BUILDING.state).toBe("implementing");
     expect(container.querySelector(`.${sheet.directions}`)).toBeNull();
   });
 
@@ -14712,10 +14929,10 @@ describe("a grilling that has handed over", () => {
   /// the whole of what makes the line worth reading.
   it("names the state a close stopped in", async () => {
     theBuilding({
-      state: "Closed",
+      state: "closed",
       timeline: [
         ...BUILDING.timeline,
-        { Moved: { id: 9001, at: "2026-08-24T11:00:00Z", state: "Closed" } },
+        { Moved: { id: 9001, at: "2026-08-24T11:00:00Z", state: "closed" } },
       ],
     });
     const { container } = mount(`/conversations/${BUILDING.id}`);
@@ -14944,7 +15161,7 @@ describe("disagreeing with a proposal", () => {
   it("draws no chooser while the grilling is still running", async () => {
     // What a refused proposal leaves behind: the set is on the timeline and
     // answered, and the conversation is still grilling.
-    theBuilding({ state: "Grilling", direction: null });
+    theBuilding({ state: "grilling", direction: null });
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     await drawn(container, `.${timeline.timeline}`);
@@ -19015,7 +19232,7 @@ describe("the pinned pull request", () => {
   /// that merges has nothing to resolve, which is the same rule the words above
   /// it are drawn by.
   it("offers the press only on a done conversation whose branch conflicts", async () => {
-    theWrapping({ ...whoseMerging("Conflicting"), state: "Done" });
+    theWrapping({ ...whoseMerging("Conflicting"), state: "done" });
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
     fireEvent.click(
@@ -19031,11 +19248,11 @@ describe("the pinned pull request", () => {
 
     for (const over of [
       // The same conflict on a conversation the wrap-up is still running.
-      { ...whoseMerging("Conflicting"), state: "Wrapping" as const },
+      { ...whoseMerging("Conflicting"), state: "wrapping" as const },
       // And the same finished conversation with nothing to resolve — one that
       // merges, and one nothing has asked GitHub about.
-      { ...whoseMerging("Cleanly"), state: "Done" as const },
-      { ...whoseMerging(null), state: "Done" as const },
+      { ...whoseMerging("Cleanly"), state: "done" as const },
+      { ...whoseMerging(null), state: "done" as const },
     ]) {
       theWrapping(over);
       const { container } = mount(`/conversations/${WRAPPING.id}`);
@@ -19060,7 +19277,7 @@ describe("the pinned pull request", () => {
   it("posts to the conversation's own resolve route and reads it again", async () => {
     const route = `/api/ui/conversations/${WRAPPING.id}/resolve-conflicts`;
     const fetching = theWrapping(
-      { ...whoseMerging("Conflicting"), state: "Done" },
+      { ...whoseMerging("Conflicting"), state: "done" },
       whenever(route, json("Resolving" satisfies Resolved), "POST"),
     );
     const { container } = mount(`/conversations/${WRAPPING.id}`);
@@ -19099,7 +19316,7 @@ describe("the pinned pull request", () => {
       "WorktreeRefused",
     ] satisfies Resolved[]) {
       theWrapping(
-        { ...whoseMerging("Conflicting"), state: "Done" },
+        { ...whoseMerging("Conflicting"), state: "done" },
         whenever(
           `/api/ui/conversations/${WRAPPING.id}/resolve-conflicts`,
           json(outcome),
@@ -19691,8 +19908,8 @@ describe("a wrap-up waiting on its checks", () => {
   /// in place of the lifecycle word rather than beside it.
   it("is what the sidebar row says in place of its state", async () => {
     theSidebar(
-      { state: "Wrapping", working: false, waiting: false },
-      { state: "Wrapping", working: false, waiting: false, waiting_on_checks: true },
+      { state: "wrapping", working: false, waiting: false },
+      { state: "wrapping", working: false, waiting: false, waiting_on_checks: true },
     );
     const { container } = mount();
 
@@ -19746,9 +19963,9 @@ describe("a stage waiting to join its chain", () => {
   /// the lifecycle word, exactly as a wrap-up down to its checks is.
   it("is what the sidebar row says in place of its state", async () => {
     theSidebar(
-      { state: "Implementing", working: false, waiting: false },
+      { state: "implementing", working: false, waiting: false },
       {
-        state: "Implementing",
+        state: "implementing",
         working: false,
         waiting: false,
         waiting_to_join: true,
@@ -19784,9 +20001,9 @@ describe("a session sitting there without asking", () => {
   /// one for ten minutes before concluding nothing was being captured.
   it("is on the sidebar row's label beside its state", async () => {
     theSidebar(
-      { state: "Implementing", working: true, waiting: false },
+      { state: "implementing", working: true, waiting: false },
       {
-        state: "Implementing",
+        state: "implementing",
         working: true,
         waiting: false,
         parked: { idle_seconds: 260, spoken_to: 1 },
@@ -19818,7 +20035,7 @@ describe("a session sitting there without asking", () => {
 /// between them, would be the button reading itself out.
 describe("a conversation that has ended", () => {
   it("says Done where the work reached the end of the ladder", async () => {
-    theRecordedWith({ state: "Done" });
+    theRecordedWith({ state: "done" });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const line = await standing(container);
@@ -19829,7 +20046,7 @@ describe("a conversation that has ended", () => {
   });
 
   it("says Closed where the work stopped wherever it was", async () => {
-    theRecordedWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     expect((await standing(container)).word).toBe("Closed");
@@ -19842,7 +20059,7 @@ describe("a conversation that has ended", () => {
   /// happened — nothing anywhere says one is coming.
   it("names a trimmed conversation Trimmed beside its state", async () => {
     theRecordedWith({
-      state: "Closed",
+      state: "closed",
       ready_to_grill: false,
       archived: true,
       trimmed: true,
@@ -19859,7 +20076,7 @@ describe("a conversation that has ended", () => {
   /// every conversation there is: the line is exactly what it was.
   it("says nothing about trimming on one no cleanup has been through", async () => {
     theRecordedWith({
-      state: "Closed",
+      state: "closed",
       ready_to_grill: false,
       archived: true,
     });
@@ -19887,14 +20104,14 @@ describe("a conversation that has ended", () => {
   /// The states on the way up are where a status is worth saying, and they say
   /// it beside the state rather than instead of it.
   it("says the state beside a status while the work is still going", async () => {
-    for (const state of ["Grilling", "Implementing", "Wrapping", "FollowUp"] as const) {
+    for (const state of ["grilling", "implementing", "wrapping", "follow-up"] as const) {
       theRecordedWith({ state, ready_to_resume: true });
       const { container, unmount } = mount(`/conversations/${OPEN.id}`);
 
       const line = await standing(container);
 
       expect(line.word).toBe("Stopped");
-      expect(line.state).toBe(STATE[state]);
+      expect(line.state).toBe(stateOf(state));
 
       unmount();
     }
@@ -19904,7 +20121,7 @@ describe("a conversation that has ended", () => {
   /// it got to is what the line says about it: there is nothing left for
   /// anybody to resume, so nothing is waiting on them.
   it("says where the work got to over anything it stopped on", async () => {
-    theStopped({ state: "Done" });
+    theStopped({ state: "done" });
     const { container } = mount(`/conversations/${STOPPED.id}`);
 
     const line = await standing(container);
@@ -20339,19 +20556,20 @@ describe("the documents on a timeline", () => {
   /// is a card they will not press.
   it("opens a document too short to be cut off", async () => {
     theGrillingStanding({
-      state: "Implementing",
+      state: "implementing",
       timeline: [
         ...GRILLING.timeline,
         {
           Steer: {
             id: 9005,
             at: "2026-08-24T11:00:00Z",
-            target: "Implementing",
+            target: "implementing",
+
             html: SHORT_INSTRUCTION,
             record: null,
           },
         },
-        { Moved: { id: 9006, at: "2026-08-24T11:00:00Z", state: "Implementing" } },
+        { Moved: { id: 9006, at: "2026-08-24T11:00:00Z", state: "implementing" } },
       ],
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -20558,7 +20776,9 @@ describe("the configuration on the brief's pane", () => {
   /// whose review pairing was never picked: what the human picked is a choice,
   /// and the pane says what it was.
   it("says no review where that is what was picked", async () => {
-    theGrillingStanding({ review_pairing: "Skipped" });
+    theGrillingStanding({
+      pairings: pairedAs(GRILLING.pairings, { review: "Skipped" }),
+    });
     await openBrief(GRILLING);
 
     expect(configuration().Review).toBe("No review.");
@@ -20571,7 +20791,9 @@ describe("the configuration on the brief's pane", () => {
   /// The grilling role has no such row — *No grilling* is retired — so a record
   /// with nothing on it reads as nothing chosen, which is what it is.
   it("says nothing chosen where no grilling pairing was picked", async () => {
-    theGrillingStanding({ grilling_pairing: null });
+    theGrillingStanding({
+      pairings: pairedAs(GRILLING.pairings, { grilling: "Nothing" }),
+    });
     await openBrief(GRILLING);
 
     expect(configuration().Grilling).toBe("Not chosen.");
@@ -20589,7 +20811,12 @@ describe("the configuration on the brief's pane", () => {
   /// the composer and the thing read back here cannot come to be called
   /// different things.
   it("says whichever process the conversation is", async () => {
-    theGrillingStanding({ process: "Review" });
+    theGrillingStanding({
+      process: whose("review"),
+      pairings: GRILLING.pairings.filter(
+        (role) => role.role !== "grilling",
+      ),
+    });
     await openBrief(GRILLING);
 
     expect(configuration().Process).toBe("Review");
@@ -20600,7 +20827,12 @@ describe("the configuration on the brief's pane", () => {
   /// out who would have grilled it would be naming the account of a session
   /// that will not exist — beside a composer that has stopped asking for one.
   it("names only the roles the process is run under", async () => {
-    theGrillingStanding({ process: "Review" });
+    theGrillingStanding({
+      process: whose("review"),
+      pairings: GRILLING.pairings.filter(
+        (role) => role.role !== "grilling",
+      ),
+    });
     await openBrief(GRILLING);
 
     await waitFor(() =>
@@ -20608,14 +20840,13 @@ describe("the configuration on the brief's pane", () => {
     );
     expect(configuration().Review).toBe("Claude Code Sonnet 5 · sonnet");
 
-    expect(uses("Review", "grilling")).toBe(false);
     expect(Object.keys(configuration())).not.toContain("Grilling");
   });
 
   /// And all three under Develop, which is the Process every draft gets while
   /// it is the only one offered.
   it("names all three where the process uses all three", async () => {
-    theGrillingStanding({ process: "Develop" });
+    theGrillingStanding({ process: whose("develop") });
     await openBrief(GRILLING);
 
     await waitFor(() =>
@@ -20631,10 +20862,11 @@ describe("the configuration on the brief's pane", () => {
   /// model there is nothing else to tell one account from another.
   it("says the half there is where a pairing named no model", async () => {
     theGrillingStanding({
-      implementation_pairing: {
-        ...GRILLING.implementation_pairing!,
-        model: null,
-      },
+      pairings: pairedAs(GRILLING.pairings, {
+        implementation: {
+          Under: { ...onRole(GRILLING, "implementation"), model: null },
+        },
+      }),
     });
     await openBrief(GRILLING);
 
@@ -20729,13 +20961,13 @@ describe("the configuration on the brief's pane", () => {
   /// says where the work has got to, and what kind of work it is is a setup fact
   /// like the Repo and the base.
   ///
-  /// Nothing of it reaches the row at all — `ConversationEntry` carries no
-  /// Process — so the check is that the list the human finds a Conversation by
-  /// reads exactly as it always did.
+  /// Nothing of it reaches the row's words — a row carries the Process so its
+  /// state word can be read off it, and names it nowhere — so the check is that
+  /// the list the human finds a Conversation by reads exactly as it always did.
   ///
   /// Whole words rather than substrings. A card's spoken label carries the
-  /// state word, and `Investigating` is a Lifecycle state the processes
-  /// roadmap brings in — which holds `Investigate` inside it. What is being
+  /// state word, and Develop declares an `Investigating` state — which holds
+  /// `Investigate` inside it. What is being
   /// checked is that a card never *says* a Process, not that its letters never
   /// turn up inside a longer word, and a sweep that could not tell the two
   /// apart would fail here for something that has nothing to do with Processes.
@@ -20755,7 +20987,7 @@ describe("the configuration on the brief's pane", () => {
         card.querySelector(`.${sidebar.open}`)!.getAttribute("aria-label") ?? "";
       expect(spoken).not.toBe("");
 
-      for (const word of Object.values(PROCESS)) {
+      for (const word of PROCESSES.map((entry) => entry.name)) {
         expect(says(card.textContent ?? "", word)).toBe(false);
         expect(says(spoken, word)).toBe(false);
       }
@@ -31388,5 +31620,147 @@ describe("the remote access banner", () => {
     await drawn(container, `.${timeline.timeline}`);
 
     expect(container.querySelector(`.${banner.banner}`)).toBeNull();
+  });
+});
+
+describe("steering into a process's declared states", () => {
+  /// A row of the form as the server sends it, for a state a plugin's process
+  /// declares.
+  function declared(
+    state: string,
+    word: string,
+    brief: SteerRow["brief"],
+    detour = false,
+  ): SteerRow {
+    return {
+      target: "Declared",
+      state,
+      word,
+      brief,
+      detour,
+      role: "implementation",
+    };
+  }
+
+  const CLOSE: SteerRow = {
+    target: "Close",
+    state: null,
+    word: "Close",
+    brief: "None",
+    detour: false,
+    role: null,
+  };
+
+  /// Every row is the server's, drawn from the steer marks: a process that
+  /// marks no state as taking a steer is offered Close alone, which is
+  /// Verkstead's and on every form.
+  it("draws Close alone for a process with no steerable state", async () => {
+    theGrillingSteering(
+      { ready_to_stop: true, working: true, steer_rows: [CLOSE] },
+      whenever(STEERING, PRESSED, "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pane = await openSteer(container);
+
+    expect(targets(pane)).toEqual(["Close"]);
+    expect(pane.querySelector("textarea")).toBeNull();
+  });
+
+  /// Each brief kind draws its own field, whatever the state it marks is
+  /// called — and the row reads the state's own word.
+  it("draws each brief kind's own field under a declared state", async () => {
+    theGrillingSteering(
+      {
+        ready_to_stop: true,
+        working: true,
+        steer_rows: [
+          declared("sketching", "Sketching", "Round"),
+          declared("asking", "Asking", "Instruction", true),
+          declared("touching-up", "Touching up", "FollowUp"),
+          declared("probing", "Probing", "Question"),
+          declared("exporting", "Exporting", "None"),
+          CLOSE,
+        ],
+      },
+      whenever(STEERING, PRESSED, "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pane = await openSteer(container);
+
+    expect(targets(pane)).toEqual([
+      "Declared:sketching",
+      "Declared:asking",
+      "Declared:touching-up",
+      "Declared:probing",
+      "Declared:exporting",
+      "Close",
+    ]);
+    expect(pane.textContent).toContain("Touching up");
+    expect(pane.textContent).toContain(
+      "It then returns to the state you steered it from.",
+    );
+
+    const fields = () =>
+      [...pane.querySelectorAll("textarea")].map((field) => field.id);
+
+    for (const [state, field] of [
+      ["sketching", ["steer-brief"]],
+      ["asking", ["steer-instruction"]],
+      ["touching-up", ["steer-follow-up"]],
+      ["probing", ["steer-investigation"]],
+      ["exporting", []],
+    ] as const) {
+      fireEvent.click(
+        await drawn(
+          pane,
+          `.${steerForm.steerTarget} input[value="Declared:${state}"]`,
+        ),
+      );
+      await waitFor(() => expect(fields()).toEqual(field));
+    }
+  });
+
+  /// And a submit names the state, carrying what was written in the field its
+  /// brief kind draws.
+  it("sends the declared state and what was written under it", async () => {
+    const fetching = theGrillingSteering(
+      {
+        ready_to_stop: true,
+        working: true,
+        steer_rows: [declared("asking", "Asking", "Instruction", true), CLOSE],
+      },
+      whenever(STEERING, PRESSED, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json("Steered" satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pane = await openSteer(container);
+
+    fireEvent.input(await drawn(pane, "#steer-instruction"), {
+      target: { value: "Find where the counter lives." },
+    });
+
+    const press = (await drawn(
+      pane,
+      `.${steerForm.steerButtons} .${steerForm.steer}`,
+    )) as HTMLButtonElement;
+    await waitFor(() => expect(press.disabled).toBe(false));
+    fireEvent.click(press);
+
+    await waitFor(() =>
+      expect(sent(fetching, STEER_SUBMIT)).toMatchObject({
+        target: "Declared",
+        state: "asking",
+        instruction: "Find where the counter lives.",
+        follow_up: null,
+        investigation: null,
+      }),
+    );
   });
 });
