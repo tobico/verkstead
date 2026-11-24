@@ -570,9 +570,11 @@ const ABOUT: Record<string, readonly string[]> = {
   // An heir named for a device that left the cluster, which no page draws:
   // the stage that was waiting on that home moves with a Nudge of its own.
   heirs: [],
-  // The installed Plugins, which the settings page alone draws — a pane this
-  // sweep never opens.
-  plugins: [],
+  // The installed Plugins, which the settings page draws and the Attach
+  // menu's Skill packs off them — neither among the panes this sweep opens —
+  // and the open Conversation, whose pack chips say whether anything loaded
+  // still provides each.
+  plugins: [OPENED],
   // The joins in flight, which move the list the modal is drawn from and the
   // Devices section of the Remote access pane. Neither is among the five: the
   // modal is read by the shell rather than by a page, and the Devices section

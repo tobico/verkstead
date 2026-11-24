@@ -13,6 +13,12 @@
 //! drafting Conversation in `conversation.json` carries two servers — `docs`,
 //! which `settings.json` declares, and `archive`, which nothing declares any
 //! more — which leaves `tickets` declared and unattached for the menu to offer.
+//!
+//! And the Skill Packs under them, which are the same control again with an
+//! installed plugin's pack where a declaration was: offered by
+//! `/api/ui/skill-packs`, which no fixture carries yet, so each test here that
+//! is about one says what the device offers — and the Conversations carry none
+//! unless a test puts one on.
 
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { describe, expect, it } from "vitest";
@@ -20,6 +26,7 @@ import { describe, expect, it } from "vitest";
 import type {
   BriefEvent,
   ConversationView,
+  OfferedPack,
   SettingsEdit,
   SettingsSaved,
   SettingsView,
@@ -83,6 +90,11 @@ function named(pane: ParentNode): string[] {
   return chips(pane).map((one) =>
     one.querySelector(`.${pill.serverName}`)!.textContent!.trim(),
   );
+}
+
+/// A pack an installed plugin provides, as the menu's read answers with it.
+function offering(name: string): OfferedPack {
+  return { name, plugin: `${name}-plugin`, skills: ["reviewing"] };
 }
 
 /// What the page put on the wire as a POST to `path`.
@@ -704,6 +716,23 @@ describe("the servers on a frozen brief", () => {
     return drawn(container, `.${shell.detailsPane}`);
   }
 
+  /// And the packs beside them the same way, nothing to press on one either.
+  it("draws a pack's chip read-only", async () => {
+    const pane = await openBrief({
+      ...FROZEN,
+      skill_packs: [{ name: "review-kit", installed: true }],
+    });
+    const row = await drawn(pane, `.${pill.attachments}`);
+
+    expect(named(row)).toEqual([
+      ...FROZEN.mcp_servers.map((one) => one.name),
+      "review-kit",
+    ]);
+    const pack = chips(row).at(-1)!;
+    expect(pack.querySelector("button")).toBeNull();
+    expect(pack.querySelector('[aria-label="Skill pack"]')).toBeTruthy();
+  });
+
   /// The same chips with nothing to press on one: the servers froze with the
   /// Brief, and the composer that could have changed them is gone.
   it("draws the chips read-only", async () => {
@@ -761,5 +790,185 @@ describe("a later drafting round", () => {
         chip.querySelector("button")?.getAttribute("aria-label"),
       ),
     ).toEqual(at.mcp_servers.map((one) => `Remove ${one.name}`));
+  });
+});
+
+/// The Skill Packs a Conversation is given, which are the servers' control said
+/// of an installed plugin's pack: rows under a heading of their own, a chip
+/// per pick, and the chip's × the way back.
+describe("the skill packs on a draft's composer", () => {
+  const attach = (name: string) =>
+    `/api/ui/conversations/${OPEN.id}/skill-packs/${name}`;
+
+  /// The drafting Conversation with packs on it.
+  const holding = (...packs: ConversationView["skill_packs"]) =>
+    whenever(
+      `/api/ui/conversations/${OPEN.id}`,
+      json({ ...OPEN, skill_packs: packs }),
+    );
+
+  /// Under the servers, in a section of its own: a pack is a different kind of
+  /// thing to put on the work from a server, and the heading says which rows are
+  /// which.
+  it("offers an installed pack under Skill packs, after the servers", async () => {
+    theWorkbench(
+      whenever("/api/ui/skill-packs", json([offering("review-kit")])),
+    );
+
+    const menu = await openMenu(await openComposer());
+    const section = await waitFor(() =>
+      within(menu).getByRole("group", { name: "Skill packs" }),
+    );
+
+    expect(rows(section)).toEqual(["review-kit"]);
+    expect(rows(menu)).toEqual([
+      "Attach file…",
+      "tickets",
+      "Add a server…",
+      "review-kit",
+    ]);
+  });
+
+  /// With nothing installed there is no section at all: a heading over nothing
+  /// would be the menu telling somebody about plugins every time they went to
+  /// attach a file.
+  it("draws no section where no plugin provides a pack", async () => {
+    const fetching = theWorkbench();
+
+    const menu = await openMenu(await openComposer());
+
+    // Waited on the read itself, so that what is asserted is the section
+    // after it rather than before.
+    await waitFor(() =>
+      expect(
+        fetching.mock.calls.some(([asked]) =>
+          String(asked).endsWith("/api/ui/skill-packs"),
+        ),
+      ).toBe(true),
+    );
+    expect(within(menu).queryByRole("group", { name: "Skill packs" })).toBeNull();
+    expect(rows(menu)).toEqual(["Attach file…", "tickets", "Add a server…"]);
+  });
+
+  /// A pack already on has its chip instead of a row, as a server does.
+  it("leaves out a pack that is already attached", async () => {
+    theWorkbench(
+      holding({ name: "review-kit", installed: true }),
+      whenever(
+        "/api/ui/skill-packs",
+        json([offering("review-kit"), offering("docs-kit")]),
+      ),
+    );
+
+    const menu = await openMenu(await openComposer());
+    const section = await waitFor(() =>
+      within(menu).getByRole("group", { name: "Skill packs" }),
+    );
+
+    expect(rows(section)).toEqual(["docs-kit"]);
+  });
+
+  /// Picking one is a request naming it, and the chip comes back off the
+  /// re-read the press asks for.
+  it("attaches the pack a row names and draws its chip", async () => {
+    let attached = false;
+
+    const fetching = theWorkbench(
+      whenever("/api/ui/skill-packs", json([offering("review-kit")])),
+      whenever(`/api/ui/conversations/${OPEN.id}`, () =>
+        json({
+          ...OPEN,
+          skill_packs: attached ? [{ name: "review-kit", installed: true }] : [],
+        })(),
+      ),
+      whenever(
+        attach("review-kit"),
+        () => {
+          attached = true;
+          return json("Attached")();
+        },
+        "POST",
+      ),
+    );
+
+    const pane = await openComposer();
+    const menu = await openMenu(pane);
+    fireEvent.click(
+      await waitFor(() =>
+        within(menu).getByRole("menuitem", { name: "review-kit" }),
+      ),
+    );
+
+    await waitFor(() => expect(writes(fetching, attach("review-kit"))).toHaveLength(1));
+    await waitFor(() => expect(named(pane)).toContain("review-kit"));
+    expect(screen.queryByRole("menu", { name: "Attach" })).toBeNull();
+  });
+
+  /// The chip after the servers', marked as a pack, and its × takes it off.
+  it("takes one off from its own ×", async () => {
+    const fetching = theWorkbench(
+      holding({ name: "review-kit", installed: true }),
+      whenever(`${attach("review-kit")}/remove`, json("Removed"), "POST"),
+    );
+
+    const pane = await openComposer();
+    await waitFor(() =>
+      expect(named(pane)).toEqual([
+        ...OPEN.mcp_servers.map((one) => one.name),
+        "review-kit",
+      ]),
+    );
+    expect(
+      chips(pane).at(-1)!.querySelector('[aria-label="Skill pack"]'),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove review-kit" }));
+
+    await waitFor(() =>
+      expect(writes(fetching, `${attach("review-kit")}/remove`)).toHaveLength(1),
+    );
+  });
+
+  /// One whose plugin is no longer installed here says so, and keeps its ×.
+  it("says so where nothing installed provides it any more", async () => {
+    theWorkbench(holding({ name: "review-kit", installed: false }));
+
+    const pane = await openComposer();
+    const gone = await waitFor(() => {
+      const found = chips(pane).find(
+        (chip) =>
+          chip.classList.contains(pill.missing!) &&
+          chip.textContent!.includes("review-kit"),
+      );
+      expect(found, "expected the pack's chip drawn as gone").toBeTruthy();
+      return found!;
+    });
+
+    expect(gone.textContent).toContain("no longer installed");
+    expect(
+      within(gone).getByRole("button", { name: "Remove review-kit" }),
+    ).toBeTruthy();
+  });
+
+  /// And what could not be done is said under the row, as a server's is.
+  it("says under the row what could not be attached", async () => {
+    theWorkbench(
+      whenever("/api/ui/skill-packs", json([offering("review-kit")])),
+      whenever(attach("review-kit"), json("NoSuchPack"), "POST"),
+    );
+
+    const pane = await openComposer();
+    const menu = await openMenu(pane);
+    fireEvent.click(
+      await waitFor(() =>
+        within(menu).getByRole("menuitem", { name: "review-kit" }),
+      ),
+    );
+
+    await waitFor(() =>
+      expect(pane.textContent).toContain(
+        "No plugin installed here provides that skill pack.",
+      ),
+    );
   });
 });

@@ -72,6 +72,7 @@ import {
   faPaperclip,
   faPlug,
   faPlus,
+  faToolbox,
 } from "@fortawesome/free-solid-svg-icons";
 
 import styles from "./Attaching.module.css";
@@ -115,8 +116,9 @@ export type Shown = {
   removing?: boolean;
 };
 
-/// One thing in the row that is not a file: an MCP server the Conversation has
-/// attached, as the composer and the frozen Brief pane both draw it.
+/// One thing in the row that is not a file: an MCP server or a Skill Pack the
+/// Conversation has attached, as the composer and the frozen Brief pane both
+/// draw it.
 ///
 /// A chip rather than a pill, and told apart from one at a glance, because it is
 /// a different kind of thing: a file is bytes handed over and sitting in the
@@ -132,9 +134,10 @@ export type Chip = {
   /// What it is called, which is the whole of what the Conversation holds.
   name: string;
 
-  /// What kind of thing it is: an MCP server where nothing says otherwise, and
-  /// on a question set's sheet a repo or a device as well (ADR-0028). What
-  /// draws the mark in front of the name, and what a gone one says.
+  /// What kind of thing it is: an MCP server where nothing says otherwise, a
+  /// Skill Pack beside them on a Brief, and on a question set's sheet a repo
+  /// or a device as well (ADR-0028). What draws the mark in front of the name,
+  /// and what a gone one says.
   kind?: ChipKind;
 
   /// What else the chip says after the name, where there is more to it than a
@@ -142,7 +145,8 @@ export type Chip = {
   detail?: string;
 
   /// Whether nothing answers to that name any more — no declaration, no
-  /// registered repo, no linked device — which is what the chip says under it.
+  /// installed pack, no registered repo, no linked device — which is what the
+  /// chip says under it.
   gone?: boolean;
 
   /// Whether two declarations share the name, which only two devices declaring
@@ -163,7 +167,7 @@ export type Chip = {
   removing?: boolean;
 };
 
-export type ChipKind = "server" | "repo" | "device";
+export type ChipKind = "server" | "pack" | "repo" | "device";
 
 /// Each kind's mark, the words that name the mark to a screen reader, and what
 /// a chip of it says once nothing answers to its name.
@@ -172,6 +176,10 @@ const KINDS: Record<
   { icon: typeof faPlug; label: string; gone: string }
 > = {
   server: { icon: faPlug, label: "MCP server", gone: "no longer declared" },
+  // A pack's plugin disabled or removed since it was attached, or a local
+  // plugin's on a device without its directory: either way nothing loaded
+  // here provides it, which is what *installed* means to the human.
+  pack: { icon: faToolbox, label: "Skill pack", gone: "no longer installed" },
   repo: { icon: faCodeBranch, label: "Repo", gone: "no longer registered" },
   device: { icon: faDesktop, label: "Device", gone: "no longer linked" },
 };
@@ -375,7 +383,10 @@ export function Attachments(props: {
 /// Three answers, because the row holds three different things across the pages
 /// that draw one: one of several rows on a page is named for what it is under,
 /// a row that may hold chips as well as pills says so, and a row of files alone
-/// is what it always was. Said once here rather than at each of the three places
+/// is what it always was. A row of chips is named for what it is attached to
+/// rather than for each kind it may hold — MCP servers and Skill Packs both,
+/// on a Brief — because a name that listed every kind would be the longest
+/// thing in it, and the chips' own marks say which is which. Said once here rather than at each of the three places
 /// a `<Row>` is built, so the two halves of the composer's row — the live one
 /// and the frozen one — cannot come to be called different things.
 function rowNamed(onto: string | undefined, chips: boolean): string {
@@ -383,7 +394,7 @@ function rowNamed(onto: string | undefined, chips: boolean): string {
     return chips ? `Attached to ${onto}` : `Files attached to ${onto}`;
   }
 
-  return chips ? "Attached files and MCP servers" : "Attached files";
+  return chips ? "Attached to the brief" : "Attached files";
 }
 
 /// The row itself, which both of them are.

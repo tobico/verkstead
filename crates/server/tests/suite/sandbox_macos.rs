@@ -1496,12 +1496,12 @@ async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
         &format!(
             r#"
             file {grilling} grilling
-            say installed "$(ls {inside} | sort | tr '\n' ' ')"
+            say installed "$(ls {inside}/verkstead | sort | tr '\n' ' ')"
             dir {data} data-dir
             file "$HOME/.claude/CLAUDE.md" claude-md
             dir "$HOME/.claude/skills" the-accounts-own
             "#,
-            grilling = quoted(&inside.join("grilling/SKILL.md")),
+            grilling = quoted(&inside.join("verkstead/grilling/SKILL.md")),
             inside = quoted(&inside),
             data = quoted(fixture.state.path()),
         ),
@@ -2673,11 +2673,12 @@ fn entry_named(path: &Path) -> String {
         .collect()
 }
 
-/// The skill names as they sit on the host, in the shape the probe reports them
-/// from inside — so the assertion above is "the installed set, whatever it is
-/// this release" rather than a list to be edited every time a skill lands.
+/// The shipped pack's skill names as they sit on the host, in the shape the
+/// probe reports them from inside — so the assertion above is "the installed
+/// set, whatever it is this release" rather than a list to be edited every time
+/// a skill lands.
 fn installed_on_the_host(skills: &Skills) -> String {
-    let mut names: Vec<String> = std::fs::read_dir(skills.path())
+    let mut names: Vec<String> = std::fs::read_dir(skills.path().join("verkstead"))
         .expect("the skills are installed")
         .map(|entry| entry.expect("a readable entry").file_name())
         .map(|name| name.to_string_lossy().into_owned())
@@ -2984,7 +2985,7 @@ async fn the_grilling_skill_names_the_handoff_where_a_session_would_find_it() {
     let fixture = grilling().await;
 
     let grilling_skill =
-        std::fs::read_to_string(fixture.skills.path().join("grilling/SKILL.md")).unwrap();
+        std::fs::read_to_string(fixture.skills.path().join("verkstead/grilling/SKILL.md")).unwrap();
 
     assert!(
         grilling_skill.contains("$HOME/verkstead/handoff.md"),

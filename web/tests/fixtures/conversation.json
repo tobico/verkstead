@@ -143,6 +143,7 @@
     }
   },
   "shared": null,
+  "skill_packs": [],
   "state": "Draft",
   "stop_asked": false,
   "stopped_by_hand": false,

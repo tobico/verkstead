@@ -4015,6 +4015,14 @@ pub struct Sandbox {
     /// were any.
     mcp_servers: Vec<crate::settings::AttachedServer>,
 
+    /// And the Skill Packs this Conversation attached that are loaded on this
+    /// device, by name, read at the same moment — each bound read-only beside
+    /// the shipped ones, and no other pack written out beside them. See
+    /// [`Skills::bound`].
+    ///
+    /// Empty is the ordinary Conversation, and a Profile's login.
+    packs: Vec<String>,
+
     /// Where the session inside reaches Verkstead: this Conversation's own base
     /// URL, which is what `verkstead ask` puts its Sets to.
     ///
@@ -4342,6 +4350,13 @@ impl Sandbox {
             // it works off — and so that a name the settings no longer declare
             // is gone before anything can be built around it.
             mcp_servers: config.attached_among(&conversation.mcp_servers, secrets),
+            // The same way: a pack disabled or removed since it was attached is
+            // not loaded, and so is neither bound nor listed.
+            packs: skills
+                .among(&conversation.skill_packs)
+                .into_iter()
+                .map(|pack| pack.name)
+                .collect(),
             server: Some(reachable.asking_from(homes.platform(), conversation.id)),
             binds,
             shell: None,
@@ -4463,6 +4478,7 @@ impl Sandbox {
             git_author: GitAuthor::default(),
             instructions: String::new(),
             mcp_servers: Vec::new(),
+            packs: Vec::new(),
             server: None,
             binds: Vec::new(),
             shell: None,
@@ -4948,7 +4964,13 @@ impl Sandbox {
         // path a session is told to read is the one they are really written at
         // and the two sides of this are the same directory — see
         // [`crate::skills::Skills::inside`].
-        surface.elsewhere(self.skills.path(), self.skills.inside(), Reach::ReadOnly);
+        //
+        // A pack at a time — the shipped ones, and those this Conversation
+        // attached — so a session reaches the packs it was given and none of
+        // the others written out beside them.
+        for (host, inside) in self.skills.bound(&self.packs) {
+            surface.elsewhere(host, inside, Reach::ReadOnly);
+        }
 
         // And the files the human attached to this Conversation, beside them in
         // that same directory — read-only, because the copy is the record and an

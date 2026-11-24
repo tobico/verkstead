@@ -135,6 +135,7 @@
     }
   },
   "shared": null,
+  "skill_packs": [],
   "state": "Implementing",
   "stop_asked": false,
   "stopped_by_hand": false,

@@ -1,0 +1,16 @@
+# The skills Verkstead ships, as one Skill Pack named `verkstead`: what every
+# session it runs is told to read, at `/verkstead/skills/verkstead/<skill>/`.
+# Pure data — no capability and no component — and the one plugin the pack name
+# `verkstead` is reserved for. Listed first in the Plugins page's Built-in group.
+uuid: 15447a8d-f28d-4573-8b8b-a7226d477755
+name: Verkstead
+author:
+  name: Tobias Cohen
+  email: tobi@tobico.net
+version: 0.1.0
+interface: 1
+description: The skills every session Verkstead runs works by.
+provides:
+  - category: skills
+    name: verkstead
+    directory: skills

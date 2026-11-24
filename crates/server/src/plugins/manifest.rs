@@ -11,9 +11,9 @@
 //! knows is refused** rather than skipped, at the top and in every entry whose
 //! shape this stage settles: a misspelt `capabilites:` read as no capabilities
 //! is a plugin quietly doing less than its author wrote, which is the gap the
-//! interface version exists to stop. The one body left unread is a `provides:`
-//! entry's beyond its `category`, which belongs to the stage that gives that
-//! Category its grammar.
+//! interface version exists to stop. A `provides:` entry's body beyond its
+//! `category` is read here once a stage has given that Category its grammar —
+//! `skills`, so far, in [`Walk::packs`] — and kept as written until then.
 //!
 //! **Per-platform overrides replace, key by key.** A top-level `linux:`,
 //! `macos:` or `windows:` holds keys of the common declaration, and reading for
@@ -92,6 +92,8 @@ pub struct Manifest {
     pub mark: Option<Mark>,
     pub dependencies: Vec<Dependency>,
     pub provides: Vec<Provision>,
+    /// The Skill Packs its `skills` entries are, in the order written.
+    pub packs: Vec<Pack>,
     pub capabilities: Vec<Capability>,
     pub settings: Vec<Setting>,
     /// A `.wasm` inside the plugin's directory, relative to it.
@@ -135,6 +137,26 @@ pub struct Provision {
     pub category: Category,
     pub body: Map<String, Value>,
 }
+
+/// A **Skill Pack**: a `provides:` entry of the `skills` Category, read.
+///
+/// Pure data — it asks for no capability and carries no component. Each of its
+/// skills is a directory holding a `SKILL.md` whose frontmatter names it, the
+/// way the agents' own skill loaders read one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pack {
+    /// What its skills are named under, `<pack>/<skill>`, and the directory
+    /// they are installed in.
+    pub name: String,
+    /// The directory of `<skill>/SKILL.md`, relative to the plugin's.
+    pub directory: PathBuf,
+    /// Its skills' names, which are their directories', in order.
+    pub skills: Vec<String>,
+}
+
+/// The pack only the Skill Pack Verkstead ships may be named: its plugin's
+/// uuid is [`super::built_in::VERKSTEAD`].
+pub const RESERVED: &str = "verkstead";
 
 /// Which of the six kinds of thing a Plugin provides an entry is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -312,9 +334,12 @@ impl Manifest {
         let walk = Walk { files };
 
         let interface = walk.interface(&fields)?;
+        let uuid = uuid(required(&fields, "uuid")?, "uuid")?;
+        let provides = list(&fields, "provides", provision)?;
+        let packs = walk.packs(&provides, &uuid)?;
 
         Ok(Manifest {
-            uuid: uuid(required(&fields, "uuid")?, "uuid")?,
+            uuid,
             name: text_of(required(&fields, "name")?, "name")?,
             author: author(required(&fields, "author")?, "author")?,
             version: version(required(&fields, "version")?, "version")?,
@@ -323,7 +348,8 @@ impl Manifest {
             description: optional_text(&fields, "description", "description")?,
             mark: walk.mark(&fields)?,
             dependencies: list(&fields, "dependencies", dependency)?,
-            provides: list(&fields, "provides", provision)?,
+            provides,
+            packs,
             capabilities: list(&fields, "capabilities", capability)?,
             settings: settings(&fields)?,
             component: walk.component(&fields)?,
@@ -430,6 +456,52 @@ impl Files<'_> {
             Files::Embedded(files) => files.iter().any(|(name, _)| Path::new(name) == path),
         }
     }
+
+    /// Every file under the directory `path`, each relative to it, sorted; or
+    /// `None` where there is no such directory.
+    pub fn within(&self, path: &Path) -> Option<Vec<PathBuf>> {
+        let mut found = match self {
+            Files::Dir(dir) => {
+                let top = dir.join(path);
+                if !top.is_dir() {
+                    return None;
+                }
+                let mut found = Vec::new();
+                walked(&top, Path::new(""), &mut found);
+                found
+            }
+            Files::Embedded(files) => {
+                let found: Vec<PathBuf> = files
+                    .iter()
+                    .filter_map(|(name, _)| Path::new(name).strip_prefix(path).ok())
+                    .filter(|inside| inside.components().next().is_some())
+                    .map(Path::to_path_buf)
+                    .collect();
+                if found.is_empty() {
+                    return None;
+                }
+                found
+            }
+        };
+        found.sort();
+        Some(found)
+    }
+}
+
+/// Every file under `dir`, written into `found` relative to the directory the
+/// walk began at, `at` being `dir`'s place in it.
+fn walked(dir: &Path, at: &Path, found: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let inside = at.join(entry.file_name());
+        match entry.file_type() {
+            Ok(kind) if kind.is_dir() => walked(&entry.path(), &inside, found),
+            Ok(kind) if kind.is_file() => found.push(inside),
+            _ => {}
+        }
+    }
 }
 
 /// What reading a path needs: where the files it may name are.
@@ -506,6 +578,115 @@ impl Walk<'_> {
         Ok(Some(path))
     }
 
+    /// Every `skills` entry of `provides` read as a [`Pack`], each of its skills'
+    /// `SKILL.md` read for its frontmatter. Refused at the first that is wrong:
+    /// a skill's refusal names the skill.
+    fn packs(&self, provides: &[Provision], uuid: &str) -> Result<Vec<Pack>, Refusal> {
+        let mut packs: Vec<Pack> = Vec::new();
+        for (index, provision) in provides.iter().enumerate() {
+            if provision.category != Category::Skills {
+                continue;
+            }
+            let field = format!("provides[{index}]");
+            let pack = self.pack(&provision.body, &field, uuid)?;
+            if packs.iter().any(|seen| seen.name == pack.name) {
+                let field = format!("{field}.name");
+                return Err(Refusal::of(
+                    &field,
+                    format!(
+                        "`{field}` is `{}`, which an earlier entry already uses.",
+                        pack.name
+                    ),
+                ));
+            }
+            packs.push(pack);
+        }
+        Ok(packs)
+    }
+
+    fn pack(&self, body: &Map<String, Value>, field: &str, uuid: &str) -> Result<Pack, Refusal> {
+        if let Some(key) = body
+            .keys()
+            .find(|key| !["name", "directory"].contains(&key.as_str()))
+        {
+            return Err(Refusal::unknown(&format!("{field}.{key}")));
+        }
+
+        let name_field = format!("{field}.name");
+        let name = text_of(within(body, field, "name")?, &name_field)?;
+        if !name
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        {
+            return Err(Refusal::of(
+                &name_field,
+                format!(
+                    "`{name_field}` should be lowercase letters, digits and hyphens, like \
+                     `rust-review`."
+                ),
+            ));
+        }
+        if name == RESERVED && uuid != super::built_in::VERKSTEAD {
+            return Err(Refusal::of(
+                &name_field,
+                format!(
+                    "`{name_field}` is `{RESERVED}`, which is the name of the skills Verkstead \
+                     ships. Give the pack a name of its own."
+                ),
+            ));
+        }
+
+        let directory_field = format!("{field}.directory");
+        let written = text_of(within(body, field, "directory")?, &directory_field)?;
+        let directory = self.inside(&written, &directory_field)?;
+        let Some(files) = self.files.within(&directory) else {
+            return Err(Refusal::of(
+                &directory_field,
+                format!("`{written}` isn't a directory in the plugin's directory."),
+            ));
+        };
+
+        // Each directory at its top is a skill; a file there is the pack's own,
+        // a README say, and no skill.
+        let mut skills: Vec<String> = Vec::new();
+        for file in &files {
+            let mut components = file.components();
+            let (Some(first), Some(_)) = (components.next(), components.next()) else {
+                continue;
+            };
+            let skill = first.as_os_str().to_string_lossy().into_owned();
+            if !skills.contains(&skill) {
+                skills.push(skill);
+            }
+        }
+        if skills.is_empty() {
+            return Err(Refusal::of(
+                &directory_field,
+                format!("`{written}` holds no skills. Each is a directory with a `SKILL.md`."),
+            ));
+        }
+
+        for skill in &skills {
+            let path = directory.join(skill).join("SKILL.md");
+            let text = match self.files.read(&path) {
+                Some(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+                None => {
+                    return Err(Refusal::of(
+                        &directory_field,
+                        format!("The skill `{skill}` has no `SKILL.md`."),
+                    ));
+                }
+            };
+            frontmatter(&text, skill).map_err(|why| Refusal::of(&directory_field, why))?;
+        }
+
+        Ok(Pack {
+            name,
+            directory,
+            skills,
+        })
+    }
+
     /// `written` as a path relative to the plugin's directory, refused where it
     /// would reach outside it.
     fn inside(&self, written: &str, field: &str) -> Result<PathBuf, Refusal> {
@@ -521,6 +702,72 @@ impl Walk<'_> {
                 format!("`{field}` should be a path inside the plugin's directory."),
             ))
         }
+    }
+}
+
+/// Refused, in a sentence naming `skill`, where `text` — its `SKILL.md` — does
+/// not open with frontmatter carrying its own name and a description.
+fn frontmatter(text: &str, skill: &str) -> Result<(), String> {
+    let missing = || {
+        format!(
+            "The skill `{skill}` has no frontmatter. Its `SKILL.md` should open with a `---` \
+             line, its `name` and `description`, and another `---` line."
+        )
+    };
+
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let mut lines = text.lines();
+    if lines.next().map(str::trim_end) != Some("---") {
+        return Err(missing());
+    }
+    let mut yaml = String::new();
+    let mut closed = false;
+    for line in lines {
+        if line.trim_end() == "---" {
+            closed = true;
+            break;
+        }
+        yaml.push_str(line);
+        yaml.push('\n');
+    }
+    if !closed {
+        return Err(missing());
+    }
+
+    // YAML where it is, and one `key: value` a line where it is not: a
+    // description holding `: ` is not YAML, and the agents' skill loaders
+    // read it all the same, so this does too.
+    let fields = match serde_saphyr::from_str::<Value>(&yaml) {
+        Ok(Value::Object(fields)) => fields,
+        _ => yaml
+            .lines()
+            .filter(|line| !line.starts_with([' ', '\t', '#']))
+            .filter_map(|line| line.split_once(':'))
+            .map(|(key, value)| {
+                (
+                    key.trim().to_owned(),
+                    Value::String(value.trim().to_owned()),
+                )
+            })
+            .collect(),
+    };
+
+    match fields.get("name") {
+        Some(Value::String(name)) if name == skill => {}
+        Some(Value::String(name)) => {
+            return Err(format!(
+                "The skill `{skill}` is named `{name}` in its frontmatter. Its `name` should be \
+                 its directory's, `{skill}`."
+            ));
+        }
+        _ => return Err(format!("The skill `{skill}`'s frontmatter has no `name`.")),
+    }
+
+    match fields.get("description") {
+        Some(Value::String(description)) if !description.trim().is_empty() => Ok(()),
+        _ => Err(format!(
+            "The skill `{skill}`'s frontmatter has no `description`."
+        )),
     }
 }
 
@@ -1092,6 +1339,180 @@ windows:
         let yaml = format!("{MINIMAL}mark: <png/>\n");
 
         assert_eq!(refused_at(&yaml), "mark");
+    }
+
+    /// A plugin directory holding `MINIMAL` with one Skill Pack entry, `entry`
+    /// written under `provides:`, and each of `skills` as `skills/<name>/SKILL.md`.
+    fn packed(entry: &str, skills: &[(&str, &str)]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        for (skill, text) in skills {
+            let at = dir.path().join("skills").join(skill);
+            std::fs::create_dir_all(&at).unwrap();
+            std::fs::write(at.join("SKILL.md"), text).unwrap();
+        }
+        std::fs::write(
+            dir.path().join(FILE),
+            MINIMAL.replace(
+                "provides: []",
+                &format!("provides:\n  - category: skills\n{entry}"),
+            ),
+        )
+        .unwrap();
+        dir
+    }
+
+    const PACK: &str = "    name: rust-review\n    directory: skills\n";
+
+    const REVIEWING: (&str, &str) = (
+        "reviewing",
+        "---\nname: reviewing\ndescription: Review Rust.\n---\n\nRead the diff.\n",
+    );
+
+    #[test]
+    fn a_skill_pack_is_read_with_its_skills() {
+        let dir = packed(
+            PACK,
+            &[
+                REVIEWING,
+                ("linting", "---\nname: linting\ndescription: Lint.\n---\n"),
+            ],
+        );
+        std::fs::write(dir.path().join("skills/README.md"), "# A pack\n").unwrap();
+
+        let manifest = Manifest::read(dir.path(), Platform::Linux).unwrap();
+
+        assert_eq!(
+            manifest.packs,
+            [Pack {
+                name: "rust-review".to_owned(),
+                directory: PathBuf::from("skills"),
+                skills: vec!["linting".to_owned(), "reviewing".to_owned()],
+            }],
+            "a file at the directory's top is no skill",
+        );
+    }
+
+    #[test]
+    fn a_skill_without_frontmatter_is_refused_naming_the_skill() {
+        let dir = packed(PACK, &[("reviewing", "# Reviewing\n")]);
+
+        let refusal = Manifest::read(dir.path(), Platform::Linux).unwrap_err();
+
+        assert_eq!(refusal.field.as_deref(), Some("provides[0].directory"));
+        assert!(
+            refusal
+                .why
+                .starts_with("The skill `reviewing` has no frontmatter"),
+            "{refusal}"
+        );
+    }
+
+    #[test]
+    fn a_skill_whose_name_is_not_its_directorys_is_refused() {
+        let dir = packed(
+            PACK,
+            &[(
+                "reviewing",
+                "---\nname: review\ndescription: Review.\n---\n",
+            )],
+        );
+
+        let refusal = Manifest::read(dir.path(), Platform::Linux).unwrap_err();
+
+        assert!(
+            refusal.why.contains("`reviewing` is named `review`"),
+            "{refusal}"
+        );
+    }
+
+    #[test]
+    fn a_description_holding_a_colon_is_read_as_the_skill_loaders_read_it() {
+        let dir = packed(
+            PACK,
+            &[(
+                "reviewing",
+                "---\nname: reviewing\ndescription: Review Rust: the diff, then the tests.\n---\n",
+            )],
+        );
+
+        assert!(Manifest::read(dir.path(), Platform::Linux).is_ok());
+    }
+
+    #[test]
+    fn a_skill_with_no_description_is_refused() {
+        let dir = packed(PACK, &[("reviewing", "---\nname: reviewing\n---\n")]);
+
+        let refusal = Manifest::read(dir.path(), Platform::Linux).unwrap_err();
+
+        assert!(refusal.why.contains("no `description`"), "{refusal}");
+    }
+
+    #[test]
+    fn a_skill_directory_without_a_skill_md_is_refused() {
+        let dir = packed(PACK, &[REVIEWING]);
+        std::fs::create_dir_all(dir.path().join("skills/linting")).unwrap();
+        // Not `skill.md`, which a case-insensitive filesystem — Windows', a
+        // Mac's by default — opens as `SKILL.md`.
+        std::fs::write(dir.path().join("skills/linting/README.md"), "x").unwrap();
+
+        let refusal = Manifest::read(dir.path(), Platform::Linux).unwrap_err();
+
+        assert_eq!(refusal.why, "The skill `linting` has no `SKILL.md`.");
+    }
+
+    #[test]
+    fn a_pack_named_verkstead_is_refused_but_for_the_built_in() {
+        let entry = "    name: verkstead\n    directory: skills\n";
+        let dir = packed(entry, &[REVIEWING]);
+
+        let refusal = Manifest::read(dir.path(), Platform::Linux).unwrap_err();
+        assert_eq!(refusal.field.as_deref(), Some("provides[0].name"));
+
+        let text = std::fs::read_to_string(dir.path().join(FILE))
+            .unwrap()
+            .replace(
+                "0b6f6b7e-5c3a-4d0e-9a51-2f7d8c1e4a90",
+                super::super::built_in::VERKSTEAD,
+            );
+        Manifest::parse(&text, Files::Dir(dir.path()), Platform::Linux)
+            .expect("the name is the built-in's own");
+    }
+
+    #[test]
+    fn a_pack_name_is_lowercase_and_hyphens() {
+        let dir = packed(
+            "    name: Rust Review\n    directory: skills\n",
+            &[REVIEWING],
+        );
+
+        let refusal = Manifest::read(dir.path(), Platform::Linux).unwrap_err();
+
+        assert_eq!(refusal.field.as_deref(), Some("provides[0].name"));
+    }
+
+    #[test]
+    fn a_pack_entry_with_an_unknown_key_is_refused() {
+        let dir = packed(&format!("{PACK}    skils: x\n"), &[REVIEWING]);
+
+        assert_eq!(
+            Manifest::read(dir.path(), Platform::Linux)
+                .unwrap_err()
+                .field
+                .as_deref(),
+            Some("provides[0].skils")
+        );
+    }
+
+    #[test]
+    fn a_pack_whose_directory_is_not_there_is_refused() {
+        let dir = packed(
+            "    name: rust-review\n    directory: elsewhere\n",
+            &[REVIEWING],
+        );
+
+        let refusal = Manifest::read(dir.path(), Platform::Linux).unwrap_err();
+
+        assert_eq!(refusal.field.as_deref(), Some("provides[0].directory"));
     }
 
     #[test]

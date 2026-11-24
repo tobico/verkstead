@@ -38,7 +38,7 @@ use verkstead_server::sandbox::{
     Bind, Closing, Executable, Homes, Reachable, Sandbox, SandboxConfig, under_dev_shell,
 };
 use verkstead_server::settings::Settings;
-use verkstead_server::skills::Skills;
+use verkstead_server::skills::{LoadedPack, Skills};
 use verkstead_server::store;
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -4063,12 +4063,13 @@ async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
         &sandbox,
         &format!(
             r#"
-            file "/verkstead/skills/grilling/SKILL.md" grilling
+            file "/verkstead/skills/verkstead/grilling/SKILL.md" grilling
+            file "/verkstead/skills/grilling/SKILL.md" unpacked
             say installed "$(ls /verkstead/skills | sort | tr '\n' ' ')"
             say verkstead "$(ls /verkstead | sort | tr '\n' ' ')"
             file "$HOME/.claude/CLAUDE.md" claude-md
             dir {tobico} tobico-skills
-            if {grep} -q 'verkstead ask' "/verkstead/skills/grilling/SKILL.md"; then
+            if {grep} -q 'verkstead ask' "/verkstead/skills/verkstead/grilling/SKILL.md"; then
                 say ask-instruction inside
             else
                 say ask-instruction missing
@@ -4082,6 +4083,14 @@ async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
     assert_eq!(
         reported["grilling"], "read",
         "the bundled grilling skill is installed, and is not a session's to rewrite"
+    );
+    assert_eq!(
+        reported["unpacked"], "absent",
+        "a skill is named with its pack, and is not where it was before it had one"
+    );
+    assert_eq!(
+        reported["installed"], "verkstead ",
+        "the mount holds a directory per pack, and the bundled skills are one"
     );
     assert_eq!(
         reported["installed"],
@@ -4114,6 +4123,61 @@ async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
 /// The skill names as they sit on the host, in the shape the probe reports them
 /// from inside — so the assertion above is "the installed set, whatever it is
 /// this release" rather than a list to be edited every time a skill lands.
+/// A Skill Pack an installed plugin provides is inside only where the
+/// Conversation attached it, at `/verkstead/skills/<pack>/` — and a pack
+/// written out beside it that this Conversation did not attach is not there at
+/// all, the mount being a pack at a time rather than the whole directory.
+#[tokio::test]
+async fn an_attached_pack_is_inside_and_no_other_pack_is() {
+    let mut fixture = grilling().await;
+
+    let mut loaded = Vec::new();
+    for pack in ["rust-review", "go-review"] {
+        let skill = fixture.skills.path().join(pack).join("reviewing");
+        std::fs::create_dir_all(&skill).unwrap();
+        std::fs::write(
+            skill.join("SKILL.md"),
+            "---\nname: reviewing\ndescription: Review.\n---\n",
+        )
+        .unwrap();
+        loaded.push(LoadedPack {
+            name: pack.to_owned(),
+            plugin: format!("{pack} plugin"),
+            skills: vec!["reviewing".to_owned()],
+        });
+    }
+    fixture.skills.holding(loaded);
+
+    const ASKED: &str = r#"
+        file "/verkstead/skills/rust-review/reviewing/SKILL.md" rust
+        file "/verkstead/skills/go-review/reviewing/SKILL.md" go
+        file "/verkstead/skills/verkstead/grilling/SKILL.md" grilling
+        say installed "$(ls /verkstead/skills | sort | tr '\n' ' ')"
+    "#;
+
+    let without = probe(&fixture.sandbox(vec![]), ASKED);
+    assert_eq!(
+        without["rust"], "absent",
+        "a Conversation that attached no pack cannot reach one"
+    );
+    assert_eq!(without["installed"], "verkstead ");
+
+    fixture.conversation.skill_packs = vec!["rust-review".to_owned(), "gone".to_owned()];
+    let with = probe(&fixture.sandbox(vec![]), ASKED);
+
+    assert_eq!(
+        with["rust"], "read",
+        "the attached pack's skills are read where the prompt says, and are not a \
+         session's to rewrite"
+    );
+    assert_eq!(with["go"], "absent", "a pack nobody attached is not there");
+    assert_eq!(with["grilling"], "read", "and the shipped pack still is");
+    assert_eq!(
+        with["installed"], "rust-review verkstead ",
+        "a pack attached and not loaded here is neither bound nor an error"
+    );
+}
+
 fn installed_on_the_host(skills: &Skills) -> String {
     let mut names: Vec<String> = std::fs::read_dir(skills.path())
         .expect("the skills are installed")

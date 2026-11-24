@@ -185,6 +185,8 @@ const CONVERSATION_KEYED: &[&str] = &[
     // names rather than anything of the installation's: what they referred to
     // stays declared in `config.yaml` after the Conversation is gone.
     "conversation_mcp_servers",
+    // And the Skill Packs, which are names for that same reason.
+    "conversation_skill_packs",
     // And the devices its agent was permitted to move it to, which are Device
     // Ids rather than anything of the machines': the machines stay linked.
     "permitted_devices",

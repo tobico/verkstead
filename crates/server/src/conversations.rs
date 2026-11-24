@@ -40,13 +40,13 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    Adopted, Attached, AttachedServerView, AttachmentRemoved, AttachmentView, BaseRecorded,
-    BranchRenamed, BriefSaved, CheckedOut, CompanionAdded, CompanionBaseRecorded,
+    Adopted, Attached, AttachedPackView, AttachedServerView, AttachmentRemoved, AttachmentView,
+    BaseRecorded, BranchRenamed, BriefSaved, CheckedOut, CompanionAdded, CompanionBaseRecorded,
     CompanionBranchRenamed, CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved,
-    Confirming, ConversationClosed, ConversationMove, GrillingStarted, OtherAuthor, PairingView,
-    PickedView, Process, ProcessPicked, ProfileEntry, ProfileTrouble, RepoPairingsView,
-    RepoSwitched, ServerAttached, ServerRemoved, Started, TakenUp, TargetRecorded, Uncommitted,
-    Worktree,
+    Confirming, ConversationClosed, ConversationMove, GrillingStarted, OfferedPack, OtherAuthor,
+    PackAttached, PackRemoved, PairingView, PickedView, Process, ProcessPicked, ProfileEntry,
+    ProfileTrouble, RepoPairingsView, RepoSwitched, ServerAttached, ServerRemoved, Started,
+    TakenUp, TargetRecorded, Uncommitted, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -1150,6 +1150,71 @@ pub(crate) fn declared_servers(state: &AppState) -> Vec<String> {
         .mcp_servers()
         .iter()
         .filter_map(|server| server.name().map(str::to_owned))
+        .collect()
+}
+
+/// Put an installed Skill Pack on a Conversation, for every session of it to
+/// be given mounted at `/verkstead/skills/<name>/` and listed in its prompt.
+///
+/// [`attach_server`]'s rules for a pack: the name and nothing else, refused
+/// once the round has started, and refused where no plugin loaded on this
+/// device provides a pack of that name — a pack disabled between the menu's
+/// drawing and the press would otherwise make a chip born gone. The built-in
+/// `verkstead` is never attached: every session has it already.
+pub(crate) async fn attach_pack(state: &AppState, id: i64, name: &str) -> Result<PackAttached> {
+    if !offered_packs(state).iter().any(|pack| pack.name == name) {
+        return Ok(PackAttached::NoSuchPack);
+    }
+
+    Ok(
+        match store::attach_skill_pack_to_draft(&state.pool, id, name).await? {
+            store::Edited::Saved => PackAttached::Attached,
+            store::Edited::NoSuchConversation => PackAttached::NoSuchConversation,
+            store::Edited::NotDrafting => PackAttached::NotDrafting,
+        },
+    )
+}
+
+/// And take one off again — asking nothing about the plugins, for
+/// [`detach_server`]'s reason: the chip most likely to be taken off is the one
+/// whose pack has gone.
+pub(crate) async fn detach_pack(state: &AppState, id: i64, name: &str) -> Result<PackRemoved> {
+    Ok(
+        match store::detach_skill_pack_from_draft(&state.pool, id, name).await? {
+            store::Edited::Saved => PackRemoved::Removed,
+            store::Edited::NoSuchConversation => PackRemoved::NoSuchConversation,
+            store::Edited::NotDrafting => PackRemoved::NotDrafting,
+        },
+    )
+}
+
+/// The Conversation's Skill Packs, in the shape the workbench draws them: each
+/// name, and whether a plugin loaded on this device still provides it.
+pub(crate) async fn attached_packs(state: &AppState, id: i64) -> Result<Vec<AttachedPackView>> {
+    let offered = offered_packs(state);
+
+    Ok(store::skill_packs(&state.pool, id)
+        .await?
+        .into_iter()
+        .map(|name| AttachedPackView {
+            installed: offered.iter().any(|pack| pack.name == name),
+            name,
+        })
+        .collect())
+}
+
+/// What the Attach menu offers of the Skill Packs: every one an enabled
+/// installed plugin provides that loaded on this device, as of the last load.
+pub(crate) fn offered_packs(state: &AppState) -> Vec<OfferedPack> {
+    state
+        .plugins
+        .packs()
+        .into_iter()
+        .map(|pack| OfferedPack {
+            name: pack.name,
+            plugin: pack.plugin,
+            skills: pack.skills,
+        })
         .collect()
 }
 

@@ -2,8 +2,9 @@
 //!
 //! A session's behaviour should be the product's rather than whatever happens
 //! to be installed on the machine it runs on. So Verkstead carries its own
-//! skills, embedded in the binary as the viewer is (ADR-0004), writes them out
-//! under the Data Directory at startup, and every sandbox reaches that
+//! skills, embedded in the binary as the viewer is (ADR-0004) — the built-in
+//! plugin [`built_in::VERKSTEAD`], whose one Skill Pack they are — writes them
+//! out under the Data Directory at startup, and every sandbox reaches that
 //! directory read-only — at [`INSIDE`] where a bind can make that path, and
 //! where they were really written where none can. Nothing beside the
 //! executable has to be there, and nothing of the host's is reachable for a
@@ -35,22 +36,15 @@
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 
 use anyhow::{Context, Result};
-use rust_embed::Embed;
 
 use crate::handoffs;
 use crate::platform::Platform;
+use crate::plugins::built_in;
+use crate::plugins::manifest::{Files, Pack};
 use crate::store;
-
-/// The skills as they are written in this repository, one directory per skill.
-///
-/// Compiled in for a release build and read off disk for a debug one, exactly
-/// as the viewer is and for the same reason: editing a skill is then visible to
-/// a running `cargo run -p verkstead-cli -- serve` without a recompile.
-#[derive(Embed)]
-#[folder = "$CARGO_MANIFEST_DIR/skills"]
-struct Bundled;
 
 /// Where the skills are mounted inside a sandbox, on the platform whose
 /// sandbox mounts anything.
@@ -80,43 +74,43 @@ const DIRECTORY: &str = "skills";
 /// Relative to the directory the skills are in, because that directory is not
 /// one thing: what a session is told to read is [`Skills::named`], which is
 /// this under whichever of the two [`Skills::inside`] turned out to be.
-const GRILLING: &str = "grilling/SKILL.md";
+const GRILLING: &str = "verkstead/grilling/SKILL.md";
 
 /// The implementation skill's, the same way.
-const IMPLEMENTING: &str = "implementing/SKILL.md";
+const IMPLEMENTING: &str = "verkstead/implementing/SKILL.md";
 
 /// And the staging skill's — Verkstead's fork of to-roadmap, which is what the
 /// roadmap direction runs instead of building anything itself.
-const STAGING: &str = "staging/SKILL.md";
+const STAGING: &str = "verkstead/staging/SKILL.md";
 
 /// And the fork of next-stage, which the one session a roadmap stage starts
 /// with runs inside: the session that re-grounds the stage's brief and writes
 /// the backlog the runner then works.
-const NEXT_STAGE: &str = "next-stage/SKILL.md";
+const NEXT_STAGE: &str = "verkstead/next-stage/SKILL.md";
 
 /// And the fork of next-task, which every session the runner launches is put
 /// inside — the task sessions and the finish one alike, because which of them it
 /// is, is read off `.tasks/` rather than told.
-const NEXT_TASK: &str = "next-task/SKILL.md";
+const NEXT_TASK: &str = "verkstead/next-task/SKILL.md";
 
 /// And the submitting skill's, which the one session launched over a finish
 /// that left no pull request runs inside: the work is built and committed, and
 /// the pull request it should have gone for review on is the one thing missing.
-const SUBMITTING: &str = "submitting/SKILL.md";
+const SUBMITTING: &str = "verkstead/submitting/SKILL.md";
 
 /// And the addressing skill's, which every fix session of a wrap-up runs
 /// inside — whichever of the three kinds of feedback dispatched it.
-const ADDRESSING: &str = "addressing/SKILL.md";
+const ADDRESSING: &str = "verkstead/addressing/SKILL.md";
 
 /// And the reviewing skill's, which the one session a wrap-up starts with runs
 /// inside: the fresh context that reads the branch none of the sessions that
 /// wrote it ever saw.
-const REVIEWING: &str = "reviewing/SKILL.md";
+const REVIEWING: &str = "verkstead/reviewing/SKILL.md";
 
 /// And the responding skill's, which a batch of comments left on the pull
 /// request after the review is answered inside: the review's propose-then-fix
 /// shape again, about what somebody has just said rather than about the branch.
-const RESPONDING: &str = "responding/SKILL.md";
+const RESPONDING: &str = "verkstead/responding/SKILL.md";
 
 /// And the instruction skill's, which the session a steer into Implementing
 /// writes its way into runs inside.
@@ -125,7 +119,7 @@ const RESPONDING: &str = "responding/SKILL.md";
 /// what follows it is whatever the branch then holds, rather than a
 /// Conversation left standing beside the work its session did — see
 /// [`crate::runner::instructed`].
-const INSTRUCTION: &str = "instruction/SKILL.md";
+const INSTRUCTION: &str = "verkstead/instruction/SKILL.md";
 
 /// And the following-up skill's, which the session a steer into Follow-up
 /// launches runs inside.
@@ -134,7 +128,7 @@ const INSTRUCTION: &str = "instruction/SKILL.md";
 /// and then rounds of ordinary Question Sets go back and forth until they have
 /// nothing else. What ends one is the system's business rather than the
 /// session's, so the skill says nothing about it.
-const FOLLOWING_UP: &str = "following-up/SKILL.md";
+const FOLLOWING_UP: &str = "verkstead/following-up/SKILL.md";
 
 /// And the investigating skill's, which the one session an **Investigate**
 /// Conversation runs — and the one a steer into Investigating starts — runs
@@ -147,7 +141,7 @@ const FOLLOWING_UP: &str = "following-up/SKILL.md";
 /// them; the instruction is the whole of what keeps commits off the branch, and
 /// one that lands anyway breaks nothing — the branch is the Conversation's and
 /// goes nowhere.
-const INVESTIGATING: &str = "investigating/SKILL.md";
+const INVESTIGATING: &str = "verkstead/investigating/SKILL.md";
 
 /// The bundled skills, installed on the host, ready for a sandbox to bind.
 #[derive(Debug, Clone)]
@@ -157,6 +151,34 @@ pub struct Skills {
     /// And where a session reads them, which is `path` itself wherever nothing
     /// can be mounted anywhere else — see [`Skills::inside`].
     inside: PathBuf,
+
+    /// The packs the built-in plugins ship, which every session is given —
+    /// `verkstead`, today.
+    shipped: Vec<String>,
+
+    /// And the installed plugins' packs that loaded on this device, as the
+    /// last load wrote them out — see [`Skills::holding`]. Shared by every
+    /// clone, so what a launch reads is what the plugins came to last.
+    loaded: Arc<RwLock<Vec<LoadedPack>>>,
+
+    /// Whether the installed plugins have loaded once since the start, which
+    /// is when `loaded` first says what this device has — see
+    /// [`Skills::settled`].
+    settled: Arc<tokio::sync::watch::Sender<bool>>,
+}
+
+/// One installed plugin's Skill Pack, written out under the skills directory
+/// and attachable to a Conversation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadedPack {
+    /// Its name, which is its directory: `<skills>/<name>/`.
+    pub name: String,
+
+    /// The plugin providing it, by its manifest's name.
+    pub plugin: String,
+
+    /// Its skills, by name, in the order the pack lists them.
+    pub skills: Vec<String>,
 }
 
 impl Skills {
@@ -213,24 +235,22 @@ impl Skills {
             }
         }
 
+        // Read through the manifest reader an installed plugin's pack is, so
+        // the skills Verkstead ships are held to the same frontmatter.
+        let shipped = built_in::verkstead();
+        let manifest = shipped
+            .manifest(platform)
+            .map_err(|refusal| anyhow::anyhow!("the skills this binary ships: {refusal}"))?;
+
         let mut installed = 0;
-
-        for name in Bundled::iter() {
-            let file = Bundled::get(&name)
-                .expect("a name the embedding just handed out is one it answers to");
-
-            let written = path.join(name.as_ref());
-
-            if let Some(parent) = written.parent() {
-                std::fs::create_dir_all(parent)
-                    .with_context(|| format!("making {}", parent.display()))?;
-            }
-
-            std::fs::write(&written, said_at(&file.data, &inside, handoffs))
-                .with_context(|| format!("installing the skill {}", written.display()))?;
-
-            installed += 1;
+        for pack in &manifest.packs {
+            installed += written(shipped.files(), pack, &path, &inside, handoffs)?;
         }
+        let shipped = manifest
+            .packs
+            .iter()
+            .map(|pack| pack.name.clone())
+            .collect();
 
         if installed == 0 {
             anyhow::bail!(
@@ -239,9 +259,15 @@ impl Skills {
             );
         }
 
-        tracing::debug!(path = %path.display(), files = installed, "the bundled skills are installed");
+        tracing::debug!(path = %path.display(), files = installed, "the skills Verkstead ships are installed");
 
-        Ok(Skills { path, inside })
+        Ok(Skills {
+            path,
+            inside,
+            shipped,
+            loaded: Arc::default(),
+            settled: Arc::new(tokio::sync::watch::Sender::new(false)),
+        })
     }
 
     /// Where they landed, which is what a sandbox reaches for.
@@ -269,6 +295,194 @@ impl Skills {
             .display()
             .to_string()
     }
+
+    /// Hold `packs` as what the installed plugins came to on this device,
+    /// once they are written out — see [`placed`]. What every launch after it
+    /// mounts and lists, and what the Attach menu offers.
+    pub fn holding(&self, packs: Vec<LoadedPack>) {
+        *self
+            .loaded
+            .write()
+            .expect("nothing panics holding the loaded packs") = packs;
+        self.settle();
+    }
+
+    /// Say the installed plugins' first load is over, whether or not it held
+    /// anything: one that failed has nothing more to say, and a launch waiting
+    /// on it would wait for good.
+    pub fn settle(&self) {
+        self.settled.send_replace(true);
+    }
+
+    /// Once the installed plugins have loaded since the start — at once, ever
+    /// after the first. Until then nothing is held, so a launch reading the
+    /// packs in that window would leave every attached one out of its session
+    /// for the whole of its life, and say nothing (the start loads the plugins
+    /// without waiting, a wasm component taking a moment to compile).
+    pub(crate) async fn settled(&self) {
+        let mut settled = self.settled.subscribe();
+        // The sender is held here, so the wait cannot end for want of one.
+        let _ = settled.wait_for(|settled| *settled).await;
+    }
+
+    /// The installed plugins' packs loaded here.
+    pub(crate) fn loaded(&self) -> Vec<LoadedPack> {
+        self.loaded
+            .read()
+            .expect("nothing panics holding the loaded packs")
+            .clone()
+    }
+
+    /// Those of `attached` that are loaded here, in the order they were
+    /// attached in: a name disabled, removed or never loaded on this device is
+    /// left out, being neither mounted nor listed (Q7).
+    pub(crate) fn among(&self, attached: &[String]) -> Vec<LoadedPack> {
+        let loaded = self.loaded();
+        attached
+            .iter()
+            .filter_map(|name| loaded.iter().find(|pack| pack.name == *name).cloned())
+            .collect()
+    }
+
+    /// Every pack a session given `attached` reaches: the shipped ones and
+    /// those, each as the directory it was written to and the one a session
+    /// reads it at.
+    ///
+    /// A directory per pack rather than the whole of the skills directory, so a
+    /// session has the packs its Conversation attached and none of the others
+    /// written out beside them.
+    pub(crate) fn bound(&self, attached: &[String]) -> Vec<(PathBuf, PathBuf)> {
+        self.shipped
+            .iter()
+            .chain(attached)
+            .map(|pack| {
+                (
+                    self.path.join(pack),
+                    crate::sandbox::under(&self.inside, pack),
+                )
+            })
+            .collect()
+    }
+}
+
+/// One installed plugin's Skill Pack, and where its plugin's files are.
+pub(crate) struct Placing<'a> {
+    pub(crate) files: Files<'a>,
+    pub(crate) pack: &'a Pack,
+}
+
+/// The installed plugins' Skill Packs written out beside the ones Verkstead
+/// ships, under `data_dir`: each of `packs` replaced whole, and every pack
+/// directory that is neither one of them nor a built-in's taken away — a
+/// disabled, removed or troubled plugin's pack is not there.
+///
+/// Through the same [`said_at`] the built-in pack is, so a pack's skill naming
+/// another's path names where it really is. Run each time the installed
+/// plugins load; what [`Skills::installed`] wrote at the start is untouched.
+pub(crate) fn placed(platform: Platform, data_dir: &Path, packs: &[Placing<'_>]) -> Result<()> {
+    let path = data_dir.join(DIRECTORY);
+    let inside = crate::sandbox::under(
+        &crate::sandbox::own_directory(platform, data_dir),
+        DIRECTORY,
+    );
+    let handoffs = handoffs::said(platform);
+
+    let shipped: Vec<String> = built_in::BUILT_INS
+        .iter()
+        .filter_map(|shipped| shipped.manifest(platform).ok())
+        .flat_map(|manifest| manifest.packs)
+        .map(|pack| pack.name)
+        .collect();
+
+    if let Ok(entries) = std::fs::read_dir(&path) {
+        for entry in entries.filter_map(Result::ok) {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let wanted = packs.iter().any(|placing| placing.pack.name == name);
+            if shipped.contains(&name) || wanted {
+                continue;
+            }
+            std::fs::remove_dir_all(entry.path())
+                .with_context(|| format!("taking away the pack at {}", entry.path().display()))?;
+        }
+    }
+
+    // Each pack rewritten in place rather than deleted and made again: a
+    // running session is bound the pack's directory itself, so one made anew
+    // would leave its bind on the deleted one, empty — and on Windows take
+    // the grant on it away. What the pack no longer has is all that goes.
+    for placing in packs {
+        let pack = path.join(&placing.pack.name);
+        let kept = placing
+            .files
+            .within(&placing.pack.directory)
+            .unwrap_or_default();
+        pruned(&pack, Path::new(""), &kept)?;
+        written(placing.files, placing.pack, &path, &inside, handoffs)?;
+    }
+
+    Ok(())
+}
+
+/// Everything under `dir` that is not one of `kept` nor a directory holding
+/// one, taken away — `at` being `dir`'s place in the pack, and every path in
+/// `kept` relative to the pack. Nothing there at all is nothing to take.
+fn pruned(dir: &Path, at: &Path, kept: &[PathBuf]) -> Result<()> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(());
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let inside = at.join(entry.file_name());
+        let directory = entry.file_type().is_ok_and(|kind| kind.is_dir());
+        let gone = if directory {
+            !kept
+                .iter()
+                .any(|file| file.starts_with(&inside) && *file != inside)
+        } else {
+            !kept.contains(&inside)
+        };
+
+        if !gone {
+            if directory {
+                pruned(&entry.path(), &inside, kept)?;
+            }
+            continue;
+        }
+
+        if directory {
+            std::fs::remove_dir_all(entry.path())
+        } else {
+            std::fs::remove_file(entry.path())
+        }
+        .with_context(|| format!("taking {} out of its pack", entry.path().display()))?;
+    }
+    Ok(())
+}
+
+/// Every file of `pack` written under `path`, in a directory of the pack's
+/// name, saying where the directories it names are; how many.
+fn written(
+    files: Files<'_>,
+    pack: &Pack,
+    path: &Path,
+    inside: &Path,
+    handoffs: &str,
+) -> Result<usize> {
+    let within = files.within(&pack.directory).unwrap_or_default();
+    for file in &within {
+        let data = files
+            .read(&pack.directory.join(file))
+            .with_context(|| format!("reading the skill file {}", file.display()))?;
+        let written = path.join(&pack.name).join(file);
+
+        if let Some(parent) = written.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("making {}", parent.display()))?;
+        }
+
+        std::fs::write(&written, said_at(&data, inside, handoffs))
+            .with_context(|| format!("installing the skill {}", written.display()))?;
+    }
+    Ok(within.len())
 }
 
 /// A skill's own text, saying where the two directories it names really are.
@@ -1298,6 +1512,49 @@ pub(crate) fn served(prompt: &str, servers: &[String], agent: store::AgentType) 
     )
 }
 
+/// The same prompt again, with the Skill Packs the Conversation attached
+/// listed under it — each pack, and each of its skills at the path of its
+/// `SKILL.md` — so a session finds them by reading rather than by exploring the
+/// mount.
+///
+/// [`served`]'s listing for its reasons: on every session prompt, appended
+/// where every session is launched, and neutral. `packs` is what the chips came
+/// to at this launch — the ones loaded on this device, in the order they were
+/// attached — so one gone since is not listed any more than it is mounted. The
+/// built-in `verkstead` is never among them: every session has it, and the
+/// prompt it was started on names the skill it runs. None, no heading.
+pub(crate) fn packed(prompt: &str, packs: &[LoadedPack], skills: &Skills) -> String {
+    if packs.is_empty() {
+        return prompt.to_owned();
+    }
+
+    let listed: Vec<String> = packs
+        .iter()
+        .map(|pack| {
+            let each: String = pack
+                .skills
+                .iter()
+                .map(|skill| {
+                    format!(
+                        "\n  - `{}/{skill}`: `{}`",
+                        pack.name,
+                        skills.named(&format!("{}/{skill}/SKILL.md", pack.name)),
+                    )
+                })
+                .collect();
+            format!("- `{}`{each}", pack.name)
+        })
+        .collect();
+
+    format!(
+        "{}\n\n# Skill packs\n\nThe human attached these Skill Packs to this Conversation. \
+         Each skill is a `SKILL.md`, at the path beside its name, in a directory this session \
+         can read and not write.\n\n{}\n",
+        prompt.trim_end(),
+        listed.join("\n"),
+    )
+}
+
 /// What a harness puts in front of an MCP server's tool names.
 ///
 /// Each read off a real run against a server that recorded what it was asked,
@@ -1727,9 +1984,45 @@ mod tests {
     /// The one mount path no prompt here names. Nothing launches a session into
     /// the breakdown: the grilling session reads on into it, in the grilling
     /// skill's own words, so what this is for is holding that promise to a test.
-    const BREAKING_DOWN: &str = "breaking-down/SKILL.md";
+    const BREAKING_DOWN: &str = "verkstead/breaking-down/SKILL.md";
 
     use super::*;
+
+    /// The skills this binary ships, each by its name `verkstead/<skill>/…`,
+    /// read out of the built-in pack the way [`Skills::installed`] reads them.
+    struct Bundled;
+
+    impl Bundled {
+        fn iter() -> impl Iterator<Item = String> {
+            let shipped = built_in::verkstead();
+            let manifest = shipped.manifest(Platform::HERE).expect("the pack reads");
+            manifest
+                .packs
+                .into_iter()
+                .flat_map(move |pack| {
+                    let files = shipped.files().within(&pack.directory).unwrap_or_default();
+                    files.into_iter().map(move |file| {
+                        Path::new(&pack.name)
+                            .join(file)
+                            .iter()
+                            .map(|component| component.to_string_lossy().into_owned())
+                            .collect::<Vec<_>>()
+                            .join("/")
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+        }
+
+        fn get(name: &str) -> Option<Vec<u8>> {
+            let shipped = built_in::verkstead();
+            let manifest = shipped.manifest(Platform::HERE).expect("the pack reads");
+            manifest.packs.iter().find_map(|pack| {
+                let file = Path::new(name).strip_prefix(&pack.name).ok()?;
+                shipped.files().read(&pack.directory.join(file))
+            })
+        }
+    }
 
     /// The skills as a session finds them where a bind makes the path, which is
     /// what a test about a *prompt* is about: what these hold to is the
@@ -1743,6 +2036,9 @@ mod tests {
         Skills {
             path: PathBuf::from(INSIDE),
             inside: PathBuf::from(INSIDE),
+            shipped: vec![crate::plugins::manifest::RESERVED.to_owned()],
+            loaded: Arc::default(),
+            settled: Arc::new(tokio::sync::watch::Sender::new(false)),
         }
     }
 
@@ -1755,7 +2051,7 @@ mod tests {
     fn skill(name: &str) -> String {
         let file = Bundled::get(name).unwrap_or_else(|| panic!("{name} is one of the skills"));
 
-        String::from_utf8(file.data.to_vec()).expect("a skill is markdown")
+        String::from_utf8(file).expect("a skill is markdown")
     }
 
     /// The same, as one long line: the skills are wrapped at eighty columns, so
@@ -1807,7 +2103,7 @@ mod tests {
     /// said.
     #[test]
     fn a_skill_at_the_mount_is_installed_word_for_word() {
-        let said = b"Read /verkstead/skills/staging/SKILL.md, then write \
+        let said = b"Read /verkstead/skills/verkstead/staging/SKILL.md, then write \
                      /tmp/verkstead/handoff.md.\n";
 
         assert_eq!(
@@ -1829,8 +2125,8 @@ mod tests {
         let inside = Path::new("/Users/you/Library/Application Support/Verkstead/skills");
 
         let said = said_at(
-            b"Read /verkstead/skills/staging/SKILL.md, then \
-              /verkstead/skills/breaking-down/SKILL.md, and write \
+            b"Read /verkstead/skills/verkstead/staging/SKILL.md, then \
+              /verkstead/skills/verkstead/breaking-down/SKILL.md, and write \
               /tmp/verkstead/handoff.md.\n",
             inside,
             handoffs::SAID_INSIDE_HOME,
@@ -1838,8 +2134,8 @@ mod tests {
 
         assert_eq!(
             String::from_utf8(said.into_owned()).unwrap(),
-            "Read /Users/you/Library/Application Support/Verkstead/skills/staging/SKILL.md, \
-             then /Users/you/Library/Application Support/Verkstead/skills/breaking-down/SKILL.md, \
+            "Read /Users/you/Library/Application Support/Verkstead/skills/verkstead/staging/SKILL.md, \
+             then /Users/you/Library/Application Support/Verkstead/skills/verkstead/breaking-down/SKILL.md, \
              and write $HOME/verkstead/handoff.md.\n",
             "a session told to read or write a path has to be told one it can open",
         );
@@ -1891,7 +2187,7 @@ mod tests {
     fn every_skill_this_binary_ships_has_a_path_a_session_reaches_it_by() {
         for name in Bundled::iter() {
             assert!(
-                NAMED.contains(&name.as_ref()),
+                NAMED.contains(&name.as_str()),
                 "{name} is shipped and nothing names it, so no session can be \
                  sent into it and nothing holds its path to the mount"
             );
@@ -1948,7 +2244,7 @@ mod tests {
     /// human's own text rather than anywhere Verkstead says how to ask.
     #[test]
     fn the_grilling_skill_says_how_to_reach_the_human() {
-        let grilling = skill("grilling/SKILL.md");
+        let grilling = skill("verkstead/grilling/SKILL.md");
 
         assert!(
             grilling.contains("verkstead guide"),
@@ -1971,7 +2267,7 @@ mod tests {
     /// until the human closed it.
     #[test]
     fn the_grilling_skill_says_how_a_grilling_ends() {
-        let grilling = skill("grilling/SKILL.md");
+        let grilling = skill("verkstead/grilling/SKILL.md");
 
         assert!(
             grilling.contains("proposal:"),
@@ -2002,7 +2298,7 @@ mod tests {
     /// the skill saying so.
     #[test]
     fn the_grilling_skill_says_a_pick_is_argued_with_by_proposing_again() {
-        let grilling = skill("grilling/SKILL.md");
+        let grilling = skill("verkstead/grilling/SKILL.md");
 
         let (_, after) = grilling
             .split_once("### After they pick")
@@ -2040,7 +2336,7 @@ mod tests {
     /// reads on into.
     #[test]
     fn the_grilling_skill_says_to_break_the_work_down_where_a_task_list_is_picked() {
-        let grilling = skill("grilling/SKILL.md");
+        let grilling = skill("verkstead/grilling/SKILL.md");
 
         assert!(
             grilling.contains(&at(BREAKING_DOWN)),
@@ -2048,7 +2344,7 @@ mod tests {
              {grilling}"
         );
         assert!(
-            flowed("grilling/SKILL.md").contains("Do not start task 01"),
+            flowed("verkstead/grilling/SKILL.md").contains("Do not start task 01"),
             "the backlog is where this session stops: the tasks are the runner's, \
              a fresh session each: {grilling}"
         );
@@ -2060,7 +2356,7 @@ mod tests {
     /// artifact to the pull request, where the breakdown's stops at the commit.
     #[test]
     fn the_grilling_skill_says_to_stage_the_work_where_a_roadmap_is_picked() {
-        let grilling = skill("grilling/SKILL.md");
+        let grilling = skill("verkstead/grilling/SKILL.md");
 
         assert!(
             grilling.contains(&at(STAGING)),
@@ -2105,7 +2401,7 @@ mod tests {
     /// answered.
     #[test]
     fn the_grilling_skill_says_where_the_handoff_is_written() {
-        let grilling = skill("grilling/SKILL.md");
+        let grilling = skill("verkstead/grilling/SKILL.md");
 
         assert!(
             grilling.contains(crate::handoffs::HANDOFF_INSIDE),
@@ -2136,7 +2432,7 @@ mod tests {
     /// record of the plan that nothing downstream reads.
     #[test]
     fn the_grilling_skill_writes_no_handoff_on_the_picks_that_commit_one() {
-        let grilling = skill("grilling/SKILL.md");
+        let grilling = skill("verkstead/grilling/SKILL.md");
 
         let (_, tails) = grilling
             .split_once("### When they pick a task list")
@@ -2165,18 +2461,18 @@ mod tests {
     #[test]
     fn the_skills_ended_on_the_done_signal_say_to_give_it() {
         for name in [
-            "next-task/SKILL.md",
-            "next-stage/SKILL.md",
-            "breaking-down/SKILL.md",
-            "staging/SKILL.md",
-            "implementing/SKILL.md",
-            "instruction/SKILL.md",
-            "addressing/SKILL.md",
-            "reviewing/SKILL.md",
-            "responding/SKILL.md",
-            "submitting/SKILL.md",
-            "following-up/SKILL.md",
-            "investigating/SKILL.md",
+            "verkstead/next-task/SKILL.md",
+            "verkstead/next-stage/SKILL.md",
+            "verkstead/breaking-down/SKILL.md",
+            "verkstead/staging/SKILL.md",
+            "verkstead/implementing/SKILL.md",
+            "verkstead/instruction/SKILL.md",
+            "verkstead/addressing/SKILL.md",
+            "verkstead/reviewing/SKILL.md",
+            "verkstead/responding/SKILL.md",
+            "verkstead/submitting/SKILL.md",
+            "verkstead/following-up/SKILL.md",
+            "verkstead/investigating/SKILL.md",
         ] {
             let skill = skill(name);
 
@@ -2190,7 +2486,7 @@ mod tests {
             );
         }
 
-        let grilling = skill("grilling/SKILL.md");
+        let grilling = skill("verkstead/grilling/SKILL.md");
         let (_, picked) = grilling
             .split_once("### After they pick")
             .expect("the grilling skill carries what follows a pick");
@@ -2304,10 +2600,10 @@ mod tests {
     #[test]
     fn the_skills_ended_on_a_pull_request_open_it_before_they_signal() {
         for name in [
-            "next-task/SKILL.md",
-            "implementing/SKILL.md",
-            "staging/SKILL.md",
-            "submitting/SKILL.md",
+            "verkstead/next-task/SKILL.md",
+            "verkstead/implementing/SKILL.md",
+            "verkstead/staging/SKILL.md",
+            "verkstead/submitting/SKILL.md",
         ] {
             let skill = flowed(name);
 
@@ -2337,9 +2633,9 @@ mod tests {
     #[test]
     fn the_skills_that_list_companions_say_their_pull_requests_are_asked_for_at_the_signal() {
         for name in [
-            "next-task/SKILL.md",
-            "implementing/SKILL.md",
-            "staging/SKILL.md",
+            "verkstead/next-task/SKILL.md",
+            "verkstead/implementing/SKILL.md",
+            "verkstead/staging/SKILL.md",
         ] {
             let skill = flowed(name);
 
@@ -2358,7 +2654,7 @@ mod tests {
     /// and feedback consolidates when the branch is reviewed as a whole.
     #[test]
     fn the_implementation_skill_says_to_commit_without_asking() {
-        let implementing = skill("implementing/SKILL.md");
+        let implementing = skill("verkstead/implementing/SKILL.md");
 
         assert!(
             implementing.contains("Commit"),
@@ -2380,7 +2676,7 @@ mod tests {
     /// run with nowhere to go.
     #[test]
     fn the_implementation_skill_opens_the_pull_request_itself() {
-        let implementing = skill("implementing/SKILL.md");
+        let implementing = skill("verkstead/implementing/SKILL.md");
 
         assert!(
             implementing.contains("docs/agents/git-workflow.md")
@@ -2417,7 +2713,7 @@ mod tests {
     /// finish the run.
     #[test]
     fn the_implementation_skill_says_what_a_second_session_does() {
-        let implementing = skill("implementing/SKILL.md");
+        let implementing = skill("verkstead/implementing/SKILL.md");
 
         assert!(
             implementing.contains("Nothing to build is not nothing to do"),
@@ -2431,7 +2727,7 @@ mod tests {
     /// the branch and owns none of it.
     #[test]
     fn the_breakdown_skill_says_what_a_task_list_is_made_of() {
-        let breaking_down = skill("breaking-down/SKILL.md");
+        let breaking_down = skill("verkstead/breaking-down/SKILL.md");
 
         for named in [".tasks/", "TODO.md", "NN-<slug>.md"] {
             assert!(
@@ -2451,7 +2747,7 @@ mod tests {
     /// chosen, and the plan commit is not something to ask permission for.
     #[test]
     fn the_breakdown_skill_drops_what_verkstead_already_supplies() {
-        let breaking_down = skill("breaking-down/SKILL.md");
+        let breaking_down = skill("verkstead/breaking-down/SKILL.md");
 
         assert!(
             breaking_down.contains("The branch is\nalready made"),
@@ -2475,7 +2771,7 @@ mod tests {
     /// second way in would be describing a session nobody starts.
     #[test]
     fn the_breakdown_skill_is_read_by_the_grilling_session_carrying_on() {
-        let breaking_down = skill("breaking-down/SKILL.md");
+        let breaking_down = skill("verkstead/breaking-down/SKILL.md");
 
         assert!(
             breaking_down.contains("reading on"),
@@ -2493,7 +2789,7 @@ mod tests {
     /// the only way anything does.
     #[test]
     fn the_breakdown_skill_puts_its_quiz_through_the_cli() {
-        let breaking_down = skill("breaking-down/SKILL.md");
+        let breaking_down = skill("verkstead/breaking-down/SKILL.md");
 
         assert!(
             breaking_down.contains("verkstead guide") && breaking_down.contains("verkstead ask"),
@@ -2511,7 +2807,7 @@ mod tests {
     /// reads it back off the branch and owns none of it.
     #[test]
     fn the_staging_skill_says_what_a_roadmap_is_made_of() {
-        let staging = skill("staging/SKILL.md");
+        let staging = skill("verkstead/staging/SKILL.md");
 
         for named in ["docs/roadmaps/", "ROADMAP.md", "NN-<slug>.md"] {
             assert!(
@@ -2533,7 +2829,7 @@ mod tests {
     /// they already write.
     #[test]
     fn the_staging_skill_writes_the_formats_the_stage_readers_expect() {
-        let staging = skill("staging/SKILL.md");
+        let staging = skill("verkstead/staging/SKILL.md");
 
         assert!(
             staging.contains("## Stages") && staging.contains("- [ ] 01: <title> — [brief]("),
@@ -2697,7 +2993,7 @@ mod tests {
     /// Conversations of their own rather than work to start here.
     #[test]
     fn the_staging_skill_drops_what_verkstead_already_supplies() {
-        let staging = skill("staging/SKILL.md");
+        let staging = skill("verkstead/staging/SKILL.md");
 
         assert!(
             staging.contains("The branch is\nalready made"),
@@ -2723,7 +3019,7 @@ mod tests {
     /// review like any other work. How is the target repository's own business.
     #[test]
     fn the_staging_skill_opens_the_pull_request_the_repositorys_own_way() {
-        let staging = skill("staging/SKILL.md");
+        let staging = skill("verkstead/staging/SKILL.md");
 
         assert!(
             staging.contains("docs/agents/git-workflow.md") && staging.contains("Finish sequence"),
@@ -2745,7 +3041,7 @@ mod tests {
     /// to say both.
     #[test]
     fn the_staging_skill_works_from_both_ways_in() {
-        let staging = skill("staging/SKILL.md");
+        let staging = skill("verkstead/staging/SKILL.md");
 
         assert!(
             staging.contains("the grilling session, reading on"),
@@ -2767,7 +3063,7 @@ mod tests {
     /// only way anything does.
     #[test]
     fn the_staging_skill_puts_its_stage_list_through_the_cli() {
-        let staging = skill("staging/SKILL.md");
+        let staging = skill("verkstead/staging/SKILL.md");
 
         assert!(
             staging.contains("verkstead guide") && staging.contains("verkstead ask"),
@@ -2809,7 +3105,7 @@ mod tests {
     /// moved under it since. Re-grounding it is the whole of what this fork adds.
     #[test]
     fn the_next_stage_fork_re_grounds_the_brief_against_the_code() {
-        let next_stage = skill("next-stage/SKILL.md");
+        let next_stage = skill("verkstead/next-stage/SKILL.md");
 
         assert!(
             next_stage.contains("Re-verify at start")
@@ -2827,7 +3123,7 @@ mod tests {
     /// stops it — and stops it naturally, being an ask somebody is idling on.
     #[test]
     fn the_next_stage_fork_puts_its_breakdown_to_the_human() {
-        let next_stage = skill("next-stage/SKILL.md");
+        let next_stage = skill("verkstead/next-stage/SKILL.md");
 
         assert!(
             next_stage.contains("verkstead guide") && next_stage.contains("verkstead ask"),
@@ -2845,7 +3141,7 @@ mod tests {
     /// says this backlog is a stage's.
     #[test]
     fn the_next_stage_fork_writes_the_backlog_the_runner_works() {
-        let next_stage = skill("next-stage/SKILL.md");
+        let next_stage = skill("verkstead/next-stage/SKILL.md");
 
         for named in [".tasks/", "TODO.md", "NN-<slug>.md", "Roadmap stage:"] {
             assert!(
@@ -2875,7 +3171,7 @@ mod tests {
     /// first and the boxes behind it.
     #[test]
     fn the_next_stage_fork_annotates_its_own_line_and_no_other() {
-        let next_stage = skill("next-stage/SKILL.md");
+        let next_stage = skill("verkstead/next-stage/SKILL.md");
 
         assert!(
             next_stage.contains("ROADMAP.md"),
@@ -2959,7 +3255,7 @@ mod tests {
     /// about to move this branch off.
     #[test]
     fn the_next_stage_fork_leaves_the_stack_to_the_finish() {
-        let next_stage = skill("next-stage/SKILL.md");
+        let next_stage = skill("verkstead/next-stage/SKILL.md");
 
         assert!(
             next_stage.contains("cut from") && next_stage.contains("not registered now"),
@@ -3043,7 +3339,7 @@ mod tests {
     /// the two things it cannot leave out.
     #[test]
     fn the_next_task_fork_works_one_task_and_commits_it() {
-        let next_task = skill("next-task/SKILL.md");
+        let next_task = skill("verkstead/next-task/SKILL.md");
 
         for named in [".tasks/", "TODO.md", "NN-<slug>.md"] {
             assert!(
@@ -3079,7 +3375,7 @@ mod tests {
     /// so the finish is the one place any of them is taken away.
     #[test]
     fn the_next_task_fork_finishes_the_feature_by_taking_the_backlog_away() {
-        let next_task = skill("next-task/SKILL.md");
+        let next_task = skill("verkstead/next-task/SKILL.md");
 
         assert!(
             next_task.contains("git rm -r .tasks/"),
@@ -3098,7 +3394,7 @@ mod tests {
     /// flight.
     #[test]
     fn the_next_task_fork_ticks_the_roadmap_stage_it_finished() {
-        let next_task = skill("next-task/SKILL.md");
+        let next_task = skill("verkstead/next-task/SKILL.md");
 
         assert!(
             next_task.contains("Roadmap stage:"),
@@ -3176,7 +3472,7 @@ mod tests {
     /// naming both shapes, because which one applies is a fact about the branch.
     #[test]
     fn the_next_task_fork_opens_the_pull_request_the_repositorys_own_way() {
-        let next_task = skill("next-task/SKILL.md");
+        let next_task = skill("verkstead/next-task/SKILL.md");
 
         assert!(
             next_task.contains("docs/agents/git-workflow.md")
@@ -3214,7 +3510,7 @@ mod tests {
     /// decides which sequence runs.
     #[test]
     fn a_stage_handed_a_chain_is_a_stacked_branch_whatever_this_worktree_says() {
-        let next_task = flowed("next-task/SKILL.md");
+        let next_task = flowed("verkstead/next-task/SKILL.md");
 
         assert!(
             next_task.contains(
@@ -3244,7 +3540,7 @@ mod tests {
     /// checks, and has thrown away work somebody did without saying so.
     #[test]
     fn a_conflict_on_the_way_into_the_chain_is_the_joining_sessions_to_resolve() {
-        let next_task = flowed("next-task/SKILL.md");
+        let next_task = flowed("verkstead/next-task/SKILL.md");
 
         let said = "**A conflict is two changes to reconcile**, and resolving it means keeping \
                     both. Taking one side's hunk wholesale — `--ours`, `--theirs`, or the same \
@@ -3255,7 +3551,7 @@ mod tests {
             "resolving is the job, in the words the resolution skill says it in: {next_task}"
         );
         assert!(
-            flowed("addressing/SKILL.md").contains(said),
+            flowed("verkstead/addressing/SKILL.md").contains(said),
             "which is the sentence a session sent at a stack is already told, word for word",
         );
         assert!(
@@ -3269,7 +3565,7 @@ mod tests {
     /// — and only then is anything pushed.
     #[test]
     fn a_resolved_join_runs_the_checks_again_before_anything_is_pushed() {
-        let next_task = flowed("next-task/SKILL.md");
+        let next_task = flowed("verkstead/next-task/SKILL.md");
 
         let again = "**Then run the repository's checks again, before anything is pushed.**";
         let built = "a rebase that compiles is not a rebase that reconciled anything";
@@ -3295,7 +3591,7 @@ mod tests {
     /// is.
     #[test]
     fn nothing_below_a_joining_branch_is_touched_while_its_conflict_is_resolved() {
-        let next_task = flowed("next-task/SKILL.md");
+        let next_task = flowed("verkstead/next-task/SKILL.md");
 
         let neither = "no branch below it is rebased, none of them is pushed, and no pull \
                        request of one changes base";
@@ -3316,7 +3612,7 @@ mod tests {
     /// nothing said.
     #[test]
     fn a_conflict_it_cannot_judge_goes_to_the_human_as_one_set() {
-        let next_task = flowed("next-task/SKILL.md");
+        let next_task = flowed("verkstead/next-task/SKILL.md");
 
         let one_set = "one Question Set through the ordinary ask — see *When you need the human* \
                        below — saying what conflicted, what each side was doing, and the options \
@@ -3348,7 +3644,7 @@ mod tests {
     /// end with nothing to commit already do with the one line they owe.
     #[test]
     fn the_join_says_it_met_a_conflict_whichever_way_it_went() {
-        let next_task = flowed("next-task/SKILL.md");
+        let next_task = flowed("verkstead/next-task/SKILL.md");
 
         let either = "**And say the join met a conflict, whichever way it went.** As the last \
                       thing you print";
@@ -3377,9 +3673,12 @@ mod tests {
     /// would be three things to keep true.
     #[test]
     fn the_finish_skills_carry_every_companion_they_committed_in_to_its_own_pull_request() {
-        let block = companion_block("next-task/SKILL.md");
+        let block = companion_block("verkstead/next-task/SKILL.md");
 
-        for named in ["implementing/SKILL.md", "staging/SKILL.md"] {
+        for named in [
+            "verkstead/implementing/SKILL.md",
+            "verkstead/staging/SKILL.md",
+        ] {
             assert_eq!(
                 companion_block(named),
                 block,
@@ -3416,7 +3715,7 @@ mod tests {
     /// would put a second run on a branch the human is about to read as finished.
     #[test]
     fn the_submitting_skill_says_the_work_is_already_built() {
-        let submitting = skill("submitting/SKILL.md");
+        let submitting = skill("verkstead/submitting/SKILL.md");
 
         assert!(
             submitting.contains("already built and committed"),
@@ -3442,7 +3741,7 @@ mod tests {
     /// session got there.
     #[test]
     fn the_submitting_skill_opens_the_pull_request_the_repositorys_own_way() {
-        let submitting = skill("submitting/SKILL.md");
+        let submitting = skill("verkstead/submitting/SKILL.md");
 
         assert!(
             submitting.contains("docs/agents/git-workflow.md")
@@ -3528,7 +3827,7 @@ mod tests {
     /// context, or to be asked whether to land the feature.
     #[test]
     fn the_next_task_fork_drops_the_gates_verkstead_supplies() {
-        let next_task = skill("next-task/SKILL.md");
+        let next_task = skill("verkstead/next-task/SKILL.md");
 
         assert!(
             !next_task.contains("/clear") && !next_task.contains("/next-task"),
@@ -3551,7 +3850,7 @@ mod tests {
     /// true.
     #[test]
     fn the_addressing_skill_is_written_for_all_five_kinds_of_feedback() {
-        let addressing = skill("addressing/SKILL.md");
+        let addressing = skill("verkstead/addressing/SKILL.md");
 
         for named in [
             "check that failed",
@@ -3579,7 +3878,7 @@ mod tests {
     /// `gh stack sync` and then tries to undo what it did.
     #[test]
     fn the_addressing_skill_says_a_stack_is_every_branch_of_it() {
-        let addressing = skill("addressing/SKILL.md");
+        let addressing = skill("verkstead/addressing/SKILL.md");
 
         assert!(
             addressing.contains("gh stack sync"),
@@ -3607,7 +3906,7 @@ mod tests {
     /// and a summary written for it would be a summary of somebody else's diff.
     #[test]
     fn the_addressing_skill_says_a_conflict_is_two_changes_to_reconcile() {
-        let addressing = skill("addressing/SKILL.md");
+        let addressing = skill("verkstead/addressing/SKILL.md");
 
         assert!(
             addressing.contains("two changes to reconcile"),
@@ -3635,7 +3934,7 @@ mod tests {
     /// push or rewrite a branch nobody asked it to.
     #[test]
     fn the_addressing_skill_leaves_merge_or_rebase_to_the_feedback() {
-        let addressing = skill("addressing/SKILL.md");
+        let addressing = skill("verkstead/addressing/SKILL.md");
 
         assert!(
             addressing.contains("The feedback\n  names which of the two"),
@@ -3658,7 +3957,7 @@ mod tests {
     /// fix that stays local is one nothing re-runs and nobody sees.
     #[test]
     fn the_addressing_skill_says_to_commit_and_push_without_asking() {
-        let addressing = skill("addressing/SKILL.md");
+        let addressing = skill("verkstead/addressing/SKILL.md");
 
         assert!(
             addressing.contains("git commit") && addressing.contains("git push"),
@@ -3691,7 +3990,7 @@ mod tests {
     /// exactly the branch it was sent to.
     #[test]
     fn the_addressing_skill_sends_the_session_to_the_worktree_the_feedback_names() {
-        let addressing = skill("addressing/SKILL.md");
+        let addressing = skill("verkstead/addressing/SKILL.md");
 
         assert!(
             addressing.contains("worktree the feedback named")
@@ -3715,7 +4014,7 @@ mod tests {
     /// fix reviewable against the thing that was asked for.
     #[test]
     fn the_addressing_skill_keeps_the_fix_to_the_feedback() {
-        let addressing = skill("addressing/SKILL.md");
+        let addressing = skill("verkstead/addressing/SKILL.md");
 
         assert!(
             addressing.contains("Keep to the feedback"),
@@ -3818,7 +4117,7 @@ mod tests {
     /// was agreed to.
     #[test]
     fn the_reviewing_skill_proposes_and_then_fixes() {
-        let reviewing = skill("reviewing/SKILL.md");
+        let reviewing = skill("verkstead/reviewing/SKILL.md");
 
         assert!(
             reviewing.contains("You propose, and then you fix what was agreed to"),
@@ -3840,7 +4139,7 @@ mod tests {
     /// between — with leaving it alone always among them.
     #[test]
     fn the_reviewing_skill_says_how_a_finding_becomes_work() {
-        let reviewing = skill("reviewing/SKILL.md");
+        let reviewing = skill("verkstead/reviewing/SKILL.md");
 
         assert!(
             reviewing.contains("Each credible way to fix it is an Option of its own"),
@@ -3880,7 +4179,7 @@ mod tests {
     /// and what the session then writes for it is a backlog rather than a fix.
     #[test]
     fn the_reviewing_skill_offers_a_split_only_where_the_work_is_too_big() {
-        let reviewing = skill("reviewing/SKILL.md");
+        let reviewing = skill("verkstead/reviewing/SKILL.md");
 
         assert!(
             reviewing.contains("Split it out as its own work"),
@@ -3911,7 +4210,7 @@ mod tests {
     /// on the ask, and what it does with them is what the human wrote.
     #[test]
     fn the_reviewing_skill_waits_for_the_answers_and_acts_on_what_they_said() {
-        let reviewing = skill("reviewing/SKILL.md");
+        let reviewing = skill("verkstead/reviewing/SKILL.md");
 
         assert!(
             reviewing.contains("The answers are yours to wait for"),
@@ -3938,7 +4237,7 @@ mod tests {
     /// other source of a decision.
     #[test]
     fn the_reviewing_skill_says_what_to_do_having_found_nothing() {
-        let reviewing = skill("reviewing/SKILL.md");
+        let reviewing = skill("verkstead/reviewing/SKILL.md");
 
         assert!(
             reviewing.contains("Ask nothing"),
@@ -3961,7 +4260,7 @@ mod tests {
     /// before the human has answered.
     #[test]
     fn the_reviewing_skill_folds_the_pull_requests_comments_into_its_one_set() {
-        let reviewing = skill("reviewing/SKILL.md");
+        let reviewing = skill("verkstead/reviewing/SKILL.md");
 
         assert!(
             reviewing.contains("What has been said on the pull request"),
@@ -3984,7 +4283,7 @@ mod tests {
     /// session deals with it itself, before its push.
     #[test]
     fn the_reviewing_skill_folds_a_red_check_into_the_woken_session() {
-        let reviewing = skill("reviewing/SKILL.md");
+        let reviewing = skill("verkstead/reviewing/SKILL.md");
 
         assert!(
             reviewing.contains("gh pr checks"),
@@ -4023,7 +4322,7 @@ mod tests {
     /// repository's half of the work twice and the companion's never.
     #[test]
     fn the_reviewing_skill_reads_every_pull_request_where_it_lives() {
-        let reviewing = skill("reviewing/SKILL.md");
+        let reviewing = skill("verkstead/reviewing/SKILL.md");
 
         assert!(
             reviewing.contains("The pull requests this work is on"),
@@ -4062,7 +4361,7 @@ mod tests {
     /// work nothing would ever start.
     #[test]
     fn the_reviewing_skill_puts_one_set_across_the_repositories() {
-        let reviewing = skill("reviewing/SKILL.md");
+        let reviewing = skill("verkstead/reviewing/SKILL.md");
 
         assert!(
             reviewing.contains("One Set for the whole of the work"),
@@ -4191,7 +4490,7 @@ mod tests {
     /// comments, which is the whole of what stops one being acted on ungated.
     #[test]
     fn the_responding_skill_proposes_before_it_changes_anything() {
-        let responding = skill("responding/SKILL.md");
+        let responding = skill("verkstead/responding/SKILL.md");
 
         assert!(
             responding.contains("You propose, and then you fix what was agreed to"),
@@ -4219,7 +4518,7 @@ mod tests {
     /// as an Option — with leaving it alone always among them.
     #[test]
     fn the_responding_skill_says_how_a_comment_becomes_work() {
-        let responding = skill("responding/SKILL.md");
+        let responding = skill("verkstead/responding/SKILL.md");
 
         assert!(
             responding.contains("Each credible way to do it is an Option of its own"),
@@ -4261,7 +4560,7 @@ mod tests {
     /// shows.
     #[test]
     fn the_responding_skill_says_what_to_do_with_a_batch_that_asks_for_nothing() {
-        let responding = skill("responding/SKILL.md");
+        let responding = skill("verkstead/responding/SKILL.md");
 
         assert!(
             responding.contains("Ask nothing"),
@@ -4357,7 +4656,7 @@ mod tests {
     /// thing.
     #[test]
     fn the_instruction_skill_hands_what_follows_to_the_pipeline() {
-        let instruction = skill("instruction/SKILL.md");
+        let instruction = skill("verkstead/instruction/SKILL.md");
 
         assert!(
             instruction.contains("The pipeline carries on after you"),
@@ -4383,7 +4682,7 @@ mod tests {
     /// uncommitted is one that stops the Conversation.
     #[test]
     fn the_instruction_skill_says_to_commit_and_then_stop() {
-        let instruction = skill("instruction/SKILL.md");
+        let instruction = skill("verkstead/instruction/SKILL.md");
 
         assert!(
             instruction.contains("git commit"),
@@ -4446,7 +4745,7 @@ mod tests {
     /// not responding's propose-everything-first.
     #[test]
     fn the_following_up_skill_acts_on_the_brief_rather_than_proposing_it_back() {
-        let following_up = skill("following-up/SKILL.md");
+        let following_up = skill("verkstead/following-up/SKILL.md");
 
         assert!(
             following_up.contains("The brief is written to this session"),
@@ -4468,7 +4767,7 @@ mod tests {
     /// it so that each round reaches their phone.
     #[test]
     fn the_following_up_skill_runs_rounds_of_ordinary_question_sets() {
-        let following_up = skill("following-up/SKILL.md");
+        let following_up = skill("verkstead/following-up/SKILL.md");
 
         assert!(
             following_up.contains("verkstead guide") && following_up.contains("verkstead ask"),
@@ -4497,7 +4796,7 @@ mod tests {
     /// what has been done and its checks run while the human composes.
     #[test]
     fn the_following_up_skill_pushes_each_round_before_it_asks() {
-        let following_up = skill("following-up/SKILL.md");
+        let following_up = skill("verkstead/following-up/SKILL.md");
 
         assert!(
             following_up.contains("git push"),
@@ -4521,8 +4820,8 @@ mod tests {
     /// does instead.
     #[test]
     fn the_following_up_skill_says_what_to_do_on_a_branch_with_no_pull_request() {
-        let following_up = skill("following-up/SKILL.md");
-        let flowed = flowed("following-up/SKILL.md");
+        let following_up = skill("verkstead/following-up/SKILL.md");
+        let flowed = flowed("verkstead/following-up/SKILL.md");
 
         assert!(
             !following_up.contains("already has a pull request open"),
@@ -4560,15 +4859,16 @@ mod tests {
     /// round — never the mark itself, nor a mechanism of its own.
     #[test]
     fn the_following_up_skill_says_nothing_about_how_a_follow_up_ends() {
-        let following_up = skill("following-up/SKILL.md");
+        let following_up = skill("verkstead/following-up/SKILL.md");
 
         assert!(
-            flowed("following-up/SKILL.md").contains("nothing to do and nothing to ask")
-                && flowed("following-up/SKILL.md").contains("run `verkstead done`"),
+            flowed("verkstead/following-up/SKILL.md").contains("nothing to do and nothing to ask")
+                && flowed("verkstead/following-up/SKILL.md").contains("run `verkstead done`"),
             "it gives the signal when it has nothing left to do or ask: {following_up}"
         );
         assert!(
-            flowed("following-up/SKILL.md").contains("put the next round to them as a Set"),
+            flowed("verkstead/following-up/SKILL.md")
+                .contains("put the next round to them as a Set"),
             "and a refusal is the human not having finished, so it goes round again: \
              {following_up}"
         );
@@ -4686,8 +4986,8 @@ mod tests {
     /// differs from every other Verkstead runs.
     #[test]
     fn the_investigating_skill_forbids_commits_pushes_and_pull_requests() {
-        let investigating = skill("investigating/SKILL.md");
-        let flowed = flowed("investigating/SKILL.md");
+        let investigating = skill("verkstead/investigating/SKILL.md");
+        let flowed = flowed("verkstead/investigating/SKILL.md");
 
         assert!(
             flowed.contains("Nothing you do here is committed"),
@@ -4719,7 +5019,7 @@ mod tests {
     /// way to an answer the way a review is.
     #[test]
     fn the_investigating_skill_writes_and_runs_whatever_answers_the_question() {
-        let flowed = flowed("investigating/SKILL.md");
+        let flowed = flowed("verkstead/investigating/SKILL.md");
 
         assert!(
             flowed.contains("Write the probe") && flowed.contains("Run it"),
@@ -4741,8 +5041,8 @@ mod tests {
     /// Verkstead's rather than the session's, exactly as a follow-up's is.
     #[test]
     fn the_investigating_skill_runs_rounds_of_ordinary_question_sets() {
-        let investigating = skill("investigating/SKILL.md");
-        let flowed = flowed("investigating/SKILL.md");
+        let investigating = skill("verkstead/investigating/SKILL.md");
+        let flowed = flowed("verkstead/investigating/SKILL.md");
 
         assert!(
             investigating.contains("verkstead guide") && investigating.contains("verkstead ask"),
@@ -5963,6 +6263,70 @@ mod tests {
         }
     }
 
+    /// A launch reading the packs waits for the installed plugins' first
+    /// load, and is let through once it has held them — or once it is over
+    /// with nothing held, a load that failed being over all the same.
+    #[tokio::test]
+    async fn the_packs_are_read_once_the_first_load_is_over() {
+        let skills = mounted();
+
+        let waiting = tokio::spawn({
+            let skills = skills.clone();
+            async move { skills.settled().await }
+        });
+        tokio::task::yield_now().await;
+        assert!(!waiting.is_finished(), "nothing has loaded yet");
+
+        skills.holding(Vec::new());
+        tokio::time::timeout(std::time::Duration::from_secs(5), waiting)
+            .await
+            .expect("held, the wait is over")
+            .unwrap();
+
+        let failed = mounted();
+        failed.settle();
+        tokio::time::timeout(std::time::Duration::from_secs(5), failed.settled())
+            .await
+            .expect("a load over without holding anything is over too");
+    }
+
+    /// The Skill Packs a Conversation attached are listed under a heading of
+    /// their own, each skill at the path of its `SKILL.md` — and none attached
+    /// is the prompt as it stands, as the servers' is.
+    #[test]
+    fn the_packs_are_listed_with_each_skills_path_and_none_is_no_heading() {
+        let prompt = next_task(&mounted(), "# Rate limiting\n", None);
+
+        assert_eq!(packed(&prompt, &[], &mounted()), prompt);
+
+        let said = packed(
+            &prompt,
+            &[LoadedPack {
+                name: "rust-review".to_owned(),
+                plugin: "Rust review".to_owned(),
+                skills: vec!["reviewing".to_owned(), "linting".to_owned()],
+            }],
+            &mounted(),
+        );
+
+        assert!(said.starts_with(prompt.trim_end()), "{said:?}");
+        assert!(said.contains("\n\n# Skill packs\n\n"), "{said:?}");
+        assert!(
+            said.contains(
+                "- `rust-review`\n  \
+                 - `rust-review/reviewing`: `/verkstead/skills/rust-review/reviewing/SKILL.md`\n  \
+                 - `rust-review/linting`: `/verkstead/skills/rust-review/linting/SKILL.md`"
+            ),
+            "{said:?}"
+        );
+        for instructed in ["you should", "use it", "make sure", "read the"] {
+            assert!(
+                !said.to_lowercase().contains(instructed),
+                "the listing is neutral, and {instructed:?} is not: {said:?}"
+            );
+        }
+    }
+
     /// A size is said in whichever unit keeps it to a few digits, because what
     /// it is for is a session knowing what it will find rather than accounting.
     #[test]
@@ -5982,15 +6346,15 @@ mod tests {
     /// seven things to keep true and the human reads them as one convention.
     #[test]
     fn every_skill_that_commits_work_asks_for_the_commits_summary() {
-        let block = summary_block("next-task/SKILL.md");
+        let block = summary_block("verkstead/next-task/SKILL.md");
 
         for name in [
-            "implementing/SKILL.md",
-            "instruction/SKILL.md",
-            "addressing/SKILL.md",
-            "reviewing/SKILL.md",
-            "responding/SKILL.md",
-            "following-up/SKILL.md",
+            "verkstead/implementing/SKILL.md",
+            "verkstead/instruction/SKILL.md",
+            "verkstead/addressing/SKILL.md",
+            "verkstead/reviewing/SKILL.md",
+            "verkstead/responding/SKILL.md",
+            "verkstead/following-up/SKILL.md",
         ] {
             assert_eq!(
                 summary_block(name),
@@ -6005,7 +6369,7 @@ mod tests {
     /// the prose.
     #[test]
     fn the_summary_block_says_which_commits_and_what_goes_in_one() {
-        let block = summary_block("next-task/SKILL.md");
+        let block = summary_block("verkstead/next-task/SKILL.md");
 
         assert!(
             block.contains("delivers work") && block.contains("as its message body"),
@@ -6135,9 +6499,9 @@ mod tests {
     #[test]
     fn the_bookkeeping_skills_ask_for_no_summary() {
         for name in [
-            "breaking-down/SKILL.md",
-            "staging/SKILL.md",
-            "next-stage/SKILL.md",
+            "verkstead/breaking-down/SKILL.md",
+            "verkstead/staging/SKILL.md",
+            "verkstead/next-stage/SKILL.md",
         ] {
             let text = skill(name);
 
@@ -6152,7 +6516,7 @@ mod tests {
     /// for the same reason: taking the list away delivers nothing.
     #[test]
     fn the_next_task_forks_finish_commit_stays_subject_only() {
-        let next_task = skill("next-task/SKILL.md");
+        let next_task = skill("verkstead/next-task/SKILL.md");
 
         assert!(
             next_task.contains(r#"git commit -m "chore: finish <feature-name>""#),
@@ -6176,8 +6540,8 @@ mod tests {
 
         assert_eq!(skills.path(), state.path().join("skills"));
         assert_eq!(
-            std::fs::read_to_string(skills.path().join("grilling/SKILL.md")).unwrap(),
-            skill("grilling/SKILL.md"),
+            std::fs::read_to_string(skills.path().join("verkstead/grilling/SKILL.md")).unwrap(),
+            skill("verkstead/grilling/SKILL.md"),
             "what is installed is what the binary carries"
         );
     }
@@ -6187,10 +6551,12 @@ mod tests {
     #[test]
     fn what_an_earlier_install_left_behind_does_not_survive() {
         let state = tempfile::tempdir().unwrap();
-        let stale = state.path().join("skills/withdrawn");
+        let stale = state.path().join("skills/verkstead/withdrawn");
+        let stray = state.path().join("skills/stray.md");
 
         std::fs::create_dir_all(&stale).unwrap();
         std::fs::write(stale.join("SKILL.md"), "# gone\n").unwrap();
+        std::fs::write(&stray, "# gone\n").unwrap();
 
         Skills::installed(Platform::HERE, state.path()).expect("this binary carries skills");
 
@@ -6198,6 +6564,39 @@ mod tests {
             !stale.exists(),
             "a withdrawn skill is still installed: {}",
             stale.display()
+        );
+        assert!(
+            !stray.exists(),
+            "and so is a file nothing installed: {}",
+            stray.display()
+        );
+    }
+
+    /// The skills are one pack, and the directory holds a directory per pack:
+    /// a skill is where its `<pack>/<skill>` name says, and not where it was
+    /// before it had a pack.
+    #[test]
+    fn the_bundled_skills_are_installed_as_the_verkstead_pack() {
+        let state = tempfile::tempdir().unwrap();
+        let skills =
+            Skills::installed(Platform::HERE, state.path()).expect("this binary carries skills");
+
+        let packs: Vec<_> = std::fs::read_dir(skills.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+
+        assert_eq!(packs, ["verkstead"], "one directory per pack");
+        assert!(skills.path().join("verkstead/grilling/SKILL.md").is_file());
+        assert!(
+            !skills.path().join("grilling").exists(),
+            "a skill named without its pack is not there"
+        );
+        assert_eq!(
+            skills.named(GRILLING),
+            crate::sandbox::under(skills.inside(), "verkstead/grilling/SKILL.md")
+                .display()
+                .to_string(),
         );
     }
 

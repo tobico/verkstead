@@ -27,15 +27,15 @@ use verkstead_store::{
     PendingAddition, PendingForm, PendingUpgrade, PlacedWork, Process, ProfileFacts, PullRequest,
     Rollup, Settlements, Standing, Summary, WaitingOn, add_companion, add_to_set, append_capture,
     append_transcript, archive_conversation, ask, ask_on_our_own, ask_to_transfer, attach,
-    attach_mcp_server, close_conversation, continue_on_arrival, create_profile, end_session,
-    fill_target, leave_memo, lock_set, lock_set_saying, nothing_else, open_database,
-    open_pending_steer, permit_device, pick_direction, record_addressed_comments, record_backlog,
-    record_check_rollup, record_commit, record_conflict_fix_attempt, record_delivery,
-    record_fix_attempt, record_merging, record_pull_request, record_share, record_share_comment,
-    record_standing, register_repo, save_brief, save_pending_steer, set_grilling_pairing,
-    set_process, set_target, settle_wrap_up, skip_review, stamp_unseen, start_capture,
-    start_conversation, start_grilling, start_implementing, stop, submit_response, suggest_preview,
-    tell, trim_conversation, unarchive_conversation,
+    attach_mcp_server, attach_skill_pack_to_draft, close_conversation, continue_on_arrival,
+    create_profile, end_session, fill_target, leave_memo, lock_set, lock_set_saying, nothing_else,
+    open_database, open_pending_steer, permit_device, pick_direction, record_addressed_comments,
+    record_backlog, record_check_rollup, record_commit, record_conflict_fix_attempt,
+    record_delivery, record_fix_attempt, record_merging, record_pull_request, record_share,
+    record_share_comment, record_standing, register_repo, save_brief, save_pending_steer,
+    set_grilling_pairing, set_process, set_target, settle_wrap_up, skip_review, stamp_unseen,
+    start_capture, start_conversation, start_grilling, start_implementing, stop, submit_response,
+    suggest_preview, tell, trim_conversation, unarchive_conversation,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -244,6 +244,14 @@ pub async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
         .expect("the Repo is registered");
 
     save_brief(pool, id, "# Rate limiting\n").await.unwrap();
+
+    // And a Skill Pack, put on while it drafts — the only time one can be.
+    assert_eq!(
+        attach_skill_pack_to_draft(pool, id, "rust-review")
+            .await
+            .unwrap(),
+        Edited::Saved
+    );
 
     // While it is still a draft, which is the only time these are settled: the
     // other repository it is worked in, the Process it runs, what it is pointed

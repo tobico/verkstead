@@ -162,15 +162,16 @@ branch: string, };
 /**
  * What was picked.
  */
-export type Added = { "Server": { name: string, declared: boolean, } } | { "Companion": { repo_id: number, name: string | null, mode: CompanionMode, base_ref: string | null, branch: string | null, } } | { "OpenedUp": { repo_id: number, name: string | null, base_ref: string | null, branch: string | null, } } | { "Device": { device: string, name: string | null, } } | { "Unmatched": { name: string, } };
+export type Added = { "Server": { name: string, declared: boolean, } } | { "Pack": { name: string, installed: boolean, } } | { "Companion": { repo_id: number, name: string | null, mode: CompanionMode, base_ref: string | null, branch: string | null, } } | { "OpenedUp": { repo_id: number, name: string | null, base_ref: string | null, branch: string | null, } } | { "Device": { device: string, name: string | null, } } | { "Unmatched": { name: string, } };
 
 /**
  * What became of a pick.
  *
  * The refusals a file on an Answer meets, for the same reasons — see
- * [`AnswerAttached`] — and the two only a server can.
+ * [`AnswerAttached`] — and those only a server, a pack, a Repo or a device
+ * can.
  */
-export type AdditionMade = { "Added": { addition: AdditionView, } } | "NoSuchSet" | "Answered" | "Locked" | "Closed" | "NoSuchLabel" | "NoSuchServer" | "AlreadyOn" | "NoSuchRepo" | "NotACompanion" | "NotAMember" | "WorkIsHere";
+export type AdditionMade = { "Added": { addition: AdditionView, } } | "NoSuchSet" | "Answered" | "Locked" | "Closed" | "NoSuchLabel" | "NoSuchServer" | "NoSuchPack" | "AlreadyOn" | "NoSuchRepo" | "NotACompanion" | "NotAMember" | "WorkIsHere";
 
 /**
  * And of taking a pick off again, refused by the same freezes.
@@ -673,6 +674,28 @@ places_taken: number, };
  * Only a server that could not write the file at all answers with one.
  */
 export type Attached = { "Attached": { attachment: AttachmentView, } } | "NoSuchConversation" | "NotDrafting" | "TooLarge" | "NotAName";
+
+/**
+ * One Skill Pack a Conversation has attached, as the composer draws it: the
+ * name it was attached under, and whether a plugin loaded on this device
+ * still provides it.
+ *
+ * [`AttachedServerView`]'s shape for its reasons: a pack whose plugin was
+ * disabled or removed since — or a local plugin's, on a device without its
+ * directory after a Transfer — keeps its chip, drawn saying it is gone, and is
+ * neither mounted nor listed to a session.
+ */
+export type AttachedPackView = { 
+/**
+ * What it is called, which is the directory its skills are under:
+ * `/verkstead/skills/<name>/`.
+ */
+name: string, 
+/**
+ * Whether a plugin loaded on this device provides it, read at the moment
+ * the Conversation is.
+ */
+installed: boolean, };
 
 /**
  * One MCP server a Conversation has attached, as the composer draws it: the
@@ -2386,6 +2409,13 @@ attachments: Array<AttachmentView>,
  * about reaching it stays in this installation's settings.
  */
 mcp_servers: Array<AttachedServerView>, 
+/**
+ * And the Skill Packs it has attached, in the order they were attached in
+ * — chips beside the servers', settled at the same control and frozen at
+ * the same moment. Names, read beside whether this device has each pack
+ * loaded — see [`AttachedPackView`].
+ */
+skill_packs: Array<AttachedPackView>, 
 /**
  * The steer somebody has started on this Conversation and not yet decided,
  * where there is one.
@@ -4390,6 +4420,25 @@ export type Nudged = {
 device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "instructions" } | { "kind": "mcp_servers" } | { "kind": "heirs" } | { "kind": "plugins" } | { "kind": "login", profile: string, } | { "kind": "logged_in", profile: string, } | { "kind": "everything" });
 
 /**
+ * One Skill Pack the Attach menu offers: an enabled installed plugin's, loaded
+ * on this device. The built-in `verkstead` is never one — every session has
+ * it already.
+ */
+export type OfferedPack = { 
+/**
+ * The pack's name, which is what a pick attaches.
+ */
+name: string, 
+/**
+ * The plugin providing it, by its manifest's name.
+ */
+plugin: string, 
+/**
+ * Its skills, by name, in the order the pack lists them.
+ */
+skills: Array<string>, };
+
+/**
  * And the same of every Conversation at once: what a member offers the device
  * asking, read over the link whenever that device's knowledge of it may be
  * stale — its Nudge stream to the member taken up, or the member answering
@@ -4551,6 +4600,20 @@ author: string, };
  * is: what is here is what the machine is.
  */
 export type Owed = "Restart" | "Annex";
+
+/**
+ * What became of attaching an installed Skill Pack to a Conversation.
+ *
+ * [`ServerAttached`]'s shape, with *no such pack* in place of its two about
+ * declarations: a pack is installed or it is not, and two plugins never hold
+ * one name — the second is refused as it loads.
+ */
+export type PackAttached = "Attached" | "NoSuchConversation" | "NotDrafting" | "NoSuchPack";
+
+/**
+ * And of taking one off again — [`ServerRemoved`]'s reasons, said of a pack.
+ */
+export type PackRemoved = "Removed" | "NoSuchConversation" | "NotDrafting";
 
 /**
  * Which of a Conversation's three roles a Pairing is for.
@@ -4755,7 +4818,7 @@ export type Permitting = "Recorded" | "NotAMember" | "DraftedThere" | "WorkIsHer
 /**
  * What a row of the menu picks.
  */
-export type Pick = { "Server": { name: string, } } | { "Companion": { repo_id: number, mode: CompanionMode, base_ref: string | null, branch: string | null, } } | { "OpenedUp": { repo_id: number, base_ref: string | null, branch: string | null, } } | { "Device": { device: string, } };
+export type Pick = { "Server": { name: string, } } | { "Pack": { name: string, } } | { "Companion": { repo_id: number, mode: CompanionMode, base_ref: string | null, branch: string | null, } } | { "OpenedUp": { repo_id: number, base_ref: string | null, branch: string | null, } } | { "Device": { device: string, } };
 
 /**
  * What a Conversation has settled about one of its roles, as the page shows
@@ -4967,7 +5030,7 @@ trouble: string | null, fields: Array<PluginField>, };
 /**
  * Where a Plugin came from.
  */
-export type PluginSource = { "kind": "Local", path: string, } | { "kind": "Git", url: string, revision: string, };
+export type PluginSource = { "kind": "Local", path: string, } | { "kind": "Git", url: string, revision: string, } | { "kind": "BuiltIn" };
 
 /**
  * **Update**: nothing the first time, and the capabilities the card showed
@@ -4986,9 +5049,10 @@ export type PluginUpdated = { "kind": "Updated", plugins: PluginsView, } | { "ki
  */
 export type PluginsView = { installed: Array<PluginRow>, 
 /**
- * The ones this binary ships and lists. None yet: the fixture that proves
- * the path is not listed, and the group is drawn only once it has a row.
- * A built-in has no **Remove**.
+ * The ones this binary ships and lists, the Skill Pack `verkstead` first;
+ * the fixture that proves the path is not listed, and the group is drawn
+ * only once it has a row. A built-in has no **Remove** and no checkbox:
+ * it is always on.
  */
 built_in: Array<PluginRow>, };
 
@@ -6605,6 +6669,11 @@ additions: Array<AdditionView>,
  */
 servers: Array<string>, 
 /**
+ * And the Skill Packs it has already, by name, for the same reason. Empty
+ * out of [`set_view`], for [`SetView::by_verkstead`]'s reason.
+ */
+packs: Array<string>, 
+/**
  * And the rest of what those menus offer: Repos to work alongside,
  * read-only Companions to open up, and devices to permit.
  */
@@ -7813,7 +7882,7 @@ export type StoreView = { name: string, eviction: Eviction, };
 /**
  * What became of the human's Response.
  */
-export type Submitted = "Accepted" | "AlreadyAnswered" | "NoSuchSet" | "Locked" | { "Rejected": Array<string> } | { "ServerGone": string } | { "RepoGone": string } | { "Companion": { repo: string, why: SteerCompanionRefusal, } };
+export type Submitted = "Accepted" | "AlreadyAnswered" | "NoSuchSet" | "Locked" | { "Rejected": Array<string> } | { "ServerGone": string } | { "PackGone": string } | { "RepoGone": string } | { "Companion": { repo: string, why: SteerCompanionRefusal, } };
 
 /**
  * What became of a device asking to be notified.
