@@ -971,13 +971,6 @@ pub(crate) fn comment(
     number: i64,
     body: &str,
 ) -> Result<String, Trouble> {
-    /// The one field of the comment GitHub makes that is worth keeping: where a
-    /// human goes to read it.
-    #[derive(Deserialize)]
-    struct Said {
-        html_url: String,
-    }
-
     let said = gh.tell_in(
         repo,
         token,
@@ -992,7 +985,41 @@ pub(crate) fn comment(
         &serde_json::json!({ "body": body }).to_string(),
     )?;
 
-    let said: Said = serde_json::from_str(&said).map_err(|error| {
+    landed(&said)
+}
+
+/// The same as whoever `gh` asks as — the Repo's Author, where the caller made
+/// it with [`Gh::as_author`], or the host's own login — rather than as a token
+/// in hand. What a wrap-up's reply on a pull request is: see
+/// [`crate::forge`].
+pub(crate) fn reply(gh: &Gh, repo: &Path, number: i64, body: &str) -> Result<String, Trouble> {
+    let said = gh.written(
+        Some(repo),
+        gh.token()?,
+        &[
+            "api",
+            "-X",
+            "POST",
+            &format!("repos/{{owner}}/{{repo}}/issues/{number}/comments"),
+            "--input",
+            "-",
+        ],
+        Some(&serde_json::json!({ "body": body }).to_string()),
+    )?;
+
+    landed(&said)
+}
+
+/// Where the comment GitHub answered with is to be read.
+fn landed(said: &str) -> Result<String, Trouble> {
+    /// The one field of the comment GitHub makes that is worth keeping: where a
+    /// human goes to read it.
+    #[derive(Deserialize)]
+    struct Said {
+        html_url: String,
+    }
+
+    let said: Said = serde_json::from_str(said).map_err(|error| {
         Trouble::Ours(format!(
             "The gh command answered something that couldn't be read: {error}."
         ))

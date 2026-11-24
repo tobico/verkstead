@@ -85,7 +85,6 @@ import {
   DIRECTION,
   DIRECTION_LABEL,
   DIRECTION_NOTE,
-  DIRECTIONS,
 } from "../directions";
 import { ErrorLine, Note } from "../notices";
 import { keyOf, useDevice } from "../reaching";
@@ -188,7 +187,11 @@ export function Answering(props: {
   const [sheet, setSheet] = createStore({
     filled: kept?.filled ?? asked.map(blank),
     comment: kept?.comment ?? "",
-    direction: kept?.direction ?? null,
+    // A kept pick the proposal no longer offers is no pick to restore.
+    direction:
+      kept?.direction && props.proposal?.offers.includes(kept.direction)
+        ? kept.direction
+        : null,
     nothing_else: kept?.nothing_else ?? false,
   });
 
@@ -600,9 +603,11 @@ export function Answering(props: {
 /// run of controls it briefly was — the label keeps the place a Question's
 /// number keeps, so the two line up down the page.
 ///
-/// All three every time, whichever one was recommended — the recommendation is
-/// marked and never preselected, exactly as an Option's ★ is, so nothing is
-/// picked until the human picks it. The rationale sits beside the three, because
+/// The Directions the interview offers — all three unless its Process declares
+/// fewer — whichever one was recommended: the recommendation is marked and
+/// never preselected, exactly as an Option's ★ is, so nothing is picked until
+/// the human picks it. One alone is no choice, so it is drawn as a tick that
+/// accepts the proposal with it rather than as a group of one. The rationale sits beside the three, because
 /// what they are deciding against is the agent's argument rather than a bare
 /// word.
 ///
@@ -651,45 +656,78 @@ function Choosing(props: {
             html={props.proposal.rationale_html}
           />
         </div>
-        <ul class={page.directions}>
-          <For each={DIRECTIONS}>
-            {(offered) => {
-              const recommended = () => props.proposal.direction === offered;
+        {/* One Direction offered is no choice: the row is a tick that
+            accepts the proposal with it, cleared by a second press as the
+            Nothing-else box is. More than one is the radio group. */}
+        <Show
+          when={only(props.proposal.offers)}
+          fallback={
+            <ul class={page.directions}>
+              <For each={props.proposal.offers}>
+                {(offered) => {
+                  const recommended = () => props.proposal.direction === offered;
 
-              return (
-                <li
-                  class={page.direction}
-                  classList={{ [page.recommended!]: recommended() }}
-                >
-                  <label onClick={rowPress(() => props.pick(offered))}>
-                    <input
-                      type="radio"
-                      id={`direction-${offered}`}
-                      name="direction"
-                      value={offered}
-                      checked={props.picked() === offered}
-                      // Both gestures, for the reason an Option answers
-                      // both: an arrow key fires a change and never a click,
-                      // and a click on the radio itself when it is already
-                      // picked fires a click and never a change. A press
-                      // anywhere else in the row is the row's own — see
-                      // [`rowPress`].
-                      onChange={() => props.move(offered)}
-                      onClick={() => props.pick(offered)}
-                    />
-                    <span class={page.directionName}>{DIRECTION[offered]}</span>
-                    <Show when={recommended()}>
-                      <span class={page.star} title="The agent's recommendation">
-                        ★
-                      </span>
-                    </Show>
-                  </label>
-                  <Note class={page.means}>{DIRECTION_NOTE[offered]}</Note>
-                </li>
-              );
-            }}
-          </For>
-        </ul>
+                  return (
+                    <li
+                      class={page.direction}
+                      classList={{ [page.recommended!]: recommended() }}
+                    >
+                      <label onClick={rowPress(() => props.pick(offered))}>
+                        <input
+                          type="radio"
+                          id={`direction-${offered}`}
+                          name="direction"
+                          value={offered}
+                          checked={props.picked() === offered}
+                          // Both gestures, for the reason an Option answers
+                          // both: an arrow key fires a change and never a click,
+                          // and a click on the radio itself when it is already
+                          // picked fires a click and never a change. A press
+                          // anywhere else in the row is the row's own — see
+                          // [`rowPress`].
+                          onChange={() => props.move(offered)}
+                          onClick={() => props.pick(offered)}
+                        />
+                        <span class={page.directionName}>{DIRECTION[offered]}</span>
+                        <Show when={recommended()}>
+                          <span class={page.star} title="The agent's recommendation">
+                            ★
+                          </span>
+                        </Show>
+                      </label>
+                      <Note class={page.means}>{DIRECTION_NOTE[offered]}</Note>
+                    </li>
+                  );
+                }}
+              </For>
+            </ul>
+          }
+        >
+          {(only) => (
+            <ul class={page.directions}>
+              <li class={page.direction}>
+                <label onClick={rowPress(() => props.pick(only()))}>
+                  <input
+                    type="checkbox"
+                    id={`direction-${only()}`}
+                    name="direction"
+                    value={only()}
+                    checked={props.picked() === only()}
+                    // A tick picks it and a tick taken off clears it, which
+                    // is what a press on the one already picked does.
+                    onChange={(event) =>
+                      event.currentTarget.checked
+                        ? props.move(only())
+                        : props.pick(only())
+                    }
+                  />
+                  <span class={page.directionName}>{DIRECTION[only()]}</span>
+                </label>
+                <Note class={page.means}>{DIRECTION_NOTE[only()]}</Note>
+              </li>
+            </ul>
+          )}
+        </Show>
         {/* What the work wants: ticks where there is a cluster to place it
             on, and the line of prose where there is none. */}
         <Show
@@ -707,13 +745,23 @@ function Choosing(props: {
           )}
         </Show>
         <p class={page.semantics}>
-          Picking a direction accepts the proposal and the agent gets on with
-          it. Anything else, your own answer included, sends it back for
-          another round.
+          {only(props.proposal.offers)
+            ? "Ticking this accepts the proposal and the agent gets on with it. " +
+              "Anything else, your own answer included, sends it back for " +
+              "another round."
+            : "Picking a direction accepts the proposal and the agent gets on " +
+              "with it. Anything else, your own answer included, sends it back " +
+              "for another round."}
         </p>
       </div>
     </section>
   );
+}
+
+/// The one Direction a proposal offers, where it offers one alone — which is
+/// drawn as accepting it or not rather than as a choice.
+function only(offers: Direction[]): Direction | null {
+  return offers.length === 1 ? offers[0]! : null;
 }
 
 /// The Nothing-else option, drawn in the closing section of a follow-up's Sets

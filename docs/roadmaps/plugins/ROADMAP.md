@@ -51,7 +51,7 @@ harness's login runs under — the brief says to re-verify there by hand.
 - [ ] 06: Claude across — [brief](06-claude-across.md) — after 05
 - [x] 07: Skill packs — [brief](07-skill-packs.md) — after 01
 - [x] 08: The Activity interface and follow-up rounds across — [brief](08-the-activity-interface.md) — after 07
-- [ ] 09: The interview, one session and the wrap-up across — [brief](09-interview-session-wrap-up-across.md) — after 08
+- [x] 09: The interview, one session and the wrap-up across — [brief](09-interview-session-wrap-up-across.md) — after 08
 - [x] 10: The backlog and stage runners across — [brief](10-runners-across.md) — after 08
 - [ ] 11: The Process engine — [brief](11-the-process-engine.md) — after 09, 10
 - [ ] 12: The Forge interface and GitHub across — [brief](12-the-forge-interface.md) — after 09

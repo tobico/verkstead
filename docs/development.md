@@ -1719,11 +1719,20 @@ Today there are four:
   functions a stranger's would: a block per Activity, each a component built
   from the crate beside it — today *Follow-up rounds*, from
   [`plugins/activities/follow-up-rounds/`](../plugins/activities/follow-up-rounds),
-  the *Backlog runner*, from
+  which an investigation's rounds run under too, configured with the
+  investigating skill and evidence, the *Backlog runner*, from
   [`plugins/activities/backlog-runner/`](../plugins/activities/backlog-runner),
-  and the *Stage runner*, from
+  the *Stage runner*, from
   [`plugins/activities/stage-runner/`](../plugins/activities/stage-runner),
-  which is why the plugin declares `conversations: start`.
+  which is why the plugin declares `conversations: start`, *One session*, from
+  [`plugins/activities/one-session/`](../plugins/activities/one-session), which
+  the inline build, the `submitting` step and an `instruction` steer each run
+  under with options of their own, the *Interview*, from
+  [`plugins/activities/interview/`](../plugins/activities/interview), which
+  every grilling session runs under, and the *Wrap-up*, from
+  [`plugins/activities/wrap-up/`](../plugins/activities/wrap-up), which every
+  wrap-up runs under — the checks, comments and review still watched by the
+  host beside it until they move in.
   It depends on the `verkstead` pack's plugin for the skills its sessions run
   under, and is the Built-in group's second row. Its directory holds the
   components' sources rather than their bytes, so `verkstead plugin check`
@@ -1754,6 +1763,8 @@ components where the script looks:
 $ cargo build --release --target wasm32-wasip2 --manifest-path plugins/Cargo.toml
 $ cargo build --release --target wasm32-wasip2 --target-dir plugins/target \
     --manifest-path plugins/tests/stub-harness/Cargo.toml
+$ cargo build --release --target wasm32-wasip2 --target-dir plugins/target \
+    --manifest-path plugins/tests/activity-fixture/Cargo.toml
 $ mkdir -p plugins/dist && cp plugins/target/wasm32-wasip2/release/*.wasm plugins/dist/
 ```
 
@@ -1773,9 +1784,12 @@ $ cargo test --manifest-path plugins/Cargo.toml --workspace
 workspace of its own: the server's suites install them as plugins of their
 own. Apart, because the packaged build (`nix/`) vendors only what the
 server's `Cargo.lock` and the built-ins' name; it leaves `plugins/tests/` out of
-its source, and compiles no test. Today that
-is the **stub harness**, whose component the suites write a `plugin.yaml`
+its source, and compiles no test. Today those
+are the **stub harness**, whose component the suites write a `plugin.yaml`
 beside and install from a directory to launch sessions on a harness a plugin
 declares — see `crates/server/tests/suite/stub_harness.rs`. The build script
 builds it from its own workspace where `plugins/dist/` has none, embeds it
-nowhere, and hands the tests its path in `VERKSTEAD_STUB_HARNESS_WASM`.
+nowhere, and hands the tests its path in `VERKSTEAD_STUB_HARNESS_WASM`. And
+the **activity fixture**, an Activity reaching every host function a wrap-up
+needs — waiting on several sessions and a timeout, the Forge, the wrap-up's
+records — whose path is in `VERKSTEAD_ACTIVITY_FIXTURE_WASM`.

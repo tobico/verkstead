@@ -1,0 +1,29 @@
+# An Activity's component for the server's suites, and never a built-in: it
+# exercises every host function the `activity` world lends a wrap-up — waiting
+# on several sessions and a timeout, the Forge, and the wrap-up's records —
+# and answers what it saw. Its directory is under `tests/`, so
+# `crates/server/build.rs` embeds nothing and hands the suites the file's path.
+#
+# A workspace of its own, as `../stub-harness` is and for its reason.
+[workspace]
+
+[package]
+name = "verkstead-activity-fixture"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+
+[lib]
+name = "activity_fixture"
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.51"
+
+# As the built-ins' are: small, and quick to instantiate.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

@@ -294,6 +294,11 @@ interface activity-types {
     nothing-else,
     /// The same mark in Investigating's window, uncommitted changes allowed.
     investigated,
+    /// The artefact of the Direction the human picks on the session's own
+    /// proposal — the handoff, the plan commit, or the roadmap commit and its
+    /// pull request — the latest pick superseding any before it. Nothing is
+    /// expected before a pick, so a signal then is refused.
+    picked,
   }
 
   /// How a session ends once it is done: with the work standing, or on a pull
@@ -322,6 +327,11 @@ interface activity-types {
     steered,
     /// The human answered a round with the Nothing-else mark.
     marked,
+    /// It gave its Done signal over the artefact of the Direction the human
+    /// picked, which was taken, and is idle — or it ended with that artefact
+    /// written: the Direction, `inline`, `task-list` or `roadmap`. Only a
+    /// session launched expecting `picked` is answered this.
+    picked(string),
   }
 
   /// What one repository's branch holds, read-only.
@@ -332,11 +342,131 @@ interface activity-types {
     /// Whether anything in the Worktree is not committed.
     uncommitted: bool,
   }
+
+  /// What a wait on several sessions woke to: one of them, and what its wait
+  /// came to — or the timeout running out first.
+  variant woke {
+    waited(tuple<session, waited>),
+    tick,
+  }
+
+  /// A pull request the Conversation's work is on: the Repo's name, as
+  /// `git-facts` takes it, and its number there.
+  record pull-request {
+    repo: string,
+    number: s64,
+  }
+
+  /// One of the things a wrap-up waits on, whose standing the viewer draws:
+  /// a pull request's checks, what has been said on it, whether it merges —
+  /// and the review, which is one across the whole of the work.
+  variant watcher {
+    checks(pull-request),
+    comments(pull-request),
+    mergeable(pull-request),
+    review,
+  }
+
+  /// Why the Forge gave no answer.
+  variant unforged {
+    /// The Forge lacks what the call needs, so the watcher that needed it has
+    /// been settled at once, and there is nothing to watch.
+    lacking,
+    /// It couldn't be asked, in a sentence. Nothing is concluded from it.
+    unasked(string),
+  }
+
+  /// Whether the Forge can merge a pull request into its base as it stands.
+  /// `unknown` is the Forge still working it out, and no conflict.
+  enum mergeable {
+    cleanly,
+    conflicting,
+    unknown,
+  }
+
+  /// Where a pull request has got to. `unknown` concludes nothing.
+  enum pull-request-stands {
+    open,
+    merged,
+    closed,
+    unknown,
+  }
+
+  /// A pull request's state and whether it merges.
+  record pull-request-standing {
+    mergeable: mergeable,
+    stands: pull-request-stands,
+  }
+
+  /// How one check is getting on: skipped counts as passed, cancelled as
+  /// failed.
+  enum checked {
+    passed,
+    failed,
+    running,
+  }
+
+  record check {
+    name: string,
+    how: checked,
+    /// Where its run is, or empty.
+    link: string,
+  }
+
+  /// A pull request's checks, the commit they are about, and whether it
+  /// merges.
+  record suite {
+    head: string,
+    checks: list<check>,
+    mergeable: mergeable,
+  }
+
+  /// One thing said on a pull request: in its conversation, at the top of a
+  /// review, or on a line of the diff.
+  record comment {
+    /// What it is for as long as it exists, which is what it is marked
+    /// addressed by.
+    which: string,
+    author: string,
+    /// When, RFC 3339.
+    at: string,
+    /// The file and line, for one left on the diff; empty otherwise.
+    about: string,
+    markdown: string,
+  }
+
+  /// Where a wrap-up stands, by the host's record of what it waits on.
+  variant wrapped {
+    /// Something it waits on is still unsettled.
+    waiting,
+    /// Everything it waits on is settled: Verkstead has finished with the
+    /// work, and what is left is the human's merge.
+    settled,
+    /// The host gave up on it — a check or a conflict out of fix sessions, a
+    /// Companion committed in and left without a pull request — and holds
+    /// the stop that says why. The Activity ends `given-up`.
+    given-up,
+    /// The Conversation is not wrapping up any more, or its run has stopped.
+    /// The Activity ends `steered`.
+    over,
+  }
+
+  /// A pull request found open on a branch.
+  record opened {
+    number: s64,
+    title: string,
+    url: string,
+    head: option<string>,
+    base: option<string>,
+  }
 }
 
 /// What the host lends an Activity: every way it reaches the server.
 interface host {
-  use activity-types.{evidence, ends, session, waited, branch-facts};
+  use activity-types.{
+    evidence, ends, session, waited, branch-facts, woke, pull-request, watcher,
+    unforged, pull-request-standing, suite, comment, opened, wrapped,
+  };
 
   /// Launch a session under `skill`, `<pack>/<skill>`, as `role`, with the
   /// prompt the Activity wrote — the host adds what every session is told —
@@ -350,12 +480,149 @@ interface host {
   /// expecting for as long as it is waited on, and refused while it is not.
   wait: func(session: session) -> waited;
 
+  /// Wait on several sessions at once, for at most `timeout` milliseconds:
+  /// woken by whichever of them something happens to first, as `wait` would
+  /// answer it, or by a `tick` where nothing does. What an Activity running
+  /// several watchers polls them on. One Worktree holds one session, so at
+  /// most one of them is running and checked for its Done signal — the newest
+  /// — and the rest are waited on to end; the check stands across ticks, so a
+  /// signal given between two waits is not lost. A session launched expecting
+  /// `picked` is waited on alone.
+  wait-any: func(sessions: list<session>, timeout: u64) -> woke;
+
   /// The git facts of the Worktree's repository or a Companion's, by the
   /// Repo's name. Refused where it is neither.
   git-facts: func(repo: string) -> result<branch-facts, string>;
 
   /// Put a notice on the Timeline.
   notice: func(text: string);
+
+  /// Every pull request the Conversation's work is on, as recorded: its own
+  /// Repo's first, then the Companions', a stack from the bottom.
+  pull-requests: func() -> list<pull-request>;
+
+  /// The Forge's word on a pull request's state and whether it merges.
+  forge-standing: func(pull-request: pull-request) -> result<pull-request-standing, unforged>;
+
+  /// Its checks. Where the Forge has no checks, the `checks` watcher over it
+  /// is settled at once and the answer is `lacking`.
+  forge-checks: func(pull-request: pull-request) -> result<suite, unforged>;
+
+  /// Everything said on it, in the order it was said. Where the Forge has no
+  /// review, the `comments` watcher over it is settled at once and the answer
+  /// is `lacking`.
+  forge-comments: func(pull-request: pull-request) -> result<list<comment>, unforged>;
+
+  /// Say `markdown` on it, as the Repo's Author, answering where it landed.
+  /// `lacking` as `forge-comments` is.
+  forge-reply: func(pull-request: pull-request, markdown: string) -> result<string, unforged>;
+
+  /// The pull request open on `branch` of the Repo named `repo`, where there
+  /// is one. `lacking` where the Forge cannot open one, which settles nothing.
+  forge-opened: func(repo: string, branch: string) -> result<option<opened>, unforged>;
+
+  /// Where the wrap-up stands, asked each time round its watchers.
+  wrap-up: func() -> wrapped;
+
+  /// Record the pull request the work's own branch is on, which a
+  /// `submitting` session the wrap-up launched has just opened, so there is
+  /// something to watch. Refused, in a sentence, where there is none — and
+  /// the Conversation is then stopped over what that session last said.
+  record-opened: func() -> result<pull-request, string>;
+
+  /// Record one of the things a wrap-up waits on as settled, or as not —
+  /// what the viewer draws the wrap-up's standing from. Saying it twice is
+  /// saying the same thing twice.
+  settle: func(watcher: watcher);
+  unsettle: func(watcher: watcher);
+
+  /// How many fix sessions `check` on the pull request has had.
+  fix-attempts: func(pull-request: pull-request, check: string) -> result<s64, string>;
+
+  /// Count one more, as the session is dispatched, and say how many that
+  /// makes.
+  count-fix-attempt: func(pull-request: pull-request, check: string) -> result<s64, string>;
+
+  /// What origin holds the pull request's branch at — the commit a suite has
+  /// to be about to be this branch's — or none where that can't be told: no
+  /// origin, a remote that didn't answer, a branch it doesn't hold.
+  pushed-head: func(pull-request: pull-request) -> option<string>;
+
+  /// How many resolution sessions the conflicts in the pull request's Repo
+  /// have had: one count for the Repo, which is one for a stack, a session
+  /// resolving a stack whole.
+  conflict-attempts: func(pull-request: pull-request) -> result<s64, string>;
+
+  /// Count one more, as the session is dispatched, and say how many that
+  /// makes.
+  count-conflict-attempt: func(pull-request: pull-request) -> result<s64, string>;
+
+  /// What a session sent to resolve the pull request's conflict with its base
+  /// is told: where to work, and how — by the strategy the human configured,
+  /// or for a stack, synced whole. Refused, in a sentence, where it is one of
+  /// a stack this Sandbox can't sync — and the run is then stopped saying how
+  /// to put that right, nothing spent.
+  resolution: func(pull-request: pull-request) -> result<string, string>;
+
+  /// Give the wrap-up up over the pull request, saying `how` about `what` it
+  /// was doing, with the tail of the newest session launched here — unless
+  /// another of the work's pull requests still has a fix or a resolution
+  /// coming, which a stop would spend: then nothing is written, and the
+  /// answer is false. Once given up, `wrap-up` says so.
+  give-up: func(pull-request: pull-request, what: string, how: string) -> bool;
+
+  /// Which of the comments said in the Repo named `repo` have already been
+  /// marked addressed, by what each is.
+  addressed: func(repo: string) -> result<list<string>, string>;
+
+  /// Mark these addressed, all or none, as the session about them is
+  /// dispatched.
+  mark-addressed: func(repo: string, comments: list<string>) -> result<_, string>;
+
+  /// Which of these comments said in the Repo named `repo` are nobody's to
+  /// answer, by what each is: the one a share of the Conversation left, and
+  /// what the human's ignore rules match — the second marked addressed on the
+  /// way past, so that taking a rule away changes what happens next rather
+  /// than what happened.
+  ignored: func(repo: string, comments: list<comment>) -> list<string>;
+
+  /// Whether one of the things a wrap-up waits on is settled, by the host's
+  /// record — the review being over is what lets a batch of comments be
+  /// answered.
+  settled: func(watcher: watcher) -> bool;
+
+  /// Find the pull requests the work's Companions were committed in and
+  /// carried to, and record each beside the Conversation's own — giving the
+  /// wrap-up up where one was committed in and left without any. Asked once
+  /// as the wrap-up starts, before anything reads the work whole.
+  cover: func();
+
+  /// Whether the branch is to be reviewed now: false where it has been
+  /// already, or is not to be at all — which settles the review — or where
+  /// the review's own proposal is standing with nobody behind it, which stops
+  /// the run. `afresh` reads past such a proposal, closing it, which is what
+  /// Resume asks for.
+  review-wanted: func(afresh: bool) -> bool;
+
+  /// What the review session is told: the documents, where every pull request
+  /// is where there are several, and `said` — what was standing on them as it
+  /// starts — under it.
+  reviewing: func(said: option<string>) -> result<string, string>;
+
+  /// The review session launched here is over, `how` it ended where that was
+  /// the trouble: settle the review, send the work back to build what it split
+  /// out, or stop over a proposal left with nobody behind it.
+  review-over: func(how: option<string>);
+
+  /// The same for a session answering a batch of comments on the pull
+  /// request, `comments` being which: carry on, or stop — and read them again
+  /// — where it did not finish.
+  batch-over: func(pull-request: pull-request, comments: list<string>, how: option<string>);
+
+  /// Whether a batch session's proposal is standing with nobody behind it,
+  /// which stops the run as it is found: nothing said is settled or answered
+  /// while it is.
+  left-behind: func() -> bool;
 
   /// Stop: the Conversation stays where it is, the reason goes on the
   /// Timeline, and any Set left open is closed — unless the newest session

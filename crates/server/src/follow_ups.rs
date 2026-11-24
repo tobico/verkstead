@@ -32,11 +32,12 @@ use crate::store;
 /// follow up on.
 ///
 /// What the **Follow-up rounds** Activity is handed as its `settled` option —
-/// see [`crate::runner::follow_up_rounds`] — and so what a fresh session on a
-/// follow-up picked up again is primed with. Empty for a follow-up that is just
-/// starting, which is every one a steer or a Tinker start opens. The component
-/// reads the brief itself, off the same Timeline; what it cannot make there is
-/// this digest, which needs each Set's schema and the Data Directory's paths.
+/// see [`crate::activities::follow_up_rounds::run`] — and so what a fresh
+/// session on a follow-up picked up again is primed with. Empty for a follow-up
+/// that is just starting, which is every one a steer or a Tinker start opens.
+/// The component reads the brief itself, off the same Timeline; what it cannot
+/// make there is this digest, which needs each Set's schema and the Data
+/// Directory's paths.
 ///
 /// **Two ways in, and the newer of them wins.** A steer is one, and a **Tinker**
 /// start is the other: that one writes no steer, because it is the press that

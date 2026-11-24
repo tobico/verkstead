@@ -37,7 +37,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use tokio::sync::watch;
-use verkstead_schema::ApiError;
+use verkstead_schema::{ApiError, Direction};
 
 use crate::AppState;
 use crate::memos::Building;
@@ -98,9 +98,10 @@ pub(crate) enum Evidence {
 
     /// A follow-up, whose end is the human's to say rather than the session's:
     /// the newest round they answered carries the Nothing-else mark — see
-    /// [`crate::runner::marked`]. What it commits is theirs to have asked for,
-    /// and a round that was a question and an answer commits nothing at all, so
-    /// there is nothing on the branch to read instead.
+    /// [`crate::activities::follow_up_rounds::marked`]. What it commits is
+    /// theirs to have asked for, and a round that was a question and an answer
+    /// commits nothing at all, so there is nothing on the branch to read
+    /// instead.
     NothingElse,
 
     /// An investigation, which is the same mark read in Investigating's own
@@ -349,7 +350,7 @@ async fn verdict(state: &AppState, conversation_id: i64) -> Verdict {
     // Conversation can have been through more than one of them — see
     // [`Evidence::mark`].
     if let Some((within, unmarked)) = evidence.mark()
-        && !crate::runner::marked(state, conversation_id, within).await
+        && !crate::activities::follow_up_rounds::marked(state, conversation_id, within).await
     {
         return Verdict::Refused(unmarked.to_owned());
     }
@@ -784,7 +785,9 @@ async fn abandoned(state: &AppState, conversation_id: i64, event_id: i64) {
 ///
 /// A grilling that has not been picked on is the one said by name: it has no
 /// artifact to have finished, and the move that gives it one is the human's. A
-/// Direction picked a moment ago is the watcher not yet armed, and says so.
+/// Direction picked a moment ago is the interview's wait not yet moved onto its
+/// artifact, and says so — unless it is one the interview does not offer, which
+/// it never moves onto, and that is said with what it does offer.
 async fn unexpected(state: &AppState, conversation_id: i64) -> String {
     let grilling = matches!(
         store::state(&state.pool, conversation_id).await,
@@ -797,7 +800,23 @@ async fn unexpected(state: &AppState, conversation_id: i64) -> String {
             .to_owned();
     }
 
+    let offered = state
+        .followers
+        .offered(conversation_id)
+        .unwrap_or_else(|| Direction::ALL.to_vec());
+
     match store::picked_direction(&state.pool, conversation_id).await {
+        // A Direction the interview does not offer is never taken up, so there
+        // is no artifact of it to have finished — which is said, with what is.
+        Ok(Some(picked)) if !offered.contains(&picked) => {
+            format!(
+                "`{}` was picked, but this interview offers only {}, so there is nothing \
+                 of it for this session to have finished — propose one of those with \
+                 `verkstead ask`",
+                picked.word(),
+                Direction::listed(&offered),
+            )
+        }
         Ok(Some(_)) => "the Direction the human picked is still being taken up, so run \
                         `verkstead done` again in a moment"
             .to_owned(),

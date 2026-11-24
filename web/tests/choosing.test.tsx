@@ -300,6 +300,89 @@ describe("picking a direction", () => {
   });
 });
 
+/// The closing Set again, its proposal offering `offers` alone — what an
+/// interview whose Process declares fewer than three puts.
+function offering(offers: Direction[]): typeof PROPOSING {
+  return {
+    ...PROPOSING,
+    proposal: { ...PROPOSING.proposal!, direction: offers[0]!, offers },
+  };
+}
+
+describe("a proposal offering fewer than three", () => {
+  it("draws only the directions it offers", async () => {
+    const { page } = await answering(offering(["inline", "task-list"]));
+
+    expect(texts(page, `.${sheet.directionPick} .${sheet.directionName}`)).toEqual([
+      "Implement inline",
+      "Break into a task list",
+    ]);
+    expect(
+      page.querySelector(`input[name="direction"][value="roadmap"]`),
+      "roadmap was not offered, so nothing draws it",
+    ).toBeNull();
+  });
+
+  it("offering one is no chooser: a tick that accepts it", async () => {
+    const { page } = await answering(offering(["inline"]));
+
+    expect(
+      page.querySelectorAll(`.${sheet.directionPick} input[type="radio"]`),
+      "nothing to choose between",
+    ).toHaveLength(0);
+
+    const tick = offered(page, "inline");
+    expect(tick.type).toBe("checkbox");
+    expect(tick.checked, "and nothing accepted until the human ticks it").toBe(false);
+    expect(page.querySelector(`.${sheet.directionPick} .${sheet.semantics}`)!.textContent).toContain(
+      "Ticking this accepts the proposal",
+    );
+
+    fireEvent.click(tick);
+    expect(offered(page, "inline").checked).toBe(true);
+
+    fireEvent.click(offered(page, "inline"));
+    expect(offered(page, "inline").checked, "a second press takes it off").toBe(false);
+  });
+
+  it("accepting the one sends it as the pick", async () => {
+    const { page, fetching } = await answering(
+      offering(["roadmap"]),
+      submitted("Accepted"),
+    );
+
+    fireEvent.click(offered(page, "roadmap"));
+    fireEvent.click(page.querySelector(`.${submitting.submit} button`)!);
+
+    await waitFor(() => expect(sent(fetching)).toBeTruthy());
+    expect((sent(fetching) as { direction?: Direction }).direction).toBe("roadmap");
+  });
+
+  it("restores no kept pick the proposal no longer offers", async () => {
+    localStorage.setItem(
+      draftKey(PROPOSING.id),
+      JSON.stringify({ filled: [], comment: "", direction: "roadmap" }),
+    );
+
+    const { page } = await answering(offering(["inline", "task-list"]));
+
+    expect(offered(page, "inline").checked).toBe(false);
+    expect(offered(page, "task-list").checked).toBe(false);
+  });
+
+  it("keeps only what was offered on the record", async () => {
+    const { page } = await answering({
+      ...PROPOSED,
+      proposal: { ...PROPOSED.proposal!, offers: ["inline", "task-list"] },
+    });
+
+    expect(texts(page, `.${sheet.directionPick} .${sheet.directionName}`)).toEqual([
+      "Implement inline",
+      "Break into a task list",
+    ]);
+  });
+});
+
 describe("the record a picked-on Set becomes", () => {
   it("marks what was chosen apart from what was recommended", async () => {
     const { page } = await answering(PROPOSED);

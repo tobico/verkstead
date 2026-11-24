@@ -37,17 +37,20 @@
 //! its own Notice. So this asks too, the way every watcher already asks before
 //! it dispatches anything — see [`crate::stopping::stopped`].
 //!
-//! A loop rather than a call from each of the watchers, and deliberately so: the
-//! things that settle are in three different places — a poll of GitHub, another
-//! poll of GitHub, and the endpoint that takes a Response — and a wrap-up left
-//! for ever because one of them forgot to ask would be the failure nobody
-//! notices. Asking costs a few reads of a table.
+//! Asked by the **Wrap-up** Activity every round rather than by each of the
+//! watchers, and deliberately so: the things that settle are in three different
+//! places — a poll of GitHub, another poll of GitHub, and the endpoint that
+//! takes a Response — and a wrap-up left for ever because one of them forgot to
+//! ask would be the failure nobody notices. Asking costs a few reads of a
+//! table. What the Activity answers on the rule holding is its `settled`, and
+//! the move is made here as that lands — see [`standing`] and [`settled`], and
+//! [`crate::activities::wrap_up::run`].
 //!
 //! Which is also why the condition on the way is noticed here — see
 //! [`narrowing`]. A wrap-up whose review, comments and merge have settled and
 //! whose checks have not, with nothing running in its Worktree, is **Waiting on
 //! checks**: a label on the card and a line on the Timeline, drawn off the same
-//! facts this loop already reads on a cadence, and nothing on the Lifecycle. A
+//! facts the Activity already reads on a cadence, and nothing on the Lifecycle. A
 //! conflicted pull request is not that, and says nothing: what it is waiting on
 //! is a resolution rather than a suite.
 //!
@@ -69,121 +72,154 @@ use verkstead_schema::Nudge;
 use crate::AppState;
 use crate::store;
 
-/// Ask whether `conversation_id`'s wrap-up is over, until it is or there is
-/// nothing left to ask about.
+/// Where `conversation_id`'s wrap-up stands, as the **Wrap-up** Activity asks
+/// each time round its watchers — see [`crate::activities::wrap_up::run`].
 ///
 /// Nothing here is refused for. This runs unattended with nobody watching, and
 /// what it has to say it says on the Timeline or in the log.
-pub(crate) async fn watch(state: AppState, conversation_id: i64) {
-    loop {
-        // Before the rule rather than inside it, because what a stop means here
-        // is the same as what it means in front of a launch: the run does not
-        // advance past one, and Done is as much an advance as a session is.
-        // Started again by the press that clears it — see [`crate::resume`],
-        // which starts the whole of a wrap-up over.
-        //
-        // And before the narrowing below for the same reason: a run that has
-        // stopped is not a wrap-up waiting on its checks, so it says nothing.
-        if crate::stopping::stopped(&state, conversation_id).await {
+pub(crate) async fn standing(state: &AppState, conversation_id: i64) -> Standing {
+    // A stop the host's watchers gave the wrap-up up with, held for the
+    // Activity to answer `given-up` over — see [`crate::wrapping::give_up`].
+    if state.wrap_ups.given_up(conversation_id) {
+        return Standing::GivenUp;
+    }
+
+    // Before the rule rather than inside it, because what a stop means here
+    // is the same as what it means in front of a launch: the run does not
+    // advance past one, and Done is as much an advance as a session is.
+    // Started again by the press that clears it — see [`crate::resume`],
+    // which starts the whole of a wrap-up over.
+    //
+    // And before the narrowing below for the same reason: a run that has
+    // stopped is not a wrap-up waiting on its checks, so it says nothing.
+    if crate::stopping::stopped(state, conversation_id).await {
+        tracing::info!(
+            conversation_id,
+            "driving has stopped, so the wrap-up is not being finished",
+        );
+        return Standing::Over;
+    }
+
+    // Before the rule itself, because the two are readings of the same facts
+    // a moment apart and this is the one that has something to say about a
+    // wrap-up that is *not* over: the narrowing is what is left when
+    // everything but the checks has settled.
+    narrowing(state, conversation_id).await;
+
+    match store::wrap_up_would_finish(&state.pool, conversation_id).await {
+        Ok(store::Finished::Done) => Standing::Settled,
+        Ok(store::Finished::StillWaiting) => Standing::Waiting,
+        // Closed out from under the watchers, or finished by something else —
+        // Resume starts the whole wrap-up again, so two can be running at once
+        // and the second finds the move made.
+        Ok(store::Finished::NotWrapping | store::Finished::NoSuchConversation) => Standing::Over,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "asking whether a wrap-up was over failed");
+            Standing::Waiting
+        }
+    }
+}
+
+/// Where a wrap-up stands — see [`standing`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Standing {
+    Waiting,
+    Settled,
+    GivenUp,
+    Over,
+}
+
+/// Land a wrap-up the Activity answered `settled` — or `merged`, where `rule`
+/// is false and the move is made whatever is still unsettled, every pull
+/// request having landed.
+///
+/// A rule no longer true by the time it is applied — something unsettled
+/// between the Activity's last look and this — starts the Activity again.
+pub(crate) async fn settled(state: &AppState, conversation_id: i64, rule: bool) {
+    let finished = match rule {
+        true => store::finish_wrap_up(&state.pool, conversation_id).await,
+        false => store::finish_merged_wrap_up(&state.pool, conversation_id).await,
+    };
+
+    match finished {
+        Ok(store::Finished::Done) => {
             tracing::info!(
                 conversation_id,
-                "driving has stopped, so the wrap-up is not being finished",
+                rule,
+                "the wrap-up is over — everything it waits on settled, or every pull \
+                 request merged — so the work is done",
             );
-            return;
-        }
 
-        // Before the rule itself, because the two are readings of the same
-        // facts a moment apart and this is the one that has something to say
-        // about a wrap-up that is *not* over: the narrowing is what is left
-        // when everything but the checks has settled.
-        narrowing(&state, conversation_id).await;
-
-        match store::finish_wrap_up(&state.pool, conversation_id).await {
-            Ok(store::Finished::StillWaiting) => {}
-            Ok(store::Finished::Done) => {
-                tracing::info!(
+            // The sidebar keeps the news until the human has looked at it,
+            // which is what a push nobody was there for needs behind it: a
+            // notification read on a phone and swiped away is a milestone
+            // the laptop would otherwise never mention. Stamped here rather
+            // than wherever Done is reached, because it is this push it
+            // marks the trail of — a steer to Done is the human's own act,
+            // pushes nothing and stamps nothing.
+            //
+            // Before the Nudge, so that the sidebar the Nudge sends every
+            // open page back to read is one this has already written to.
+            if let Err(error) = store::stamp_unseen(&state.pool, conversation_id).await {
+                tracing::error!(
+                    error = ?error,
                     conversation_id,
-                    "every pull request's checks are green, every one of them merges and \
-                     nothing said on any of them is left unaddressed, and the review is \
-                     answered, so the work is done",
+                    "stamping a finished Conversation unseen failed",
                 );
-
-                // The sidebar keeps the news until the human has looked at it,
-                // which is what a push nobody was there for needs behind it: a
-                // notification read on a phone and swiped away is a milestone
-                // the laptop would otherwise never mention. Stamped here rather
-                // than wherever Done is reached, because it is this push it
-                // marks the trail of — a steer to Done is the human's own act,
-                // pushes nothing and stamps nothing.
-                //
-                // Before the Nudge, so that the sidebar the Nudge sends every
-                // open page back to read is one this has already written to.
-                if let Err(error) = store::stamp_unseen(&state.pool, conversation_id).await {
-                    tracing::error!(
-                        error = ?error,
-                        conversation_id,
-                        "stamping a finished Conversation unseen failed",
-                    );
-                }
-
-                // The Timeline has a move on it, and an open page should say so
-                // without being reloaded.
-                state.nudges.announce(Nudge::Conversation {
-                    conversation: conversation_id,
-                });
-
-                // And the devices are told: nobody pressed anything to get here
-                // and nobody was watching it happen, which is exactly what a
-                // milestone notification is for. Behind the move, which the
-                // store has already made — and in a cluster the members are told
-                // the same thing, so that a phone installed from any device in it
-                // hears this one (ADR-0020) — see [`crate::push`].
-                crate::push::the_work_is_done(&state.pool, conversation_id);
-
-                // And the record is handed to whoever is reviewing the work,
-                // where the human has asked for that to happen by itself. This
-                // settle rather than the state: a Conversation steered to Done
-                // never comes through here, and nothing is shared for it.
-                //
-                // Awaited, and after the news above rather than in front of it:
-                // a publish is a gist made, a clone and a push, and the sidebar
-                // saying the work is done should not be waiting on GitHub.
-                share_to_pull_requests(&state, conversation_id).await;
-
-                // And a settled wrap-up is what lets the next roadmap stage
-                // start, which is the whole of what makes a staged roadmap
-                // execute itself — see [`crate::continuing`]. Asked of every
-                // Conversation rather than of the ones somebody thought were
-                // stages: whether this is a stage of anything is read off the
-                // branch, and one that has written to no roadmap starts nothing.
-                //
-                // Here rather than anywhere else because this is the one place
-                // that knows a wrap-up has just ended, and awaited rather than
-                // spawned: this loop has nothing left to do after it, and the
-                // work it is waiting on is a git read and a session starting.
-                crate::continuing::carry_on(state, conversation_id).await;
-                return;
             }
-            // Closed out from under the watchers, or finished by something else
-            // — Resume starts the whole wrap-up watching again, so two of these
-            // can be running at once and the second finds the move made.
-            Ok(store::Finished::NotWrapping) => {
-                tracing::debug!(
-                    conversation_id,
-                    "the Conversation is not wrapping up any more, so nothing is left to settle",
-                );
-                return;
-            }
-            Ok(store::Finished::NoSuchConversation) => {
-                tracing::error!(conversation_id, "there is no Conversation left to settle");
-                return;
-            }
-            Err(error) => {
-                tracing::error!(error = ?error, conversation_id, "asking whether a wrap-up was over failed");
-            }
+
+            // The Timeline has a move on it, and an open page should say so
+            // without being reloaded.
+            state.nudges.announce(Nudge::Conversation {
+                conversation: conversation_id,
+            });
+
+            // And the devices are told: nobody pressed anything to get here
+            // and nobody was watching it happen, which is exactly what a
+            // milestone notification is for. Behind the move, which the
+            // store has already made — and in a cluster the members are told
+            // the same thing, so that a phone installed from any device in it
+            // hears this one (ADR-0020) — see [`crate::push`].
+            crate::push::the_work_is_done(&state.pool, conversation_id);
+
+            // And the record is handed to whoever is reviewing the work,
+            // where the human has asked for that to happen by itself. This
+            // settle rather than the state: a Conversation steered to Done
+            // never comes through here, and nothing is shared for it.
+            //
+            // Awaited, and after the news above rather than in front of it:
+            // a publish is a gist made, a clone and a push, and the sidebar
+            // saying the work is done should not be waiting on GitHub.
+            share_to_pull_requests(state, conversation_id).await;
+
+            // And a settled wrap-up is what lets the next roadmap stage
+            // start, which is the whole of what makes a staged roadmap
+            // execute itself — see [`crate::continuing`]. Asked of every
+            // Conversation rather than of the ones somebody thought were
+            // stages: whether this is a stage of anything is read off the
+            // branch, and one that has written to no roadmap starts nothing.
+            //
+            // Here rather than anywhere else because this is the one place
+            // that knows a wrap-up has just ended, and awaited rather than
+            // spawned: nothing is left to do after it, and the
+            // work it is waiting on is a git read and a session starting.
+            crate::continuing::carry_on(state.clone(), conversation_id).await;
         }
-
-        tokio::time::sleep(state.sessions.pace().checks).await;
+        Ok(store::Finished::StillWaiting) => {
+            crate::wrapping::wrap_up(state, conversation_id, None);
+        }
+        Ok(store::Finished::NotWrapping) => {
+            tracing::debug!(
+                conversation_id,
+                "the Conversation is not wrapping up any more, so nothing is left to settle",
+            );
+        }
+        Ok(store::Finished::NoSuchConversation) => {
+            tracing::error!(conversation_id, "there is no Conversation left to settle");
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "finishing a wrap-up failed");
+        }
     }
 }
 

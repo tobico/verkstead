@@ -5590,7 +5590,13 @@ rationale_html: string,
  * agent wrote them. Empty where it wants none, and the chooser then draws
  * nothing for them.
  */
-wants: Array<WantView>, };
+wants: Array<WantView>, 
+/**
+ * The Directions the chooser draws, in the design's order — all three
+ * unless the interview offered fewer, and one alone drawn as accepting
+ * the proposal or not rather than as a choice.
+ */
+offers: Array<Direction>, };
 
 /**
  * The agent's prose, rendered.

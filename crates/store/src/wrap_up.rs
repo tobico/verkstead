@@ -1236,6 +1236,34 @@ pub async fn forget_every_addressed_comment(pool: &SqlitePool, conversation_id: 
 /// What it does *not* wait for is the merge. Done means Verkstead has finished
 /// with the work, not that it is on `main`.
 pub async fn finish_wrap_up(pool: &SqlitePool, conversation_id: i64) -> Result<Finished> {
+    finishing(pool, conversation_id, Rule::Applied).await
+}
+
+/// Move the Conversation to Done because every pull request it is on has been
+/// merged, whatever is still unsettled: the work has landed, and there is
+/// nothing left for a wrap-up to wait on.
+pub async fn finish_merged_wrap_up(pool: &SqlitePool, conversation_id: i64) -> Result<Finished> {
+    finishing(pool, conversation_id, Rule::Landed).await
+}
+
+/// Whether [`finish_wrap_up`] would move the Conversation now, read and nothing
+/// written: [`Finished::Done`] where everything is settled.
+pub async fn wrap_up_would_finish(pool: &SqlitePool, conversation_id: i64) -> Result<Finished> {
+    finishing(pool, conversation_id, Rule::Read).await
+}
+
+/// How [`finishing`] goes by the rule.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Rule {
+    /// Asked, and the move made where it holds.
+    Applied,
+    /// Asked, and nothing written.
+    Read,
+    /// Not asked: the move made.
+    Landed,
+}
+
+async fn finishing(pool: &SqlitePool, conversation_id: i64, rule: Rule) -> Result<Finished> {
     let mut tx = super::writing(pool, "finishing a wrap-up").await?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
@@ -1267,8 +1295,12 @@ pub async fn finish_wrap_up(pool: &SqlitePool, conversation_id: i64) -> Result<F
             }),
     );
 
-    if !waiting_on.into_iter().all(|one| settled.contains(&one)) {
+    if rule != Rule::Landed && !waiting_on.into_iter().all(|one| settled.contains(&one)) {
         return Ok(Finished::StillWaiting);
+    }
+
+    if rule == Rule::Read {
+        return Ok(Finished::Done);
     }
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")

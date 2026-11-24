@@ -799,12 +799,13 @@ impl Walk<'_> {
         }
         for (index, outcome) in outcomes.iter().enumerate() {
             let at = format!("{field}.outcomes[{index}]");
-            if !is_word(outcome) {
+            if !is_outcome(outcome) {
                 return Err(Refusal::of(
                     &at,
                     format!(
                         "`{at}` should be lowercase letters, digits and hyphens, like \
-                         `committed`."
+                         `committed`, or one such word after another and a colon, like \
+                         `direction:inline`."
                     ),
                 ));
             }
@@ -1040,6 +1041,15 @@ fn skilled(
 }
 
 /// Whether `text` is lowercase letters, digits and hyphens, and not empty.
+/// An Outcome's word: a [word](is_word), or a word naming what it is one of, a
+/// colon, and the word — the interview's `direction:inline`.
+fn is_outcome(text: &str) -> bool {
+    match text.split_once(':') {
+        Some((of, word)) => is_word(of) && is_word(word),
+        None => is_word(text),
+    }
+}
+
 fn is_word(text: &str) -> bool {
     !text.is_empty()
         && text
@@ -2289,6 +2299,39 @@ windows:
             let dir = acting(&activity("[rust-review/reviewing]", outcomes), "");
 
             assert_eq!(refused(&dir).field.as_deref(), Some(at), "{outcomes}");
+        }
+    }
+
+    /// An Outcome may name what it is one of, as the interview's Directions
+    /// do, and only once.
+    #[test]
+    fn an_outcome_may_be_one_word_after_another_and_a_colon() {
+        let dir = acting(
+            &activity("[rust-review/reviewing]", "[\"direction:inline\", gone]"),
+            "",
+        );
+        let manifest = Manifest::read(dir.path(), Platform::Linux).unwrap();
+        assert_eq!(
+            manifest.activities[0].outcomes,
+            ["direction:inline", "gone"]
+        );
+
+        for outcome in [
+            "\"direction:\"",
+            "\":inline\"",
+            "\"a:b:c\"",
+            "\"Direction:inline\"",
+        ] {
+            let dir = acting(
+                &activity("[rust-review/reviewing]", &format!("[{outcome}]")),
+                "",
+            );
+
+            assert_eq!(
+                refused(&dir).field.as_deref(),
+                Some("provides[1].outcomes[0]"),
+                "{outcome}"
+            );
         }
     }
 

@@ -185,11 +185,18 @@ fn walked(dir: &Path, at: &Path, crate_: bool, crates: &[String], found: &mut Ve
 /// The components under `plugins/tests/` the suites install, each by the
 /// variable a test reads its path from, its directory there, and the file
 /// cargo writes.
-const TESTS: &[(&str, &str, &str)] = &[(
-    "VERKSTEAD_STUB_HARNESS_WASM",
-    "stub-harness",
-    "stub_harness.wasm",
-)];
+const TESTS: &[(&str, &str, &str)] = &[
+    (
+        "VERKSTEAD_STUB_HARNESS_WASM",
+        "stub-harness",
+        "stub_harness.wasm",
+    ),
+    (
+        "VERKSTEAD_ACTIVITY_FIXTURE_WASM",
+        "activity-fixture",
+        "activity_fixture.wasm",
+    ),
+];
 
 /// Build every component of the workspace at `plugins` — the built-ins' under
 /// `plugins/`, or a test component's own — for `wasm32-wasip2`, returning the
@@ -225,6 +232,8 @@ fn build(plugins: &Path, out: &Path) -> PathBuf {
              cargo build --release --target {TARGET} --manifest-path plugins/Cargo.toml\n    \
              cargo build --release --target {TARGET} --target-dir plugins/target \
              --manifest-path plugins/tests/stub-harness/Cargo.toml\n    \
+             cargo build --release --target {TARGET} --target-dir plugins/target \
+             --manifest-path plugins/tests/activity-fixture/Cargo.toml\n    \
              mkdir -p plugins/dist && cp plugins/target/{TARGET}/release/*.wasm plugins/dist/\n\n\
              What cargo said:\n{}",
             String::from_utf8_lossy(&output.stderr)

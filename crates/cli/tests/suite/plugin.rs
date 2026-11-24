@@ -500,8 +500,8 @@ fn the_activities_verkstead_ships_pass() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains(
-            "providing activity — its activities Follow-up rounds, Backlog runner, and Stage \
-             runner."
+            "providing activity — its activities Follow-up rounds, Backlog runner, Stage runner, \
+             One session, Interview, and Wrap-up."
         ),
         "{stdout}"
     );

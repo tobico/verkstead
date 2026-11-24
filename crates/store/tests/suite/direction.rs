@@ -106,6 +106,7 @@ fn proposing(direction: Direction) -> QuestionSet {
             direction,
             rationale: "Six changes, each independently testable.".to_owned(),
             wants: Vec::new(),
+            offers: Vec::new(),
         }),
         project: None,
         branch: None,

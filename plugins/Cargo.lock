@@ -363,7 +363,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "verkstead-activity-interview"
+version = "0.1.0"
+dependencies = [
+ "wit-bindgen 0.46.0",
+]
+
+[[package]]
+name = "verkstead-activity-one-session"
+version = "0.1.0"
+dependencies = [
+ "wit-bindgen 0.46.0",
+]
+
+[[package]]
 name = "verkstead-activity-stage-runner"
+version = "0.1.0"
+dependencies = [
+ "wit-bindgen 0.46.0",
+]
+
+[[package]]
+name = "verkstead-activity-wrap-up"
 version = "0.1.0"
 dependencies = [
  "wit-bindgen 0.46.0",

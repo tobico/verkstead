@@ -53,6 +53,30 @@ impl Building {
             Building::Instruction => "the instructed session".to_owned(),
         }
     }
+
+    /// The kind as an Activity's `building` option spells it — `task:3`,
+    /// `finish`, `stage`, `inline`, `instruction` — which is how the host is
+    /// told what a component's sessions build. See [`Building::named`].
+    pub(crate) fn option(self) -> String {
+        match self {
+            Building::Task(number) => format!("task:{number}"),
+            Building::Finish => "finish".to_owned(),
+            Building::Stage => "stage".to_owned(),
+            Building::Inline => "inline".to_owned(),
+            Building::Instruction => "instruction".to_owned(),
+        }
+    }
+
+    /// The kind a `building` option names, where it names one.
+    pub(crate) fn named(option: &str) -> Option<Building> {
+        Some(match option {
+            "finish" => Building::Finish,
+            "stage" => Building::Stage,
+            "inline" => Building::Inline,
+            "instruction" => Building::Instruction,
+            option => Building::Task(option.strip_prefix("task:")?.parse().ok()?),
+        })
+    }
 }
 
 /// `POST /conversations/{conversation}/api/v1/memos` — the session running in
@@ -234,6 +258,23 @@ fn refused(conversation_id: i64, why: String) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every kind crosses an Activity's options and comes back as it went.
+    #[test]
+    fn a_building_kind_is_an_option_and_back() {
+        for building in [
+            Building::Task(7),
+            Building::Finish,
+            Building::Stage,
+            Building::Inline,
+            Building::Instruction,
+        ] {
+            assert_eq!(Building::named(&building.option()), Some(building));
+        }
+
+        assert_eq!(Building::named("task:"), None);
+        assert_eq!(Building::named("grilling"), None);
+    }
 
     #[test]
     fn a_task_is_stamped_with_its_number_as_the_backlog_spells_it() {
