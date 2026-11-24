@@ -112,18 +112,19 @@ pub use profiles::{
 pub use push::{PushKey, RelayedNews, Subscribed, Subscription, Unsubscribe};
 pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};
 pub use repos::{
-    AuthorThere, ClonableRepo, Cloned, Cloning, Created, Creation, Registered, Registration,
-    RepoAcross, RepoEntry, RepoRemoved, RepoView, Repointed, Repointing,
+    AuthorThere, ClonableRepo, Cloned, Cloning, Created, Creation, ForgeCapability, ForgeMatch,
+    Registered, Registration, RepoAcross, RepoEntry, RepoForge, RepoRemoved, RepoView, Repointed,
+    Repointing,
 };
 pub use settings::{
     AtOnceEdit, AtOnceView, Author, AuthorEdit, AuthorEdited, AuthorEntry, AuthorRemoved,
     AuthorSaved, AuthorToken, BindEntry, CleanupEdit, CleanupStepEdit, CleanupStepView,
-    CleanupView, CompileCaching, ConflictResolution, DiskUse, Eviction, HeaderEdit, IgnoreRule,
-    IgnoredCommentsEdit, InstructionsEdit, LanguageCleared, LanguageView, McpHeader, McpHeaderEdit,
-    McpHeaderValues, McpServer, McpServerEdit, McpServersEdit, PathResolution, PathSource,
-    PathsView, PointingRepo, RuleField, RuleRefused, Running, ServerField, ServerRefused,
-    ServerTried, SettingsEdit, SettingsSaved, SettingsView, StoreView, TokenEdit, TokenSaved,
-    Tried, UnrepointedRepo, Unrepointing, Verified,
+    CleanupView, CompileCaching, ConflictResolution, DiskUse, Eviction, ForgeToken, ForgeTokenEdit,
+    ForgeVerified, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstructionsEdit, LanguageCleared,
+    LanguageView, McpHeader, McpHeaderEdit, McpHeaderValues, McpServer, McpServerEdit,
+    McpServersEdit, PathResolution, PathSource, PathsView, PointingRepo, RuleField, RuleRefused,
+    Running, ServerField, ServerRefused, ServerTried, SettingsEdit, SettingsSaved, SettingsView,
+    StoreView, TokenEdit, TokenForge, TokenSaved, Tried, UnrepointedRepo, Unrepointing, Verified,
 };
 pub use sharing::{
     CommentedOn, MissedOut, SHARE_MARKER, ShareCommented, SharePublished, SharedCommit,

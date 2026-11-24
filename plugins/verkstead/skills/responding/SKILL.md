@@ -18,9 +18,9 @@ what it means.
 more than one repository — its own, and one per companion repository the work
 committed in — so the comments name the repository, the pull request and the
 worktree to work in. `cd` into that worktree first and do the whole job there:
-`git` and `gh` both read their repository from wherever they are run, so a
-`gh pr diff` from the wrong directory reads somebody else's pull request, and a
-push from there puts your answer on somebody else's branch.
+`git` reads its repository from wherever it is run, so a diff read from the
+wrong directory is somebody else's pull request, and a push from there puts
+your answer on somebody else's branch.
 
 You start in a worktree of the Conversation's own repository. Whichever worktree
 you end up working in, it is one branch and one pull request: already pushed and
@@ -34,10 +34,15 @@ person's thinking rather than a list — three replies in a minute are one point
 being made — so the last of them often says what the first was getting at.
 
 Then go and look. A comment names a symptom and the code says what the cause
-is — in the worktree the comments named, `gh` reading its repository from
-wherever it is run:
+is — in the worktree the comments named, where `git` reads the repository it is
+run in:
 
-    gh pr diff
+    git fetch origin
+    git diff <the branch this work goes into>...HEAD
+
+The branch it goes into is named in this prompt, under *The forge this repo is
+on*, and beside the pull request itself where the comments name a companion's.
+Nothing here asks a forge for a diff.
 
 Read what each one is about and the code around it, and read what the
 repository says about itself where the answer turns on a convention — its
@@ -64,7 +69,7 @@ answer to "this is the wrong way round" is a decision they have not made yet.
 
 ## 3. Change nothing yet
 
-No edits, no commits, no pushes, no `gh` command that writes anything — not
+No edits, no commits, no pushes, nothing written to the pull request — not
 until the human has answered. Doing what a comment asks before they have seen
 what you took it to mean is deciding in their place, and the whole point of the
 Set is that the decision is theirs.

@@ -2107,7 +2107,8 @@ pub(crate) fn on_the_path(
 }
 
 /// The `PATH` a program the server runs itself is looked for over on a Mac —
-/// `gh` for [`crate::github`], `tailscale` for [`crate::remote`].
+/// `gh` for the GitHub plugin's declared tool, `tailscale` for
+/// [`crate::remote`].
 ///
 /// **The server's own `PATH` is not enough there.** The desktop app is started
 /// from the Dock, and launchd hands it `/usr/bin:/bin:/usr/sbin:/sbin` and

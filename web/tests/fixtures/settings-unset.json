@@ -20,13 +20,22 @@
     }
   },
   "conflict_resolution": "Merge",
+  "forges": [
+    {
+      "name": "GitHub",
+      "scopes": [
+        "repo",
+        "gist"
+      ],
+      "uuid": "b357e557-3716-4ea6-a3a8-d904c92c5eac"
+    }
+  ],
   "git_author": {
     "display_name": "",
     "email": "",
     "id": null,
     "name": ""
   },
-  "github_token": null,
   "ignored_comments": [],
   "instructions": "",
   "languages": [
@@ -81,5 +90,6 @@
     "sessions": 0,
     "terminals": 0
   },
-  "share_on_done": false
+  "share_on_done": false,
+  "tokens": []
 }

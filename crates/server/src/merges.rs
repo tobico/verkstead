@@ -10,7 +10,7 @@
 //!
 //! So this sweep does, on a pace of its own. Every [`crate::Pace::merges`] it
 //! walks every Done Conversation's pull requests that nothing has recorded
-//! merged or closed, and asks the host's `gh` two things about each: whether it
+//! merged or closed, and asks the Repo's Forge two things about each: whether it
 //! still merges, and where it has got to. Both land in the store beside what
 //! the wrap-up's checks watcher wrote there — see
 //! [`crate::store::record_merging`] and [`crate::store::record_standing`] — so
@@ -40,16 +40,16 @@
 //! the word changed, which is a page already open being told to read again
 //! rather than anybody being told anything.
 //!
-//! A `gh` that cannot answer changes nothing at all, exactly as it changes
+//! A Forge that cannot answer changes nothing at all, exactly as it changes
 //! nothing for a wrap-up: *Verkstead does not know* is a third thing beside
-//! merges and conflicts, and the next sweep asks again of a `gh` that may by
+//! merges and conflicts, and the next sweep asks again of a Forge that may by
 //! then have been logged in.
 //!
 //! **Opening the details pane sweeps that one pull request too.** It asks GitHub
 //! about the pull request on its way to listing the checks, and both readings
 //! ride that question — so a human who opens the pane freshens what is written
 //! down here in the same act, whatever state the Conversation is in and whether
-//! or not anything is sweeping it. See [`crate::github::details`] and
+//! or not anything is sweeping it. See [`crate::forges::Forge::details`] and
 //! [`remember`].
 
 use std::time::Duration;
@@ -57,7 +57,7 @@ use std::time::Duration;
 use verkstead_schema::Nudge;
 
 use crate::AppState;
-use crate::github::{Landing, Mergeable, Stands};
+use crate::forges::{Landing, Mergeable, Stands};
 use crate::store;
 
 /// How often a Done Conversation's pull requests are asked about, as
@@ -120,7 +120,7 @@ async fn sweep(state: &AppState) {
 
             // Off the runtime's threads: this is a process, and one that goes to
             // the network.
-            tokio::task::spawn_blocking(move || crate::github::landing(&gh, &repo, number)).await
+            tokio::task::spawn_blocking(move || gh.landing(&repo, number)).await
         };
 
         let landing = match asked {
@@ -139,7 +139,7 @@ async fn sweep(state: &AppState) {
                 continue;
             }
             Err(error) => {
-                tracing::error!(error = ?error, conversation_id = pull_request.conversation_id, "asking gh about a pull request that has not landed failed");
+                tracing::error!(error = ?error, conversation_id = pull_request.conversation_id, "asking the Forge about a pull request that has not landed failed");
                 continue;
             }
         };

@@ -342,8 +342,9 @@ code. It is a WebAssembly **component** built for WASI 0.2 — Rust's
 Verkstead's WIT package, `verkstead:plugin` (`crates/server/wit/plugin.wit`):
 the base world `plugin`, or the world of a Category it provides. A Category's
 world is filled by the stage that gives it its grammar: the `agent` world's
-exports are above, and the `activity` world's are below, where an Activity's
-component is named by its block rather than here; the rest hold nothing yet.
+exports are above, the `forge` world's are below it, and the `activity`
+world's are below those, where an Activity's component is named by its block
+rather than here; the rest hold nothing yet.
 
 The component may import WASI 0.2 and WASI HTTP, and nothing else. What any of
 it reaches is what `capabilities` grants, below.
@@ -360,6 +361,7 @@ capabilities:
   - outbound: gitlab.com              # a host it may connect to
   - environment: GITLAB_HOST          # a variable it may read
   - conversations: start              # an Activity starting Conversations
+  - secrets: GITLAB_TOKEN             # a secret the host sets for a call
 ```
 
 - **`filesystem`** — a directory on the host, with `access` either
@@ -377,6 +379,12 @@ capabilities:
 - **`conversations`** — `start`, and nothing else: an Activity may start
   Conversations of its own and read them back, through the host functions
   above. Nothing of WASI's comes with it.
+- **`secrets`** — the name of an environment variable, such as `GH_TOKEN`,
+  that the host sets a secret in for the call that needs it: a Forge's token,
+  read out of `secrets.yaml` at the moment of the call. The component is never
+  told where that file is, and the secret is never returned to the viewer.
+  Letters, digits and underscores, not starting with a digit; anything else is
+  refused.
 
 Any other kind is refused, and so is an entry naming two.
 
@@ -941,6 +949,128 @@ not export all three of:
   written since the last call: the address to show the human, that the harness
   is waiting for the code they bring back, words to say to them, or done. The
   host runs the harness and owns its console; the export only reads it.
+
+### Forge
+
+An entry of category **`forge`** is a **Forge**: where a Repo's pull requests
+live. What about it is data is written here — the hosts it answers for, what
+it calls a pull request, how git inside the Sandbox signs in to it, the tool a
+session is lent and what it can do. GitHub is the one Verkstead ships, as the
+built-in plugin *GitHub*.
+
+```yaml
+capabilities:
+  - outbound: gitlab.com
+  - secrets: GITLAB_TOKEN
+provides:
+  - category: forge
+    hosts: [gitlab.com]
+    noun: merge request
+    credential:
+      username: oauth2
+      hosts: [gitlab.com]           # optional: the forge's hosts by default
+    tool:                           # optional
+      name: glab
+      token: GITLAB_TOKEN
+    capabilities: [checks, review, publish, create]
+    scopes: [api]
+```
+
+- **`hosts`** — required, a list of at least one host. A Repo is on this
+  Forge when its remote names one of them.
+- **`noun`** — required. What the Forge calls a pull request, *merge
+  request* say, drawn wherever a Repo on it is.
+- **`credential`** — required. The **`username`** git's credential helper
+  answers with inside the Sandbox, the Author's token being the password, and
+  the **`hosts`** it answers for, which are `hosts` above where it names none.
+- **`tool`** — optional. The command-line tool a session is lent, by its
+  **`name`**, and the environment variable it reads the token from,
+  **`token`**. Whether an extension of it is installed is read off the
+  directory it would be in under the home a session runs with —
+  `<data>/<tool>/extensions/<tool>-<name>`, and `%LOCALAPPDATA%\GitHub CLI` on
+  Windows — rather than by running it: a session's home is Verkstead's own, and
+  the server runs no such tool itself (Set 1878, Q4).
+- **`capabilities`** — optional, a list of what the Forge can do, each once:
+  **`checks`**, checks run against a pull request; **`review`**, comments and
+  reviews on one; **`publish`**, publishing a Share; **`stacks`**, stacked pull
+  requests; and **`create`**, creating a repository. Anything else is refused,
+  naming the entry. A Forge without one is not failed for it: without
+  `checks` or `review` the wrap-up's watcher over it is settled at once and the
+  Timeline says so; without `publish` the Share pane has no Publish and says
+  why; without `create` **Create repo** makes the repository locally and says
+  no remote was made; and without `stacks` a roadmap's chain is left to the
+  rebases its stages already join it by, every stage's pull request opened
+  against the branch below, with no stack walked or synced.
+- **`scopes`** — optional, a list: the scopes a token needs for everything
+  Verkstead asks of the Forge.
+
+A key not listed here is refused.
+
+**A Repo's Forge is read off its remote's host** at the moment it is needed —
+never stored, and never picked on the Repo's row — against the `hosts` of
+every enabled Forge, plus the hosts the human has added to one through a
+`list` setting keyed **`hosts`**: a self-hosted instance is a host added, not
+a plugin written. GitHub declares that setting as *Other hosts*, and a Forge
+has a tick on the Plugins page like a Language plugin's. A remote naming no
+host — a path on this machine, or no `origin` at all — is left to the first
+enabled Forge, as every Repo was before there was more than one.
+
+**A Repo on no Forge has no wrap-up.** Its work lands Done at the signal with
+nothing watching and the Timeline saying why, `verkstead done` takes the
+signal with no open pull request, the Share pane has no Publish, and the
+Repo's row and the Conversation's card say *No forge for* its host.
+
+#### The `forge` world
+
+The component of a plugin providing a forge is written against the `forge`
+world of `crates/server/wit/plugin.wit`, and is refused at load where it does
+not export every operation the server asks of a Forge. Each one may fail with
+one of four kinds — **`no-pull-request`**, nothing open under what was asked
+about; **`not-logged-in`**, the token turned down or none to ask with;
+**`no-remote`**, a remote this Forge answers for no repository of; and
+**`refused(said)`**, anything else in the Forge's own words — and a failure in
+Verkstead rather than at the Forge is the host's to word.
+
+**Every operation about a repository is handed the `origin` remote** as git
+holds it, and works out from it which repository on which host it is: a Forge
+answering for a self-hosted instance derives its API from the host there and
+nowhere else. The host never hands over a path, a component having no handle
+on anybody's checkout.
+
+**The token is never a parameter.** The Author's token for this Forge is set
+in the environment variable the manifest's `secrets` capability names, for the
+one call it was set for — a fresh instance per call — so nothing of one is
+asked for or answered back.
+
+- **`verify()`** — who the token in this call's environment is, and the scopes
+  the Forge says it carries, which the host reads against the `scopes` the
+  manifest declares. A Forge that names no scopes is not read as naming none.
+- **`pull-request(remote, branch)`** and
+  **`pull-request-numbered(remote, number)`** — the pull request open on a
+  branch, and the one a number names whether it is open or not.
+- **`open-pull-request(remote, opening)`** — one opened as a draft, from the
+  head, the base, the title and the body, answered as the Forge now has it.
+- **`open-pull-requests(remote)`** — every one open, which is what a stack is
+  walked out of: each carries its head, its base and whether its head is in
+  another repository.
+- **`details(remote, number)`**, **`checks(remote, number)`**,
+  **`landing(remote, number)`** and **`comments(remote, number)`** — what the
+  details pane draws, the checks against the head with the commit they are
+  about, whether it merges and where it has got to, and everything said on it.
+- **`comment(remote, number, body)`** — something said on it, answering where
+  it was said.
+- **`publish(description, name, content)`** and **`unpublish(id)`** — a Share
+  published as one file, and taken down again.
+- **`create-repository(name)`** — a private repository, answered as where a
+  reader goes and the remote the host writes as `origin` and pushes to. The
+  pushing is the host's: it holds the repository.
+- **`lacks-scope(said)`** — whether a refusal is the Forge turning the token
+  down for what it may do rather than turning the request down.
+- **`target-in(prose)`**, **`target-named(target)`**,
+  **`repository-in(url)`** and **`repository-of(origin)`** — the pull request
+  a Brief's prose or a Target field names, the repository a pull request's URL
+  is in, and the repository a remote is. String work, with nothing asked of
+  the Forge.
 
 ## Per-platform overrides
 

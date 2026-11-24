@@ -320,8 +320,19 @@ pub(crate) async fn across(state: &AppState, conversation_id: i64) -> Option<Str
         .filter_map(|(repo, pull_request)| {
             let watched = crate::wrapping::watched(&conversation, repo.id, pull_request)?;
 
+            // The branch it goes into beside where it is, because a reading
+            // session holds the branch against its base with git now rather
+            // than asking a forge's own tool for a diff — see
+            // [`crate::skills::forged`], which says the same of the
+            // Conversation's own. A row written before Verkstead wrote the
+            // base down says nothing about it rather than guessing.
+            let into = match pull_request.base.as_deref() {
+                Some(base) => format!(", which goes into `{base}`"),
+                None => String::new(),
+            };
+
             Some(format!(
-                "- {}, at {} — its worktree is at `{}`.",
+                "- {}, at {}{into} — its worktree is at `{}`.",
                 crate::wrapping::named(&watched),
                 pull_request.url,
                 watched.worktree.display(),

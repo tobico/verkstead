@@ -1,0 +1,23 @@
+[package]
+name = "verkstead-plugin-github"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# The wasm file is named after this, and the directory the plugin is in: what
+# `crates/server/build.rs` looks for is `<directory>.wasm`.
+[lib]
+name = "github"
+crate-type = ["cdylib"]
+
+# `wasi` for WASI HTTP, which is how this reaches `api.github.com` — the
+# outbound host the manifest asks for, and the only one a request of this
+# component is let out to. The bindings are the Bytecode Alliance's own,
+# pregenerated: the alternative was vendoring the `wasi:http` WIT beside
+# Verkstead's and generating them here, which is the same bindings with a
+# copy of somebody else's interface to keep up to date.
+[dependencies]
+wit-bindgen = "0.51"
+serde_json = "1"
+wasi = "0.14"

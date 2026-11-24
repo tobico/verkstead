@@ -133,6 +133,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { otherAuthor } from "./Timeline";
+import { nounOf, spoken } from "../forges";
 import { Empty, ErrorLine, Note } from "../notices";
 import { rowPress } from "../rows";
 import { PaneSticky } from "../Panes";
@@ -350,7 +351,10 @@ export function discarding(outcome: ConversationSteered | null): number[] {
 /// Every other refusal is the sentence and nothing else.
 export function SteerRefusal(props: {
   outcome: ConversationSteered;
+  /// What the Repo's Forge calls a pull request — see [`nounOf`].
+  noun?: string;
 }): JSX.Element {
+  const noun = () => props.noun ?? "pull request";
   const stillAtWork = (): number | null =>
     typeof props.outcome === "object" && "AlreadyHeld" in props.outcome
       ? props.outcome.AlreadyHeld.conversation
@@ -360,11 +364,14 @@ export function SteerRefusal(props: {
     <Show
       when={wouldDiscard(props.outcome)}
       fallback={
-        <Show when={stillAtWork()} fallback={steerRefusal(props.outcome)}>
+        <Show
+          when={stillAtWork()}
+          fallback={spoken(steerRefusal(props.outcome), noun())}
+        >
           {(conversation) => (
             <>
               <A href={pathOf(conversation())}>Another conversation</A> is still
-              at work on this pull request. Carry on there rather than starting a
+              at work on this {noun()}. Carry on there rather than starting a
               second one beside it.
             </>
           )}
@@ -1524,7 +1531,10 @@ export function Steer(props: {
                   {offered.label}
                 </label>
                 <Note class={styles.optionNote}>
-                  {note(offered, props.conversation.process)}
+                  {spoken(
+                    note(offered, props.conversation.process),
+                    nounOf(props.conversation.repo),
+                  )}
                 </Note>
               </div>
             )}
@@ -1629,8 +1639,9 @@ export function Steer(props: {
               disabled={submit.isPending}
             />
             <Note>
-              Ask about this pull request, or say what you want done to it. The
-              agent asks what else there is until you're finished.
+              Ask about this {nounOf(props.conversation.repo)}, or say what you
+              want done to it. The agent asks what else there is until you're
+              finished.
             </Note>
           </div>
         </Show>
@@ -1796,7 +1807,10 @@ export function Steer(props: {
         <Show when={refused()}>
           {(outcome) => (
             <ErrorLine class={styles.failure}>
-              <SteerRefusal outcome={outcome()} />
+              <SteerRefusal
+                outcome={outcome()}
+                noun={nounOf(props.conversation.repo)}
+              />
             </ErrorLine>
           )}
         </Show>

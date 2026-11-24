@@ -107,12 +107,11 @@ use verkstead_render::{
 };
 
 use crate::annex::{self, Backend};
-use crate::github::Gh;
 use crate::platform::{Environment, Platform, hostname};
 use crate::remote::Elevate;
 use crate::settings::Settings;
 use crate::unseen::Unseen;
-use crate::{github, profiles, sandbox, sessions, store};
+use crate::{profiles, sandbox, sessions, store};
 
 mod install;
 
@@ -1031,13 +1030,12 @@ impl Machine {
     /// What this machine can offer the git step, for each field of it Verkstead
     /// has not been told — see [`Wanted`].
     ///
-    /// Blocks: a `git config` apiece for the two fields that are wanted, and at
-    /// most one `gh` for the third.
-    fn prefilled(&self, gh: &Gh, wanted: Wanted) -> PrefillView {
+    /// Blocks: a `git config` apiece for the two fields that are wanted.
+    fn prefilled(&self, wanted: Wanted) -> PrefillView {
         PrefillView {
             name: self.configured(wanted.name, "user.name"),
             email: self.configured(wanted.email, "user.email"),
-            token: wanted.token.then(|| self.token(gh)).flatten(),
+            token: wanted.token.then(|| self.token()).flatten(),
         }
     }
 
@@ -1084,14 +1082,13 @@ impl Machine {
     }
 
     /// And a GitHub token this machine is already holding: the server's own
-    /// environment first, in the order `gh` itself reads the two variables, and
-    /// the host `gh`'s own login after them.
+    /// environment, in the order `gh` itself reads the two variables.
     ///
-    /// The environment before the process, because reading a variable costs
-    /// nothing and running `gh` is a process — and because a token put in the
-    /// environment of the thing that is running is the more deliberate of the
-    /// two.
-    fn token(&self, gh: &Gh) -> Option<Prefilled> {
+    /// **The environment alone** (Set 1878, Q3): the host's own `gh` login is
+    /// not asked, the way nothing else falls back to it — a token put in the
+    /// environment of the thing that is running is a deliberate one, and a
+    /// login somebody once made on the machine is not.
+    fn token(&self) -> Option<Prefilled> {
         let said = |held: &Option<String>| {
             held.as_deref()
                 .map(str::trim)
@@ -1103,11 +1100,7 @@ impl Machine {
             return Some(prefilled(token, Source::GhToken));
         }
 
-        if let Some(token) = said(&self.github_token) {
-            return Some(prefilled(token, Source::GithubToken));
-        }
-
-        github::host_token(gh).map(|token| prefilled(token, Source::HostGh))
+        said(&self.github_token).map(|token| prefilled(token, Source::GithubToken))
     }
 }
 
@@ -1428,10 +1421,10 @@ impl Onboarding {
     /// reasoning is the cost of the probes and what one of them carries: the
     /// reading above is made every ten seconds while a step is unmet and again
     /// by the workbench's own gate at every start, and neither of those has any
-    /// business running `git config` twice and `gh` once — or handing a GitHub
+    /// business running `git config` twice — or handing a GitHub
     /// token to a page that is drawing a sidebar. This is asked for by the step
     /// that has the fields, while they stand empty.
-    pub(crate) async fn prefill(&self, settings: &Settings, gh: &Gh) -> Result<PrefillView> {
+    pub(crate) async fn prefill(&self, settings: &Settings) -> Result<PrefillView> {
         // What is wanted is decided here, off the settings, and the probes are
         // made for that alone — see [`Wanted`].
         //
@@ -1452,9 +1445,8 @@ impl Onboarding {
         // Off the runtime, for the reason the probes above are: every one of
         // these is a process.
         let machine = self.machine.clone();
-        let gh = gh.clone();
 
-        Ok(tokio::task::spawn_blocking(move || machine.prefilled(&gh, wanted)).await?)
+        Ok(tokio::task::spawn_blocking(move || machine.prefilled(wanted)).await?)
     }
 
     /// The wizard is over: the mode is off for the rest of this run.
@@ -2128,9 +2120,10 @@ esac
         );
     }
 
-    /// And a `gh` that is logged in as somebody, or is not.
+    /// And a `gh` on the machine that is logged in as somebody, or is not —
+    /// which nothing here runs either way (Set 1878, Q3).
     #[cfg(unix)]
-    fn a_gh(dir: &Path, token: Option<&str>) -> Gh {
+    fn a_gh(dir: &Path, token: Option<&str>) {
         let path = dir.join(sandbox::GH);
 
         program(
@@ -2145,8 +2138,6 @@ echo {token}
                 None => "#!/bin/sh\nexit 1\n".to_owned(),
             },
         );
-
-        Gh::running(vec![path.to_string_lossy().into_owned()])
     }
 
     /// Everything wanted, which is a Verkstead that has been told nothing.
@@ -3437,9 +3428,8 @@ echo {token}
     fn the_author_is_prefilled_from_the_machines_global_git_config() {
         let dir = tempfile::tempdir().unwrap();
         a_git(dir.path(), Some("Ada Lovelace"), Some("ada@example.com"));
-        let gh = a_gh(dir.path(), None);
 
-        let prefill = holding(dir.path(), None, None).prefilled(&gh, EVERYTHING);
+        let prefill = holding(dir.path(), None, None).prefilled(EVERYTHING);
 
         assert_eq!(
             prefill.name,
@@ -3458,9 +3448,8 @@ echo {token}
     fn a_machine_that_names_no_author_prefills_nothing() {
         let dir = tempfile::tempdir().unwrap();
         a_git(dir.path(), None, None);
-        let gh = a_gh(dir.path(), None);
 
-        let prefill = holding(dir.path(), None, None).prefilled(&gh, EVERYTHING);
+        let prefill = holding(dir.path(), None, None).prefilled(EVERYTHING);
 
         assert_eq!(prefill.name, None);
         assert_eq!(prefill.email, None);
@@ -3474,9 +3463,8 @@ echo {token}
     #[test]
     fn a_machine_with_no_git_prefills_nothing() {
         let dir = tempfile::tempdir().unwrap();
-        let gh = a_gh(dir.path(), None);
 
-        let prefill = holding(dir.path(), None, None).prefilled(&gh, EVERYTHING);
+        let prefill = holding(dir.path(), None, None).prefilled(EVERYTHING);
 
         assert_eq!(prefill.name, None);
         assert_eq!(prefill.email, None);
@@ -3498,9 +3486,8 @@ echo {token}
         let ran = dir.path().join("ran");
         a_git_nothing_runs(&dir.path().join(APPLES_GIT), &ran);
         program(&dir.path().join(XCODE_SELECT), WITHOUT_THE_TOOLS);
-        let gh = a_gh(dir.path(), None);
 
-        let prefill = with_a_usr_bin(Platform::MacOs, dir.path()).prefilled(&gh, EVERYTHING);
+        let prefill = with_a_usr_bin(Platform::MacOs, dir.path()).prefilled(EVERYTHING);
 
         assert_eq!(
             prefill.name, None,
@@ -3524,9 +3511,8 @@ echo {token}
         std::fs::create_dir_all(apples.parent().unwrap()).unwrap();
         a_git(apples.parent().unwrap(), Some("Ada Lovelace"), None);
         program(&dir.path().join(XCODE_SELECT), WITH_THE_TOOLS);
-        let gh = a_gh(dir.path(), None);
 
-        let prefill = with_a_usr_bin(Platform::MacOs, dir.path()).prefilled(&gh, EVERYTHING);
+        let prefill = with_a_usr_bin(Platform::MacOs, dir.path()).prefilled(EVERYTHING);
 
         assert_eq!(
             prefill.name,
@@ -3542,18 +3528,18 @@ echo {token}
     #[test]
     fn the_token_is_prefilled_from_gh_token_before_github_token() {
         let dir = tempfile::tempdir().unwrap();
-        let gh = a_gh(dir.path(), Some("ghp_thehostslogin"));
+        a_gh(dir.path(), Some("ghp_thehostslogin"));
 
         assert_eq!(
             holding(dir.path(), Some("ghp_first"), Some("ghp_second"))
-                .prefilled(&gh, EVERYTHING)
+                .prefilled(EVERYTHING)
                 .token,
             Some(prefilled("ghp_first".to_owned(), Source::GhToken)),
         );
 
         assert_eq!(
             holding(dir.path(), None, Some("ghp_second"))
-                .prefilled(&gh, EVERYTHING)
+                .prefilled(EVERYTHING)
                 .token,
             Some(prefilled("ghp_second".to_owned(), Source::GithubToken)),
             "and the second variable where the first said nothing",
@@ -3561,26 +3547,24 @@ echo {token}
 
         assert_eq!(
             holding(dir.path(), Some("   "), Some("ghp_second"))
-                .prefilled(&gh, EVERYTHING)
+                .prefilled(EVERYTHING)
                 .token,
             Some(prefilled("ghp_second".to_owned(), Source::GithubToken)),
             "a variable set to nothing but spaces holds no token",
         );
     }
 
-    /// And the host's own `gh` where the environment holds neither, which is
-    /// the one of the three that is a process.
+    /// And nothing where the environment holds neither: the host's own `gh`
+    /// login is not asked, logged in or not (Set 1878, Q3).
     #[cfg(unix)]
     #[test]
-    fn the_token_falls_back_to_the_login_the_host_gh_is_holding() {
+    fn the_hosts_own_gh_login_is_never_prefilled() {
         let dir = tempfile::tempdir().unwrap();
-        let gh = a_gh(dir.path(), Some("ghp_thehostslogin"));
+        a_gh(dir.path(), Some("ghp_thehostslogin"));
 
         assert_eq!(
-            holding(dir.path(), None, None)
-                .prefilled(&gh, EVERYTHING)
-                .token,
-            Some(prefilled("ghp_thehostslogin".to_owned(), Source::HostGh)),
+            holding(dir.path(), None, None).prefilled(EVERYTHING).token,
+            None
         );
     }
 
@@ -3593,16 +3577,13 @@ echo {token}
     fn a_field_that_is_already_configured_is_not_prefilled() {
         let dir = tempfile::tempdir().unwrap();
         a_git(dir.path(), Some("Ada Lovelace"), Some("ada@example.com"));
-        let gh = a_gh(dir.path(), Some("ghp_thehostslogin"));
+        a_gh(dir.path(), Some("ghp_thehostslogin"));
 
-        let prefill = holding(dir.path(), Some("ghp_first"), None).prefilled(
-            &gh,
-            Wanted {
-                name: false,
-                email: true,
-                token: false,
-            },
-        );
+        let prefill = holding(dir.path(), Some("ghp_first"), None).prefilled(Wanted {
+            name: false,
+            email: true,
+            token: false,
+        });
 
         assert_eq!(prefill.name, None, "the name is Verkstead's own already");
         assert_eq!(prefill.token, None, "and so is the token");

@@ -89,7 +89,7 @@ use verkstead_render::{
 
 use crate::checklist;
 use crate::declarations;
-use crate::github::Credential;
+use crate::forges::Credential;
 use crate::repos::git;
 use crate::{store, worktrees};
 

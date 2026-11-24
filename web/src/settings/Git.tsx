@@ -1,5 +1,5 @@
-//! Everything git is told, on one pane: the GitHub token every session is
-//! handed, who its commits are by, how a conflicted pull request is resolved,
+//! Everything git is told, on one pane: the token for each forge every session
+//! is handed, who its commits are by, how a conflicted pull request is resolved,
 //! and whether Done shares the record to that pull request.
 //!
 //! **Git**, at `/settings/git`. It was *GitHub and git author* at
@@ -53,6 +53,12 @@
 //! Both halves read the one query. They are two views of the same two files, and
 //! a read apiece would be two reads of them — the cache is what makes the second
 //! caller free.
+//!
+//! **A token per enabled forge** under each Author (ADR-0030, *Forge*): a field
+//! of its own for each, labelled with the forge's name, in the order the
+//! settings list them — the built-in GitHub first. Each is verified by its
+//! forge against the scopes its manifest declares, and one short of them is
+//! refused rather than written, the missing scopes named under its field.
 //!
 //! The token field is write-only. What is shown of a saved token is its
 //! last four characters and when it was written — never the token — because a
@@ -141,6 +147,7 @@ import {
   saveSettings,
 } from "../api/client";
 import { authorLabel } from "../authors";
+import { GITHUB } from "../forges";
 import { useReading } from "../freshness";
 import { Listbox, Picker } from "../picking";
 import type {
@@ -148,6 +155,9 @@ import type {
   AuthorRemoved,
   AuthorSaved,
   ConflictResolution,
+  ForgeToken,
+  ForgeTokenEdit,
+  ForgeVerified,
   IgnoreRule,
   IgnoredCommentsEdit,
   PointingRepo,
@@ -157,6 +167,7 @@ import type {
   SettingsSaved,
   SettingsView,
   TokenEdit,
+  TokenForge,
   TokenSaved,
   UnrepointedRepo,
   Verified,
@@ -211,24 +222,36 @@ function authorless(author: Author | AuthorSaved): boolean {
   return author.name === "" || author.email === "";
 }
 
+/// The saved token of `tokens` for the forge `forge`, or `null` where none is.
+function savedFor(tokens: ForgeToken[], forge: string): TokenSaved | null {
+  return tokens.find((token) => token.forge === forge)?.saved ?? null;
+}
+
+/// The first enabled forge `tokens` holds none for, or `null` where it holds
+/// one for every one.
+function tokenless(told: SettingsView, tokens: ForgeToken[]): TokenForge | null {
+  return told.forges.find((forge) => savedFor(tokens, forge.uuid) === null) ?? null;
+}
+
 /// What one Author is missing, in the card's words — or `null` where it has
 /// everything a session needs.
-function lacking(tokenless: boolean, author: boolean): string | null {
-  if (tokenless && author) return "No GitHub token or git author";
-  if (tokenless) return "No GitHub token";
+function lacking(forge: TokenForge | null, author: boolean): string | null {
+  if (forge && author) return `No ${forge.name} token or git author`;
+  if (forge) return `No ${forge.name} token`;
   if (author) return "No git author";
 
   return null;
 }
 
-/// Whether the card is drawn in the warning colour: an Author missing either
-/// half, or no Author at all.
+/// Whether the card is drawn in the warning colour: an Author missing a token
+/// or its git author, or no Author at all.
 function warning(told: SettingsView): boolean {
   return told.authors.length > 1
     ? told.authors.some(
-        (author) => author.github_token === null || authorless(author),
+        (author) =>
+          tokenless(told, author.tokens) !== null || authorless(author),
       )
-    : told.github_token === null || authorless(told.git_author);
+    : tokenless(told, told.tokens) !== null || authorless(told.git_author);
 }
 
 /// What the card says, in a line: who commits and which token is saved — or,
@@ -241,7 +264,7 @@ function warning(told: SettingsView): boolean {
 function summary(told: SettingsView): string {
   if (told.authors.length > 1) {
     for (const author of told.authors) {
-      const missing = lacking(author.github_token === null, authorless(author));
+      const missing = lacking(tokenless(told, author.tokens), authorless(author));
 
       if (missing) return `${missing} for ${authorLabel(author)}`;
     }
@@ -249,9 +272,14 @@ function summary(told: SettingsView): string {
     return told.authors.map(authorLabel).join(", ");
   }
 
+  const first = told.forges[0];
+  const saved = first ? savedFor(told.tokens, first.uuid) : null;
+
   return (
-    lacking(told.github_token === null, authorless(told.git_author)) ??
-    `${told.git_author.name} · token …${told.github_token!.last_four}`
+    lacking(tokenless(told, told.tokens), authorless(told.git_author)) ??
+    (saved === null
+      ? told.git_author.name
+      : `${told.git_author.name} · token …${saved.last_four}`)
   );
 }
 
@@ -326,27 +354,33 @@ export function GitPane(props: {
   const [name, setName] = createSignal<string | null>(null);
   const [email, setEmail] = createSignal<string | null>(null);
 
-  // The write-only field, which starts empty every time and is emptied again the
-  // moment it is spent.
-  const [token, setToken] = createSignal("");
+  // The write-only fields, one per forge by its uuid, which start empty every
+  // time and are emptied again the moment they are spent.
+  const [tokens, setTokens] = createSignal<Record<string, string>>({});
+  const token = (forge: string) => tokens()[forge] ?? "";
+  const setToken = (forge: string, value: string) =>
+    setTokens({ ...tokens(), [forge]: value });
 
-  // Whether the token field is open. It always is where there is nothing
-  // configured; where there is, replacing is a press, so that the field to paste
-  // a credential into is one somebody asked for.
-  const [replacing, setReplacing] = createSignal(false);
+  // Which token fields are open, by forge. One always is where there is
+  // nothing configured for its forge; where there is, replacing is a press, so
+  // that the field to paste a credential into is one somebody asked for.
+  const [replacings, setReplacings] = createSignal<Record<string, boolean>>({});
+  const replacing = (forge: string) => replacings()[forge] ?? false;
+  const setReplacing = (forge: string, open: boolean) =>
+    setReplacings({ ...replacings(), [forge]: open });
 
-  // What GitHub made of the token that was last saved, or `null` where nothing
-  // has been saved from here. Not part of the settings: it is the answer to a
-  // question asked at the moment of the save, and nothing reads it back
-  // afterwards. Said in this pane rather than on the card, because this is where
-  // the press that asked it was made and the pane is still standing to hear the
-  // answer.
+  // What each forge made of the token last saved for it, or `null` where
+  // nothing has been saved from here. Not part of the settings: it is the
+  // answer to a question asked at the moment of the save, and nothing reads it
+  // back afterwards. Said in this pane rather than on the card, because this is
+  // where the press that asked it was made and the pane is still standing to
+  // hear the answer.
   //
   // Kept with the uuid of the Author it was about, so that switching the
   // dropdown does not say one Author's account under another's fields.
   const [verifiedAs, setVerifiedAs] = createSignal<{
     id: string | null;
-    verified: Verified;
+    verified: ForgeVerified[];
   } | null>(null);
 
   // The ignore rules as they are being edited, or `null` while nobody has
@@ -378,7 +412,7 @@ export function GitPane(props: {
             display_name: "",
             name: "",
             email: "",
-            github_token: null,
+            tokens: [],
           },
         ];
   };
@@ -405,7 +439,7 @@ export function GitPane(props: {
       standing && {
         ...standing.git_author,
         id: standing.git_author.id ?? "",
-        github_token: standing.github_token,
+        tokens: standing.tokens,
       }
     );
   };
@@ -416,20 +450,27 @@ export function GitPane(props: {
   /// Whether that is the Author **Add author** opened, still unsaved.
   const drafting = () => author() !== undefined && author()!.id === adding();
 
-  const configured = () => author()?.github_token ?? null;
+  /// Every forge a token is asked for, in the order the settings list them.
+  const forges = (): TokenForge[] => told()?.forges ?? [];
 
-  /// Whether this device holds a token for the Author the fields are about.
-  const holding = () => configured() !== null;
+  /// What is saved for the Author the fields are about, for `forge`.
+  const configured = (forge: string): TokenSaved | null =>
+    savedFor(author()?.tokens ?? [], forge);
+
+  /// Whether this device holds a token for that Author for `forge`.
+  const holding = (forge: string) => configured(forge) !== null;
 
   const authorDisplayName = () => displayName() ?? author()?.display_name ?? "";
   const authorName = () => name() ?? author()?.name ?? "";
   const authorEmail = () => email() ?? author()?.email ?? "";
 
-  /// What GitHub said about the token last saved from here, where it was saved
-  /// under the Author the fields are about now.
-  const verified = (): Verified | null => {
+  /// What `forge` said about the token last saved for it from here, where it
+  /// was saved under the Author the fields are about now.
+  const verified = (forge: string): Verified | null => {
     const what = verifiedAs();
-    return what && what.id === authorId() ? what.verified : null;
+    if (!what || what.id !== authorId()) return null;
+
+    return what.verified.find((one) => one.forge === forge)?.verified ?? null;
   };
 
   /// Everything in `config.yaml` this form is not about, as it stands — see
@@ -464,7 +505,7 @@ export function GitPane(props: {
   }): SettingsEdit => ({
     git_author: heldAuthor(told()),
     // Untouched, for the reason a blank field is a `Keep`.
-    github_token: "Keep",
+    tokens: [],
     // And the rules left exactly where they are: neither control is the form's
     // save, and one that spoke for them could be turned down over a pattern it
     // never showed anybody — see [`ruleEdit`].
@@ -476,7 +517,7 @@ export function GitPane(props: {
     ...owned,
   });
 
-  const typing = () => replacing() || !holding();
+  const typing = (forge: string) => replacing(forge) || !holding(forge);
 
   /// The rows as they are drawn: what has been typed, or what is written down
   /// while nothing has been.
@@ -543,25 +584,24 @@ export function GitPane(props: {
     return edited === null ? "Keep" : { Set: { rules: edited } };
   };
 
-  /// The account the last saved token authenticates as, and the words GitHub
-  /// or `gh` refused it in — one of the two at a time, and neither until this
-  /// pane has saved a token.
-  const account = () => {
-    const what = verified();
+  /// The account the last token saved for `forge` authenticates as, and the
+  /// words the forge refused it in — one of the two at a time, and neither
+  /// until this pane has saved a token for it.
+  const account = (forge: string) => {
+    const what = verified(forge);
     return what && "Account" in what ? what.Account.login : null;
   };
 
-  const refused = () => {
-    const what = verified();
+  const refused = (forge: string) => {
+    const what = verified(forge);
     return what && "Refused" in what ? what.Refused.why : null;
   };
 
-  /// And the scopes GitHub says it has not been given, of the ones Verkstead
-  /// needs. Empty on a token that can do everything asked of it — and on one
-  /// GitHub named no scopes for at all, which says nothing either way.
-  const missing = () => {
-    const what = verified();
-    return what && "Account" in what ? what.Account.missing : [];
+  /// And a token refused for being short of the scopes the forge declares:
+  /// whose it was, and what it is missing. It was not written.
+  const short = (forge: string) => {
+    const what = verified(forge);
+    return what && "Short" in what ? what.Short : null;
   };
 
   /// Spend the form. The pane stays — what was saved is what the fields are
@@ -584,8 +624,8 @@ export function GitPane(props: {
     setDisplayName(null);
     setName(null);
     setEmail(null);
-    setToken("");
-    setReplacing(false);
+    setTokens({});
+    setReplacings({});
   };
 
   // The Author a **Remove author** has asked about, while the card asking is
@@ -692,7 +732,7 @@ export function GitPane(props: {
       }
 
       setVerifiedAs(
-        saved.verified === null
+        saved.verified.length === 0
           ? null
           : {
               // A save about no Author yet made the first one, so the answer
@@ -718,13 +758,13 @@ export function GitPane(props: {
     },
   }));
 
-  /// Save, with whatever is to become of the token.
+  /// Save, with whatever is to become of each token.
   ///
   /// The switch below rides along as it stands, along with everything else this
   /// form is not about — see [`held`]: pressing Save is about the fields, and a
   /// switch that came back off with the author would be a switch the form
   /// flipped.
-  const write = (github_token: TokenEdit) => {
+  const write = (tokens: ForgeTokenEdit[]) => {
     // Whatever the last save was turned down over went with the press that is
     // being made now: the answer to this one says what is wrong with what is
     // being sent this time.
@@ -736,12 +776,12 @@ export function GitPane(props: {
     // left from turning down a save about their own email address.
     tidied();
 
-    const about = editing(github_token);
+    const about = editing(tokens);
     setSentAbout(about.id);
 
     save.mutate({
       git_author: about,
-      github_token: drafting() && !said(github_token) ? "Keep" : github_token,
+      tokens: drafting() && !said(tokens) ? [] : tokens,
       share_on_done: sharing(),
       // And the ignore rules, which this pane is the one that owns: the whole
       // list where somebody has touched a row, and `Keep` where nobody has —
@@ -759,10 +799,10 @@ export function GitPane(props: {
   /// Whether a save says anything about the Author **Add author** opened: a
   /// field typed in, or a token. One that says nothing writes no Author — a
   /// row nobody filled in is no more an Author than it is a rule.
-  const said = (github_token: TokenEdit): boolean =>
+  const said = (tokens: ForgeTokenEdit[]): boolean =>
     [authorDisplayName(), authorName(), authorEmail()].some(
       (field) => field.trim() !== "",
-    ) || github_token !== "Keep";
+    ) || tokens.some((edit) => edit.token !== "Keep");
 
   /// The Author a press of Save is about: the one the fields were read from,
   /// with what they hold now, by its uuid — which is what says which Author the
@@ -771,8 +811,8 @@ export function GitPane(props: {
   /// The first Author as it stands, where the fields are about an Author that
   /// was added and never filled in: the rest of the form is still saved, and
   /// nothing is made out of nothing.
-  const editing = (github_token: TokenEdit): Author => {
-    if (drafting() && !said(github_token)) return heldAuthor(told());
+  const editing = (tokens: ForgeTokenEdit[]): Author => {
+    if (drafting() && !said(tokens)) return heldAuthor(told());
 
     return {
       id: authorId(),
@@ -811,10 +851,15 @@ export function GitPane(props: {
 
     // A field left blank is the token left alone. The server reads a token of
     // nothing but whitespace as nothing configured, so a blank one sent as a
-    // Set would take the credentials away — which is exactly what `Keep` is
-    // here to stop.
+    // Set would take the credentials away — which is exactly what leaving it
+    // out is here to stop.
     write(
-      typing() && token().trim() !== "" ? { Set: { token: token() } } : "Keep",
+      forges()
+        .filter(({ uuid }) => typing(uuid) && token(uuid).trim() !== "")
+        .map(({ uuid }) => ({
+          forge: uuid,
+          token: { Set: { token: token(uuid) } } satisfies TokenEdit,
+        })),
     );
   };
 
@@ -908,105 +953,142 @@ export function GitPane(props: {
               </section>
             </Show>
 
-            <section>
-              <h3>GitHub Token</h3>
+            {/* A token per enabled forge, each its own section, in the
+                order the settings list them. */}
+            <For each={forges()}>
+              {(forge) => (
+                <section>
+                  <h3>{forge.name} Token</h3>
 
-              {/* What a token has to be able to do, above everything about the
-                  one that is saved: this is the list to tick against before
-                  pasting one, and it stands whether or not anything has ever
-                  been saved here. */}
-              <TokenScopes class={styles.tokenScopes} />
+                  {/* What a token has to be able to do, above everything about
+                      the one that is saved: this is the list to tick against
+                      before pasting one, and it stands whether or not anything
+                      has ever been saved here. GitHub's in its own words; any
+                      other forge's as the scopes its manifest declares. */}
+                  <Show
+                    when={forge.uuid === GITHUB}
+                    fallback={
+                      <Show when={forge.scopes.length > 0}>
+                        <Note class={styles.tokenScopes}>
+                          It needs the{" "}
+                          <code class={styles.scope}>
+                            {forge.scopes.join(", ")}
+                          </code>{" "}
+                          scopes.
+                        </Note>
+                      </Show>
+                    }
+                  >
+                    <TokenScopes class={styles.tokenScopes} />
+                  </Show>
 
-              <Show when={configured()}>{(saved) => standing(saved)}</Show>
+                  <Show when={configured(forge.uuid)}>
+                    {(saved) => standing(saved)}
+                  </Show>
 
-              {/* What GitHub said about the last token saved from here: the
-                  account it authenticates as, or why nobody could be asked.
-                  Both are worth showing — a token saved against the wrong
-                  account is the failure this form exists to catch. */}
-              <Show when={account()}>
-                {(login) => (
-                  <p class={styles.verified}>
-                    GitHub says it's <span class={styles.login}>{login()}</span>
-                    .
-                  </p>
-                )}
-              </Show>
+                  {/* What the forge said about the last token saved from here:
+                      the account it authenticates as, or why nobody could be
+                      asked. Both are worth showing — a token saved against the
+                      wrong account is the failure this form exists to catch. */}
+                  <Show when={account(forge.uuid)}>
+                    {(login) => (
+                      <p class={styles.verified}>
+                        {forge.name} says it's{" "}
+                        <span class={styles.login}>{login()}</span>.
+                      </p>
+                    )}
+                  </Show>
 
-              {/* And what it may not do, on a token that authenticates
-                  perfectly and cannot publish a share. A line of its own rather
-                  than part of the one above, because it is a different thing to
-                  do about it: the account is right and the token needs re-
-                  issuing with another box ticked. */}
-              <Show when={missing().length > 0}>
-                <p class={styles.unscoped}>
-                  It can't publish a share without the{" "}
-                  <code class={styles.scope}>{missing().join(", ")}</code>{" "}
-                  scope. Re-issue the token on GitHub with it ticked, and save
-                  it here again.
-                </p>
-              </Show>
-              <Show when={refused()}>
+                  {/* And a token refused for what it may not do: the account is
+                      right and the token needs re-issuing with more ticked. It
+                      was not written, so whatever was saved before stands. */}
+                  <Show when={short(forge.uuid)}>
+                    {(short) => (
+                      <ErrorLine class={styles.unscoped}>
+                        Not saved: the token for{" "}
+                        <span class={styles.login}>{short().login}</span> is
+                        missing the{" "}
+                        <code class={styles.scope}>
+                          {short().missing.join(", ")}
+                        </code>{" "}
+                        {short().missing.length === 1 ? "scope" : "scopes"}.
+                        Re-issue it with{" "}
+                        {short().missing.length === 1 ? "it" : "them"} ticked,
+                        and save it here again.
+                      </ErrorLine>
+                    )}
+                  </Show>
+                  <Show when={refused(forge.uuid)}>
+                    {(why) => (
+                      <ErrorLine class={styles.unverified}>
+                        It's saved, but {forge.name} wouldn't say whose it is.{" "}
+                        {why()}
+                      </ErrorLine>
+                    )}
+                  </Show>
 
-                {(why) => (
-                  <ErrorLine class={styles.unverified}>
-                    It's saved, but GitHub wouldn't say whose it is. {why()}
-                  </ErrorLine>
-                )}
-              </Show>
-
-              <Show
-                when={typing()}
-                fallback={
-                  <div class={styles.tokenActions}>
-                    <button type="button" onClick={() => setReplacing(true)}>
-                      Replace
-                    </button>
-                    <button
-                      type="button"
-                      class={styles.clear}
-                      disabled={save.isPending}
-                      onClick={() => {
-                        setVerifiedAs(null);
-                        write("Clear");
-                      }}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                }
-              >
-                <label for="github-token">Token</label>
-                <Note class={styles.stored}>Stored, and never shown again.</Note>
-                <input
-                  id="github-token"
-                  type="password"
-                  autocapitalize="off"
-                  autocorrect="off"
-                  autocomplete="off"
-                  spellcheck={false}
-                  placeholder="ghp_…"
-                  value={token()}
-                  onInput={(ev) => setToken(ev.currentTarget.value)}
-                />
-                {/* Only where there was one to go back to: with nothing
-                    configured, the field is the form rather than a detour
-                    from it. */}
-                <Show when={holding()}>
-                  <div class={styles.tokenActions}>
-                    <button
-                      type="button"
-                      class={`${styles.keep} secondary`}
-                      onClick={() => {
-                        setReplacing(false);
-                        setToken("");
-                      }}
-                    >
-                      Keep the saved token
-                    </button>
-                  </div>
-                </Show>
-              </Show>
-            </section>
+                  <Show
+                    when={typing(forge.uuid)}
+                    fallback={
+                      <div class={styles.tokenActions}>
+                        <button
+                          type="button"
+                          onClick={() => setReplacing(forge.uuid, true)}
+                        >
+                          Replace
+                        </button>
+                        <button
+                          type="button"
+                          class={styles.clear}
+                          disabled={save.isPending}
+                          onClick={() => {
+                            setVerifiedAs(null);
+                            write([{ forge: forge.uuid, token: "Clear" }]);
+                          }}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    }
+                  >
+                    <label for={`token-${forge.uuid}`}>Token</label>
+                    <Note class={styles.stored}>
+                      Stored, and never shown again.
+                    </Note>
+                    <input
+                      id={`token-${forge.uuid}`}
+                      type="password"
+                      autocapitalize="off"
+                      autocorrect="off"
+                      autocomplete="off"
+                      spellcheck={false}
+                      placeholder={forge.uuid === GITHUB ? "ghp_…" : ""}
+                      value={token(forge.uuid)}
+                      onInput={(ev) =>
+                        setToken(forge.uuid, ev.currentTarget.value)
+                      }
+                    />
+                    {/* Only where there was one to go back to: with nothing
+                        configured, the field is the form rather than a detour
+                        from it. */}
+                    <Show when={holding(forge.uuid)}>
+                      <div class={styles.tokenActions}>
+                        <button
+                          type="button"
+                          class={`${styles.keep} secondary`}
+                          onClick={() => {
+                            setReplacing(forge.uuid, false);
+                            setToken(forge.uuid, "");
+                          }}
+                        >
+                          Keep the saved token
+                        </button>
+                      </div>
+                    </Show>
+                  </Show>
+                </section>
+              )}
+            </For>
 
             <section>
               <h3>Git Author</h3>

@@ -3,6 +3,7 @@
 //! them — records made on another device, drawn no differently (ADR-0028).
 
 import type { AuthorEntry, SettingsView } from "../src/api/types";
+import { GITHUB } from "../src/forges";
 
 /// `settings`' own Authors as the one list draws them, then `others`.
 export function oneList(
@@ -15,7 +16,7 @@ export function oneList(
       display_name: author.display_name,
       name: author.name,
       email: author.email,
-      holds_token: author.github_token !== null,
+      tokens: author.tokens.map(({ forge }) => forge),
     })),
     ...others,
   ];
@@ -27,5 +28,5 @@ export const CLIENT: AuthorEntry = {
   display_name: "Client",
   name: "Ada Lovelace",
   email: "ada@client.example",
-  holds_token: true,
+  tokens: [GITHUB],
 };

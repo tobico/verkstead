@@ -66,8 +66,9 @@ use verkstead_server::remote::Tailscale;
 use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
+use verkstead_server::stand_in::{Forge, GitHub, Said};
 use verkstead_server::{
-    Agents, Gh, Pace, Routers, open_database, routers_answering_devices_telling,
+    Agents, Pace, Routers, open_database, routers_answering_devices_telling,
     routers_running_sessions_answering_devices, store,
 };
 use verkstead_store::{Linking, record_member};
@@ -138,16 +139,16 @@ const COMPANION: &str = "askance";
 /// The Brief every Conversation here is started from.
 const BRIEF: &str = "# Rate limiting\n\nThe API has none.\n";
 
-/// A `gh` that answers nothing: nothing here reaches GitHub, and the real one
-/// would need an account.
-const NO_GITHUB: &str = "exit 1";
+/// A GitHub that answers nothing: nothing here reaches GitHub, and the real
+/// one would need an account.
+fn no_github() -> Forge {
+    Forge::unanswerable()
+}
 
-/// And one that answers for a branch nothing was opened on, in the words the
-/// real one uses.
-const NO_PULL_REQUEST: &str = r#"
-printf 'no pull requests found for branch "%s"\n' "$3" >&2
-exit 1
-"#;
+/// And one that answers for a branch nothing was opened on.
+async fn no_pull_request() -> Forge {
+    Forge::standing_in(&*GitHub::saying(Said::Nothing).await)
+}
 
 /// How long a dial in this suite gives one address, rather than the two seconds
 /// a running server gives one.
@@ -216,26 +217,26 @@ impl Verkstead {
     /// 07's — but a device taking work in needs what a served one has: a Data
     /// Directory, which is where an arriving Conversation's attached files land.
     async fn running(id: &str, stub: &str, spill: &Path) -> Verkstead {
-        Verkstead::standing(id, Some(stub), spill, Pace::default(), B_OS, NO_GITHUB).await
+        Verkstead::standing(id, Some(stub), spill, Pace::default(), B_OS, no_github()).await
     }
 
     /// The same at `pace`, for the one test that needs a session spoken to
     /// sooner than a server would.
     async fn running_at(id: &str, stub: &str, spill: &Path, pace: Pace) -> Verkstead {
-        Verkstead::standing(id, Some(stub), spill, pace, B_OS, NO_GITHUB).await
+        Verkstead::standing(id, Some(stub), spill, pace, B_OS, no_github()).await
     }
 
     /// And the same with B running `os` rather than [`B_OS`], for the tests about
     /// work placed by the platform it wants.
     async fn running_on(id: &str, stub: &str, spill: &Path, pace: Pace, os: &str) -> Verkstead {
-        Verkstead::standing(id, Some(stub), spill, pace, os, NO_GITHUB).await
+        Verkstead::standing(id, Some(stub), spill, pace, os, no_github()).await
     }
 
     /// And the same with a `gh` that finds no pull request on the branch, for
     /// the tests about an inline run: what a Resume of one asks GitHub before
     /// it launches anything.
     async fn building_on(id: &str, stub: &str, spill: &Path, pace: Pace, os: &str) -> Verkstead {
-        Verkstead::standing(id, Some(stub), spill, pace, os, NO_PULL_REQUEST).await
+        Verkstead::standing(id, Some(stub), spill, pace, os, no_pull_request().await).await
     }
 
     async fn standing(
@@ -244,7 +245,7 @@ impl Verkstead {
         spill: &Path,
         pace: Pace,
         b_os: &str,
-        gh: &str,
+        gh: Forge,
     ) -> Verkstead {
         let dir = tempfile::tempdir().unwrap();
         let home = tempfile::tempdir().unwrap();
@@ -308,7 +309,7 @@ impl Verkstead {
                 pool.clone(),
                 dir.path().to_owned(),
                 agents(stub, home.path(), dir.path(), spill).at_pace(pace),
-                gh_stub(gh),
+                gh,
                 cluster.clone(),
                 nudges.clone(),
                 probing(dir.path()),
@@ -413,7 +414,7 @@ impl Verkstead {
             self.pool.clone(),
             self._dir.path().to_owned(),
             agents(stub, self._home.path(), self._dir.path(), spill).at_pace(pace),
-            gh_stub(NO_GITHUB),
+            no_github(),
             self.cluster.clone(),
             self.nudges.clone(),
             probing(self._dir.path()),
@@ -2217,16 +2218,6 @@ fn agents(stub: &str, home: &Path, data_dir: &Path, spill: &Path) -> Agents {
         Attachments::under(data_dir),
         Settings::in_data_dir(data_dir),
     )
-}
-
-/// A `gh` that is a shell script, so nothing here reaches GitHub.
-fn gh_stub(script: &str) -> Gh {
-    Gh::running(vec![
-        "/bin/sh".to_owned(),
-        "-c".to_owned(),
-        script.to_owned(),
-        "gh".to_owned(),
-    ])
 }
 
 /// A machine with no Tailscale on it: `verkstead-no-such-tailscale` is a program

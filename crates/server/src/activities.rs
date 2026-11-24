@@ -90,12 +90,12 @@ impl Hosting {
         self.state.followers.declare(conversation_id, offers);
     }
 
-    /// Say that the Forge lacks `capability` from now on — the declaration a
-    /// Forge makes from stage 12, which GitHub, with every capability, never
-    /// does. A watcher asking over it is settled at once: see
-    /// [`crate::forge`].
-    pub fn lacking(&self, capability: crate::forge::Capability) {
-        self.state.forge.lacking(capability);
+    /// Register `declared` as a Forge on this server from now on, ahead of
+    /// every built-in — the suite's Forge declaring what it likes, answered by
+    /// the router's own GitHub stand-in. A watcher asking over a capability it
+    /// does not declare is settled at once: see [`crate::forge`].
+    pub fn registering(&self, declared: crate::forge::Declared) {
+        self.state.forge.register(declared);
     }
 
     /// Start `activity`, whose component is `component`, on

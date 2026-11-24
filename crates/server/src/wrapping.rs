@@ -20,7 +20,7 @@
 //! can most easily be wrong about.
 //!
 //! So this asks the host's `gh` for the PR on the Conversation's branch — see
-//! [`crate::github`] — and records what it finds. Recording it *is* the move,
+//! the Repo's Forge — and records what it finds. Recording it *is* the move,
 //! which is why nothing here sets a state: the store does both in one
 //! transaction, so a Wrapping with no PR under it cannot exist.
 //!
@@ -78,7 +78,6 @@ use std::path::{Path, PathBuf};
 use verkstead_schema::Nudge;
 
 use crate::AppState;
-use crate::github;
 use crate::store;
 
 /// Find the pull request `conversation_id`'s last session opened, and move the
@@ -176,12 +175,16 @@ pub(crate) async fn record(
     conversation_id: i64,
     repo_id: i64,
     branch: &str,
-    found: Result<store::PullRequest, github::Trouble>,
+    found: Result<store::PullRequest, crate::forges::Trouble>,
     writing: Option<i64>,
     door: Door,
 ) {
     let opened = match found {
         Ok(opened) => opened,
+        Err(crate::forges::Trouble::NoForge(host)) => {
+            unforged(state, conversation_id, host.as_deref()).await;
+            return;
+        }
         Err(trouble) => {
             tracing::warn!(
                 conversation_id,
@@ -233,11 +236,18 @@ pub(crate) async fn record(
             // human's own part of it starts. Behind the record, which the store
             // has already taken — a push service that cannot be reached costs a
             // notification and never the pull request.
+            // Named in the word the Repo's Forge calls one.
+            let noun = match store::registered_repo(&state.pool, repo_id).await {
+                Ok(Some(repo)) => crate::forges::of(state, &repo.path).await.noun().to_owned(),
+                _ => crate::forges::PULL_REQUEST.to_owned(),
+            };
+
             crate::push::told(
                 &state.pool,
                 conversation_id,
                 crate::push::News::OnAPullRequest {
                     number: opened.number,
+                    noun,
                 },
             );
 
@@ -621,18 +631,32 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
     let mut missing = Vec::new();
 
     for companion in committed {
+        // A companion on no Forge has no pull request to be missing: its work
+        // is committed, and there is nobody to open one on.
+        if let crate::forges::Matched::Unmatched { host } =
+            crate::forges::of(&state, &companion.path).await
+        {
+            tracing::info!(
+                conversation_id,
+                repo = companion.name,
+                host,
+                "a companion the work committed in is on no forge, so no pull request is asked for",
+            );
+            continue;
+        }
+
         let asked = {
             let gh = state.github.as_author(companion.author.as_deref());
             let repo = companion.path.clone();
             let head = companion.head.clone();
 
-            tokio::task::spawn_blocking(move || github::pull_request(&gh, &repo, &head)).await
+            tokio::task::spawn_blocking(move || gh.pull_request(&repo, &head)).await
         };
 
         let found = match asked {
             Ok(found) => found,
             Err(error) => {
-                tracing::error!(error = ?error, conversation_id, repo = companion.name, "asking gh for a companion's pull request failed");
+                tracing::error!(error = ?error, conversation_id, repo = companion.name, "asking the Forge for a companion's pull request failed");
                 return;
             }
         };
@@ -738,7 +762,7 @@ pub(crate) struct Committed {
     pub(crate) path: PathBuf,
 
     /// And the uuid of the Author it records, which is whose token `gh` is
-    /// run with — see [`github::Gh::as_author`].
+    /// run with — see [`crate::forges::Forge::as_author`].
     pub(crate) author: Option<String>,
 
     /// The branch the work is on there, mirroring resolved.
@@ -921,6 +945,43 @@ pub(crate) async fn stopped(
     }
 }
 
+/// Land the work of `conversation_id` in Done, its Repo being on no Forge:
+/// nothing is watching, because there is nothing to watch, and the Timeline
+/// says why — see [`crate::forges::unmatched`].
+///
+/// The ending [`record`] makes for every other Repo, reached the same way: a
+/// Repo whose remote's host no enabled Forge declares has no wrap-up, and the
+/// next Conversation on it wraps up once a Forge answers for that host.
+pub(crate) async fn unforged(state: &AppState, conversation_id: i64, host: Option<&str>) {
+    let said = crate::forges::unmatched(host);
+
+    match store::land_on_no_forge(&state.pool, conversation_id, &said).await {
+        Ok(store::Unforged::Done) => {
+            tracing::info!(
+                conversation_id,
+                host,
+                "the work is finished on a repo no forge answers for, so it is done with \
+                 nothing watching",
+            );
+
+            state.nudges.announce(Nudge::Conversation {
+                conversation: conversation_id,
+            });
+        }
+        Ok(store::Unforged::NothingToEnd | store::Unforged::NoSuchConversation) => {
+            tracing::info!(
+                conversation_id,
+                "the Conversation has nothing left to end, so nothing was recorded",
+            );
+        }
+        Err(error) => tracing::error!(
+            error = ?error,
+            conversation_id,
+            "landing a Conversation on no forge in Done failed"
+        ),
+    }
+}
+
 /// What a stop over a pull request nobody can find says the run was doing.
 const FINDING: &str = "finding the pull request the work ended on";
 
@@ -1095,9 +1156,19 @@ async fn write_the_stop(state: &AppState, conversation_id: i64, gave_up: GaveUp)
 pub(crate) async fn asked(
     state: &AppState,
     conversation_id: i64,
-) -> Option<(i64, String, Result<store::PullRequest, github::Trouble>)> {
+) -> Option<(
+    i64,
+    String,
+    Result<store::PullRequest, crate::forges::Trouble>,
+)> {
     let (repo_id, repo, author, branch) = branch(state, conversation_id).await?;
     let head = head_ref(conversation_id, &repo, &branch).await;
+
+    // On no Forge, nothing is asked at all: there is nobody to ask, and what
+    // meets this lands the work Done rather than stopping it — see [`record`].
+    if let crate::forges::Matched::Unmatched { host } = crate::forges::of(state, &repo).await {
+        return Some((repo_id, head, Err(crate::forges::Trouble::NoForge(host))));
+    }
 
     let asked = {
         let gh = state.github.as_author(author.as_deref());
@@ -1105,13 +1176,13 @@ pub(crate) async fn asked(
 
         // Off the runtime's threads: this is a process, and one that goes to the
         // network.
-        tokio::task::spawn_blocking(move || github::pull_request(&gh, &repo, &head)).await
+        tokio::task::spawn_blocking(move || gh.pull_request(&repo, &head)).await
     };
 
     match asked {
         Ok(found) => Some((repo_id, head, found)),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "asking gh for a pull request failed");
+            tracing::error!(error = ?error, conversation_id, "asking the Forge for a pull request failed");
             None
         }
     }
@@ -1195,7 +1266,7 @@ async fn branch(
             None
         }
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading the Conversation to ask gh about failed");
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation to ask the Forge about failed");
             None
         }
     }

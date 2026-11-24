@@ -184,7 +184,7 @@ use std::path::{Path, PathBuf};
 use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
-use crate::github::{Credential, Gh};
+use crate::forges::Credential;
 use crate::merging;
 use crate::settings::{Author, Config, Signature, Unauthored};
 use crate::stages::{self, Stage};
@@ -1061,7 +1061,7 @@ async fn start(
 
                 planned.push(beside(
                     &data,
-                    &gh,
+                    &*gh,
                     id,
                     &branch,
                     base.as_deref(),
@@ -1593,7 +1593,7 @@ impl Why {
 /// companion start without having checked out another.
 fn beside(
     data: &Path,
-    gh: &Gh,
+    gh: &dyn crate::forges::Forge,
     id: i64,
     branch: &str,
     base: Option<&str>,

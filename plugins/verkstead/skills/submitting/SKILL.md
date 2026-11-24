@@ -39,51 +39,67 @@ and the `### Finish sequence` inside it — and follow that sequence step by ste
 It is the repository's process rather than Verkstead's, so what is written there
 is what to do, whatever another project's habits would suggest.
 
+**The pull request itself is Verkstead's to open.** Push the branch, then open
+it with one line:
+
+    git push -u origin HEAD
+    verkstead pull-request open --title '<what this built>' --body '<what the branch delivered>'
+
+Verkstead knows where this repo's pull requests live and which token to open one
+with — this prompt's *The forge this repo is on* names the forge and what it
+calls a pull request — so that line works wherever the work is hosted, and it
+opens a draft. Wherever the repository's own sequence says to open one with a
+forge's own tool, this is what opens it instead; everything else that sequence
+says — the push, the branch's name, what the body covers — is the repository's
+and stands.
+
 Two shapes, and which one this is, is a fact about the branch rather than a
 choice:
 
 - an **unstacked** branch — the ordinary case — is pushed, and then opened as a
-  **draft** pull request titled for the work, with a summary of what the branch
+  draft pull request titled for the work, with a summary of what the branch
   delivered as its body;
 - a **stacked** branch, one made with `gh stack init` / `gh stack add`, goes
   through `gh stack submit --auto` instead, after which this branch's own pull
   request has its title and body corrected. Leave the stack's other pull
   requests alone: they belong to finished work.
 
-Work out which of the two this branch is before running either, and follow what
-the repository's own sequence says about it — `gh stack view` naming this branch
-is what says it is in a stack, and an error or a stack without it says it is
-not. A repository whose file says nothing about finishing, or has no such file:
-push the branch and open a draft pull request titled for the work —
-
-    git push -u origin HEAD
-    gh pr create --draft --title '<what this built>' --body '<what the branch delivered>'
+**The stacked shape is on offer only where this prompt says the forge stacks
+pull requests**, under *The forge this repo is on*. A forge that does not has no
+stack to submit, so this branch is the unstacked shape whatever `gh stack` or the
+repository's own file would say about one. Where the prompt says it does, work
+out which of the two this branch is before running either — `gh stack view`
+naming this branch is what says it is in a stack, and an error or a stack
+without it says it is not.
 
 **Where this prompt names a branch to open it against**, under *The branch to
-open it against*, that is the base — `--base <that branch>` on the create, and
+open it against*, that is the base — `--base <that branch>` on the open, and
 the same branch wherever the repository's own sequence asks for one. It is
 there because the work was taken up off a base somebody chose rather than cut
 from one, and nothing on the branch itself says which it was. Where the prompt
-names none, the base is the repository's own rule and there is nothing to pass.
+names none, the base is the one the Conversation was cut against and there is
+nothing to pass.
 
 **A pull request may already be half there.** The session before you may have
 pushed and got no further, so a push that says everything is up to date is not a
-failure — go on and open the pull request. And if `gh pr view` finds one on this
-branch after all, that is the job done: say so and run `verkstead done`.
+failure — go on and open the pull request. And if the open is refused because
+this branch already has one, that is the job done: say so and run `verkstead
+done`.
 
 **Nothing waits on approval.** No gate, no confirmation and nobody at this
 terminal: the pull request opens unasked, and it opens as a *draft* because
 merging is the human's act and nothing here is allowed to look like it was
 theirs. Then run `verkstead done` — see *Saying you are done* below. Verkstead
-then asks GitHub for the pull request and takes the Conversation on to wrapping
-it up.
+then asks the forge for the pull request and takes the Conversation on to
+wrapping it up.
 
-**And say what happened, either way.** If you cannot open one — `gh` missing,
-not logged in, the push refused — say what stopped you, and then run `verkstead
-done`. Where Verkstead cannot reach GitHub either, the signal is taken, and what
-you said is what the human reads on the Timeline when Verkstead finds no pull
-request a second time. Where it can, the signal is refused, and what stopped you
-goes to the human as a Set instead — see *When you need the human* below.
+**And say what happened, either way.** If you cannot open one — the push
+refused, the repo's Author holding no token for its forge, the repo on no forge
+at all — say what stopped you, and then run `verkstead done`. Where Verkstead
+cannot reach the forge either, the signal is taken, and what you said is what
+the human reads on the Timeline when Verkstead finds no pull request a second
+time. Where it can, the signal is refused, and what stopped you goes to the
+human as a Set instead — see *When you need the human* below.
 
 ## Saying you are done
 
@@ -92,7 +108,7 @@ The last thing this session does, once the pull request is open, is run
 push, and not going quiet. So a session that waits on a push, or on an answer,
 is not cut off while it waits.
 
-Verkstead checks the repository and GitHub when you run it. A refusal exits
+Verkstead checks the repository and the forge when you run it. A refusal exits
 non-zero and says on stderr what is missing — changes left uncommitted, or a
 branch with no open pull request — and the session carries on: put that right
 and run `verkstead done` again.
@@ -100,7 +116,7 @@ and run `verkstead done` again.
 ## When you need the human
 
 Only when the pull request genuinely cannot be opened without them: a branch
-with nothing on it to open one for, a push GitHub refuses, or a decision about
+with nothing on it to open one for, a push the forge refuses, or a decision about
 the branch that would be expensive to unpick. Everything about *how* to open one
 is in the repository's own file.
 

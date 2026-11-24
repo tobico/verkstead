@@ -93,8 +93,9 @@ use verkstead_server::remote::Tailscale;
 use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
+use verkstead_server::stand_in::{Asked, Asking, Forge, GitHub, PullRequest, Said};
 use verkstead_server::{
-    Agents, Gh, Pace, open_database, router_hosting_activities, router_running_sessions,
+    Agents, Pace, open_database, router_hosting_activities, router_running_sessions,
     router_running_sessions_answering_devices,
 };
 use verkstead_store::{Decision, StageOf, stage_roadmap};
@@ -410,14 +411,21 @@ impl Grilling {
     ///
     /// The caller holds on to what comes back — dropping the Router is the second
     /// server going away again.
-    async fn restarted(&self, stub: &str, gh: &str) -> Router {
+    async fn restarted(&self, stub: &str, gh: Github) -> Router {
         self.restarted_at_pace(stub, gh, *BRISKLY).await
     }
 
     /// And the same at a pace of the caller's choosing, for the tests where what
     /// the second server does is something the first one was not doing: a sweep
     /// the first server's pace had switched off.
-    async fn restarted_at_pace(&self, stub: &str, gh: &str, pace: Pace) -> Router {
+    async fn restarted_at_pace(&self, stub: &str, gh: Github, pace: Pace) -> Router {
+        let github = GitHub::answering({
+            let gh = gh.clone();
+
+            move |asked| gh(asked)
+        })
+        .await;
+
         router_running_sessions(
             open_database(&self.database).await.unwrap(),
             self.state.path().to_owned(),
@@ -441,7 +449,7 @@ impl Grilling {
                 Settings::in_data_dir(self.state.path()),
             )
             .at_pace(pace),
-            gh_stub(gh),
+            Forge::standing_in(&github),
         )
     }
 
@@ -1235,16 +1243,14 @@ static UNRESCUED: LazyLock<Pace> = LazyLock::new(|| Pace {
     ..*BRISKLY
 });
 
-/// What stands where the host's `gh` goes: a branch with a pull request on it,
-/// and nothing said on it yet.
+/// What stands where GitHub goes: a branch with a pull request on it, and
+/// nothing said on it yet.
 ///
-/// A script rather than the real thing, for the reason the agent is one: what
-/// these ask is what Verkstead does with the answer, and asking GitHub itself
-/// would be a test that needed a network, an account and a pull request.
-///
-/// It tells the questions apart by the fields being asked for, because that is
-/// what tells them apart on the command line — except the comments left on the
-/// lines of the diff, which are `gh api`'s and so are told by `$1`.
+/// A stand-in rather than the real thing, for the reason the agent is one:
+/// what these ask is what Verkstead does with the answer, and asking GitHub
+/// itself would be a test that needed a network, an account and a pull
+/// request. What answers is GitHub's own component all the same — see
+/// [`verkstead_server::stand_in`].
 ///
 /// The checks are on the details pane's question and on nothing else here: the
 /// watcher asks about them on their own and this answers that with the pull
@@ -1259,149 +1265,142 @@ static UNRESCUED: LazyLock<Pace> = LazyLock::new(|| Pace {
 /// is the one of the three nothing else here writes down, which is what makes
 /// that freshening visible.
 ///
-/// That one answer carries the `mergeable` the same watcher reads, because a
-/// wrap-up waits on that as much as on the checks: a pull request nothing has
-/// said merges is one Verkstead is still waiting to hear about, and every
-/// fixture here that reaches Done would sit in Wrapping for ever. The pull
-/// request lookup ignores the extra field, as every `gh` answer ignores the
-/// fields nobody asked it for.
-const PULL_REQUEST: &str = r#"
-if [ "$1" = api ]; then printf '[]'; exit 0; fi
-if [ "$2" = list ]; then printf '[]'; exit 0; fi
-case "$5" in
-*commits*)
-    printf '{"commits":[{"oid":"c0ffee1","messageHeadline":"feat: count the requests"}],"comments":[{"author":{"login":"tobico"},"body":"Looks **good**.","createdAt":"2026-08-21T09:00:00Z"}],"statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}],"mergeable":"MERGEABLE","state":"OPEN"}'
-    ;;
-*comments*)
-    printf '{"comments":[],"reviews":[]}'
-    ;;
-*)
-    printf '{"mergeable":"MERGEABLE","number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}'
-    ;;
-esac
-"#;
+/// Every other answer carries the `mergeable` the same watcher reads, because
+/// a wrap-up waits on that as much as on the checks: a pull request nothing
+/// has said merges is one Verkstead is still waiting to hear about, and every
+/// fixture here that reaches Done would sit in Wrapping for ever.
+fn gh_pull_request() -> Github {
+    answering(|asked| match asked.asking {
+        Asking::Details => Said::About(PullRequest {
+            commits: entries_of(
+                r#"{"oid":"c0ffee1","messageHeadline":"feat: count the requests"}"#,
+            ),
+            comments: entries_of(
+                r#"{"author":{"login":"tobico"},"body":"Looks **good**.","createdAt":"2026-08-21T09:00:00Z"}"#,
+            ),
+            checks: entries_of(GREEN_CHECK),
+            ..merging()
+        }),
+        Asking::Comments => Said::About(merging()),
+        Asking::Open | Asking::OnTheDiff => Said::Nothing,
+        _ => Said::About(merging()),
+    })
+}
 
-/// A `gh` whose pull request has one check on it, concluded as `how` — the word
-/// GitHub puts in a check run's `conclusion` column. Shell text rather than a
-/// literal, so a caller can hand it something that changes mid-test.
+/// A GitHub whose pull request has one check on it, concluded as `how` — the
+/// word GitHub puts in a check run's `conclusion` column.
 ///
-/// Everything else it answers is [`PULL_REQUEST`]'s, because a wrap-up needs the
-/// pull request found before it has any checks to ask about.
-fn gh_checking(how: &str) -> String {
-    format!(
-        r#"
-if [ "$1" = api ]; then printf '[]'; exit 0; fi
-if [ "$2" = list ]; then printf '[]'; exit 0; fi
-case "$5" in
-*statusCheckRollup*)
-    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"%s","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "{how}"
-    ;;
-*commits*)
-    printf '{{"commits":[],"comments":[]}}'
-    ;;
-*comments*)
-    printf '{{"comments":[],"reviews":[]}}'
-    ;;
-*)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
-    ;;
-esac
-"#
+/// Everything else it answers is [`gh_pull_request`]'s, because a wrap-up needs
+/// the pull request found before it has any checks to ask about.
+fn gh_checking(how: &str) -> Github {
+    let how = concluded(how);
+
+    answering(move |asked| match asked.asking {
+        Asking::Checks => how.said(),
+        _ => usually(asked),
+    })
+}
+
+/// A green suite whose one check concluded as `how`.
+fn concluded(how: &str) -> Rollup {
+    Rollup::from(
+        format!(
+            r#"{{"mergeable":"MERGEABLE","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"{how}","detailsUrl":"{CHECK_LINK}"}}]}}"#
+        )
+        .as_str(),
     )
 }
 
-/// A `gh` whose pull request answers `rollup` about its checks, carries `said`
-/// in its conversation and `on_the_diff` on the lines of its diff — each of them
-/// the entries of the answer, so a test can hand it however many it needs and
-/// none at all.
-///
-/// The comments on the diff are told by `$1`, because they are `gh api`'s rather
-/// than `gh pr view`'s. The rest are told by the fields being asked for, in the
-/// order the field lists have to be told apart in: the details pane asks for
-/// `commits,comments` and the comment watcher asks for `comments,reviews`, and
-/// only the first of those contains `commits`.
-fn gh_about(rollup: &str, said: &str, on_the_diff: &str) -> String {
-    format!(
-        r#"
-if [ "$1" = api ]; then printf '[{on_the_diff}]'; exit 0; fi
-case "$5" in
-*statusCheckRollup*)
-{rollup}
-    ;;
-*commits*)
-    printf '{{"commits":[],"comments":[]}}'
-    ;;
-*comments*)
-    printf '{{"comments":[{said}],"reviews":[]}}'
-    ;;
-*)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
-    ;;
-esac
-"#
-    )
+/// A GitHub whose pull request answers `rollup` about its checks, carries
+/// `said` in its conversation and `on_the_diff` on the lines of its diff —
+/// each of the last two the entries of the answer, so a test can hand it
+/// however many it needs and none at all.
+fn gh_about(rollup: impl Into<Rollup>, in_conversation: &str, on_the_diff: &str) -> Github {
+    let rollup = rollup.into();
+    let (in_conversation, on_the_diff) = (entries_of(in_conversation), entries_of(on_the_diff));
+
+    answering(move |asked| match asked.asking {
+        Asking::Checks => rollup.said(),
+        Asking::Comments => Said::About(PullRequest {
+            comments: in_conversation.clone(),
+            ..the_pull_request()
+        }),
+        Asking::OnTheDiff => Said::About(PullRequest {
+            on_the_diff: on_the_diff.clone(),
+            ..the_pull_request()
+        }),
+        _ => usually(asked),
+    })
 }
 
-/// The same, with the details pane's own question answered beside the watchers'.
+/// The same, with the details pane's own question answered beside the
+/// watchers'.
 ///
-/// The pane asks for `commits` and the rollup together, so its question has to be
-/// matched before the checks watcher's — the watcher's own field is in both, and
-/// a stub that cannot be asked about the checks would otherwise refuse the pane
-/// as well. What it answers with is the same comments the watcher is given, which
-/// is the point: the pane draws what is on the pull request, whatever a rule has
-/// taken out of what an agent is sent about.
-fn gh_about_with_a_pane(rollup: &str, said: &str, on_the_diff: &str) -> String {
-    format!(
-        r#"
-if [ "$1" = api ]; then printf '[{on_the_diff}]'; exit 0; fi
-case "$5" in
-*commits*)
-    printf '{{"commits":[],"comments":[{said}],"statusCheckRollup":[],"mergeable":"MERGEABLE","state":"OPEN"}}'
-    ;;
-*statusCheckRollup*)
-{rollup}
-    ;;
-*comments*)
-    printf '{{"comments":[{said}],"reviews":[]}}'
-    ;;
-*)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
-    ;;
-esac
-"#
-    )
+/// What it answers the pane with is the same comments the watcher is given,
+/// which is the point: the pane draws what is on the pull request, whatever a
+/// rule has taken out of what an agent is sent about.
+fn gh_about_with_a_pane(
+    rollup: impl Into<Rollup>,
+    in_conversation: &str,
+    on_the_diff: &str,
+) -> Github {
+    let rollup = rollup.into();
+    let (in_conversation, on_the_diff) = (entries_of(in_conversation), entries_of(on_the_diff));
+
+    answering(move |asked| match asked.asking {
+        Asking::Checks => rollup.said(),
+        Asking::Details | Asking::Comments => Said::About(PullRequest {
+            comments: in_conversation.clone(),
+            ..merging()
+        }),
+        Asking::OnTheDiff => Said::About(PullRequest {
+            on_the_diff: on_the_diff.clone(),
+            ..the_pull_request()
+        }),
+        _ => usually(asked),
+    })
 }
 
-/// The same, except that nothing has been said on the pull request until `after`
-/// is there with something in it.
+/// The same, except that nothing has been said on the pull request until
+/// `after` is there with something in it.
 ///
-/// Which is how a test says *when* a comment landed. Everything already on a pull
-/// request when a wrap-up's review starts is the review's to propose about, so a
-/// test about what a batch session does has to put the comment there afterwards —
-/// and the file the review session writes its prompt into is exactly the moment
-/// it started.
-fn gh_about_once(rollup: &str, after: &Path, said: &str, on_the_diff: &str) -> String {
-    format!(
-        r#"
-if [ -s {after} ]; then said='{said}'; on_the_diff='{on_the_diff}'; else said=; on_the_diff=; fi
-if [ "$1" = api ]; then printf '[%s]' "$on_the_diff"; exit 0; fi
-case "$5" in
-*statusCheckRollup*)
-{rollup}
-    ;;
-*commits*)
-    printf '{{"commits":[],"comments":[]}}'
-    ;;
-*comments*)
-    printf '{{"comments":[%s],"reviews":[]}}' "$said"
-    ;;
-*)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
-    ;;
-esac
-"#,
-        after = quoted(after),
-    )
+/// Which is how a test says *when* a comment landed. Everything already on a
+/// pull request when a wrap-up's review starts is the review's to propose
+/// about, so a test about what a batch session does has to put the comment
+/// there afterwards — and the file the review session writes its prompt into
+/// is exactly the moment it started.
+fn gh_about_once(
+    rollup: impl Into<Rollup>,
+    after: &Path,
+    in_conversation: &str,
+    on_the_diff: &str,
+) -> Github {
+    let rollup = rollup.into();
+    let (in_conversation, on_the_diff) = (entries_of(in_conversation), entries_of(on_the_diff));
+    let after = after.to_owned();
+
+    answering(move |asked| {
+        let yet = std::fs::metadata(&after).is_ok_and(|read| read.len() > 0);
+
+        match asked.asking {
+            Asking::Checks => rollup.said(),
+            Asking::Comments => Said::About(PullRequest {
+                comments: match yet {
+                    true => in_conversation.clone(),
+                    false => Vec::new(),
+                },
+                ..the_pull_request()
+            }),
+            Asking::OnTheDiff => Said::About(PullRequest {
+                on_the_diff: match yet {
+                    true => on_the_diff.clone(),
+                    false => Vec::new(),
+                },
+                ..the_pull_request()
+            }),
+            _ => usually(asked),
+        }
+    })
 }
 
 /// A `gh` for the sweep that watches a pull request after the work on it is
@@ -1421,33 +1420,32 @@ esac
 /// An empty `landing` is a pull request that is open and merges, which is what
 /// every one of these starts as: the file is how a test says GitHub has come to
 /// say something else.
-fn gh_landing(asked: &Path, landing: &Path) -> String {
-    format!(
-        r#"
-if [ "$1" = api ]; then printf '[]'; exit 0; fi
-if [ "$2" = list ]; then printf '[]'; exit 0; fi
-case "$5" in
-mergeable,state)
-    printf '%s\n' "$5" >> {asked}
-    if [ -s {landing} ]; then cat {landing}; else printf '{{"mergeable":"MERGEABLE","state":"OPEN"}}'; fi
-    ;;
-*commits*)
-    printf '{{"commits":[],"comments":[],"mergeable":"MERGEABLE","state":"OPEN"}}'
-    ;;
-*statusCheckRollup*)
-{GREEN}
-    ;;
-*comments*)
-    printf '{{"comments":[],"reviews":[]}}'
-    ;;
-*)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
-    ;;
-esac
-"#,
-        asked = quoted(asked),
-        landing = quoted(landing),
-    )
+fn gh_landing(asked: &Path, landing: &Path) -> Github {
+    let (asked_in, landing) = (asked.to_owned(), landing.to_owned());
+    let green = Rollup::from(GREEN);
+
+    answering(move |asked| match asked.asking {
+        Asking::Landing => {
+            noted(&asked_in, "mergeable,state");
+
+            match std::fs::read_to_string(&landing) {
+                Ok(said) if !said.trim().is_empty() => {
+                    let read: serde_json::Value =
+                        serde_json::from_str(&said).expect("a landing is JSON");
+
+                    Said::About(PullRequest {
+                        mergeable: text(&read, "mergeable"),
+                        state: text(&read, "state"),
+                        ..the_pull_request()
+                    })
+                }
+                _ => Said::About(merging()),
+            }
+        }
+        Asking::Details => Said::About(merging()),
+        Asking::Checks => green.said(),
+        _ => usually(asked),
+    })
 }
 
 /// How many times the sweep has asked GitHub about the pull request — read off
@@ -1528,37 +1526,38 @@ async fn until_swept(asked: &Path) {
 /// work is carried to Done on; `conflicting` is the base moving under it
 /// afterwards, and `resolved` — which the resolution session writes as it
 /// commits — is the merge that puts it right.
-fn gh_conflicting_between(conflicting: &Path, resolved: &Path) -> String {
-    format!(
-        r#"
-if [ -e {conflicting} ] && [ ! -e {resolved} ]; then merges=CONFLICTING; else merges=MERGEABLE; fi
-if [ "$1" = api ]; then printf '[]'; exit 0; fi
-if [ "$2" = list ]; then printf '[]'; exit 0; fi
-case "$5" in
-mergeable,state)
-    printf '{{"mergeable":"%s","state":"OPEN"}}' "$merges"
-    ;;
-*statusCheckRollup*)
-    printf '{{"mergeable":"%s","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$merges"
-    ;;
-*commits*)
-    printf '{{"commits":[],"comments":[],"mergeable":"%s","state":"OPEN"}}' "$merges"
-    ;;
-*comments*)
-    printf '{{"comments":[],"reviews":[]}}'
-    ;;
-*)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
-    ;;
-esac
-"#,
-        conflicting = quoted(conflicting),
-        resolved = quoted(resolved),
-    )
+fn gh_conflicting_between(conflicting: &Path, resolved: &Path) -> Github {
+    let (conflicting, resolved) = (conflicting.to_owned(), resolved.to_owned());
+
+    answering(move |asked| {
+        let merges = match conflicting.exists() && !resolved.exists() {
+            true => "CONFLICTING",
+            false => "MERGEABLE",
+        };
+        let pull_request = PullRequest {
+            mergeable: merges.to_owned(),
+            ..the_pull_request()
+        };
+
+        match asked.asking {
+            Asking::Landing | Asking::Details => Said::About(pull_request),
+            Asking::Checks => Said::About(PullRequest {
+                checks: entries_of(GREEN_CHECK),
+                ..pull_request
+            }),
+            _ => usually(asked),
+        }
+    })
 }
 
+/// Where a check's own page is, which every one of these names.
+const CHECK_LINK: &str = "https://github.com/tobico/verkstead/actions/runs/1/job/2";
+
+/// One check that passed, as a rollup carries one.
+const GREEN_CHECK: &str = r#"{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}"#;
+
 /// A green suite, as [`gh_about`]'s answer about the checks.
-const GREEN: &str = r#"    printf '{"mergeable":"MERGEABLE","statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'"#;
+const GREEN: &str = r#"{"mergeable":"MERGEABLE","statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}"#;
 
 /// And a suite that never finishes, which is how a test holds a wrap-up down to
 /// its checks for as long as it cares to look: nothing is red, so nothing is
@@ -1567,7 +1566,7 @@ const GREEN: &str = r#"    printf '{"mergeable":"MERGEABLE","statusCheckRollup":
 /// The pull request merges throughout, that being another of the things a
 /// wrap-up waits on: one GitHub said nothing about would be a wrap-up waiting on
 /// more than its suite, which is not the condition these are about.
-const STILL_RUNNING: &str = r#"    printf '{"mergeable":"MERGEABLE","statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"IN_PROGRESS","conclusion":"","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'"#;
+const STILL_RUNNING: &str = r#"{"mergeable":"MERGEABLE","statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"IN_PROGRESS","conclusion":"","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}"#;
 
 /// The branch every one of these `gh` stubs names as its pull request's head.
 ///
@@ -1583,15 +1582,24 @@ const HEAD_BRANCH: &str = "rate-limiting";
 /// Which is how a test says *what commit GitHub thinks it is talking about*. The
 /// checks and the head come back together because they are one answer, and a
 /// wrap-up holds one against the other — see the tests below.
-fn green_for(head: &Path) -> String {
-    format!(
-        r#"    if [ -s {head} ]; then
-        printf '{{"mergeable":"MERGEABLE","headRefOid":"%s","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$(cat {head})"
-    else
-        printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"IN_PROGRESS","conclusion":"","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}'
-    fi"#,
-        head = quoted(head),
-    )
+fn green_for(head: &Path) -> Rollup {
+    let head = head.to_owned();
+
+    Rollup::reading(move || match read_if_there(&head) {
+        Some(oid) => format!(
+            r#"{{"mergeable":"MERGEABLE","headRefOid":"{oid}","statusCheckRollup":[{GREEN_CHECK}]}}"#
+        ),
+        None => STILL_RUNNING.to_owned(),
+    })
+}
+
+/// What `path` holds, where it is there with something in it — which is how
+/// every one of these fixtures says *this has happened now*.
+fn read_if_there(path: &Path) -> Option<String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|said| said.trim().to_owned())
+        .filter(|said| !said.is_empty())
 }
 
 /// A suite that is green until `landed` is there, and a pull request reporting
@@ -1601,26 +1609,31 @@ fn green_for(head: &Path) -> String {
 /// that had a suite a moment ago and has none now is a push whose run has not
 /// appeared — the same answer a repository with no CI gives, and not the same
 /// fact.
-fn green_until_nothing_is_reported(landed: &Path) -> String {
-    format!(
-        r#"    if [ -e {landed} ]; then
-        printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[]}}'
-    else
-{GREEN}
-    fi"#,
-        landed = quoted(landed),
-    )
+fn green_until_nothing_is_reported(landed: &Path) -> Rollup {
+    let landed = landed.to_owned();
+
+    Rollup::reading(move || match landed.exists() {
+        true => r#"{"mergeable":"MERGEABLE","statusCheckRollup":[]}"#.to_owned(),
+        false => GREEN.to_owned(),
+    })
 }
 
 /// One that has gone back to running once `landed` is there — which is what a
 /// commit pushed to the pull request does to it, GitHub starting a whole new run
 /// against the new head.
-fn green_until(landed: &Path) -> String {
-    format!(
-        r#"    if [ -e {landed} ]; then how=IN_PROGRESS; else how=COMPLETED; fi
-    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"%s","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$how""#,
-        landed = quoted(landed),
-    )
+fn green_until(landed: &Path) -> Rollup {
+    let landed = landed.to_owned();
+
+    Rollup::reading(move || {
+        let how = match landed.exists() {
+            true => "IN_PROGRESS",
+            false => "COMPLETED",
+        };
+
+        format!(
+            r#"{{"mergeable":"MERGEABLE","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"{how}","conclusion":"SUCCESS","detailsUrl":"{CHECK_LINK}"}}]}}"#
+        )
+    })
 }
 
 /// A green suite on a pull request GitHub will not merge until `resolved` is
@@ -1630,22 +1643,27 @@ fn green_until(landed: &Path) -> String {
 /// and the merge come back in one answer because they are one answer — the
 /// watcher asks for both in the same call — so a suite that is green throughout
 /// leaves the conflict as the only thing between the wrap-up and Done.
-fn green_but_conflicting_until(resolved: &Path) -> String {
-    format!(
-        r#"    if [ -e {resolved} ]; then merges=MERGEABLE; else merges=CONFLICTING; fi
-    printf '{{"mergeable":"%s","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$merges""#,
-        resolved = quoted(resolved),
-    )
+fn green_but_conflicting_until(resolved: &Path) -> Rollup {
+    let resolved = resolved.to_owned();
+
+    Rollup::reading(move || {
+        let merges = match resolved.exists() {
+            true => "MERGEABLE",
+            false => "CONFLICTING",
+        };
+
+        format!(r#"{{"mergeable":"{merges}","statusCheckRollup":[{GREEN_CHECK}]}}"#)
+    })
 }
 
 /// A green suite on a pull request GitHub will never merge, which is how a test
 /// spends a pull request's goes at a conflict nothing resolves.
-const GREEN_BUT_CONFLICTING: &str = r#"    printf '{"mergeable":"CONFLICTING","statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'"#;
+const GREEN_BUT_CONFLICTING: &str = r#"{"mergeable":"CONFLICTING","statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}"#;
 
 /// And a green suite on a pull request GitHub has not worked out whether it can
 /// merge — which is what it says for a while after every push, and is neither a
 /// conflict nor a clean merge.
-const GREEN_BUT_UNKNOWN: &str = r#"    printf '{"mergeable":"UNKNOWN","statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'"#;
+const GREEN_BUT_UNKNOWN: &str = r#"{"mergeable":"UNKNOWN","statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}"#;
 
 /// The same, until `merges` is there — after which GitHub will merge it.
 ///
@@ -1655,30 +1673,37 @@ const GREEN_BUT_UNKNOWN: &str = r#"    printf '{"mergeable":"UNKNOWN","statusChe
 /// and the merge is the one thing left — see
 /// [`a_merge_github_has_not_worked_out_dispatches_nothing`]. The marker is how the
 /// test lets it go.
-fn unknown_until(merges: &Path) -> String {
-    format!(
-        r#"    if [ -e {merges} ]; then how=MERGEABLE; else how=UNKNOWN; fi
-    printf '{{"mergeable":"%s","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$how""#,
-        merges = quoted(merges),
-    )
+fn unknown_until(merges: &Path) -> Rollup {
+    let merges = merges.to_owned();
+
+    Rollup::reading(move || {
+        let how = match merges.exists() {
+            true => "MERGEABLE",
+            false => "UNKNOWN",
+        };
+
+        format!(r#"{{"mergeable":"{how}","statusCheckRollup":[{GREEN_CHECK}]}}"#)
+    })
 }
 
 /// One whose suite is still running until `started` is there and green once it
 /// is, which is how a test keeps the checks out of the way until the thing it is
 /// about has begun — and then lets them settle, so that what stops the wrap-up
 /// finishing is the thing being asked about and nothing else.
-fn green_after(started: &Path) -> String {
-    format!(
-        r#"    if [ -s {started} ]; then status=COMPLETED; how=SUCCESS; else status=IN_PROGRESS; how=; fi
-    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"%s","conclusion":"%s","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$status" "$how""#,
-        started = quoted(started),
-    )
+fn green_after(started: &Path) -> Rollup {
+    let started = started.to_owned();
+
+    Rollup::reading(move || match read_if_there(&started).is_some() {
+        true => GREEN.to_owned(),
+        false => STILL_RUNNING.to_owned(),
+    })
 }
 
 /// And one that cannot be asked about the checks at all, which is how a test
 /// keeps a wrap-up from settling while it watches what the comments do.
-const CHECKS_UNANSWERABLE: &str = r#"    printf 'gh: To use GitHub CLI, run: gh auth login\n' >&2
-    exit 1"#;
+fn checks_unanswerable() -> Rollup {
+    Rollup::of(Said::not_logged_in)
+}
 
 /// Three comments said in the space of a minute in the pull request's
 /// conversation, which is one human making one point rather than three.
@@ -1750,177 +1775,287 @@ const TWO_ON_THE_DIFF: &str = r#"{"node_id":"PRRC_1","user":{"login":"tobico"},"
 /// turns red only once the file the review session writes its prompt into is
 /// there — which is that session inside its sandbox, and so the Worktree already
 /// taken.
-fn gh_checking_after(started: &Path) -> String {
-    format!(
-        r#"
-if [ "$1" = api ]; then printf '[]'; exit 0; fi
-if [ "$2" = list ]; then printf '[]'; exit 0; fi
-if [ -s {started} ]; then status=COMPLETED; how=FAILURE; else status=IN_PROGRESS; how=; fi
-case "$5" in
-*statusCheckRollup*)
-    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"%s","conclusion":"%s","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$status" "$how"
-    ;;
-*commits*)
-    printf '{{"commits":[],"comments":[]}}'
-    ;;
-*comments*)
-    printf '{{"comments":[],"reviews":[]}}'
-    ;;
-*)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
-    ;;
-esac
-"#,
-        started = quoted(started),
-    )
+fn gh_checking_after(started: &Path) -> Github {
+    let red_once = {
+        let started = started.to_owned();
+
+        Rollup::reading(move || match read_if_there(&started).is_some() {
+            true => RED.to_owned(),
+            false => STILL_RUNNING.to_owned(),
+        })
+    };
+
+    answering(move |asked| match asked.asking {
+        Asking::Checks => red_once.said(),
+        _ => usually(asked),
+    })
 }
 
 /// And one that can find the pull request but cannot say anything about its
 /// checks — an account whose login has expired, which is the ordinary way this
 /// goes wrong on a machine nobody is sitting at.
-const CHECKS_UNASKABLE: &str = r#"
-if [ "$1" = api ]; then printf '[]'; exit 0; fi
-if [ "$2" = list ]; then printf '[]'; exit 0; fi
-case "$5" in
-*statusCheckRollup*)
-    printf 'gh: To use GitHub CLI, run: gh auth login\n' >&2
-    exit 1
-    ;;
-*commits*)
-    printf '{"commits":[],"comments":[]}'
-    ;;
-*comments*)
-    printf '{"comments":[],"reviews":[]}'
-    ;;
-*)
-    printf '{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}'
-    ;;
-esac
-"#;
+fn checks_unaskable() -> Github {
+    answering(|asked| match asked.asking {
+        Asking::Checks => Said::not_logged_in(),
+        _ => usually(asked),
+    })
+}
 
-/// And a `gh` that answers for a branch nothing was opened on, in the words the
-/// real one uses.
-const NO_PULL_REQUEST: &str = r#"
-printf 'no pull requests found for branch "%s"\n' "$3" >&2
-exit 1
-"#;
+/// And a GitHub that answers for a branch nothing was opened on.
+fn no_pull_request() -> Github {
+    answering(|_| Said::Nothing)
+}
 
 /// And one that finds none until `opened` is there, and finds one once it is —
 /// the human going to GitHub and opening the pull request by hand, which is
 /// what a halt over a missing one tells them they can do.
 ///
-/// Everything it answers once there is one is [`PULL_REQUEST`]'s, because
+/// Everything it answers once there is one is [`gh_pull_request`]'s, because
 /// finding it is what starts a wrap-up and a wrap-up asks about the rest.
-fn gh_opened_by_hand(opened: &Path) -> String {
-    format!(
-        r#"
-if [ "$1" = api ]; then printf '[]'; exit 0; fi
-if [ "$2" = list ]; then printf '[]'; exit 0; fi
-if [ ! -f {opened} ]; then
-    printf 'no pull requests found for branch "%s"\n' "$3" >&2
-    exit 1
-fi
-case "$5" in
-*statusCheckRollup*)
-    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[]}}'
-    ;;
-*commits*)
-    printf '{{"commits":[],"comments":[]}}'
-    ;;
-*comments*)
-    printf '{{"comments":[],"reviews":[]}}'
-    ;;
-*)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
-    ;;
-esac
-"#,
-        opened = quoted(opened),
-    )
+fn gh_opened_by_hand(opened: &Path) -> Github {
+    let opened = opened.to_owned();
+
+    answering(move |asked| match opened.is_file() {
+        false => Said::Nothing,
+        true => match asked.asking {
+            Asking::Checks => Said::About(merging()),
+            _ => usually(asked),
+        },
+    })
 }
 
-/// And a `gh` that cannot answer anything at all, in the words the real one
-/// uses: an account that was never logged in, which is the ordinary way this
-/// goes wrong on a machine nobody is sitting at.
+/// And a GitHub that cannot answer anything at all: an account that was never
+/// logged in, which is the ordinary way this goes wrong on a machine nobody is
+/// sitting at.
 ///
-/// Different in kind from [`NO_PULL_REQUEST`], and that is the point of it:
+/// Different in kind from [`no_pull_request`], and that is the point of it:
 /// GitHub has not said there is no pull request, it has not been asked.
-const NOTHING_ASKABLE: &str = r#"
-printf 'gh: To use GitHub CLI, run: gh auth login\n' >&2
-exit 1
-"#;
+fn nothing_askable() -> Github {
+    answering(|_| Said::not_logged_in())
+}
 
-/// A `gh` that answers for two repositories at once: the Conversation's own,
+/// A GitHub that answers for two repositories at once: the Conversation's own,
 /// and the companion beside it.
 ///
-/// Told apart by the directory the call is made in, which is how the real one
-/// tells them apart too — Verkstead runs `gh` in the repository it is asking
-/// about, `#41` meaning something else entirely in another one. `companion` is
-/// the whole of what it does when it is asked in `askance`.
+/// Told apart by the repository the question names, which is how the real one
+/// tells them apart too — `#41` means something else entirely in another
+/// repository. `companion` is the whole of what it does when it is asked about
+/// `askance`.
 ///
 /// The Conversation's own pull request is green and nothing has been said on
 /// it, so what a wrap-up is left waiting on is the companion and nothing else.
-fn gh_alongside(companion: &str) -> String {
-    format!(
-        r#"
-case "$(pwd -P)" in
-*/askance)
-{companion}
-    ;;
-esac
-if [ "$1" = api ]; then printf '[]'; exit 0; fi
-if [ "$2" = list ]; then printf '[]'; exit 0; fi
-case "$5" in
-*statusCheckRollup*)
-{green}
-    ;;
-*commits*)
-    printf '{{"commits":[],"comments":[]}}'
-    ;;
-*comments*)
-    printf '{{"comments":[],"reviews":[]}}'
-    ;;
-*)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
-    ;;
-esac
-"#,
-        green = GREEN,
-    )
+fn gh_alongside(companion: Companion) -> Github {
+    let green = Rollup::from(GREEN);
+
+    answering(move |asked| match asked.repository.as_str() {
+        COMPANION => companion(asked),
+        _ => match asked.asking {
+            Asking::Checks => green.said(),
+            _ => usually(asked),
+        },
+    })
 }
 
-/// What that companion says when the finish opened a pull request in it.
-const COMPANION_PULL_REQUEST: &str = r#"    printf '{"mergeable":"MERGEABLE","number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7","headRefName":"%s"}' "$3"
-    exit 0"#;
+/// What a bench's GitHub answers about the companion repository.
+type Companion = Arc<dyn Fn(&Asked) -> Said + Send + Sync>;
 
-/// And what it says when the finish left it without one, in the words the real
-/// `gh` uses.
-const COMPANION_NO_PULL_REQUEST: &str = r#"    printf 'no pull requests found for branch "%s"\n' "$3" >&2
-    exit 1"#;
+/// One of those.
+fn on_the_companion_of(said: impl Fn(&Asked) -> Said + Send + Sync + 'static) -> Companion {
+    Arc::new(said)
+}
+
+/// What the companion repository of every one of these fixtures is called.
+const COMPANION: &str = "askance";
+
+/// What that companion says when the finish opened a pull request in it.
+fn the_companion_has_one() -> Companion {
+    on_the_companion_of(|asked| Said::About(the_companions_pull_request(asked)))
+}
+
+/// Its pull request, on whatever branch was asked about — which is the
+/// companion's own branch, and not the Conversation's.
+fn the_companions_pull_request(asked: &Asked) -> PullRequest {
+    PullRequest {
+        number: 7,
+        title: "The other half".to_owned(),
+        url: "https://github.com/tobico/askance/pull/7".to_owned(),
+        head: asked.branch.clone().unwrap_or_default(),
+        base: String::new(),
+        state: "OPEN".to_owned(),
+        mergeable: "MERGEABLE".to_owned(),
+        ..PullRequest::default()
+    }
+}
+
+/// And what it says when the finish left it without one.
+fn companion_no_pull_request() -> Companion {
+    on_the_companion_of(|_| Said::Nothing)
+}
 
 /// And what it says when the finish left it without one until `opened` is there
 /// — the session going back and opening it, which is what a refused signal asks
 /// of it.
-fn companion_opened_once_refused(opened: &Path) -> String {
-    format!(
-        r#"    if [ ! -f {opened} ]; then
-        printf 'no pull requests found for branch "%s"\n' "$3" >&2
-        exit 1
-    fi
-{COMPANION_PULL_REQUEST}"#,
-        opened = quoted(opened),
-    )
+fn companion_opened_once_refused(opened: &Path) -> Companion {
+    let opened = opened.to_owned();
+
+    on_the_companion_of(move |asked| match opened.is_file() {
+        true => Said::About(the_companions_pull_request(asked)),
+        false => Said::Nothing,
+    })
 }
 
-/// One of those scripts as a `gh` the server can run: `sh -c` gives `$0` the
-/// program's own name, so what Verkstead passes lands in `$1` onwards.
-fn gh_stub(script: &str) -> Gh {
-    Gh::running(vec![
-        "/bin/sh".to_owned(),
-        "-c".to_owned(),
-        script.to_owned(),
-        "gh".to_owned(),
-    ])
+/// What a bench's GitHub answers, as a fixture says it.
+///
+/// One closure, asked afresh at every question — which is what lets a fixture
+/// say *when* something changed: a suite that goes green once a session has
+/// pushed is one of these looking at the file that session wrote.
+type Github = Arc<dyn Fn(&Asked) -> Said + Send + Sync>;
+
+/// One of those.
+fn answering(said: impl Fn(&Asked) -> Said + Send + Sync + 'static) -> Github {
+    Arc::new(said)
+}
+
+/// GitHub's stand-in answering `gh`, listening on a port of its own — what a
+/// test that stands a second server up for itself builds.
+async fn standing_in(gh: Github) -> Arc<GitHub> {
+    GitHub::answering(move |asked| gh(asked)).await
+}
+
+/// The pull request every one of these fixtures is about: #41, on
+/// [`HEAD_BRANCH`], against `main`, open, with nothing on it.
+///
+/// **Nothing about whether it merges**, which is the `*)` arm of every one of
+/// the stubs this replaced: a fixture that is about the merge says so, and one
+/// that is not leaves GitHub not having said — which is what holds a wrap-up
+/// in Wrapping, and is the condition several of these are about.
+fn the_pull_request() -> PullRequest {
+    PullRequest {
+        number: 41,
+        title: "Rate limiting".to_owned(),
+        url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+        head: HEAD_BRANCH.to_owned(),
+        base: "main".to_owned(),
+        state: "OPEN".to_owned(),
+        mergeable: String::new(),
+        ..PullRequest::default()
+    }
+}
+
+/// And the same, which GitHub says it will merge.
+fn merging() -> PullRequest {
+    PullRequest {
+        mergeable: "MERGEABLE".to_owned(),
+        ..the_pull_request()
+    }
+}
+
+/// What a bench's GitHub answers where the fixture says nothing else: the one
+/// pull request above, nothing open beside it, and nothing on its diff.
+fn usually(asked: &Asked) -> Said {
+    match asked.asking {
+        Asking::Open | Asking::OnTheDiff => Said::Nothing,
+        _ => Said::About(the_pull_request()),
+    }
+}
+
+/// What a bench's GitHub answers the one question the wrap-up's checks watcher
+/// asks: whether its pull request merges, which commit GitHub's record of it
+/// is at, and the checks against that commit.
+///
+/// Written as the JSON GitHub answers those three in — `mergeable`,
+/// `headRefOid` and `statusCheckRollup`, the spelling the scripts this
+/// replaced printed — and read afresh at every question, so a fixture whose
+/// answer changes part way through is a closure rather than two benches.
+#[derive(Clone)]
+struct Rollup(Arc<dyn Fn() -> Said + Send + Sync>);
+
+impl Rollup {
+    /// One that says whatever `said` says, asked now.
+    fn of(said: impl Fn() -> Said + Send + Sync + 'static) -> Rollup {
+        Rollup(Arc::new(said))
+    }
+
+    /// And one that answers the JSON `said` builds, read now.
+    fn reading(said: impl Fn() -> String + Send + Sync + 'static) -> Rollup {
+        Rollup::of(move || rolled(&said()))
+    }
+
+    fn said(&self) -> Said {
+        (self.0)()
+    }
+}
+
+/// The same JSON every time, which is what a `const` rollup is.
+impl From<&str> for Rollup {
+    fn from(said: &str) -> Rollup {
+        let said = said.to_owned();
+
+        Rollup::of(move || rolled(&said))
+    }
+}
+
+/// The pull request a rollup answer describes: its three fields written on to
+/// the one pull request these fixtures are about.
+fn rolled(said: &str) -> Said {
+    let read: serde_json::Value =
+        serde_json::from_str(said).unwrap_or_else(|error| panic!("a rollup is JSON: {error}"));
+
+    Said::About(PullRequest {
+        mergeable: text(&read, "mergeable"),
+        head_oid: text(&read, "headRefOid"),
+        checks: entries(&read, "statusCheckRollup"),
+        ..the_pull_request()
+    })
+}
+
+/// The string at `key`, or empty where there is none.
+fn text(said: &serde_json::Value, key: &str) -> String {
+    said.get(key)
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// And the array at `key`, or none.
+fn entries(said: &serde_json::Value, key: &str) -> Vec<serde_json::Value> {
+    said.get(key)
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The entries `fragments` are: the comments and the diff comments these
+/// fixtures are written as, which are the commas-between of a JSON array
+/// without its brackets.
+fn entries_of(fragments: &str) -> Vec<serde_json::Value> {
+    match fragments.trim().is_empty() {
+        true => Vec::new(),
+        false => serde_json::from_str(&format!("[{fragments}]"))
+            .unwrap_or_else(|error| panic!("what was said is JSON: {error}\n{fragments}")),
+    }
+}
+
+/// And one comment at a time, for the fixtures that write one.
+fn one_said(fragment: &str) -> serde_json::Value {
+    entries_of(fragment)
+        .into_iter()
+        .next()
+        .expect("a fragment holding one comment")
+}
+
+/// Write `line` into `path`, which is how the fixtures that count what GitHub
+/// was asked count it.
+fn noted(path: &Path, line: &str) {
+    use std::io::Write;
+
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .expect("a file to note what GitHub was asked in");
+
+    writeln!(file, "{line}").expect("noting what GitHub was asked");
 }
 
 /// What a fixture that puts no file on the Conversation hands
@@ -1934,7 +2069,7 @@ const NOTHING_ATTACHED: &[(&str, &str)] = &[];
 /// Stand a workbench up with `stub` where claude goes, and press *start
 /// grilling*.
 async fn grilling(stub: &str) -> Grilling {
-    grilling_spilling(tempfile::tempdir().unwrap(), stub, PULL_REQUEST).await
+    grilling_spilling(tempfile::tempdir().unwrap(), stub, gh_pull_request()).await
 }
 
 /// And the same on a Claude account whose memory is switched off, so that a
@@ -1943,7 +2078,7 @@ async fn grilling_forgetting(stub: &str) -> Grilling {
     grilling_however_started(
         tempfile::tempdir().unwrap(),
         stub,
-        PULL_REQUEST,
+        gh_pull_request(),
         *BRISKLY,
         &[],
         NOTHING_ATTACHED,
@@ -1965,7 +2100,7 @@ async fn grilling_on_codex(stub: &str) -> Grilling {
     grilling_however_started(
         tempfile::tempdir().unwrap(),
         stub,
-        PULL_REQUEST,
+        gh_pull_request(),
         *BRISKLY,
         &[],
         NOTHING_ATTACHED,
@@ -1983,7 +2118,7 @@ async fn grilling_on_codex_forgetting(stub: &str) -> Grilling {
     grilling_however_started(
         tempfile::tempdir().unwrap(),
         stub,
-        PULL_REQUEST,
+        gh_pull_request(),
         *BRISKLY,
         &[],
         NOTHING_ATTACHED,
@@ -1998,7 +2133,7 @@ async fn grilling_on_codex_forgetting(stub: &str) -> Grilling {
 /// The same with every role on that Profile, spilling what its sessions were
 /// told somewhere that outlives their worktrees and with a `gh` of the caller's
 /// choosing — which is what a wrap-up on the second backend needs.
-async fn grilling_spilling_on_codex(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+async fn grilling_spilling_on_codex(spill: tempfile::TempDir, stub: &str, gh: Github) -> Grilling {
     grilling_however_started(
         spill,
         stub,
@@ -2031,7 +2166,7 @@ async fn grilling_drawing(stub: &str, signature: &str) -> Grilling {
     grilling_however_started(
         tempfile::tempdir().unwrap(),
         stub,
-        PULL_REQUEST,
+        gh_pull_request(),
         *BRISKLY,
         &[],
         NOTHING_ATTACHED,
@@ -2055,7 +2190,7 @@ async fn grilling_at_work(stub: &str) -> Grilling {
     grilling_however_started(
         tempfile::tempdir().unwrap(),
         stub,
-        PULL_REQUEST,
+        gh_pull_request(),
         *BRISKLY,
         &[],
         NOTHING_ATTACHED,
@@ -2078,7 +2213,7 @@ async fn grilling_on_grok(stub: &str) -> Grilling {
     grilling_however_started(
         tempfile::tempdir().unwrap(),
         stub,
-        PULL_REQUEST,
+        gh_pull_request(),
         *BRISKLY,
         &[],
         NOTHING_ATTACHED,
@@ -2096,7 +2231,7 @@ async fn grilling_on_grok_forgetting(stub: &str) -> Grilling {
     grilling_however_started(
         tempfile::tempdir().unwrap(),
         stub,
-        PULL_REQUEST,
+        gh_pull_request(),
         *BRISKLY,
         &[],
         NOTHING_ATTACHED,
@@ -2120,7 +2255,7 @@ async fn grilling_on_opencode(stub: &str) -> Grilling {
     grilling_however_started(
         tempfile::tempdir().unwrap(),
         stub,
-        PULL_REQUEST,
+        gh_pull_request(),
         *BRISKLY,
         &[],
         NOTHING_ATTACHED,
@@ -2140,7 +2275,7 @@ async fn grilling_spilling_on_opencode(spill: tempfile::TempDir, stub: &str) -> 
     grilling_however_started(
         spill,
         stub,
-        PULL_REQUEST,
+        gh_pull_request(),
         *BRISKLY,
         &[],
         NOTHING_ATTACHED,
@@ -2161,7 +2296,7 @@ async fn grilling_spilling_on_opencode_forgetting(
     grilling_however_started(
         spill,
         stub,
-        PULL_REQUEST,
+        gh_pull_request(),
         *BRISKLY,
         &[],
         NOTHING_ATTACHED,
@@ -2179,7 +2314,7 @@ async fn grilling_on_agy(stub: &str) -> Grilling {
     grilling_however_started(
         tempfile::tempdir().unwrap(),
         stub,
-        PULL_REQUEST,
+        gh_pull_request(),
         *BRISKLY,
         &[],
         NOTHING_ATTACHED,
@@ -2194,7 +2329,13 @@ async fn grilling_on_agy(stub: &str) -> Grilling {
 /// And the same with every role on a harness a plugin declares — see
 /// [`Bench::everything_on_a_plugin`].
 async fn grilling_on_a_plugin(harness: StubHarness, stub: &str) -> Grilling {
-    grilling_spilling_on_a_plugin(tempfile::tempdir().unwrap(), harness, stub, PULL_REQUEST).await
+    grilling_spilling_on_a_plugin(
+        tempfile::tempdir().unwrap(),
+        harness,
+        stub,
+        gh_pull_request(),
+    )
+    .await
 }
 
 /// The same, spilling into `spill` and opening its pull request through `gh`.
@@ -2202,7 +2343,7 @@ async fn grilling_spilling_on_a_plugin(
     spill: tempfile::TempDir,
     harness: StubHarness,
     stub: &str,
-    gh: &str,
+    gh: Github,
 ) -> Grilling {
     grilling_however_started(
         spill,
@@ -2269,7 +2410,7 @@ async fn grilling_alongside(stub: &str, companion: &str) -> Grilling {
     grilling_at_pace(
         tempfile::tempdir().unwrap(),
         stub,
-        PULL_REQUEST,
+        gh_pull_request(),
         *BRISKLY,
         &[(companion, CompanionMode::ReadOnly)],
     )
@@ -2282,7 +2423,7 @@ async fn grilling_with_a_file_attached(stub: &str, name: &str, contents: &str) -
     grilling_however_started(
         tempfile::tempdir().unwrap(),
         stub,
-        PULL_REQUEST,
+        gh_pull_request(),
         *BRISKLY,
         &[],
         &[(name, contents)],
@@ -2300,7 +2441,7 @@ async fn grilling_with_a_server_attached(stub: &str, name: &str, url: &str) -> G
     grilling_however_started_serving(
         tempfile::tempdir().unwrap(),
         stub,
-        PULL_REQUEST,
+        gh_pull_request(),
         *BRISKLY,
         &[],
         &[],
@@ -2320,7 +2461,7 @@ async fn grilling_building_in(stub: &str, companion: &str) -> Grilling {
     grilling_at_pace(
         tempfile::tempdir().unwrap(),
         stub,
-        PULL_REQUEST,
+        gh_pull_request(),
         *BRISKLY,
         &[(companion, CompanionMode::ReadWrite)],
     )
@@ -2329,7 +2470,7 @@ async fn grilling_building_in(stub: &str, companion: &str) -> Grilling {
 
 /// The same with the companion in the mode one is added in — read-only — and a
 /// `gh` of the caller's choosing.
-async fn grilling_alongside_asking(stub: &str, companion: &str, gh: &str) -> Grilling {
+async fn grilling_alongside_asking(stub: &str, companion: &str, gh: Github) -> Grilling {
     grilling_at_pace(
         tempfile::tempdir().unwrap(),
         stub,
@@ -2342,7 +2483,7 @@ async fn grilling_alongside_asking(stub: &str, companion: &str, gh: &str) -> Gri
 
 /// And the same again with something else where `gh` goes, for the tests about
 /// what a wrap-up makes of the pull requests a finish opened in the companion.
-async fn grilling_building_in_asking(stub: &str, companion: &str, gh: &str) -> Grilling {
+async fn grilling_building_in_asking(stub: &str, companion: &str, gh: Github) -> Grilling {
     grilling_building_in_spilling(tempfile::tempdir().unwrap(), stub, companion, gh).await
 }
 
@@ -2353,7 +2494,7 @@ async fn grilling_building_in_spilling(
     spill: tempfile::TempDir,
     stub: &str,
     companion: &str,
-    gh: &str,
+    gh: Github,
 ) -> Grilling {
     grilling_at_pace(
         spill,
@@ -2367,7 +2508,7 @@ async fn grilling_building_in_spilling(
 
 /// The same, with something else where `gh` goes — for the tests about what
 /// Verkstead does when GitHub cannot be asked.
-async fn grilling_asking(stub: &str, gh: &str) -> Grilling {
+async fn grilling_asking(stub: &str, gh: Github) -> Grilling {
     grilling_spilling(tempfile::tempdir().unwrap(), stub, gh).await
 }
 
@@ -2377,7 +2518,7 @@ async fn grilling_swept(stub: &str) -> Grilling {
     grilling_at_pace(
         tempfile::tempdir().unwrap(),
         stub,
-        PULL_REQUEST,
+        gh_pull_request(),
         *SWEEPING,
         &[],
     )
@@ -2386,7 +2527,7 @@ async fn grilling_swept(stub: &str) -> Grilling {
 
 /// The same, on a server that sweeps a Done Conversation's pull requests briskly
 /// enough to watch it do so — see [`LANDING`].
-async fn grilling_landing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+async fn grilling_landing(spill: tempfile::TempDir, stub: &str, gh: Github) -> Grilling {
     grilling_at_pace(spill, stub, gh, *LANDING, &[]).await
 }
 
@@ -2396,7 +2537,7 @@ async fn grilling_unspoken(stub: &str) -> Grilling {
     grilling_at_pace(
         tempfile::tempdir().unwrap(),
         stub,
-        PULL_REQUEST,
+        gh_pull_request(),
         *UNSPOKEN,
         &[],
     )
@@ -2406,14 +2547,14 @@ async fn grilling_unspoken(stub: &str) -> Grilling {
 /// The same, over a directory the caller already has the name of — which is
 /// what a stub that has to write somewhere the worktree is not needs, the
 /// script naming the path being written before there is a fixture to ask.
-async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: Github) -> Grilling {
     grilling_at_pace(spill, stub, gh, *BRISKLY, &[]).await
 }
 
 /// And the same on a server whose rescue speaks to nothing at all — for the
 /// tests that go all the way through a wrap-up and read what the Conversation
 /// had to say about itself afterwards. See [`UNRESCUED`].
-async fn grilling_unrescued(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+async fn grilling_unrescued(spill: tempfile::TempDir, stub: &str, gh: Github) -> Grilling {
     grilling_at_pace(spill, stub, gh, *UNRESCUED, &[]).await
 }
 
@@ -2425,13 +2566,13 @@ async fn grilling_unrescued(spill: tempfile::TempDir, stub: &str, gh: &str) -> G
 /// picker is drawn for one — and the Process picked before the Brief is written,
 /// which is the order the composer sends its fields in.
 async fn tinkering(spill: tempfile::TempDir, stub: &str) -> Grilling {
-    tinkering_asking(spill, stub, PULL_REQUEST).await
+    tinkering_asking(spill, stub, gh_pull_request()).await
 }
 
 /// The same, with something else where `gh` goes — for the tests about a
 /// Tinker's ending, which turns on the branch being on no pull request until
 /// the session sent for one has opened it.
-async fn tinkering_asking(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+async fn tinkering_asking(spill: tempfile::TempDir, stub: &str, gh: Github) -> Grilling {
     tinkering_alongside(spill, stub, gh, &[]).await
 }
 
@@ -2439,14 +2580,39 @@ async fn tinkering_asking(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gri
 /// test about a Tinker that commits in one and nowhere else needs: its own branch
 /// stays exactly as the press cut it, so the companion is the whole of what the
 /// ending has to find.
+/// The same, with somewhere to push to — for the test about a session opening
+/// its own pull request, which is refused until the branch is on origin.
+async fn tinkering_pushing(spill: tempfile::TempDir, stub: &str, gh: Github) -> Grilling {
+    tinkering_however(spill, stub, gh, &[], Origin::Cloned).await
+}
+
 async fn tinkering_alongside(
     spill: tempfile::TempDir,
     stub: &str,
-    gh: &str,
+    gh: Github,
     companions: &[(&str, CompanionMode)],
+) -> Grilling {
+    tinkering_however(spill, stub, gh, companions, Origin::None).await
+}
+
+/// And the same with whatever remote `origin` says, which is what a session
+/// pushing its own branch needs: a push with nowhere to go is a branch the
+/// Forge is never asked about.
+async fn tinkering_however(
+    spill: tempfile::TempDir,
+    stub: &str,
+    gh: Github,
+    companions: &[(&str, CompanionMode)],
+    origin: Origin,
 ) -> Grilling {
     let bench = bench_at_pace(spill, stub, gh, *BRISKLY, None).await;
     let app = &bench.app;
+
+    // Before the Conversation is started, so that the worktree cut from this
+    // repository has the remote — see [`grilling_on`], which says why.
+    if origin == Origin::Cloned {
+        cloned(&bench);
+    }
 
     let started: Started = post(
         app,
@@ -2536,7 +2702,7 @@ async fn grilling_offering(
     stub: &str,
     offers: Vec<verkstead_schema::Direction>,
 ) -> Grilling {
-    let bench = bench_at_pace(spill, stub, PULL_REQUEST, *BRISKLY, None).await;
+    let bench = bench_at_pace(spill, stub, gh_pull_request(), *BRISKLY, None).await;
     let app = &bench.app;
 
     let started: Started = post(
@@ -2597,7 +2763,7 @@ fn a_grilling_that_writes_its_prompt(prompts: &Path) -> String {
 /// before the Brief is written, which is the order the composer sends its fields
 /// in.
 async fn investigating(spill: tempfile::TempDir, stub: &str) -> Grilling {
-    let bench = bench_at_pace(spill, stub, PULL_REQUEST, *BRISKLY, None).await;
+    let bench = bench_at_pace(spill, stub, gh_pull_request(), *BRISKLY, None).await;
     let app = &bench.app;
 
     let started: Started = post(
@@ -2648,7 +2814,7 @@ async fn investigating(spill: tempfile::TempDir, stub: &str) -> Grilling {
 /// question is the steer's own and the Pairing is the only thing the target asks
 /// for. The branch and the Worktree are cut by the steer, there being none.
 async fn a_draft_steered_into_investigating(spill: tempfile::TempDir, stub: &str) -> Grilling {
-    let bench = bench_at_pace(spill, stub, PULL_REQUEST, *BRISKLY, None).await;
+    let bench = bench_at_pace(spill, stub, gh_pull_request(), *BRISKLY, None).await;
 
     let started: Started = post(
         &bench.app,
@@ -2790,7 +2956,7 @@ fn an_investigating_round_before_the_mark(prompts: &Path) -> String {
 async fn grilling_seeded(
     spill: tempfile::TempDir,
     stub: &str,
-    gh: &str,
+    gh: Github,
     seed: fn(&Path),
 ) -> Grilling {
     grilling_however_started(
@@ -2810,7 +2976,7 @@ async fn grilling_seeded(
 
 /// And the same with the Review picker moved off its Pairing and onto the row
 /// that runs nothing, which is the Conversation that wraps up without a review.
-async fn grilling_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+async fn grilling_unreviewed(spill: tempfile::TempDir, stub: &str, gh: Github) -> Grilling {
     grilling_however_started(
         spill,
         stub,
@@ -2887,7 +3053,7 @@ async fn grilling_spilling_alongside(
     spill: tempfile::TempDir,
     stub: &str,
     companion: &str,
-    gh: &str,
+    gh: Github,
 ) -> Grilling {
     grilling_at_pace(
         spill,
@@ -2904,7 +3070,7 @@ async fn grilling_spilling_alongside(
 async fn grilling_at_pace(
     spill: tempfile::TempDir,
     stub: &str,
-    gh: &str,
+    gh: Github,
     pace: Pace,
     companions: &[(&str, CompanionMode)],
 ) -> Grilling {
@@ -2929,7 +3095,7 @@ async fn grilling_at_pace(
 /// Every other fixture here is a checkout with no remote at all, which is one of
 /// the two ways [`checks`](verkstead_server) has of not being able to tell — so
 /// none of them asks the question these are about.
-async fn grilling_pushing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+async fn grilling_pushing(spill: tempfile::TempDir, stub: &str, gh: Github) -> Grilling {
     grilling_however_started(
         spill,
         stub,
@@ -3019,7 +3185,7 @@ fn cloned(bench: &Bench) {
 async fn grilling_however_started(
     spill: tempfile::TempDir,
     stub: &str,
-    gh: &str,
+    gh: Github,
     pace: Pace,
     companions: &[(&str, CompanionMode)],
     attaching: &[(&str, &str)],
@@ -3056,7 +3222,7 @@ async fn grilling_however_started(
 async fn grilling_however_started_serving(
     spill: tempfile::TempDir,
     stub: &str,
-    gh: &str,
+    gh: Github,
     pace: Pace,
     companions: &[(&str, CompanionMode)],
     attaching: &[(&str, &str)],
@@ -3081,7 +3247,7 @@ async fn grilling_as_a_desktop_install(stub: &str) -> Grilling {
     let bench = bench_serving(
         tempfile::tempdir().unwrap(),
         stub,
-        PULL_REQUEST,
+        gh_pull_request(),
         *BRISKLY,
         None,
         Serving::ADesktopInstall,
@@ -3698,7 +3864,7 @@ static ROOM: LazyLock<Arc<tokio::sync::Semaphore>> = LazyLock::new(|| {
     Arc::new(tokio::sync::Semaphore::new((cores * 2).clamp(4, 16)))
 });
 
-async fn bench(spill: tempfile::TempDir, stub: &str, gh: &str) -> Bench {
+async fn bench(spill: tempfile::TempDir, stub: &str, gh: Github) -> Bench {
     bench_at_pace(spill, stub, gh, *BRISKLY, None).await
 }
 
@@ -3708,11 +3874,93 @@ async fn bench(spill: tempfile::TempDir, stub: &str, gh: &str) -> Bench {
 async fn bench_at_pace(
     spill: tempfile::TempDir,
     stub: &str,
-    gh: &str,
+    gh: Github,
     pace: Pace,
     signature: Option<&str>,
 ) -> Bench {
     bench_serving(spill, stub, gh, pace, signature, Serving::Sessions).await
+}
+
+thread_local! {
+    /// The Forge the next bench built on this thread registers ahead of
+    /// GitHub, taken as it is — see [`on_a_forge_declaring`].
+    static DECLARING: std::cell::RefCell<Option<verkstead_server::forge::Declared>> =
+        const { std::cell::RefCell::new(None) };
+
+    /// Whether the next bench built on this thread has `gh stack` installed
+    /// under the home its sessions get — see [`with_the_stack_extension`].
+    static THE_STACK_EXTENSION: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// Say whether the next bench's sessions would find `gh stack`.
+///
+/// **A directory rather than a program** (Set 1878, Q4): an extension lives
+/// inside the home the tool is run under, Verkstead reads whether it is there
+/// rather than running the tool to ask, and a session's home is the bench's.
+/// So it is the bench that makes the directory, and a fixture says so here
+/// rather than in what GitHub answers.
+///
+/// Installed unless a fixture says otherwise, which is what every bench but
+/// the two about a missing extension wants: a stack's fix session is stopped
+/// before a go is spent where it is missing, and that is a thing to prove
+/// rather than a thing to meet by accident.
+///
+/// Read and put back by [`bench_serving`], the way [`DECLARING`] is.
+fn with_the_stack_extension(installed: bool) {
+    THE_STACK_EXTENSION.with(|extension| extension.set(installed));
+}
+
+/// Where `gh` keeps the `stack` extension under the home a session runs with,
+/// on the platforms this suite runs on.
+fn the_stack_extension(home: &Path) -> PathBuf {
+    home.join(".local")
+        .join("share")
+        .join("gh")
+        .join("extensions")
+        .join("gh-stack")
+}
+
+/// What the suite's Forge is called, which is what the Timeline says has no
+/// checks or no review.
+const WORKSHOP: &str = "Workshop";
+
+/// Build `fixture` with its bench's server holding a Forge that declares
+/// `capabilities` and nothing else, registered ahead of GitHub — so the bench's
+/// Repo, whose remote is a path, is on it. The operations are still answered
+/// by the bench's own `gh` stand-in: what changes is what the Forge says it
+/// can do.
+///
+/// Through a thread-local rather than one more argument to every fixture: the
+/// bench is built on the test's own thread, before anything it starts could
+/// ask about the Forge, and the take-up's walk at the press is one of those.
+async fn on_a_forge_declaring<T>(
+    capabilities: &[verkstead_server::forge::Capability],
+    fixture: impl std::future::Future<Output = T>,
+) -> T {
+    DECLARING.with(|declaring| {
+        *declaring.borrow_mut() = Some(verkstead_server::forge::Declared {
+            uuid: "5f0c1d8e-6a3b-4f7e-9c2d-1b8a7e6f5d4c".to_owned(),
+            name: WORKSHOP.to_owned(),
+            noun: "pull request".to_owned(),
+            hosts: Vec::new(),
+            capabilities: capabilities.to_vec(),
+        });
+    });
+
+    let built = fixture.await;
+
+    DECLARING.with(|declaring| declaring.borrow_mut().take());
+    built
+}
+
+/// Every capability but `lacking`.
+fn all_but(
+    lacking: verkstead_server::forge::Capability,
+) -> Vec<verkstead_server::forge::Capability> {
+    verkstead_server::forge::Capability::ALL
+        .into_iter()
+        .filter(|capability| *capability != lacking)
+        .collect()
 }
 
 /// What a bench's server is besides a workbench running sessions.
@@ -3723,13 +3971,19 @@ enum Serving {
     /// A desktop install's, answering for this device too — see
     /// [`grilling_as_a_desktop_install`].
     ADesktopInstall,
+
+    /// Sessions, with the `gh` asked as the Repo's Author the way the real
+    /// server asks it — through the Author's token in `secrets.yaml`, and not
+    /// at all where it holds none. Every other bench's `gh` is a stand-in
+    /// answering as whatever it is.
+    AsTheAuthor,
 }
 
 /// The same, serving what `serving` says.
 async fn bench_serving(
     spill: tempfile::TempDir,
     stub: &str,
-    gh: &str,
+    gh: Github,
     pace: Pace,
     signature: Option<&str>,
     serving: Serving,
@@ -3745,6 +3999,23 @@ async fn bench_serving(
     let elsewhere = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
+
+    // Whether a session of this bench would find `gh stack`, which is a
+    // directory under the home it runs with — see
+    // [`with_the_stack_extension`].
+    if THE_STACK_EXTENSION.replace(true) {
+        std::fs::create_dir_all(the_stack_extension(home.path())).unwrap();
+    }
+
+    // What GitHub answers this bench, and GitHub's own component pointed at
+    // it: the one seam where a shell script used to stand — see
+    // [`verkstead_server::stand_in`].
+    let github = GitHub::answering({
+        let gh = gh.clone();
+
+        move |asked| gh(asked)
+    })
+    .await;
 
     // Who a session commits as: a settings file in the Data Directory, which is
     // where every sandbox is configured out of.
@@ -3780,8 +4051,21 @@ async fn bench_serving(
 
     let (app, hosting) = match serving {
         Serving::Sessions => {
-            let (app, hosting) =
-                router_hosting_activities(pool, state.path().to_owned(), agents, gh_stub(gh));
+            let (app, hosting) = router_hosting_activities(
+                pool,
+                state.path().to_owned(),
+                agents,
+                Forge::standing_in(&github),
+            );
+            (app, Some(hosting))
+        }
+        Serving::AsTheAuthor => {
+            let (app, hosting) = router_hosting_activities(
+                pool,
+                state.path().to_owned(),
+                agents,
+                Forge::as_the_author(&github),
+            );
             (app, Some(hosting))
         }
         Serving::ADesktopInstall => {
@@ -3807,12 +4091,21 @@ async fn bench_serving(
                 pool,
                 state.path().to_owned(),
                 agents,
-                gh_stub(gh),
+                Forge::standing_in(&github),
                 devices,
             );
             (app, None)
         }
     };
+
+    // A Forge the test asked for, ahead of GitHub, before anything is
+    // registered or started — see [`on_a_forge_declaring`].
+    if let Some(declared) = DECLARING.with(|declaring| declaring.borrow_mut().take()) {
+        hosting
+            .as_ref()
+            .expect("a Forge is registered on a bench that hosts Activities")
+            .registering(declared);
+    }
 
     let repo = repository(elsewhere.path().join("verkstead"));
     let registered: Registered =
@@ -4390,7 +4683,7 @@ async fn a_grilling_session_reads_an_attached_skill_pack() {
     let bench = bench_at_pace(
         tempfile::tempdir().unwrap(),
         r#"printf 'prompt=%s\n' "$2"; printf 'skill=%s\n' "$(cat /verkstead/skills/rust-review/reviewing/SKILL.md)""#,
-        PULL_REQUEST,
+        gh_pull_request(),
         *BRISKLY,
         None,
     )
@@ -4985,7 +5278,7 @@ async fn removing_the_profile_a_running_session_was_launched_under_leaves_it_run
             "#,
             carry_on = carry_on.display(),
         ),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -5345,7 +5638,7 @@ async fn a_plugin_harness_session_is_launched_with_its_declared_line_and_root() 
             shift
         done
         "#,
-        PULL_REQUEST,
+        gh_pull_request(),
         *BRISKLY,
         &[],
         NOTHING_ATTACHED,
@@ -5503,7 +5796,7 @@ async fn a_session_on_a_plugin_harness_finishes_after_the_plugin_is_disabled() {
              printf '\\nfinished with its plugin disabled\\n'\n",
             go = go.display(),
         ),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -5567,7 +5860,7 @@ async fn an_ask_on_a_store_and_nudge_plugin_harness_is_stored_and_holds_its_sess
         spill,
         StubHarness::Drawing,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX_AND_IDLE),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -7369,7 +7662,7 @@ async fn a_capture_survives_the_server_restarting() {
             Attachments::under(fixture.state.path()),
             Settings::in_data_dir(fixture.state.path()),
         ),
-        gh_stub(PULL_REQUEST),
+        Forge::standing_in(&*standing_in(gh_pull_request()).await),
     );
 
     let view: ConversationView =
@@ -7801,7 +8094,7 @@ async fn a_restarted_server_grills_the_work_again_rather_than_raising_anything()
     let before = outputs(&fixture.view().await).len();
 
     let _restarted = fixture
-        .restarted(r#"printf 'prompt was: %s\n' "$2""#, PULL_REQUEST)
+        .restarted(r#"printf 'prompt was: %s\n' "$2""#, gh_pull_request())
         .await;
 
     // The session the second server started, with nobody having pressed
@@ -7912,7 +8205,10 @@ async fn an_update_over_two_running_sessions_counts_both_and_both_are_resumed() 
     };
 
     let _relaunched = fixture
-        .restarted(r#"printf 'prompt was: %s\n' "$2"; sleep 300"#, PULL_REQUEST)
+        .restarted(
+            r#"printf 'prompt was: %s\n' "$2"; sleep 300"#,
+            gh_pull_request(),
+        )
         .await;
 
     for (id, before) in [fixture.id, beside].into_iter().zip(before) {
@@ -9044,6 +9340,132 @@ async fn worked_to_empty(fixture: &Grilling) {
         .await;
 }
 
+/// Give the fixture's repository a remote on a host no Forge declares.
+/// `.invalid` so that a fetch of it fails at once rather than going anywhere.
+fn on_an_undeclared_host(repo: &Path) {
+    let status = std::process::Command::new("git")
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://git.example.invalid/tobico/verkstead.git",
+        ])
+        .current_dir(repo)
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+/// A backlog worked to empty on a Repo whose remote no enabled Forge answers
+/// for lands Done at the finish, with nothing watching and the Timeline saying
+/// why — and the card saying the Repo is on no forge. The `gh` here would
+/// answer a pull request if it were asked, which is what says it was not.
+#[tokio::test]
+async fn a_backlog_on_a_repo_no_forge_answers_for_lands_done_with_nothing_watching() {
+    let fixture = grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        A_BACKLOG_OF_ONE,
+        gh_pull_request(),
+        *BRISKLY,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::UnderEveryPairing,
+        Origin::None,
+        Seeded::Nothing,
+        None,
+    )
+    .await;
+
+    // Once the branch is cut, which fetches its remote: there is nothing at
+    // this host to fetch.
+    on_an_undeclared_host(&fixture.repo());
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    assert!(
+        pull_request(&view).is_none(),
+        "nothing was asked for a pull request"
+    );
+    assert!(
+        !view
+            .timeline
+            .iter()
+            .any(|event| matches!(event, TimelineEvent::Moved(moved) if moved.state == Lifecycle::Wrapping)),
+        "it never wrapped up"
+    );
+    assert!(
+        notices(&view)
+            .iter()
+            .any(|notice| notice.contains("No forge for git.example.invalid")),
+        "the Timeline says why: {:?}",
+        notices(&view),
+    );
+    assert_eq!(
+        view.repo.forge.map(|forge| forge.on),
+        Some(verkstead_render::ForgeMatch::Unmatched {
+            host: Some("git.example.invalid".to_owned())
+        }),
+    );
+}
+
+/// A backlog worked to empty on a Repo whose Author holds no GitHub token gets
+/// no wrap-up (Set 1878, Q3): GitHub is not asked — the `gh` here would answer
+/// a pull request — and nothing falls back to the host's own login, so the
+/// run stops saying the Author needs one, the way a Forge out of reach does.
+#[tokio::test]
+async fn a_backlog_whose_author_holds_no_token_is_not_wrapped_up() {
+    let bench = bench_serving(
+        tempfile::tempdir().unwrap(),
+        A_BACKLOG_OF_ONE,
+        gh_pull_request(),
+        *BRISKLY,
+        None,
+        Serving::AsTheAuthor,
+    )
+    .await;
+    let fixture = grilling_on(
+        bench,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::UnderEveryPairing,
+        Origin::None,
+        Seeded::Nothing,
+        &[],
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture
+        .until(|view| {
+            notices(view)
+                .iter()
+                .any(|notice| notice.contains("no GitHub token that works"))
+                .then(|| view.clone())
+        })
+        .await;
+
+    assert!(
+        pull_request(&view).is_none(),
+        "nothing was asked for a pull request"
+    );
+    assert!(
+        fixture.view().await.blocked_on.is_some(),
+        "the run stopped, on you"
+    );
+    assert!(
+        !view
+            .timeline
+            .iter()
+            .any(|event| matches!(event, TimelineEvent::Moved(moved) if moved.state == Lifecycle::Wrapping)),
+        "it never wrapped up"
+    );
+}
+
 /// The whole of what a finished backlog leaves behind: a pull request open on
 /// the branch, the Conversation wrapping it up, and the move on the Timeline —
 /// with nothing having asked for approval at any point.
@@ -9593,7 +10015,7 @@ async fn a_green_suite_settles_the_checks_and_dispatches_nothing() {
     let fixture = grilling_spilling(
         prompts,
         &a_backlog_then_fixes(&written),
-        &gh_checking("SUCCESS"),
+        gh_checking("SUCCESS"),
     )
     .await;
 
@@ -9642,7 +10064,7 @@ async fn a_check_two_fix_sessions_could_not_fix_halts_and_tells_the_human() {
     let fixture = grilling_spilling(
         prompts,
         &a_backlog_then_fixes(&written),
-        &gh_checking("FAILURE"),
+        gh_checking("FAILURE"),
     )
     .await;
 
@@ -9747,7 +10169,7 @@ async fn checks_gh_cannot_answer_about_leave_the_wrap_up_waiting() {
     let written = prompts.path().join("fix-prompts");
 
     let fixture =
-        grilling_spilling(prompts, &a_backlog_then_fixes(&written), CHECKS_UNASKABLE).await;
+        grilling_spilling(prompts, &a_backlog_then_fixes(&written), checks_unaskable()).await;
 
     worked_to_empty(&fixture).await;
     fixture
@@ -9800,7 +10222,7 @@ async fn a_wrap_up_down_to_its_checks_reads_as_waiting_on_them_and_says_so_once(
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &gh_about(STILL_RUNNING, "", ""),
+        gh_about(STILL_RUNNING, "", ""),
     )
     .await;
 
@@ -9869,15 +10291,21 @@ async fn the_checks_stop_being_asked_about_once_the_conversation_leaves_wrapping
     let asked = spill.path().join("asked");
     let written = spill.path().join("fix-prompts");
 
-    // A `gh` that keeps a mark per question about the checks, so a test can see
-    // whether anything is still asking.
-    let counting = format!(
-        "case \"$5\" in *statusCheckRollup*) printf 'x' >> {asked} ;; esac\n{}",
-        gh_checking("SUCCESS"),
-        asked = quoted(&asked),
-    );
+    // A GitHub that keeps a mark per question about the checks, so a test can
+    // see whether anything is still asking.
+    let counting = {
+        let (asked_in, green) = (asked.clone(), gh_checking("SUCCESS"));
 
-    let fixture = grilling_spilling(spill, &a_backlog_then_fixes(&written), &counting).await;
+        answering(move |asked| {
+            if asked.asking == Asking::Checks {
+                noted(&asked_in, "x");
+            }
+
+            green(asked)
+        })
+    };
+
+    let fixture = grilling_spilling(spill, &a_backlog_then_fixes(&written), counting).await;
 
     worked_to_empty(&fixture).await;
     fixture
@@ -9934,7 +10362,7 @@ async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
     let written = prompts.path().join("fix-prompts");
 
     let fixture =
-        grilling_spilling(prompts, &a_backlog_then_fixes(&written), CHECKS_UNASKABLE).await;
+        grilling_spilling(prompts, &a_backlog_then_fixes(&written), checks_unaskable()).await;
 
     worked_to_empty(&fixture).await;
     fixture
@@ -9967,7 +10395,7 @@ async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
             Settings::in_data_dir(fixture.state.path()),
         )
         .at_pace(*BRISKLY),
-        gh_stub(&gh_checking("SUCCESS")),
+        Forge::standing_in(&*standing_in(gh_checking("SUCCESS")).await),
     );
 
     let deadline = Instant::now() + *PATIENCE;
@@ -9992,32 +10420,20 @@ async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
 /// A `gh` whose check is red until the first fix session has written its
 /// prompt to `written`, and which cannot be asked about the checks from then
 /// on — a server that dispatched one fix and then lost GitHub.
-fn red_until_a_fix_then_unaskable(written: &Path) -> String {
-    format!(
-        r#"
-if [ "$1" = api ]; then printf '[]'; exit 0; fi
-if [ "$2" = list ]; then printf '[]'; exit 0; fi
-case "$5" in
-*statusCheckRollup*)
-    if [ -e {written} ]; then
-        printf 'gh: To use GitHub CLI, run: gh auth login\n' >&2
-        exit 1
-    fi
-    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}'
-    ;;
-*commits*)
-    printf '{{"commits":[],"comments":[]}}'
-    ;;
-*comments*)
-    printf '{{"comments":[],"reviews":[]}}'
-    ;;
-*)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
-    ;;
-esac
-"#,
-        written = quoted(written),
-    )
+fn red_until_a_fix_then_unaskable(written: &Path) -> Github {
+    let unaskable = {
+        let written = written.to_owned();
+
+        Rollup::of(move || match written.exists() {
+            true => Said::not_logged_in(),
+            false => rolled(RED),
+        })
+    };
+
+    answering(move |asked| match asked.asking {
+        Asking::Checks => unaskable.said(),
+        _ => usually(asked),
+    })
 }
 
 /// The goes a check has had are the host's record, not the Wrap-up
@@ -10035,7 +10451,7 @@ async fn fix_attempts_survive_a_server_restarted_mid_wrap_up() {
     let fixture = grilling_spilling(
         prompts,
         &a_backlog_then_fixes(&written),
-        &red_until_a_fix_then_unaskable(&written),
+        red_until_a_fix_then_unaskable(&written),
     )
     .await;
 
@@ -10080,7 +10496,7 @@ async fn fix_attempts_survive_a_server_restarted_mid_wrap_up() {
             Settings::in_data_dir(fixture.state.path()),
         )
         .at_pace(*BRISKLY),
-        gh_stub(&gh_checking("FAILURE")),
+        Forge::standing_in(&*standing_in(gh_checking("FAILURE")).await),
     );
 
     let stopped = fixture.stopped().await;
@@ -10097,31 +10513,20 @@ async fn fix_attempts_survive_a_server_restarted_mid_wrap_up() {
     );
 }
 
-/// A `gh` that answers everything about the pull request — merging cleanly —
+/// A GitHub that answers everything about the pull request — merging cleanly —
 /// and writes `asked` the moment anything asks about its checks.
-fn gh_telling_of_checks(asked: &Path) -> String {
-    format!(
-        r#"
-if [ "$1" = api ]; then printf '[]'; exit 0; fi
-if [ "$2" = list ]; then printf '[]'; exit 0; fi
-case "$5" in
-*statusCheckRollup*)
-    : > {asked}
-    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[]}}'
-    ;;
-*commits*)
-    printf '{{"commits":[],"comments":[]}}'
-    ;;
-*comments*)
-    printf '{{"comments":[],"reviews":[]}}'
-    ;;
-*)
-    printf '{{"mergeable":"MERGEABLE","number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
-    ;;
-esac
-"#,
-        asked = quoted(asked),
-    )
+fn gh_telling_of_checks(asked_in: &Path) -> Github {
+    let asked_in = asked_in.to_owned();
+
+    answering(move |asked| match asked.asking {
+        Asking::Checks => {
+            std::fs::write(&asked_in, "").expect("a file to say the checks were asked about in");
+
+            Said::About(merging())
+        }
+        Asking::Open | Asking::OnTheDiff => Said::Nothing,
+        _ => Said::About(merging()),
+    })
 }
 
 /// A Forge with no checks has nothing for the wrap-up to wait on: the checks
@@ -10133,18 +10538,15 @@ async fn a_wrap_up_over_a_forge_lacking_checks_settles_them_and_never_asks() {
     let asked = spill.path().join("checks-asked");
     let written = spill.path().join("fix-prompts");
 
-    let fixture = grilling_spilling(
-        spill,
-        &a_backlog_then_fixes(&written),
-        &gh_telling_of_checks(&asked),
+    let fixture = on_a_forge_declaring(
+        &all_but(verkstead_server::forge::Capability::Checks),
+        grilling_spilling(
+            spill,
+            &a_backlog_then_fixes(&written),
+            gh_telling_of_checks(&asked),
+        ),
     )
     .await;
-
-    fixture
-        .hosting
-        .as_ref()
-        .expect("this bench hosts Activities")
-        .lacking(verkstead_server::forge::Capability::Checks);
 
     worked_to_empty(&fixture).await;
 
@@ -10180,18 +10582,20 @@ async fn a_wrap_up_over_a_forge_lacking_review_settles_it_and_sends_nobody() {
     let dispatched = spill.path().join("fix-prompts");
     let batches = spill.path().join("batch-prompts");
 
-    let fixture = grilling_spilling(
-        spill,
-        &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
-        &gh_about(GREEN, THREE_COMMENTS, ""),
+    let fixture = on_a_forge_declaring(
+        &all_but(verkstead_server::forge::Capability::Review),
+        grilling_spilling(
+            spill,
+            &a_backlog_then_answers_comments(
+                &reviews,
+                &dispatched,
+                &batches,
+                RESPOND_AND_FIND_NOTHING,
+            ),
+            gh_about(GREEN, THREE_COMMENTS, ""),
+        ),
     )
     .await;
-
-    fixture
-        .hosting
-        .as_ref()
-        .expect("this bench hosts Activities")
-        .lacking(verkstead_server::forge::Capability::Review);
 
     worked_to_empty(&fixture).await;
 
@@ -10213,6 +10617,323 @@ async fn a_wrap_up_over_a_forge_lacking_review_settles_it_and_sends_nobody() {
         notices(&view).is_empty(),
         "and nothing stopped: {:?}",
         notices(&view),
+    );
+}
+
+/// Every line the Timeline carries saying the wrap-up doesn't wait on
+/// something its Forge has not got — see [`unwatched`].
+fn unwatched_lines(view: &ConversationView) -> Vec<String> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Notice(notice) if unwatched(notice) => Some(notice.html.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A Forge declaring none of the five capabilities has no checks and no
+/// review, so a wrap-up on it waits on whether the pull request merges and on
+/// nothing else: no check is asked about, nobody is sent to read the branch or
+/// answer what is said on it, and the Timeline says so for each of the two.
+#[tokio::test]
+async fn a_wrap_up_on_a_forge_declaring_nothing_waits_on_the_merge_alone_and_says_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let asked = spill.path().join("checks-asked");
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let fixture = on_a_forge_declaring(
+        &[],
+        grilling_spilling(
+            spill,
+            &a_backlog_then_answers_comments(
+                &reviews,
+                &dispatched,
+                &batches,
+                RESPOND_AND_FIND_NOTHING,
+            ),
+            gh_telling_of_checks(&asked),
+        ),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    assert!(
+        merge_settled(&fixture).await,
+        "whether it merges is the one thing the wrap-up waited on",
+    );
+    assert!(
+        !asked.exists(),
+        "nothing asked about checks a Forge without them can't answer",
+    );
+    assert!(
+        !reviews.exists() && !batches.exists() && !dispatched.exists(),
+        "and nobody was sent to read the branch, answer it or fix it: {:?} {:?} {:?}",
+        std::fs::read_to_string(&reviews).ok(),
+        std::fs::read_to_string(&batches).ok(),
+        std::fs::read_to_string(&dispatched).ok(),
+    );
+
+    let lines = unwatched_lines(&view);
+
+    assert!(
+        lines.iter().any(|line| line.contains(&format!("{WORKSHOP} has no checks"))
+            && line.contains("#41")),
+        "the Timeline says there were no checks to wait on: {lines:?}",
+    );
+    assert!(
+        lines.iter().any(
+            |line| line.contains(&format!("{WORKSHOP} has no reviews")) && line.contains("#41")
+        ),
+        "and no review: {lines:?}",
+    );
+    assert_eq!(lines.len(), 2, "each said once: {lines:?}");
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped: {:?}",
+        notices(&view),
+    );
+}
+
+/// A GitHub with a three-deep stack open — #41 in the middle of it, and #41
+/// the one that conflicts until `resolved` is written — on a bench whose
+/// sessions have **no** `gh stack`.
+///
+/// Which is how *nothing asked after `gh stack`* is read now that the asking
+/// is a directory rather than a program: an extension that is not there stops
+/// a stack's fix session before a go is spent, so a run that goes on regardless
+/// is one that never looked. See [`with_the_stack_extension`].
+fn gh_a_stack_conflicting_in_the_middle(resolved: &Path) -> Github {
+    with_the_stack_extension(false);
+
+    gh_a_stack_conflicting_at(resolved, 41)
+}
+
+/// A Fix Merge Issues taken up inside a stack on a Forge without `stacks` is a
+/// lone pull request: the chain is not walked, nothing beside #41 is recorded,
+/// its conflict is sent the configured strategy rather than a sync, and
+/// nothing ever asks after `gh stack`.
+#[tokio::test]
+async fn a_conflict_on_a_forge_without_stacks_is_resolved_alone_and_never_synced() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let batches = spill.path().join("batch-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let resolved = spill.path().join("conflict-resolved");
+
+    let fixture = on_a_forge_declaring(
+        &all_but(verkstead_server::forge::Capability::Stacks),
+        taking_up_to_fix(
+            spill,
+            &a_conflict_and_nothing_beside_it(&reviews, &batches, &dispatched, None, &resolved),
+            gh_a_stack_conflicting_in_the_middle(&resolved),
+        ),
+    )
+    .await;
+
+    let told = until_written_by(&dispatched, 1).await;
+    let prompt = prompts(&told)[0];
+
+    assert!(
+        prompt.contains("Merge the pull request's base branch"),
+        "the conflict is sent the configured strategy: {prompt}",
+    );
+    assert!(
+        !prompt.contains("gh stack") && !prompt.contains("stack of"),
+        "and nothing of a stack: {prompt}",
+    );
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    let recorded: Vec<i64> = verkstead_server::store::pull_requests(&pool, fixture.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(_, opened)| opened.number)
+        .collect();
+    pool.close().await;
+
+    assert_eq!(
+        recorded,
+        [41],
+        "the chain was never walked, so #41 is the whole of it"
+    );
+    // The bench has no `gh stack` under the home its sessions get, so a run
+    // that reached the end is one that never looked for it — see
+    // [`with_the_stack_extension`].
+
+    assert!(
+        notices_since_the_take_up(&view).is_empty(),
+        "nothing stopped on the way: {:?}",
+        notices_since_the_take_up(&view),
+    );
+}
+
+/// A roadmap on a Forge without `stacks` is left to the rebases the join
+/// already does: the second stage's finish is told to rebase onto the stage
+/// below and open its pull request against it, and nothing asks after
+/// `gh stack` on the way.
+#[tokio::test]
+async fn a_roadmap_on_a_forge_without_stacks_opens_each_stage_against_the_one_below() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let finishing = spill.path().join("finish-prompts");
+    // Whether it merges is said on the pull request itself, which is where a
+    // wrap-up with no checks to ask reads it. And the bench has no `gh stack`
+    // under the home its sessions get, so a run that reaches the end is one
+    // that never looked for it — see [`with_the_stack_extension`].
+    with_the_stack_extension(false);
+
+    let gh = answering(|asked| match asked.asking {
+        Asking::Checks => rolled(GREEN),
+        Asking::Open | Asking::OnTheDiff => Said::Nothing,
+        _ => Said::About(merging()),
+    });
+
+    let fixture = on_a_forge_declaring(
+        &[],
+        adopting_asking(
+            spill,
+            &a_stage_finished_saying_what_it_was_told(&planning, &finishing, ANNOTATES_THE_STAGE),
+            gh,
+        ),
+    )
+    .await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let below = fixture.view().await.branch;
+    let next = stage_of(&fixture).await;
+    let deadline = Instant::now() + *PATIENCE;
+
+    let settled = loop {
+        let view: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{}", next.id)).await;
+
+        if view.state == Lifecycle::Done {
+            break view;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the stage after it never settled. It says: {:?}",
+            notices(&view),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    };
+
+    let second = told_at_the_finish(&finishing, &settled.branch);
+    let chain = second
+        .split_once("# The chain this stage joins")
+        .unwrap_or_else(|| panic!("the second stage was told no chain at all: {second}"))
+        .1;
+
+    assert!(
+        chain.contains(&format!(
+            "**rebase this branch onto `{below}` before anything is pushed**"
+        )) && chain.contains(&format!("open the pull request against `{below}`")),
+        "the stage's pull request goes against the branch below it: {chain}",
+    );
+}
+
+/// On a Forge declaring no `publish` a Share has nowhere to go: the publish is
+/// refused naming the Forge, and nothing is asked of it. And on one declaring
+/// no `create`, **Create repo** makes the repository here, registers it, and
+/// says no remote was made.
+#[tokio::test]
+async fn a_forge_without_publish_or_create_publishes_nothing_and_makes_no_remote() {
+    let spill = tempfile::tempdir().unwrap();
+    let asked = spill.path().join("gh-asked");
+    let parent = tempfile::tempdir().unwrap();
+
+    let gh = {
+        let (asked_in, usual) = (asked.clone(), gh_pull_request());
+
+        answering(move |asked| {
+            if matches!(
+                asked.asking,
+                Asking::Publishing | Asking::Unpublishing | Asking::Making
+            ) {
+                std::fs::write(&asked_in, "").expect("a file to say the Forge was asked in");
+            }
+
+            usual(asked)
+        })
+    };
+
+    let fixture = on_a_forge_declaring(
+        &[],
+        grilling_spilling(spill, "printf 'grilling\\n'\nsleep 300\n", gh),
+    )
+    .await;
+
+    let view = fixture.view().await;
+    assert_eq!(
+        view.repo.forge.map(|forge| forge.on),
+        Some(verkstead_render::ForgeMatch::On {
+            uuid: "5f0c1d8e-6a3b-4f7e-9c2d-1b8a7e6f5d4c".to_owned(),
+            name: WORKSHOP.to_owned(),
+            noun: "pull request".to_owned(),
+            capabilities: Vec::new(),
+        }),
+        "the viewer is told the Forge declares nothing, which is what draws no \
+         Publish",
+    );
+
+    let published: verkstead_render::SharePublished = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/share/publish", fixture.id),
+        &serde_json::json!({}),
+    )
+    .await;
+
+    assert_eq!(
+        published,
+        verkstead_render::SharePublished::NoPublish {
+            forge: WORKSHOP.to_owned()
+        },
+    );
+
+    let created: verkstead_render::Created = post(
+        &fixture.app,
+        "/api/ui/repos/new",
+        &serde_json::json!({
+            "parent": parent.path(),
+            "name": "widgets",
+            "github": true,
+        }),
+    )
+    .await;
+
+    let verkstead_render::Created::MadeWithoutRemote { repo, why } = created else {
+        panic!("the create did not make the local repository alone: {created:?}");
+    };
+
+    assert_eq!(
+        why,
+        format!("{WORKSHOP} can't create repositories, so no remote was made.")
+    );
+    assert!(
+        parent.path().join("widgets").join(".git").exists(),
+        "the repository is made here",
+    );
+    assert_eq!(repo.name, "widgets", "and registered");
+    assert!(
+        !asked.exists(),
+        "and the Forge was asked for neither a gist nor a repository",
     );
 }
 
@@ -10238,7 +10959,7 @@ async fn a_finish_that_opened_no_pull_request_is_sent_back_for_one() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_whose_pull_request_is_opened_when_asked(&opened),
-        &gh_opened_by_hand(&opened),
+        gh_opened_by_hand(&opened),
     )
     .await;
 
@@ -10282,7 +11003,7 @@ async fn a_quiet_session_sent_for_the_pull_request_is_ended_only_once_it_signals
     let fixture = grilling_spilling(
         spill,
         &a_backlog_whose_pull_request_is_opened_and_then_signalled(&opened),
-        &gh_opened_by_hand(&opened),
+        gh_opened_by_hand(&opened),
     )
     .await;
 
@@ -10405,7 +11126,7 @@ async fn a_finish_signal_is_refused_until_its_pull_request_is_open() {
         A_BACKLOG_OF_ONE.replace(finish, &opens_its_pull_request_once_refused(&opened)),
     );
 
-    let fixture = grilling_spilling(spill, &stub, &gh_opened_by_hand(&opened)).await;
+    let fixture = grilling_spilling(spill, &stub, gh_opened_by_hand(&opened)).await;
 
     worked_to_empty(&fixture).await;
 
@@ -10453,7 +11174,7 @@ esac
         opens = opens_its_pull_request_once_refused(&opened),
     );
 
-    let fixture = grilling_spilling(spill, &stub, &gh_opened_by_hand(&opened)).await;
+    let fixture = grilling_spilling(spill, &stub, gh_opened_by_hand(&opened)).await;
 
     fixture
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
@@ -10501,7 +11222,7 @@ esac
         opens = opens_its_pull_request_once_refused(&opened),
     );
 
-    let fixture = grilling_spilling(spill, &stub, &gh_opened_by_hand(&opened)).await;
+    let fixture = grilling_spilling(spill, &stub, gh_opened_by_hand(&opened)).await;
 
     staged(&fixture).await;
 
@@ -10534,7 +11255,7 @@ esac
         opens = opens_its_pull_request_once_refused(&opened),
     );
 
-    let fixture = grilling_spilling(spill, &stub, &gh_opened_by_hand(&opened)).await;
+    let fixture = grilling_spilling(spill, &stub, gh_opened_by_hand(&opened)).await;
 
     worked_to_empty(&fixture).await;
 
@@ -10584,7 +11305,7 @@ case "$2" in
     ;;
 esac
 "#,
-        NOTHING_ASKABLE,
+        nothing_askable(),
     )
     .await;
 
@@ -10605,7 +11326,7 @@ esac
         "the signal was taken: {answered:?}",
     );
     assert!(
-        stopped.html.contains("isn't logged in"),
+        stopped.html.contains("no GitHub token that works"),
         "and the stop after it is the one GitHub's silence has always given: {:?}",
         stopped.html,
     );
@@ -10628,7 +11349,7 @@ esac
 async fn a_finish_whose_pull_request_never_arrives_leaves_the_conversation_where_it_is() {
     let fixture = grilling_asking(
         &a_backlog_that_cannot_open_a_pull_request(),
-        NO_PULL_REQUEST,
+        no_pull_request(),
     )
     .await;
 
@@ -10686,7 +11407,7 @@ async fn a_companion_the_work_committed_in_is_pinned_beside_the_conversations_ow
     let fixture = grilling_building_in_asking(
         A_BACKLOG_ALONGSIDE,
         "askance",
-        &gh_alongside(COMPANION_PULL_REQUEST),
+        gh_alongside(the_companion_has_one()),
     )
     .await;
 
@@ -10741,7 +11462,7 @@ async fn a_companion_nothing_was_committed_in_is_never_asked_about() {
     let fixture = grilling_building_in_asking(
         A_BACKLOG_OF_ONE,
         "askance",
-        &gh_alongside(COMPANION_NO_PULL_REQUEST),
+        gh_alongside(companion_no_pull_request()),
     )
     .await;
 
@@ -10787,7 +11508,7 @@ async fn a_read_only_companion_is_not_asked_about_a_pull_request() {
     let fixture = grilling_alongside_asking(
         A_BACKLOG_OF_ONE,
         "askance",
-        &gh_alongside(COMPANION_NO_PULL_REQUEST),
+        gh_alongside(companion_no_pull_request()),
     )
     .await;
 
@@ -10851,7 +11572,7 @@ async fn a_committed_in_companion_without_a_pull_request_refuses_the_signal_nami
         spill,
         &a_backlog_alongside_opened_once_refused(&opened),
         "askance",
-        &gh_alongside(&companion_opened_once_refused(&opened)),
+        gh_alongside(companion_opened_once_refused(&opened)),
     )
     .await;
 
@@ -10905,7 +11626,7 @@ async fn a_finish_that_exits_leaving_a_companion_without_a_pull_request_stops_th
     let fixture = grilling_building_in_asking(
         A_BACKLOG_ALONGSIDE_UNSIGNALLED,
         "askance",
-        &gh_alongside(COMPANION_NO_PULL_REQUEST),
+        gh_alongside(companion_no_pull_request()),
     )
     .await;
 
@@ -11733,7 +12454,7 @@ async fn the_review_proposes_its_findings_and_then_fixes_what_was_accepted() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -11856,7 +12577,7 @@ async fn a_review_that_finds_nothing_raises_no_question_set_and_says_so() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -11912,7 +12633,7 @@ async fn a_review_that_finishes_without_exiting_is_ended_and_the_wrap_up_carries
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING_THEN_IDLE),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -11962,7 +12683,7 @@ async fn a_review_waiting_on_its_ask_is_left_alone_until_the_answers_are_in() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX_AND_IDLE),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -12048,7 +12769,7 @@ async fn a_deferred_ask_of_a_reviews_own_does_not_hold_its_session_open() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_DEFER_AND_FINISH),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -12126,7 +12847,7 @@ async fn an_ask_on_a_store_and_nudge_backend_is_stored_and_holds_its_session_ope
     let fixture = grilling_spilling_on_codex(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX_AND_IDLE),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -12224,7 +12945,7 @@ async fn a_deferred_ask_on_a_store_and_nudge_backend_still_holds_nothing_open() 
     let fixture = grilling_spilling_on_codex(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_DEFER_AND_FINISH),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -12296,7 +13017,7 @@ async fn a_response_to_a_store_and_nudge_ask_is_typed_into_the_session_that_stor
     let fixture = grilling_spilling_on_codex(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_READ_THE_NUDGE),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -12461,7 +13182,7 @@ async fn a_store_and_nudge_ask_whose_session_died_is_folded_in_and_nothing_is_ty
     let fixture = grilling_spilling_on_codex(
         spill,
         &a_backlog_of_one_dying_on_its_ask(&written),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -12592,9 +13313,12 @@ async fn a_task_wanting_a_platform_with_no_cluster_runs_here_saying_so_at_every_
     let spill = tempfile::tempdir().unwrap();
     let launches = spill.path().join("launches");
 
-    let fixture =
-        grilling_spilling_on_codex(spill, &a_windows_task_dying_once(&launches), PULL_REQUEST)
-            .await;
+    let fixture = grilling_spilling_on_codex(
+        spill,
+        &a_windows_task_dying_once(&launches),
+        gh_pull_request(),
+    )
+    .await;
 
     fixture
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
@@ -12672,7 +13396,7 @@ async fn a_response_to_a_deferred_ask_types_nothing_into_the_session_that_stored
     let fixture = grilling_spilling_on_codex(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THAT_KEEPS_TALKING),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -12727,7 +13451,7 @@ async fn a_response_to_a_blocking_ask_types_nothing_into_the_session_waiting_on_
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX_AND_IDLE),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -12837,7 +13561,7 @@ async fn a_review_that_keeps_talking_is_never_ended_under_it() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THAT_KEEPS_TALKING),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -12881,7 +13605,7 @@ async fn a_quiet_review_is_spoken_to_rather_than_ended_and_is_ended_once_it_sign
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THAT_SAYS_NOTHING),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -12955,7 +13679,7 @@ async fn a_review_session_that_dies_halts_the_run_rather_than_passing_the_branch
             &dispatched,
             "    printf 'gh: could not read the diff\n'\n    exit 1",
         ),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -13034,7 +13758,7 @@ async fn a_review_that_dies_on_its_own_ask_closes_its_questions_and_reads_the_br
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, &review),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -13132,7 +13856,7 @@ async fn a_restart_over_a_review_waiting_on_its_ask_stops_the_run_rather_than_le
     let stub = a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_WAIT);
     let gh = gh_about(GREEN, "", "");
 
-    let fixture = grilling_spilling(spill, &stub, &gh).await;
+    let fixture = grilling_spilling(spill, &stub, gh.clone()).await;
 
     worked_to_empty(&fixture).await;
     until_asking(&fixture, &reviews).await;
@@ -13141,7 +13865,7 @@ async fn a_restart_over_a_review_waiting_on_its_ask_stops_the_run_rather_than_le
 
     // A second server over the same database, which is what a restart is: the
     // session idling on that ask does not exist as far as it is concerned.
-    let _restarted = fixture.restarted(&stub, &gh).await;
+    let _restarted = fixture.restarted(&stub, gh.clone()).await;
 
     let stopped = fixture.stopped().await;
 
@@ -13238,7 +13962,7 @@ async fn a_review_waiting_on_its_ask() -> (Grilling, i64, PathBuf) {
     let fixture = grilling_landing(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_WAIT),
-        &gh_landing(&asked, &landing),
+        gh_landing(&asked, &landing),
     )
     .await;
 
@@ -13299,7 +14023,7 @@ async fn a_restart_over_an_answered_review_stops_the_run_rather_than_landing_any
 
     let stub = a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_WORK_ON);
 
-    let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
+    let fixture = grilling_spilling(spill, &stub, gh_pull_request()).await;
 
     worked_to_empty(&fixture).await;
     until_asking(&fixture, &reviews).await;
@@ -13320,7 +14044,7 @@ async fn a_restart_over_an_answered_review_stops_the_run_rather_than_landing_any
     );
 
     // And the process that was going to read those answers goes away.
-    let _restarted = fixture.restarted(&stub, PULL_REQUEST).await;
+    let _restarted = fixture.restarted(&stub, gh_pull_request()).await;
 
     let stopped = fixture.stopped().await;
 
@@ -13374,7 +14098,7 @@ async fn a_review_that_landed_nothing_still_settles_on_its_session_ending() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_VANISH),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -13458,7 +14182,7 @@ async fn a_review_that_dies_after_the_answers_stops_the_run_and_dispatches_nothi
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, &review),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -13569,9 +14293,9 @@ async fn a_conversation_sent_back_to_be_built_wraps_up_and_reviews_again() {
     let dispatched = spill.path().join("fix-prompts");
 
     let stub = a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX);
-    let gh = gh_about(CHECKS_UNANSWERABLE, "", "");
+    let gh = gh_about(checks_unanswerable(), "", "");
 
-    let fixture = grilling_spilling(spill, &stub, &gh).await;
+    let fixture = grilling_spilling(spill, &stub, gh.clone()).await;
 
     worked_to_empty(&fixture).await;
     until_asking(&fixture, &reviews).await;
@@ -13659,7 +14383,7 @@ async fn a_conversation_sent_back_to_be_built_wraps_up_and_reviews_again() {
 
     // A second server over the same database, which takes up every Conversation
     // it finds wrapping up — the whole of a wrap-up, its review included.
-    let _restarted = fixture.restarted(&stub, &gh).await;
+    let _restarted = fixture.restarted(&stub, gh.clone()).await;
 
     let deadline = Instant::now() + *PATIENCE;
     let read_again = loop {
@@ -13820,9 +14544,9 @@ async fn a_review_that_split_a_finding_out_sends_the_work_back_to_be_built() {
     let once = spill.path().join("split-written");
 
     let stub = a_backlog_then_wraps_up(&reviews, &dispatched, &review_then_split(&once, AND_A_FIX));
-    let gh = gh_about(CHECKS_UNANSWERABLE, "", "");
+    let gh = gh_about(checks_unanswerable(), "", "");
 
-    let fixture = grilling_spilling(spill, &stub, &gh).await;
+    let fixture = grilling_spilling(spill, &stub, gh.clone()).await;
 
     worked_to_empty(&fixture).await;
     until_asking(&fixture, &reviews).await;
@@ -13941,9 +14665,9 @@ async fn a_split_with_nothing_else_accepted_still_sends_the_work_back() {
     let once = spill.path().join("split-written");
 
     let stub = a_backlog_then_wraps_up(&reviews, &dispatched, &review_then_split(&once, ""));
-    let gh = gh_about(CHECKS_UNANSWERABLE, "", "");
+    let gh = gh_about(checks_unanswerable(), "", "");
 
-    let fixture = grilling_spilling(spill, &stub, &gh).await;
+    let fixture = grilling_spilling(spill, &stub, gh.clone()).await;
 
     worked_to_empty(&fixture).await;
     until_asking(&fixture, &reviews).await;
@@ -14056,9 +14780,9 @@ async fn a_split_out_backlog_lands_on_the_record_of_a_run_that_never_had_one() {
     let once = spill.path().join("split-written");
 
     let stub = an_inline_run_then_splits(&reviews, &review_then_split(&once, ""));
-    let gh = gh_about(CHECKS_UNANSWERABLE, "", "");
+    let gh = gh_about(checks_unanswerable(), "", "");
 
-    let fixture = grilling_spilling(spill, &stub, &gh).await;
+    let fixture = grilling_spilling(spill, &stub, gh.clone()).await;
 
     fixture
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
@@ -14145,7 +14869,7 @@ async fn a_split_no_backlog_was_written_for_settles_like_any_other_review() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -14237,7 +14961,7 @@ async fn a_red_check_waits_for_the_worktree_rather_than_ending_the_review() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX),
-        &gh_checking_after(&reviews),
+        gh_checking_after(&reviews),
     )
     .await;
 
@@ -14351,7 +15075,7 @@ async fn what_was_already_said_reaches_the_review_rather_than_a_session_of_its_o
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &gh_about(CHECKS_UNANSWERABLE, THREE_COMMENTS, TWO_ON_THE_DIFF),
+        gh_about(checks_unanswerable(), THREE_COMMENTS, TWO_ON_THE_DIFF),
     )
     .await;
 
@@ -14422,7 +15146,7 @@ async fn the_comment_a_share_left_is_never_addressed_and_a_reply_to_it_is() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &gh_about(CHECKS_UNANSWERABLE, A_SHARE_AND_A_REPLY, ""),
+        gh_about(checks_unanswerable(), A_SHARE_AND_A_REPLY, ""),
     )
     .await;
 
@@ -14491,7 +15215,11 @@ async fn the_comments_the_ignore_rules_match_reach_nobody_and_are_written_down()
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &gh_about_with_a_pane(CHECKS_UNANSWERABLE, TWO_BOTS_AND_A_HUMAN, A_BOT_ON_THE_DIFF),
+        gh_about_with_a_pane(
+            checks_unanswerable(),
+            TWO_BOTS_AND_A_HUMAN,
+            A_BOT_ON_THE_DIFF,
+        ),
     )
     .await;
 
@@ -14603,7 +15331,7 @@ async fn a_rule_written_while_the_wrap_up_watches_takes_effect_and_deleting_it_b
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &gh_about_once(CHECKS_UNANSWERABLE, &landed, A_BOTS_BILLING_NOTE, ""),
+        gh_about_once(checks_unanswerable(), &landed, A_BOTS_BILLING_NOTE, ""),
     )
     .await;
 
@@ -14690,7 +15418,7 @@ async fn comments_said_while_the_review_runs_reach_one_batch_session_afterwards(
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX),
-        &gh,
+        gh,
     )
     .await;
 
@@ -14795,7 +15523,7 @@ async fn a_batch_of_comments_is_proposed_about_and_then_fixed_in_the_same_sessio
     // everything standing on the pull request when it starts is the review's own
     // to propose about.
     let gh = gh_about_once(
-        CHECKS_UNANSWERABLE,
+        checks_unanswerable(),
         &reviews,
         THREE_COMMENTS,
         TWO_ON_THE_DIFF,
@@ -14804,7 +15532,7 @@ async fn a_batch_of_comments_is_proposed_about_and_then_fixed_in_the_same_sessio
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_THEN_FIX),
-        &gh,
+        gh,
     )
     .await;
 
@@ -14902,12 +15630,12 @@ async fn a_batch_with_nothing_to_do_asks_nothing_and_settles_as_addressed() {
     let dispatched = spill.path().join("fix-prompts");
     let batches = spill.path().join("batch-prompts");
 
-    let gh = gh_about_once(CHECKS_UNANSWERABLE, &reviews, THREE_COMMENTS, "");
+    let gh = gh_about_once(checks_unanswerable(), &reviews, THREE_COMMENTS, "");
 
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
-        &gh,
+        gh,
     )
     .await;
 
@@ -14959,7 +15687,7 @@ async fn a_quiet_batch_session_is_spoken_to_rather_than_ended_and_settles_once_i
     let dispatched = spill.path().join("fix-prompts");
     let batches = spill.path().join("batch-prompts");
 
-    let gh = gh_about_once(CHECKS_UNANSWERABLE, &reviews, THREE_COMMENTS, "");
+    let gh = gh_about_once(checks_unanswerable(), &reviews, THREE_COMMENTS, "");
 
     let fixture = grilling_spilling(
         spill,
@@ -14969,7 +15697,7 @@ async fn a_quiet_batch_session_is_spoken_to_rather_than_ended_and_settles_once_i
             &batches,
             RESPOND_QUIETLY_THEN_SIGNAL,
         ),
-        &gh,
+        gh,
     )
     .await;
 
@@ -15053,7 +15781,7 @@ async fn a_comment_left_while_the_review_runs_is_answered_rather_than_settled_ov
     let fixture = grilling_at_pace(
         spill,
         &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
-        &gh,
+        gh,
         dawdling,
         &[],
     )
@@ -15105,7 +15833,7 @@ async fn a_wrap_up_waits_for_the_run_the_review_pushed() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, &review),
-        &gh_about(&green_until(&landed), "", ""),
+        gh_about(green_until(&landed), "", ""),
     )
     .await;
 
@@ -15177,7 +15905,7 @@ async fn a_wrap_up_waits_for_the_run_a_batch_session_pushed() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, &responding),
-        &gh_about_once(&green_until(&landed), &reviews, THREE_COMMENTS, ""),
+        gh_about_once(green_until(&landed), &reviews, THREE_COMMENTS, ""),
     )
     .await;
 
@@ -15224,7 +15952,7 @@ async fn a_rollup_about_a_commit_that_is_not_what_was_pushed_settles_nothing() {
     let fixture = grilling_pushing(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &gh_about(&green_for(&head), "", ""),
+        gh_about(green_for(&head), "", ""),
     )
     .await;
 
@@ -15305,7 +16033,7 @@ async fn checks_that_have_gone_from_a_pull_request_that_had_them_settle_nothing(
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, &review),
-        &gh_about(&green_until_nothing_is_reported(&landed), "", ""),
+        gh_about(green_until_nothing_is_reported(&landed), "", ""),
     )
     .await;
 
@@ -15377,7 +16105,7 @@ async fn a_pull_request_that_conflicts_keeps_the_wrap_up_out_of_done() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_resolves(&dispatched, &released, &resolved),
-        &gh_about(&green_but_conflicting_until(&resolved), "", ""),
+        gh_about(green_but_conflicting_until(&resolved), "", ""),
     )
     .await;
 
@@ -15498,7 +16226,7 @@ async fn a_conflict_two_sessions_could_not_resolve_halts_and_tells_the_human() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &gh_about(GREEN_BUT_CONFLICTING, "", ""),
+        gh_about(GREEN_BUT_CONFLICTING, "", ""),
     )
     .await;
 
@@ -15587,7 +16315,7 @@ async fn a_merge_github_has_not_worked_out_dispatches_nothing() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &gh_about(GREEN_BUT_UNKNOWN, "", ""),
+        gh_about(GREEN_BUT_UNKNOWN, "", ""),
     )
     .await;
 
@@ -15663,7 +16391,7 @@ async fn a_conflict_that_arrives_after_done_is_written_down_and_nothing_else() {
     let fixture = grilling_landing(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &gh_landing(&asked, &landing),
+        gh_landing(&asked, &landing),
     )
     .await;
 
@@ -15749,7 +16477,7 @@ async fn pressing_resolve_on_a_conflicted_done_pull_request_gets_it_resolved() {
     let fixture = grilling_landing(
         spill,
         &a_backlog_then_resolves_at_once(&reviews, &dispatched, &resolved),
-        &gh_conflicting_between(&conflicting, &resolved),
+        gh_conflicting_between(&conflicting, &resolved),
     )
     .await;
 
@@ -15897,7 +16625,7 @@ async fn a_pull_request_that_has_been_merged_is_never_asked_about_again() {
     let fixture = grilling_landing(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &gh_landing(&asked, &landing),
+        gh_landing(&asked, &landing),
     )
     .await;
 
@@ -15955,7 +16683,7 @@ async fn a_closed_conversation_is_never_asked_about() {
     let fixture = grilling_landing(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &gh_landing(&asked, &landing),
+        gh_landing(&asked, &landing),
     )
     .await;
 
@@ -16008,7 +16736,7 @@ async fn the_cleanup_trims_what_was_archived_long_enough_ago() {
     let bench = bench_at_pace(
         tempfile::tempdir().unwrap(),
         PRINTS_AND_STOPS,
-        PULL_REQUEST,
+        gh_pull_request(),
         *CLEANING,
         None,
     )
@@ -16129,7 +16857,7 @@ async fn the_cleanup_goes_by_what_the_settings_say_at_the_time() {
     let bench = bench_at_pace(
         tempfile::tempdir().unwrap(),
         PRINTS_AND_STOPS,
-        PULL_REQUEST,
+        gh_pull_request(),
         *CLEANING,
         None,
     )
@@ -16195,7 +16923,7 @@ async fn the_cleanup_deletes_what_was_archived_long_enough_ago() {
     let bench = bench_at_pace(
         tempfile::tempdir().unwrap(),
         PRINTS_AND_STOPS,
-        PULL_REQUEST,
+        gh_pull_request(),
         *CLEANING,
         None,
     )
@@ -16513,9 +17241,9 @@ async fn a_restart_over_a_batch_waiting_on_its_ask_stops_the_run_and_reads_what_
     // Done is what was said — which is what makes an unattended batch a
     // Conversation that finishes with the questions still open.
     let stub = a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_THEN_WAIT);
-    let gh = gh_about_once(&green_after(&batches), &reviews, THREE_COMMENTS, "");
+    let gh = gh_about_once(green_after(&batches), &reviews, THREE_COMMENTS, "");
 
-    let fixture = grilling_spilling(spill, &stub, &gh).await;
+    let fixture = grilling_spilling(spill, &stub, gh.clone()).await;
 
     worked_to_empty(&fixture).await;
     until_asking(&fixture, &batches).await;
@@ -16524,7 +17252,7 @@ async fn a_restart_over_a_batch_waiting_on_its_ask_stops_the_run_and_reads_what_
 
     // A second server over the same database, which is what a restart is: the
     // session idling on that ask does not exist as far as it is concerned.
-    let _restarted = fixture.restarted(&stub, &gh).await;
+    let _restarted = fixture.restarted(&stub, gh.clone()).await;
 
     let stopped = fixture.stopped().await;
 
@@ -16605,12 +17333,12 @@ async fn a_batch_that_landed_nothing_still_leaves_what_was_said_addressed() {
     let dispatched = spill.path().join("fix-prompts");
     let batches = spill.path().join("batch-prompts");
 
-    let gh = gh_about_once(CHECKS_UNANSWERABLE, &reviews, THREE_COMMENTS, "");
+    let gh = gh_about_once(checks_unanswerable(), &reviews, THREE_COMMENTS, "");
 
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_THEN_VANISH),
-        &gh,
+        gh,
     )
     .await;
 
@@ -16693,12 +17421,12 @@ async fn a_batch_that_dies_after_the_answers_stops_the_run_and_dispatches_nothin
         die = RESPOND_THEN_DIE_ON_THE_ANSWERS,
     );
 
-    let gh = gh_about_once(CHECKS_UNANSWERABLE, &reviews, THREE_COMMENTS, "");
+    let gh = gh_about_once(checks_unanswerable(), &reviews, THREE_COMMENTS, "");
 
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, &responding),
-        &gh,
+        gh,
     )
     .await;
 
@@ -16806,9 +17534,9 @@ async fn comments_already_dispatched_for_are_not_dispatched_for_again_after_a_re
     // Said after the review started, so a batch session is what they reach:
     // everything already there when it starts is the review's own to propose
     // about, and there would be nothing dispatched for to write down.
-    let gh = gh_about_once(CHECKS_UNANSWERABLE, &reviews, THREE_COMMENTS, "");
+    let gh = gh_about_once(checks_unanswerable(), &reviews, THREE_COMMENTS, "");
 
-    let fixture = grilling_spilling(spill, &stub, &gh).await;
+    let fixture = grilling_spilling(spill, &stub, gh.clone()).await;
 
     worked_to_empty(&fixture).await;
     until_written(&dispatched).await;
@@ -16822,7 +17550,7 @@ async fn comments_already_dispatched_for_are_not_dispatched_for_again_after_a_re
 
     // A second server over the same database, sandboxes and agent — which knows
     // nothing about the comments except what was written down.
-    let _restarted = fixture.restarted(&stub, &gh).await;
+    let _restarted = fixture.restarted(&stub, gh.clone()).await;
 
     // Long enough for many polls of both of them.
     pause(Duration::from_millis(800)).await;
@@ -16861,20 +17589,26 @@ async fn a_wrap_up_with_nothing_left_outstanding_finishes_without_waiting_for_a_
     let spill = tempfile::tempdir().unwrap();
     let reviews = spill.path().join("review-prompts");
     let dispatched = spill.path().join("fix-prompts");
-    let questions = spill.path().join("gh-questions");
+    // A GitHub that writes down every question it is asked, so that what was
+    // never asked can be read back.
+    let questions: Arc<Mutex<Vec<Asking>>> = Arc::new(Mutex::new(Vec::new()));
+    let recording = {
+        let (asked_for, green) = (questions.clone(), gh_about(GREEN, "", ""));
 
-    // A `gh` that writes down every question it is asked, so that what was never
-    // asked can be read back.
-    let recording = format!(
-        "printf '%s\\n' \"$5\" >> {questions}\n{}",
-        gh_about(GREEN, "", ""),
-        questions = quoted(&questions),
-    );
+        answering(move |asked| {
+            asked_for
+                .lock()
+                .expect("nothing panics holding it")
+                .push(asked.asking);
+
+            green(asked)
+        })
+    };
 
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &recording,
+        recording,
     )
     .await;
 
@@ -16906,17 +17640,17 @@ async fn a_wrap_up_with_nothing_left_outstanding_finishes_without_waiting_for_a_
         "and nothing was dispatched, because nothing was wrong",
     );
 
-    let asked = std::fs::read_to_string(&questions).unwrap();
-
-    let fields = || asked.lines().flat_map(|asked| asked.split(','));
+    let asked = questions.lock().expect("nothing panics holding it").clone();
 
     assert!(
-        fields().any(|field| field == "mergeable"),
-        "whether it can be merged is asked on every poll: {asked}",
+        asked.contains(&Asking::Checks),
+        "whether it can be merged is asked on every poll, that question carrying \
+         it: {asked:?}",
     );
     assert!(
-        !fields().any(|field| field == "merged" || field == "mergedAt"),
-        "and whether it has been merged is never asked at all: {asked}",
+        !asked.contains(&Asking::Landing),
+        "and where it has got to — whether it has been merged — is never asked \
+         while it is being wrapped up: {asked:?}",
     );
 }
 
@@ -16945,7 +17679,7 @@ async fn a_pull_request_opening_and_a_conversation_finishing_reach_the_devices()
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -17056,7 +17790,7 @@ async fn a_push_service_that_cannot_be_reached_costs_a_notification_and_nothing_
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -17135,7 +17869,7 @@ async fn a_commit_landing_on_the_pull_request_puts_the_checks_back_to_waiting() 
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_WAIT),
-        &gh_about(&green_until(&landed), "", ""),
+        gh_about(green_until(&landed), "", ""),
     )
     .await;
 
@@ -18204,7 +18938,7 @@ async fn closing_ends_the_session_before_the_worktree_goes() {
             "#,
             ticks = quoted(&ticks),
         ),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -19269,7 +20003,7 @@ async fn a_login_resumes_every_run_it_unblocks() {
     let stub = signed_out_until_logged_in(spill.path());
     let spilled = spill.path().to_owned();
 
-    let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
+    let fixture = grilling_spilling(spill, &stub, gh_pull_request()).await;
 
     let investigating = composed_beside(&fixture, Process::Investigate).await;
     grilled(&fixture, investigating).await;
@@ -19396,7 +20130,7 @@ async fn a_sign_out_after_a_fresh_login_resumes_by_itself() {
     let stub = signed_out_after_starting(spill.path());
     let spilled = spill.path().to_owned();
 
-    let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
+    let fixture = grilling_spilling(spill, &stub, gh_pull_request()).await;
 
     running_out(&fixture).await;
 
@@ -19480,7 +20214,7 @@ async fn a_codex_account_out_of_window_stops_the_run_on_codexs_own_sentence() {
             "You've hit your usage limit. Upgrade to Plus to continue using Codex \
              (https://chatgpt.com/explore/plus)",
         ),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -20068,7 +20802,7 @@ esac
 async fn stop_lets_the_task_finish_and_halts_before_the_next_one() {
     let spill = tempfile::tempdir().unwrap();
     let gate = spill.path().join("go");
-    let fixture = grilling_spilling(spill, &two_tasks_waiting_at(&gate), PULL_REQUEST).await;
+    let fixture = grilling_spilling(spill, &two_tasks_waiting_at(&gate), gh_pull_request()).await;
 
     fixture
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
@@ -20198,7 +20932,7 @@ async fn stop_lets_the_task_finish_and_halts_before_the_next_one() {
 async fn force_stop_ends_the_session_where_it_stands_and_halts_at_once() {
     let spill = tempfile::tempdir().unwrap();
     let gate = spill.path().join("never");
-    let fixture = grilling_spilling(spill, &two_tasks_waiting_at(&gate), PULL_REQUEST).await;
+    let fixture = grilling_spilling(spill, &two_tasks_waiting_at(&gate), gh_pull_request()).await;
 
     fixture
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
@@ -20409,7 +21143,7 @@ async fn force_stop_as_the_handoff_lands_starts_nothing_behind_the_halt() {
 async fn steering_into_done_with_interrupt_ends_the_session_where_it_stands() {
     let spill = tempfile::tempdir().unwrap();
     let gate = spill.path().join("never");
-    let fixture = grilling_spilling(spill, &two_tasks_waiting_at(&gate), PULL_REQUEST).await;
+    let fixture = grilling_spilling(spill, &two_tasks_waiting_at(&gate), gh_pull_request()).await;
 
     fixture
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
@@ -20502,7 +21236,7 @@ async fn steering_into_done_with_interrupt_ends_the_session_where_it_stands() {
 async fn steering_into_done_without_interrupt_sees_the_session_out() {
     let spill = tempfile::tempdir().unwrap();
     let gate = spill.path().join("go");
-    let fixture = grilling_spilling(spill, &two_tasks_waiting_at(&gate), PULL_REQUEST).await;
+    let fixture = grilling_spilling(spill, &two_tasks_waiting_at(&gate), gh_pull_request()).await;
 
     fixture
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
@@ -21031,7 +21765,14 @@ fn waiting_on_checks(view: &ConversationView) -> Vec<&NoticeEvent> {
 /// Which of the two a Notice is, by what it opens with — the rendered markdown
 /// the settling loop writes.
 fn narrowing(notice: &NoticeEvent) -> bool {
-    notice.html.contains("Waiting on checks")
+    notice.html.contains("Waiting on checks") || unwatched(notice)
+}
+
+/// And whether a Notice is the line a wrap-up on a Forge without checks or
+/// review writes saying it doesn't wait on them — a label on a condition, the
+/// way [`narrowing`]'s own is, and read past with it.
+fn unwatched(notice: &NoticeEvent) -> bool {
+    notice.html.contains("so the wrap-up doesn")
 }
 
 /// And whether a Notice is the Rescue's escalation rather than a stop — the one
@@ -21059,7 +21800,7 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
     let fixture = grilling_spilling(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING, ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -21277,7 +22018,7 @@ async fn a_settle_starts_every_ready_stage_of_a_declaring_roadmap() {
     let fixture = grilling_spilling(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_ROOTS, RECORDS_STACKING, ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -21366,7 +22107,7 @@ async fn the_settings_say_how_many_stages_of_one_roadmap_start_at_once() {
     let fixture = grilling_spilling(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_ROOTS, RECORDS_STACKING, ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -21429,7 +22170,7 @@ async fn a_fourth_ready_stage_waits_for_a_place_and_is_told_so() {
             "",
             TWO_MORE_BRIEFS,
         ),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -21501,7 +22242,7 @@ async fn the_servers_places_hold_a_settle_back_and_never_a_press() {
             "",
             THREE_MORE_BRIEFS,
         ),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -21762,7 +22503,7 @@ esac
         ),
     );
 
-    let fixture = grilling_at_pace(spill, &stub, &gh_about(GREEN, "", ""), pace, &[]).await;
+    let fixture = grilling_at_pace(spill, &stub, gh_about(GREEN, "", ""), pace, &[]).await;
 
     // Five places of its own against four roots, so nothing here is ever waiting
     // on its own roadmap: what holds the fourth back is the server's four.
@@ -22268,7 +23009,7 @@ async fn a_roadmap_under_review() -> (Grilling, i64) {
         REVIEW_THEN_FIX_AND_IDLE,
     );
 
-    let fixture = grilling_at_pace(spill, &stub, &gh_about(GREEN, "", ""), *LOOKING, &[]).await;
+    let fixture = grilling_at_pace(spill, &stub, gh_about(GREEN, "", ""), *LOOKING, &[]).await;
 
     staged(&fixture).await;
     until_asking(&fixture, &reviews).await;
@@ -22338,7 +23079,7 @@ esac
         roadmap = a_roadmap_then_wraps_up(&planning, &worked, TWO_ROOTS, RECORDS_STACKING, ""),
     );
 
-    let fixture = grilling_at_pace(spill, &stub, &gh_about(GREEN, "", ""), *LOOKING, &[]).await;
+    let fixture = grilling_at_pace(spill, &stub, gh_about(GREEN, "", ""), *LOOKING, &[]).await;
 
     // One place across the whole server, said while the roadmap was being planned
     // — nothing was restarted for it, and nothing had to be.
@@ -22456,7 +23197,7 @@ async fn a_restart_starts_the_stage_that_was_waiting_when_a_place_comes_free() {
     // counts a single place, which is what keeps it from starting over the top of
     // three stages it cannot see yet.
     let _restarted = fixture
-        .restarted_at_pace(&stub, &gh_about(GREEN, "", ""), *LOOKING)
+        .restarted_at_pace(&stub, gh_about(GREEN, "", ""), *LOOKING)
         .await;
 
     let stages = stages_of(&fixture, 4).await;
@@ -22571,7 +23312,7 @@ async fn two_roadmaps_waiting_for_a_place(at_once: usize, pace: Pace) -> (Grilli
     let worked = spill.path().join("task-prompts");
 
     let stub = two_roadmaps_an_investigation_and_their_stages(&planning, &worked);
-    let fixture = grilling_at_pace(spill, &stub, &gh_about(GREEN, "", ""), pace, &[]).await;
+    let fixture = grilling_at_pace(spill, &stub, gh_about(GREEN, "", ""), pace, &[]).await;
 
     configure(
         &fixture,
@@ -22810,7 +23551,7 @@ async fn a_look_that_started_nothing_does_not_say_a_stage_is_waiting_again() {
     let fixture = grilling_at_pace(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_ROOTS, RECORDS_STACKING, ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
         *LOOKING,
         &[],
     )
@@ -22969,7 +23710,7 @@ async fn a_stage_whose_branch_is_taken_leaves_its_siblings_started() {
     let fixture = grilling_spilling(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_ROOTS, RECORDS_STACKING, ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -23031,7 +23772,7 @@ async fn a_roadmap_moving_on_tells_the_devices_which_stage_started() {
     let fixture = grilling_spilling(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING, ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -23107,7 +23848,7 @@ async fn a_repository_with_no_stacking_recorded_still_stands_its_stage_on_the_pr
     let fixture = grilling_spilling(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -23163,7 +23904,7 @@ async fn a_stage_whose_predecessor_has_landed_comes_off_the_default_branch() {
     let fixture = grilling_spilling(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", MERGES_THE_PREDECESSOR),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -23227,7 +23968,7 @@ async fn a_stage_is_cut_from_the_highest_settled_stage_of_the_chain() {
             RECORDS_STACKING,
             BRANCHES_A_SIBLING,
         ),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -23371,7 +24112,7 @@ async fn a_stage_start_fetches_origin_before_it_reads_the_default_branch() {
     let fixture = grilling_spilling(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -23430,7 +24171,7 @@ async fn a_stage_whose_fetch_fails_halts_with_a_notice_and_starts_nothing() {
     let fixture = grilling_spilling(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -23503,7 +24244,7 @@ async fn a_stage_clears_the_task_list_the_branch_it_stands_on_carried() {
     let fixture = grilling_spilling(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", LANDS_AND_LEAVES_A_LIST),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -23604,7 +24345,7 @@ async fn a_settle_with_no_git_author_starts_no_stage_and_says_so() {
     let fixture = grilling_spilling(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING, ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -23687,7 +24428,7 @@ async fn a_settle_on_a_repo_whose_author_is_gone_starts_no_stage_and_says_so() {
     let fixture = grilling_spilling(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING, ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -23741,7 +24482,7 @@ async fn a_stage_inheriting_a_companion_of_another_author_starts_nothing_and_say
     let fixture = grilling_at_pace(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING, ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
         *BRISKLY,
         &[("askance", CompanionMode::ReadOnly)],
     )
@@ -23815,7 +24556,7 @@ async fn a_stage_taken_under_its_former_name_starts_nothing_and_says_so() {
     let fixture = grilling_spilling(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING, ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -23881,7 +24622,7 @@ async fn a_branch_in_a_stages_way_starts_nothing_and_says_which_one() {
     let fixture = grilling_spilling(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING, ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -23994,7 +24735,7 @@ async fn a_stage_inherits_the_companion_set_its_roadmap_was_grilled_with() {
     let fixture = grilling_at_pace(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", MERGES_THE_PREDECESSOR),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
         *BRISKLY,
         &[
             ("askance", CompanionMode::ReadWrite),
@@ -24110,7 +24851,7 @@ async fn a_stacked_stage_cuts_its_companion_branch_from_the_predecessors() {
     let fixture = grilling_at_pace(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING, ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
         *BRISKLY,
         &[
             ("askance", CompanionMode::ReadWrite),
@@ -24178,7 +24919,7 @@ async fn a_stage_whose_companion_cannot_be_delivered_starts_nothing() {
     let fixture = grilling_at_pace(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
         *BRISKLY,
         &[("askance", CompanionMode::ReadWrite)],
     )
@@ -24277,7 +25018,7 @@ async fn a_companion_with_a_branch_in_a_stages_way_halts_it_by_name() {
     let fixture = grilling_at_pace(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
         *BRISKLY,
         &[("askance", CompanionMode::ReadWrite)],
     )
@@ -24349,7 +25090,7 @@ async fn a_roadmap_with_every_stage_checked_starts_nothing_and_says_it_is_comple
             RECORDS_STACKING,
             "",
         ),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -24432,7 +25173,7 @@ async fn a_finished_roadmap_starts_no_stage_of_another_roadmap_on_the_branch() {
     let fixture = grilling_seeded(
         spill,
         &a_roadmap_beside_another(&planning, &worked),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
         another_effort_already_committed,
     )
     .await;
@@ -24575,7 +25316,7 @@ async fn a_branch_that_wrote_two_roadmaps_starts_nothing_and_says_why() {
     let fixture = grilling_spilling(
         spill,
         &two_roadmaps_then_wraps_up(&planning, &worked),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -24670,7 +25411,7 @@ async fn a_stage_from_before_the_record_starts_nothing_and_says_so() {
     let fixture = adopting_asking(
         spill,
         &a_stage_planned_and_worked_to_a_finish(&planning, ANNOTATES_THE_STAGE),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -24725,7 +25466,7 @@ async fn an_ordinary_conversation_that_touched_a_roadmap_carries_nothing_on() {
     let fixture = grilling_seeded(
         spill,
         &a_backlog_that_amends_a_roadmap(),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
         another_effort_already_committed,
     )
     .await;
@@ -24844,19 +25585,24 @@ sleep 300
 /// write and no grilling to run, so what the human settles is the two Profiles
 /// and then presses once.
 async fn adopting(spill: tempfile::TempDir, stub: &str) -> Grilling {
-    adopting_asking(spill, stub, PULL_REQUEST).await
+    adopting_asking(spill, stub, gh_pull_request()).await
 }
 
 /// The same, with something else where `gh` goes — for the test that carries an
 /// adopted stage the whole way to a settled wrap-up.
-async fn adopting_asking(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+async fn adopting_asking(spill: tempfile::TempDir, stub: &str, gh: Github) -> Grilling {
     adopting_at_pace(spill, stub, gh, *BRISKLY).await
 }
 
 /// And the same at a pace of the caller's choosing — for the tests about what
 /// the stall sweep makes of a stage that is waiting rather than working, that
 /// being the one thing [`BRISKLY`] deliberately keeps slow.
-async fn adopting_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pace) -> Grilling {
+async fn adopting_at_pace(
+    spill: tempfile::TempDir,
+    stub: &str,
+    gh: Github,
+    pace: Pace,
+) -> Grilling {
     let bench = bench_at_pace(spill, stub, gh, pace, None).await;
 
     a_roadmap_already_committed(&bench.repo);
@@ -24906,7 +25652,7 @@ const A_TAKEN_UP_BRIEF: &str = "# Rate limiting for the public API\n\nA token bu
 /// branch lives on origin, and a checkout that never fetched knows nothing about
 /// it. So the branch is made, pushed and then dropped locally: what the press
 /// finds is exactly what a fresh clone would, which is the ordinary case.
-async fn taking_up(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+async fn taking_up(spill: tempfile::TempDir, stub: &str, gh: Github) -> Grilling {
     taking_up_however_reviewed(
         spill,
         stub,
@@ -24921,7 +25667,7 @@ async fn taking_up(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
 
 /// The same with the Review picker moved onto the row that runs nothing, which
 /// is the take-up that wraps up without a review.
-async fn taking_up_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+async fn taking_up_unreviewed(spill: tempfile::TempDir, stub: &str, gh: Github) -> Grilling {
     taking_up_however_reviewed(
         spill,
         stub,
@@ -24942,7 +25688,7 @@ async fn taking_up_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) ->
 /// One role rather than two, an Agent control of its own and no Review picker at
 /// all — see [`Bench::the_one_an_investigation_runs_under`]. Everything else about
 /// the press is the Review's own, this being one take-up.
-async fn taking_up_to_fix(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+async fn taking_up_to_fix(spill: tempfile::TempDir, stub: &str, gh: Github) -> Grilling {
     taking_up_to_fix_at_pace(spill, stub, gh, *BRISKLY).await
 }
 
@@ -24952,7 +25698,7 @@ async fn taking_up_to_fix(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gri
 /// Which is what the Resolve-conflicts press needs standing behind it: the press
 /// is offered on what the record says about the merge, and nothing but that
 /// sweep writes it down once the work is finished with.
-async fn taking_up_to_fix_landing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+async fn taking_up_to_fix_landing(spill: tempfile::TempDir, stub: &str, gh: Github) -> Grilling {
     taking_up_to_fix_at_pace(spill, stub, gh, *LANDING).await
 }
 
@@ -24960,7 +25706,7 @@ async fn taking_up_to_fix_landing(spill: tempfile::TempDir, stub: &str, gh: &str
 async fn taking_up_to_fix_at_pace(
     spill: tempfile::TempDir,
     stub: &str,
-    gh: &str,
+    gh: Github,
     pace: Pace,
 ) -> Grilling {
     taking_up_however_reviewed(
@@ -24981,7 +25727,7 @@ async fn taking_up_to_fix_at_pace(
 /// Written before the press rather than after it, which is what makes it a fact
 /// about the whole wrap-up: the switch is read at the moment the work settles,
 /// and a test that wrote it afterwards would be racing its own fixture.
-async fn taking_up_sharing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+async fn taking_up_sharing(spill: tempfile::TempDir, stub: &str, gh: Github) -> Grilling {
     taking_up_however_reviewed(
         spill,
         stub,
@@ -25003,7 +25749,7 @@ async fn taking_up_sharing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gr
 async fn taking_up_however_reviewed(
     spill: tempfile::TempDir,
     stub: &str,
-    gh: &str,
+    gh: Github,
     pace: Pace,
     pickers: Pickers,
     process: Process,
@@ -25097,7 +25843,7 @@ async fn taking_up_however_reviewed(
 async fn reviewing_a_branch(
     spill: tempfile::TempDir,
     stub: &str,
-    gh: &str,
+    gh: Github,
     base: Option<&str>,
     standing: Option<&str>,
     holder: Option<Holder<'_>>,
@@ -25251,7 +25997,7 @@ async fn a_review_of_a_branch_sends_one_session_for_the_pull_request_it_is_owed(
     let fixture = reviewing_a_branch(
         spill,
         &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
-        &gh_opened_by_hand(&opened),
+        gh_opened_by_hand(&opened),
         Some("release/2.1"),
         None,
         None,
@@ -25348,7 +26094,7 @@ async fn a_fix_merge_issues_over_a_branch_sends_the_one_session_it_is_owed() {
     let fixture = reviewing_a_branch(
         spill,
         &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
-        &gh_opened_by_hand(&opened),
+        gh_opened_by_hand(&opened),
         Some("release/2.1"),
         None,
         None,
@@ -25401,37 +26147,24 @@ async fn a_fix_merge_issues_over_a_branch_sends_the_one_session_it_is_owed() {
 /// the work sits on, `#41` the branch itself, and `#42` above it. Which is what
 /// a bare branch inside a stack looks like — the work is a link of a chain and
 /// nobody had opened its own pull request yet.
-fn gh_listing_a_stack(opened: &Path) -> String {
-    format!(
-        r#"
-if [ "$1" = api ]; then printf '[]'; exit 0; fi
-if [ "$2" = list ]; then
-    printf '[{{"number":40,"title":"Stage 01","url":"https://github.com/tobico/verkstead/pull/40","headRefName":"stage-01","baseRefName":"main","isCrossRepository":false}},'
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"stage-01","isCrossRepository":false}},'
-    printf '{{"number":42,"title":"Stage 03","url":"https://github.com/tobico/verkstead/pull/42","headRefName":"stage-03","baseRefName":"rate-limiting","isCrossRepository":false}}]'
-    exit 0
-fi
-if [ ! -f {opened} ]; then
-    printf 'no pull requests found for branch "%s"\n' "$3" >&2
-    exit 1
-fi
-case "$5" in
-*statusCheckRollup*)
-    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[]}}'
-    ;;
-*commits*)
-    printf '{{"commits":[],"comments":[]}}'
-    ;;
-*comments*)
-    printf '{{"comments":[],"reviews":[]}}'
-    ;;
-*)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"stage-01","isCrossRepository":false,"state":"OPEN"}}'
-    ;;
-esac
-"#,
-        opened = quoted(opened),
-    )
+fn gh_listing_a_stack(opened: &Path) -> Github {
+    let opened = opened.to_owned();
+
+    answering(move |asked| match asked.asking {
+        Asking::Open => Said::Open(
+            THE_STACK
+                .iter()
+                .map(|&(number, ..)| of_the_stack(number))
+                .collect(),
+        ),
+        _ if !opened.is_file() => Said::Nothing,
+        Asking::Checks => Said::About(PullRequest {
+            mergeable: "MERGEABLE".to_owned(),
+            ..of_the_stack(41)
+        }),
+        Asking::OnTheDiff => Said::Nothing,
+        _ => Said::About(of_the_stack(asked.number.unwrap_or(41))),
+    })
 }
 
 /// A Conversation to stand on a link of the chain, which is what a stack
@@ -25585,7 +26318,7 @@ async fn a_bare_branch_inside_a_stack_is_walked_when_its_pull_request_arrives() 
     let fixture = reviewing_a_branch(
         spill,
         &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
-        &gh_listing_a_stack(&opened),
+        gh_listing_a_stack(&opened),
         None,
         None,
         None,
@@ -25702,7 +26435,7 @@ async fn a_bare_branch_whose_stack_somebody_is_standing_on_stops_the_run() {
     let fixture = reviewing_a_branch(
         spill,
         &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
-        &gh_listing_a_stack(&opened),
+        gh_listing_a_stack(&opened),
         None,
         // The link under this branch, checked out in a worktree that is nobody's
         // here — which is what a human's own clone of the stage below looks like.
@@ -25763,7 +26496,7 @@ async fn a_bare_branch_whose_stack_a_finished_conversation_stands_on_carries_on(
     let fixture = reviewing_a_branch(
         spill,
         &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
-        &gh_listing_a_stack(&opened),
+        gh_listing_a_stack(&opened),
         None,
         None,
         // The stage below, which is a Conversation of its own that has finished
@@ -25864,7 +26597,7 @@ async fn a_bare_branch_whose_stack_holds_uncommitted_changes_stops_the_run() {
     let fixture = reviewing_a_branch(
         spill,
         &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
-        &gh_listing_a_stack(&opened),
+        gh_listing_a_stack(&opened),
         None,
         None,
         Some(Holder {
@@ -25929,7 +26662,7 @@ async fn a_review_of_a_branch_whose_session_opens_none_stops_and_resume_is_anoth
     let fixture = reviewing_a_branch(
         spill,
         &a_tinker_whose_submit_stops_short_once(&opened, &asked_twice),
-        &gh_opened_by_hand(&opened),
+        gh_opened_by_hand(&opened),
         None,
         None,
         None,
@@ -26037,7 +26770,7 @@ esac
 /// The same workbench with the Target naming the open pull request rather than the
 /// branch, for the one test that is about the other half of the press.
 async fn reviewing_a_pull_request(spill: tempfile::TempDir, stub: &str) -> Grilling {
-    let bench = bench(spill, stub, THE_PULL_REQUEST_NUMBERED).await;
+    let bench = bench(spill, stub, the_pull_request_numbered()).await;
 
     cloned(&bench);
     somebody_elses_branch(&bench.repo, "rate-limiting");
@@ -26083,30 +26816,16 @@ async fn reviewing_a_pull_request(spill: tempfile::TempDir, stub: &str) -> Grill
     bench.holding(id)
 }
 
-/// A `gh` that answers about a pull request by *number*, which is what a Review's
-/// press asks — and about the branch afterwards, which is what the wrap-up's
-/// watchers ask.
-const THE_PULL_REQUEST_NUMBERED: &str = r#"
-if [ "$1" = api ]; then printf '[]'; exit 0; fi
-if [ "$2" = list ]; then printf '[]'; exit 0; fi
-case "$5" in
-*headRefName*)
-    printf '{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}'
-    ;;
-*statusCheckRollup*)
-    printf '{"mergeable":"MERGEABLE","statusCheckRollup":[]}'
-    ;;
-*commits*)
-    printf '{"commits":[],"comments":[]}'
-    ;;
-*comments*)
-    printf '{"comments":[],"reviews":[]}'
-    ;;
-*)
-    printf '{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"%s"}' "$3"
-    ;;
-esac
-"#;
+/// A GitHub that answers about a pull request by *number*, which is what a
+/// Review's press asks — and about the branch afterwards, which is what the
+/// wrap-up's watchers ask.
+fn the_pull_request_numbered() -> Github {
+    answering(|asked| match asked.asking {
+        Asking::Checks => Said::About(merging()),
+        Asking::Open | Asking::OnTheDiff => Said::Nothing,
+        _ => Said::About(merging()),
+    })
+}
 
 /// Put a pull request's head branch on the upstream and take it off here, which
 /// is what a branch somebody else opened a pull request from looks like from
@@ -26284,7 +27003,7 @@ async fn resuming_a_stage_that_never_planned_runs_the_planning_again() {
     let fixture = adopting_asking(
         spill,
         &plans_nothing_then_plans(&planning, &worked, &remembered),
-        NO_PULL_REQUEST,
+        no_pull_request(),
     )
     .await;
 
@@ -26459,7 +27178,7 @@ async fn an_adopted_stage_that_settles_starts_the_stage_after_it() {
     let fixture = adopting_asking(
         spill,
         &a_stage_planned_and_worked_to_a_finish(&planning, ANNOTATES_THE_STAGE),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -26567,7 +27286,7 @@ async fn a_settled_stage_the_roadmap_says_nothing_about_is_still_done() {
     let fixture = adopting_asking(
         spill,
         &a_stage_planned_and_worked_to_a_finish(&planning, ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -26610,7 +27329,7 @@ async fn a_stage_away_from_home_settles_and_starts_nothing_here() {
     let fixture = adopting_at_pace(
         spill,
         &a_stage_planned_and_worked_to_a_finish(&planning, ANNOTATES_THE_STAGE),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
         *LOOKING,
     )
     .await;
@@ -26669,7 +27388,7 @@ async fn a_stage_that_came_home_settles_and_starts_the_next_here() {
     let fixture = adopting_asking(
         spill,
         &a_stage_planned_and_worked_to_a_finish(&planning, ANNOTATES_THE_STAGE),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -26739,7 +27458,7 @@ async fn a_settle_on_a_badly_declaring_roadmap_starts_nothing_and_says_why() {
     let fixture = adopting_asking(
         spill,
         &a_stage_planned_and_worked_to_a_finish(&planning, DECLARES_BADLY),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -26983,7 +27702,7 @@ async fn a_stage_waits_to_join_while_a_stage_in_its_chain_has_not_settled() {
     let fixture = adopting_at_pace(
         spill,
         &a_stage_worked_to_its_finish(&worked, &gate),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
         *SWEEPING,
     )
     .await;
@@ -27105,7 +27824,7 @@ async fn a_restarted_server_takes_a_held_stage_up_and_holds_it_again() {
     let gate = spill.path().join("go");
     let stub = a_stage_worked_to_its_finish(&worked, &gate);
 
-    let fixture = adopting_asking(spill, &stub, &gh_about(GREEN, "", "")).await;
+    let fixture = adopting_asking(spill, &stub, gh_about(GREEN, "", "")).await;
 
     let repo_id = fixture.view().await.repo.id;
 
@@ -27121,7 +27840,7 @@ async fn a_restarted_server_takes_a_held_stage_up_and_holds_it_again() {
     // takes up everything it was left driving, and this stage is one of them:
     // its boxes are all ticked, so what it is taken up to is the finish — and
     // the chain below it is where it was.
-    let restarted = fixture.restarted(&stub, &gh_about(GREEN, "", "")).await;
+    let restarted = fixture.restarted(&stub, gh_about(GREEN, "", "")).await;
 
     let deadline = Instant::now() + *PATIENCE;
 
@@ -27175,7 +27894,7 @@ async fn a_roadmap_run_in_order_holds_no_stage_at_its_finish() {
     let fixture = adopting_asking(
         spill,
         &a_stage_planned_and_worked_to_a_finish(&planning, ANNOTATES_THE_STAGE),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -27316,7 +28035,7 @@ async fn the_finish_of_a_stage_is_told_the_chain_it_joins_before_it_pushes() {
     let fixture = adopting_asking(
         spill,
         &a_stage_finished_saying_what_it_was_told(&planning, &finishing, ANNOTATES_THE_STAGE),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -27414,7 +28133,7 @@ async fn a_stage_waits_its_turn_behind_the_stage_whose_tasks_finished_first() {
     let gate = spill.path().join("go");
     let stub = a_stage_worked_to_its_finish(&worked, &gate);
 
-    let fixture = adopting_asking(spill, &stub, &gh_about(GREEN, "", "")).await;
+    let fixture = adopting_asking(spill, &stub, gh_about(GREEN, "", "")).await;
 
     let repo_id = fixture.view().await.repo.id;
 
@@ -27451,7 +28170,7 @@ async fn a_stage_waits_its_turn_behind_the_stage_whose_tasks_finished_first() {
     // A second server over the same database, which is what a restart is. The
     // queue is where it was, so the stage is taken up and held again rather than
     // let in ahead of the one whose tasks finished first.
-    let restarted = fixture.restarted(&stub, &gh_about(GREEN, "", "")).await;
+    let restarted = fixture.restarted(&stub, gh_about(GREEN, "", "")).await;
 
     let deadline = Instant::now() + *PATIENCE;
 
@@ -27527,7 +28246,7 @@ async fn a_taken_up_pull_request_is_reviewed_on_the_edited_brief_and_what_was_sa
     let fixture = taking_up(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &gh_about(STILL_RUNNING, THREE_COMMENTS, ""),
+        gh_about(STILL_RUNNING, THREE_COMMENTS, ""),
     )
     .await;
 
@@ -27592,7 +28311,7 @@ async fn a_taken_up_pull_request_with_no_review_answers_what_was_said_on_it() {
     let fixture = taking_up_unreviewed(
         spill,
         &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
-        &gh_about(STILL_RUNNING, THREE_COMMENTS, ""),
+        gh_about(STILL_RUNNING, THREE_COMMENTS, ""),
     )
     .await;
 
@@ -27636,7 +28355,7 @@ async fn a_restarted_server_watches_a_taken_up_pull_request_again() {
     let fixture = taking_up(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        CHECKS_UNASKABLE,
+        checks_unaskable(),
     )
     .await;
 
@@ -27648,7 +28367,7 @@ async fn a_restarted_server_watches_a_taken_up_pull_request_again() {
     let _restarted = fixture
         .restarted(
             &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-            &gh_checking("SUCCESS"),
+            gh_checking("SUCCESS"),
         )
         .await;
 
@@ -27691,7 +28410,7 @@ async fn a_taken_up_pull_request_settles_to_done_and_reaches_for_the_share() {
     let fixture = taking_up_sharing(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -27746,9 +28465,9 @@ async fn a_review_that_split_work_out_of_a_take_up_builds_it_and_wraps_up_again(
     let once = spill.path().join("split-written");
 
     let stub = a_backlog_then_wraps_up(&reviews, &dispatched, &review_then_split(&once, ""));
-    let gh = gh_about(CHECKS_UNANSWERABLE, "", "");
+    let gh = gh_about(checks_unanswerable(), "", "");
 
-    let fixture = taking_up(spill, &stub, &gh).await;
+    let fixture = taking_up(spill, &stub, gh).await;
 
     until_asking(&fixture, &reviews).await;
 
@@ -27831,7 +28550,7 @@ async fn a_taken_up_conversation_is_steered_into_a_follow_up_and_back() {
     let fixture = taking_up(
         spill,
         &a_backlog_then_a_follow_up(&reviews, A_QUESTION_THEN_IDLE),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -27893,7 +28612,7 @@ async fn a_fix_merge_issues_wrap_up_reads_no_branch_and_answers_nothing_said_on_
     let fixture = taking_up_to_fix(
         spill,
         &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
-        &gh_about(GREEN, THREE_COMMENTS, ""),
+        gh_about(GREEN, THREE_COMMENTS, ""),
     )
     .await;
 
@@ -27976,7 +28695,7 @@ async fn a_fix_merge_issues_over_a_branch_enters_the_same_narrowed_wrap_up() {
     let fixture = reviewing_a_branch(
         spill,
         &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
-        &gh_opened_by_hand(&opened),
+        gh_opened_by_hand(&opened),
         None,
         None,
         None,
@@ -28044,7 +28763,7 @@ async fn a_fix_merge_issues_still_fixes_a_red_check_and_settles_to_done() {
     let fixture = taking_up_to_fix(
         spill,
         &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
-        &gh_about(&red_until(&dispatched), "", ""),
+        gh_about(red_until(&dispatched), "", ""),
     )
     .await;
 
@@ -28095,7 +28814,7 @@ async fn a_steer_into_wrapping_a_narrowed_wrap_up_reads_no_branch_either() {
     let fixture = taking_up_to_fix(
         spill,
         &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -28158,7 +28877,7 @@ async fn a_narrowed_wrap_up_whose_round_was_forgotten_settles_it_all_again() {
     let fixture = taking_up_to_fix(
         spill,
         &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -28244,7 +28963,7 @@ async fn a_resume_of_a_narrowed_wrap_up_reads_no_branch_either() {
     let fixture = taking_up_to_fix(
         spill,
         &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
-        &gh_checking("FAILURE"),
+        gh_checking("FAILURE"),
     )
     .await;
 
@@ -28314,7 +29033,7 @@ async fn a_fix_merge_issues_conflict_gets_one_resolution_and_nothing_beside_it()
             Some(&released),
             &resolved,
         ),
-        &gh_about(&green_but_conflicting_until(&resolved), THREE_COMMENTS, ""),
+        gh_about(green_but_conflicting_until(&resolved), THREE_COMMENTS, ""),
     )
     .await;
 
@@ -28445,7 +29164,7 @@ async fn two_goes_at_a_narrowed_conflict_and_then_the_human() {
     let fixture = taking_up_to_fix(
         spill,
         &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
-        &gh_about(GREEN_BUT_CONFLICTING, "", ""),
+        gh_about(GREEN_BUT_CONFLICTING, "", ""),
     )
     .await;
 
@@ -28525,7 +29244,7 @@ async fn pressing_resolve_on_a_narrowed_wrap_up_comes_back_through_the_same_one(
     let fixture = taking_up_to_fix_landing(
         spill,
         &a_conflict_and_nothing_beside_it(&reviews, &batches, &dispatched, None, &resolved),
-        &gh_conflicting_between(&conflicting, &resolved),
+        gh_conflicting_between(&conflicting, &resolved),
     )
     .await;
 
@@ -28629,54 +29348,70 @@ async fn pressing_resolve_on_a_narrowed_wrap_up_comes_back_through_the_same_one(
 /// resolves. `installed` is whether `gh stack --help` answers, which is what
 /// Verkstead asks in the environment a session gets before it sends anything at
 /// a stack at all.
-fn gh_stacked_and_conflicting(resolved: &Path, installed: bool) -> String {
-    let extension = match installed {
-        true => "if [ \"$1\" = stack ]; then exit 0; fi",
-        false => {
-            "if [ \"$1\" = stack ]; then \
-             printf 'unknown command \"stack\" for \"gh\"\\n' >&2; exit 1; fi"
-        }
-    };
+fn gh_stacked_and_conflicting(resolved: &Path, installed: bool) -> Github {
+    with_the_stack_extension(installed);
 
-    format!(
-        r#"
-{extension}
-if [ "$1" = api ]; then printf '[]'; exit 0; fi
-if [ "$2" = list ]; then
-    printf '[{{"number":40,"title":"Stage 01","url":"https://github.com/tobico/verkstead/pull/40","headRefName":"stage-01","baseRefName":"main","isCrossRepository":false}},'
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"stage-01","isCrossRepository":false}},'
-    printf '{{"number":42,"title":"Stage 03","url":"https://github.com/tobico/verkstead/pull/42","headRefName":"stage-03","baseRefName":"rate-limiting","isCrossRepository":false}}]'
-    exit 0
-fi
-if [ -e {resolved} ]; then bottom=MERGEABLE; else bottom=CONFLICTING; fi
-case "$5" in
-*statusCheckRollup*)
-    if [ "$3" = 40 ]; then merges="$bottom"; else merges=MERGEABLE; fi
-    printf '{{"mergeable":"%s","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$merges"
-    ;;
-*commits*)
-    printf '{{"commits":[],"comments":[]}}'
-    ;;
-*comments*)
-    printf '{{"comments":[],"reviews":[]}}'
-    ;;
-*)
-    case "$3" in
-    40)
-        printf '{{"number":40,"title":"Stage 01","url":"https://github.com/tobico/verkstead/pull/40","headRefName":"stage-01","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
-        ;;
-    42)
-        printf '{{"number":42,"title":"Stage 03","url":"https://github.com/tobico/verkstead/pull/42","headRefName":"stage-03","baseRefName":"rate-limiting","isCrossRepository":false,"state":"OPEN"}}'
-        ;;
-    *)
-        printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"stage-01","isCrossRepository":false,"state":"OPEN"}}'
-        ;;
-    esac
-    ;;
-esac
-"#,
-        resolved = quoted(resolved),
-    )
+    gh_a_stack_conflicting_at(resolved, 40)
+}
+
+/// The same, with `conflicting` the pull request of the three whose merge is
+/// the one that will not go.
+fn gh_a_stack_conflicting_at(resolved: &Path, conflicting: i64) -> Github {
+    let resolved = resolved.to_owned();
+
+    answering(move |asked| {
+        let bottom = match resolved.exists() {
+            true => "MERGEABLE",
+            false => "CONFLICTING",
+        };
+        let numbered = of_the_stack(asked.number.unwrap_or(41));
+
+        match asked.asking {
+            Asking::Open => Said::Open(
+                THE_STACK
+                    .iter()
+                    .map(|&(number, ..)| of_the_stack(number))
+                    .collect(),
+            ),
+            Asking::Checks => Said::About(PullRequest {
+                mergeable: match asked.number == Some(conflicting) {
+                    true => bottom.to_owned(),
+                    false => "MERGEABLE".to_owned(),
+                },
+                checks: entries_of(GREEN_CHECK),
+                ..numbered
+            }),
+            Asking::OnTheDiff => Said::Nothing,
+            _ => Said::About(numbered),
+        }
+    })
+}
+
+/// The three pull requests of that stack, from the bottom: the number, the
+/// title, the branch and the branch it is against.
+const THE_STACK: [(i64, &str, &str, &str); 3] = [
+    (40, "Stage 01", "stage-01", "main"),
+    (41, "Rate limiting", HEAD_BRANCH, "stage-01"),
+    (42, "Stage 03", "stage-03", HEAD_BRANCH),
+];
+
+/// One of the three, or the middle one for anything that is not one of them —
+/// which is the Conversation's own, and what a question asked by branch is
+/// about.
+fn of_the_stack(number: i64) -> PullRequest {
+    let &(number, title, head, base) = THE_STACK
+        .iter()
+        .find(|&&(one, ..)| one == number)
+        .unwrap_or(&THE_STACK[1]);
+
+    PullRequest {
+        number,
+        title: title.to_owned(),
+        url: format!("https://github.com/tobico/verkstead/pull/{number}"),
+        head: head.to_owned(),
+        base: base.to_owned(),
+        ..the_pull_request()
+    }
 }
 
 /// A conflict low in a three-deep stack sends **one** `addressing` session,
@@ -28712,7 +29447,7 @@ async fn a_conflict_low_in_a_stack_sends_one_session_told_the_whole_chain() {
             Some(&released),
             &resolved,
         ),
-        &gh_stacked_and_conflicting(&resolved, true),
+        gh_stacked_and_conflicting(&resolved, true),
     )
     .await;
 
@@ -28866,7 +29601,7 @@ async fn two_goes_at_a_stack_and_then_the_human() {
     let fixture = taking_up_to_fix(
         spill,
         &a_conflict_and_nothing_beside_it(&reviews, &batches, &dispatched, None, &claimed),
-        &gh_stacked_and_conflicting(&resolved, true),
+        gh_stacked_and_conflicting(&resolved, true),
     )
     .await;
 
@@ -28938,7 +29673,7 @@ async fn a_sandbox_without_the_stack_extension_stops_before_it_spends_a_go() {
     let fixture = taking_up_to_fix(
         spill,
         &a_conflict_and_nothing_beside_it(&reviews, &batches, &dispatched, None, &resolved),
-        &gh_stacked_and_conflicting(&resolved, false),
+        gh_stacked_and_conflicting(&resolved, false),
     )
     .await;
 
@@ -29520,8 +30255,12 @@ async fn typing_into_a_driven_session_changes_nothing_about_when_it_ends() {
     let spill = tempfile::tempdir().unwrap();
     let gate = spill.path().join("go");
 
-    let fixture =
-        grilling_spilling(spill, &a_backlog_held_at(&gate, "sleep 300"), PULL_REQUEST).await;
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_held_at(&gate, "sleep 300"),
+        gh_pull_request(),
+    )
+    .await;
 
     let at = fixture.listening().await;
     let (_watcher, event) = typed_into_at_the_breakdown(&fixture, at).await;
@@ -29591,7 +30330,7 @@ esac
 "#,
             gate = quoted(&gate),
         ),
-        NO_PULL_REQUEST,
+        no_pull_request(),
     )
     .await;
 
@@ -29752,7 +30491,7 @@ async fn a_halt_verkstead_decided_on_tells_the_devices_once() {
 
     // A server coming back sweeps every Conversation before it does anything
     // else, and this one has already stopped.
-    let _restarted = fixture.restarted("true", PULL_REQUEST).await;
+    let _restarted = fixture.restarted("true", gh_pull_request()).await;
 
     // Long enough for that sweep to have looked, and to have said something if
     // it were going to.
@@ -30032,7 +30771,7 @@ async fn a_conversation_a_stopped_server_left_mid_run_is_driven_again_before_the
             printf 'the grilling is running again\n'
             sleep 300
             "#,
-            PULL_REQUEST,
+            gh_pull_request(),
         )
         .await;
 
@@ -30137,7 +30876,7 @@ async fn an_inline_run_that_opened_no_pull_request_leaves_the_conversation_where
             ;;
         esac
         "#,
-        NO_PULL_REQUEST,
+        no_pull_request(),
     )
     .await;
 
@@ -30530,7 +31269,7 @@ async fn resuming_an_inline_run_whose_branch_has_a_pull_request_wraps_it_up_unsp
     let spill = tempfile::tempdir().unwrap();
     let opened = spill.path().join("opened-by-hand");
 
-    let fixture = grilling_spilling(spill, AN_INLINE_RUN, &gh_opened_by_hand(&opened)).await;
+    let fixture = grilling_spilling(spill, AN_INLINE_RUN, gh_opened_by_hand(&opened)).await;
 
     fixture
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
@@ -30625,7 +31364,7 @@ async fn resuming_an_inline_run_with_no_pull_request_builds_the_work_again() {
             ;;
         esac
         "#,
-        NO_PULL_REQUEST,
+        no_pull_request(),
     )
     .await;
 
@@ -30734,7 +31473,7 @@ esac
         opened = quoted(&opened),
     );
 
-    let fixture = grilling_spilling(spill, &stub, &gh_opened_by_hand(&opened)).await;
+    let fixture = grilling_spilling(spill, &stub, gh_opened_by_hand(&opened)).await;
 
     fixture
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
@@ -30841,7 +31580,7 @@ esac
         opened = quoted(&opened),
     );
 
-    let fixture = grilling_spilling(spill, &stub, &gh_opened_by_hand(&opened)).await;
+    let fixture = grilling_spilling(spill, &stub, gh_opened_by_hand(&opened)).await;
 
     fixture
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
@@ -30885,7 +31624,7 @@ esac
 /// the one thing that reaches the human on their phone.
 #[tokio::test]
 async fn resuming_an_inline_run_github_cannot_be_asked_about_halts_unspent() {
-    let fixture = grilling_asking(AN_INLINE_RUN, NOTHING_ASKABLE).await;
+    let fixture = grilling_asking(AN_INLINE_RUN, nothing_askable()).await;
 
     fixture
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
@@ -30897,7 +31636,7 @@ async fn resuming_an_inline_run_github_cannot_be_asked_about_halts_unspent() {
     let first = fixture.stopped().await;
 
     assert!(
-        first.html.contains("isn't logged in"),
+        first.html.contains("no GitHub token that works"),
         "the run stopped because nothing could be asked: {:?}",
         first.html,
     );
@@ -30916,7 +31655,7 @@ async fn resuming_an_inline_run_github_cannot_be_asked_about_halts_unspent() {
         .await;
 
     assert!(
-        again.html.contains("isn't logged in"),
+        again.html.contains("no GitHub token that works"),
         "and it stops on the same thing, named again: {:?}",
         again.html,
     );
@@ -31157,7 +31896,7 @@ async fn resuming_a_halted_wrap_up_watches_the_checks_again_from_no_attempts_spe
     let fixture = grilling_spilling(
         prompts,
         &a_backlog_then_fixes(&written),
-        &gh_checking("FAILURE"),
+        gh_checking("FAILURE"),
     )
     .await;
 
@@ -31356,7 +32095,7 @@ async fn steering_into_implementing_carries_on_a_backlog_whose_worktree_has_gone
     let fixture = grilling_at_pace(
         spill,
         &a_backlog_then_once_then_staying(&remembered),
-        PULL_REQUEST,
+        gh_pull_request(),
         *SWEEPING,
         &[],
     )
@@ -31452,7 +32191,7 @@ async fn steering_a_halted_wrap_up_into_wrapping_watches_the_checks_afresh() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &written, REVIEW_AND_FIND_NOTHING),
-        &gh_checking("FAILURE"),
+        gh_checking("FAILURE"),
     )
     .await;
 
@@ -31545,7 +32284,7 @@ async fn steering_a_done_conversation_into_wrapping_reads_the_branch_afresh() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -31648,7 +32387,7 @@ async fn an_instruction_session_that_commits_wraps_the_pull_request_up_again() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_an_instruction(&reviews),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -31758,7 +32497,7 @@ async fn an_instruction_session_wraps_up_a_pull_request_the_record_never_got() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_an_instruction(&reviews),
-        &gh_opened_by_hand(&opened),
+        gh_opened_by_hand(&opened),
     )
     .await;
 
@@ -32173,10 +32912,14 @@ async fn a_tinker_starts_the_follow_ups_own_session_on_the_brief() {
          being on the name Verkstead invented: {prompt:?}",
     );
     assert!(
-        !prompt.contains("pull request"),
+        prompt.contains("on **no pull request yet**"),
         "and with nothing promising one: the branch was cut a moment ago and is \
-         on none, so the opening sends it to the branch it is standing on: \
-         {prompt:?}",
+         on none, which is what the forge section says of it: {prompt:?}",
+    );
+    assert!(
+        !prompt.contains("follow up on this branch's pull request"),
+        "so the opening sends it to the branch it is standing on rather than to \
+         a pull request: {prompt:?}",
     );
 }
 
@@ -32414,9 +33157,10 @@ async fn an_investigate_starts_the_investigating_session_on_the_brief() {
          being on the name Verkstead invented: {prompt:?}",
     );
     assert!(
-        !prompt.contains("pull request"),
-        "and with nothing promising one: an investigation never ends on one: \
-         {prompt:?}",
+        prompt.contains("on **no pull request yet**"),
+        "and with nothing promising one: an investigation never ends on one, and \
+         the forge section says the branch is on none — what forbids opening one \
+         is the skill it was sent to: {prompt:?}",
     );
 }
 
@@ -32808,7 +33552,7 @@ async fn a_tinker_that_committed_lands_in_wrapping_on_a_pull_request_it_sent_for
     let fixture = tinkering_asking(
         spill,
         &a_tinker_that_commits_and_then_submits(&opened),
-        &gh_opened_by_hand(&opened),
+        gh_opened_by_hand(&opened),
     )
     .await;
 
@@ -32875,6 +33619,200 @@ async fn a_tinker_that_committed_lands_in_wrapping_on_a_pull_request_it_sent_for
         "and nothing stopped anywhere along it: a Tinker that ends is not a run \
          that stopped: {:?}",
         notices(&view),
+    );
+}
+
+/// A `gh` that opens a pull request when it is asked to and answers about it
+/// from then on, writing every `pr create` it was given into `asked`.
+///
+/// Which is the whole of what `verkstead pull-request open` reaches: the verb
+/// is the server asking the Repo's Forge, so what a test about it reads is
+/// what the Forge was asked for — the draft flag, the head, the base and the
+/// title — and what the branch answers to afterwards.
+fn gh_opening_a_pull_request(asked_in: &Path, opened: &Path) -> Github {
+    let (asked_in, opened) = (asked_in.to_owned(), opened.to_owned());
+
+    answering(move |asked| match asked.asking {
+        Asking::Opening => {
+            noted(&asked_in, &asked.body);
+            std::fs::write(&opened, "").expect("a file to say the pull request was opened in");
+
+            Said::About(merging())
+        }
+        _ if !opened.is_file() => Said::Nothing,
+        Asking::Checks => Said::About(merging()),
+        Asking::Open | Asking::OnTheDiff => Said::Nothing,
+        _ => Said::About(PullRequest {
+            head: asked
+                .branch
+                .clone()
+                .unwrap_or_else(|| HEAD_BRANCH.to_owned()),
+            ..merging()
+        }),
+    })
+}
+
+/// A Tinker's round that commits, pushes, says so, and then waits on the human
+/// — the push being what `verkstead pull-request open` is refused without.
+fn a_tinker_that_commits_and_pushes() -> String {
+    format!(
+        "case \"$2\" in\n\
+         *reviewing/SKILL.md*)\n    \
+             printf 'prompt was: %s\\n' \"$2\"\n    \
+             while :; do printf 'reading the branch\\n'; sleep 0.1; done\n    \
+             ;;\n\
+         *)\n    \
+             printf 'a limiter\\n' >> limiter.md\n    \
+             git add -A\n    \
+             git commit --quiet -m 'feat: count what the limiter rejects'\n    \
+             git push --quiet -u origin HEAD\n    \
+             : > {pushed}\n    \
+             SAYING='following it up'\n    \
+             printf '%s\\n' \"$SAYING\"\n    \
+             {WHILE_NOBODY_HAS_ASKED}\n    \
+             while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+             printf 'nothing else then\\n'\n    \
+             : > /tmp/verkstead/done\n    \
+             sleep 300\n    \
+             ;;\n\
+         esac\n",
+        pushed = "/tmp/verkstead/pushed",
+    )
+}
+
+/// What `POST …/api/v1/pull-requests` answered, as the status and the body.
+async fn opening(fixture: &Grilling, body: &str) -> (StatusCode, String) {
+    fetch(
+        &fixture.app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/conversations/{}/api/v1/pull-requests",
+                fixture.id
+            ))
+            .body(Body::from(body.to_owned()))
+            .unwrap(),
+    )
+    .await
+}
+
+/// A session that runs `verkstead pull-request open` has the Repo's Forge open
+/// one as a draft, has it recorded on the Conversation there and then, and the
+/// Tinker it was running in lands in Wrapping over that pull request.
+///
+/// The whole of the subcommand. The session says what the pull request should
+/// hold and nothing about where the Repo's pull requests live: the server reads
+/// the Forge off the remote, asks it as the Repo's Author, writes the row and
+/// the Timeline Event the wrap-up would have written on finding one, and prints
+/// where it is. Which is what makes the skills forge-neutral — the lines that
+/// said `gh pr create --draft` are this one verb now (ADR-0030, *Forge*).
+#[tokio::test]
+async fn a_session_that_opens_its_own_pull_request_lands_the_tinker_in_wrapping_on_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let asked = spill.path().join("asked-to-open");
+    let opened = spill.path().join("opened-by-the-verb");
+
+    let fixture = tinkering_pushing(
+        spill,
+        &a_tinker_that_commits_and_pushes(),
+        gh_opening_a_pull_request(&asked, &opened),
+    )
+    .await;
+
+    // Once the branch is pushed, which is what the verb is refused without.
+    let pushed = handoff_directory(&fixture).join("pushed");
+    fixture.until(|_| pushed.exists().then_some(())).await;
+
+    let (status, body) = opening(
+        &fixture,
+        "title: Rate limiting\nbody: A counter per key.\nbase: main\n",
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "the verb was refused: {body}");
+    assert_eq!(
+        body.trim(),
+        "url: https://github.com/tobico/verkstead/pull/41",
+        "where it is, as YAML and nothing else",
+    );
+
+    // Asked of the Forge as a draft, against the base the verb was given, from
+    // the branch as origin is carrying it.
+    let asked_for = std::fs::read_to_string(&asked).unwrap();
+    for said in [
+        r#""draft":true"#,
+        r#""base":"main""#,
+        r#""title":"Rate limiting""#,
+    ] {
+        assert!(
+            asked_for.contains(said),
+            "the Forge should have been asked for {said:?}, got:\n{asked_for}"
+        );
+    }
+    assert!(
+        asked_for.contains("A counter per key."),
+        "with the body on its stdin: {asked_for}"
+    );
+
+    // Recorded there and then, without the move: the Conversation is still
+    // following up, and what it does about being on a pull request is its
+    // ending's.
+    let view = fixture
+        .until(|view| pull_request(view).map(|_| view.clone()))
+        .await;
+
+    assert_eq!(
+        pull_request(&view).map(|opened| opened.number),
+        Some(41),
+        "the pull request the verb opened is the one on the record",
+    );
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Wrapping).then(|| view.clone()))
+        .await;
+
+    assert_eq!(
+        pull_requests(&view).len(),
+        1,
+        "one pull request, recorded once however many times it was found: {:?}",
+        view.pinned,
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped anywhere along it: {:?}",
+        notices(&view),
+    );
+}
+
+/// A branch origin has never heard of is refused, naming the push: a pull
+/// request's head is a branch on the Forge, so there is nothing to open one
+/// from until the branch is there.
+#[tokio::test]
+async fn opening_a_pull_request_on_an_unpushed_branch_is_refused() {
+    let spill = tempfile::tempdir().unwrap();
+    let prompts = spill.path().join("round-prompts");
+
+    let fixture = tinkering(spill, &a_tinker_round(&prompts)).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|_| ()))
+        .await;
+
+    let (status, body) = opening(&fixture, "title: Rate limiting\n").await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "it opened one: {body}");
+    assert!(
+        body.contains("isn't on origin") && body.contains("git push -u origin HEAD"),
+        "and says what is missing and what puts it right: {body}"
+    );
+    assert_eq!(
+        pull_request(&fixture.view().await),
+        None,
+        "and nothing was recorded",
     );
 }
 
@@ -32945,7 +33883,7 @@ async fn resume_on_a_tinker_that_owes_a_pull_request_sends_for_it_rather_than_an
     let fixture = tinkering_asking(
         spill,
         &a_tinker_whose_submit_stops_short_once(&opened, &asked_twice),
-        &gh_opened_by_hand(&opened),
+        gh_opened_by_hand(&opened),
     )
     .await;
 
@@ -33034,7 +33972,7 @@ async fn a_tinker_that_committed_before_it_lost_its_session_lands_in_wrapping_to
     let fixture = tinkering_asking(
         spill,
         &a_tinker_that_commits_then_loses_its_session(&opened),
-        &gh_opened_by_hand(&opened),
+        gh_opened_by_hand(&opened),
     )
     .await;
 
@@ -33105,7 +34043,7 @@ async fn a_tinker_that_built_nothing_lands_done_with_nothing_dispatched() {
     // A `gh` that says there is no pull request, whatever it is asked: nothing
     // here should ask it anything, and a stub that answered would hide one that
     // did.
-    let fixture = tinkering_asking(spill, &a_tinker_that_builds_nothing(), NO_PULL_REQUEST).await;
+    let fixture = tinkering_asking(spill, &a_tinker_that_builds_nothing(), no_pull_request()).await;
 
     fixture.running().await;
 
@@ -33159,43 +34097,20 @@ async fn a_tinker_that_built_nothing_lands_done_with_nothing_dispatched() {
 /// them once the `submitting` session has pushed — the Conversation's own to make
 /// a wrap-up, and the companion's because the Done signal is refused while one
 /// the work committed in is uncovered.
-fn gh_alongside_opened_when_asked(opened: &Path, companion: &Path) -> String {
-    format!(
-        r#"
-if [ "$1" = api ]; then printf '[]'; exit 0; fi
-if [ "$2" = list ]; then printf '[]'; exit 0; fi
-case "$(pwd -P)" in
-*/askance)
-    if [ ! -f {companion} ]; then
-        printf 'no pull requests found for branch "%s"\n' "$3" >&2
-        exit 1
-    fi
-    printf '{{"mergeable":"MERGEABLE","number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7","headRefName":"%s"}}' "$3"
-    exit 0
-    ;;
-esac
-if [ ! -f {opened} ]; then
-    printf 'no pull requests found for branch "%s"\n' "$3" >&2
-    exit 1
-fi
-case "$5" in
-*statusCheckRollup*)
-    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[]}}'
-    ;;
-*commits*)
-    printf '{{"commits":[],"comments":[]}}'
-    ;;
-*comments*)
-    printf '{{"comments":[],"reviews":[]}}'
-    ;;
-*)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
-    ;;
-esac
-"#,
-        opened = quoted(opened),
-        companion = quoted(companion),
-    )
+fn gh_alongside_opened_when_asked(opened: &Path, companion: &Path) -> Github {
+    let (opened, its_own) = (opened.to_owned(), companion.to_owned());
+
+    answering(move |asked| match asked.repository.as_str() {
+        COMPANION => match its_own.is_file() {
+            true => Said::About(the_companions_pull_request(asked)),
+            false => Said::Nothing,
+        },
+        _ if !opened.is_file() => Said::Nothing,
+        _ => match asked.asking {
+            Asking::Checks => Said::About(merging()),
+            _ => usually(asked),
+        },
+    })
 }
 
 /// A Tinker whose round commits in the companion and nowhere else, and then a
@@ -33257,7 +34172,7 @@ async fn a_tinker_that_committed_only_in_a_companion_lands_in_wrapping_too() {
     let fixture = tinkering_alongside(
         spill,
         &a_tinker_that_commits_in_the_companion_alone(&opened, &alongside),
-        &gh_alongside_opened_when_asked(&opened, &alongside),
+        gh_alongside_opened_when_asked(&opened, &alongside),
         &[("askance", CompanionMode::ReadWrite)],
     )
     .await;
@@ -33330,7 +34245,7 @@ async fn steering_into_follow_up_runs_the_skill_on_the_brief_and_is_never_swept(
     let fixture = grilling_at_pace(
         spill,
         &a_backlog_then_a_follow_up(&reviews, A_ROUND_THEN_WAITING),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
         *SWEEPING,
         &[],
     )
@@ -33430,7 +34345,7 @@ async fn steering_into_investigating_runs_the_skill_on_the_question_it_was_given
     let fixture = grilling_at_pace(
         spill,
         &a_backlog_then_an_investigation(&reviews, &written_to, A_ROUND_THEN_WAITING_TO_BE_TOLD),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
         *SWEEPING,
         &[],
     )
@@ -33547,7 +34462,7 @@ async fn an_investigation_steered_out_of_a_wrap_up_lands_back_in_it() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_an_investigation(&reviews, &written_to, A_ROUND_OVER_SCRATCH_THEN_IDLE),
-        &gh_about(&unknown_until(&merges), "", ""),
+        gh_about(unknown_until(&merges), "", ""),
     )
     .await;
 
@@ -33867,7 +34782,7 @@ async fn a_follow_up_session_that_exits_badly_says_how_it_ended() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_a_follow_up(&reviews, "    printf 'falling over\\n'\n    exit 1"),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -33920,7 +34835,7 @@ async fn a_follow_up_session_that_is_gone_stops_the_conversation() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_a_follow_up(&reviews, "    printf 'nothing more to say\\n'"),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -33995,7 +34910,7 @@ async fn a_follow_up_session_that_finishes_on_the_mark_lands_in_the_wrap_up() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_a_follow_up(&reviews, A_MARKED_ROUND_THEN_GONE),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -34057,7 +34972,7 @@ async fn a_follow_up_ends_on_the_mark_and_lands_back_in_the_wrap_up() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_a_follow_up(&reviews, A_ROUND_THEN_IDLE),
-        &gh_about(&green_until(&running), "", ""),
+        gh_about(green_until(&running), "", ""),
     )
     .await;
 
@@ -34165,7 +35080,7 @@ async fn a_follow_up_that_pushed_nothing_goes_straight_back_to_done() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_a_follow_up(&reviews, A_QUESTION_THEN_IDLE),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -34230,7 +35145,7 @@ async fn a_set_asked_after_the_mark_keeps_the_follow_up_open() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_a_follow_up(&reviews, TWO_ROUNDS_THEN_IDLE),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -34310,7 +35225,7 @@ async fn a_follow_up_signal_without_the_mark_is_refused_and_one_with_it_ends_the
     let fixture = grilling_unrescued(
         spill,
         &a_backlog_then_a_follow_up(&reviews, SIGNALS_BEFORE_THE_MARK),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -34380,7 +35295,7 @@ async fn a_marked_follow_up_that_never_signals_is_not_ended_but_told_it_may_be_d
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_a_follow_up(&reviews, MARKED_THEN_IDLE_UNTIL_TOLD),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -34453,7 +35368,7 @@ async fn a_gone_follow_up_session_takes_the_question_it_left_with_it() {
              printf 'gh: the connection dropped\\n'\n    \
              exit 1",
         ),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -35532,7 +36447,7 @@ async fn a_follow_up_that_goes_idle_without_asking_is_told_to_put_it_to_the_huma
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_a_follow_up(&reviews, IDLE_UNTIL_TOLD),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -35622,7 +36537,7 @@ async fn a_follow_up_session_that_will_not_answer_is_put_to_the_human_and_left_r
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_a_follow_up(&reviews, IDLE_UNTIL_PUT_BACK_TO_WORK),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -35757,7 +36672,7 @@ async fn a_rescue_answered_puts_the_count_back_to_nothing() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_a_follow_up(&reviews, ANSWERS_EVERY_RESCUE),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -37731,7 +38646,7 @@ esac
 "#,
             prompts = quoted(&written),
         ),
-        &gh_checking("FAILURE"),
+        gh_checking("FAILURE"),
     )
     .await;
 
@@ -38031,7 +38946,7 @@ async fn resume_follows_the_work_up_again_on_the_brief_and_the_rounds_answered()
     let reviews = spill.path().join("review-prompts");
     let stub = a_backlog_then_a_follow_up(&reviews, A_ROUND_THEN_GONE);
 
-    let fixture = grilling_spilling(spill, &stub, &gh_about(GREEN, "", "")).await;
+    let fixture = grilling_spilling(spill, &stub, gh_about(GREEN, "", "")).await;
 
     worked_to_empty(&fixture).await;
 
@@ -38061,7 +38976,7 @@ async fn resume_follows_the_work_up_again_on_the_brief_and_the_rounds_answered()
     // A second server over the same database, which is what a restart is. This
     // stop is one Verkstead decided, so it waits for the press rather than being
     // taken up unasked.
-    let restarted = fixture.restarted(&stub, &gh_about(GREEN, "", "")).await;
+    let restarted = fixture.restarted(&stub, gh_about(GREEN, "", "")).await;
 
     tokio::time::sleep(BRISKLY.proposing * 2).await;
 
@@ -38111,7 +39026,7 @@ async fn resume_on_a_marked_follow_up_on_a_pull_request_follows_it_up_again() {
     let reviews = spill.path().join("review-prompts");
     let stub = a_backlog_then_a_follow_up(&reviews, A_MARKED_ROUND_STILL_WORKING);
 
-    let fixture = grilling_spilling(spill, &stub, &gh_about(GREEN, "", "")).await;
+    let fixture = grilling_spilling(spill, &stub, gh_about(GREEN, "", "")).await;
 
     worked_to_empty(&fixture).await;
 
@@ -38184,7 +39099,7 @@ async fn a_restart_follows_the_work_up_again_rather_than_raising_anything() {
     let reviews = spill.path().join("review-prompts");
     let stub = a_backlog_then_a_follow_up(&reviews, A_ROUND_THEN_GONE);
 
-    let fixture = grilling_spilling(spill, &stub, &gh_about(GREEN, "", "")).await;
+    let fixture = grilling_spilling(spill, &stub, gh_about(GREEN, "", "")).await;
 
     worked_to_empty(&fixture).await;
 
@@ -38212,7 +39127,7 @@ async fn a_restart_follows_the_work_up_again_rather_than_raising_anything() {
 
     let before = outputs(&fixture.view().await).len();
 
-    let _restarted = fixture.restarted(&stub, &gh_about(GREEN, "", "")).await;
+    let _restarted = fixture.restarted(&stub, gh_about(GREEN, "", "")).await;
 
     let printed = fixture.printed_after(before).await;
 
@@ -38542,7 +39457,7 @@ async fn steering_a_closed_conversation_checks_its_branch_out_again() {
     let fixture = grilling_spilling(
         prompts,
         &a_backlog_then_fixes(&written),
-        &gh_checking("FAILURE"),
+        gh_checking("FAILURE"),
     )
     .await;
 
@@ -38608,7 +39523,7 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
     let fixture = grilling_spilling(
         prompts,
         &a_backlog_then_fixes(&written),
-        &gh_checking("FAILURE"),
+        gh_checking("FAILURE"),
     )
     .await;
 
@@ -38737,7 +39652,7 @@ async fn steering_a_conversation_whose_worktree_has_gone_makes_it_again() {
     let fixture = grilling_spilling(
         prompts,
         &a_backlog_then_fixes(&written),
-        &gh_checking("FAILURE"),
+        gh_checking("FAILURE"),
     )
     .await;
 
@@ -38814,7 +39729,7 @@ async fn resuming_a_conversation_whose_worktree_has_gone_makes_it_again() {
     let fixture = grilling_at_pace(
         spill,
         &once_then_staying(&remembered),
-        PULL_REQUEST,
+        gh_pull_request(),
         *SWEEPING,
         &[],
     )
@@ -38868,7 +39783,7 @@ async fn resuming_leaves_a_worktree_that_is_still_one_alone() {
     let fixture = grilling_at_pace(
         spill,
         &once_then_staying(&remembered),
-        PULL_REQUEST,
+        gh_pull_request(),
         *SWEEPING,
         &[],
     )
@@ -38910,7 +39825,7 @@ async fn a_worktree_that_cannot_be_made_again_refuses_by_name() {
     let fixture = grilling_at_pace(
         spill,
         &once_then_staying(&remembered),
-        PULL_REQUEST,
+        gh_pull_request(),
         *SWEEPING,
         &[],
     )
@@ -38974,7 +39889,7 @@ async fn resuming_an_emptied_backlog_with_no_pull_request_sends_for_one_again() 
     let fixture = grilling_spilling(
         spill,
         &a_backlog_whose_pull_request_takes_two_asks(&tried, &opened),
-        &gh_opened_by_hand(&opened),
+        gh_opened_by_hand(&opened),
     )
     .await;
 
@@ -39049,7 +39964,7 @@ async fn resuming_an_emptied_backlog_whose_branch_has_a_pull_request_wraps_it_up
     let spill = tempfile::tempdir().unwrap();
     let opened = spill.path().join("opened-by-hand");
 
-    let fixture = grilling_spilling(spill, A_BACKLOG_OF_ONE, &gh_opened_by_hand(&opened)).await;
+    let fixture = grilling_spilling(spill, A_BACKLOG_OF_ONE, gh_opened_by_hand(&opened)).await;
 
     worked_to_empty(&fixture).await;
 
@@ -39158,7 +40073,7 @@ while [ ! -f {gate} ]; do sleep 0.05; done
 "#,
             gate = quoted(&gate),
         ),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -39255,7 +40170,7 @@ async fn a_restarted_server_works_the_backlog_it_was_left_implementing() {
             printf 'prompt was: %s\n' "$2"
             sleep 300
             "#,
-            PULL_REQUEST,
+            gh_pull_request(),
         )
         .await;
 
@@ -39348,7 +40263,7 @@ async fn a_deliberate_halt_survives_a_restart_with_its_badge_intact() {
 
     let before = outputs(&fixture.view().await).len();
 
-    let _restarted = fixture.restarted("true", PULL_REQUEST).await;
+    let _restarted = fixture.restarted("true", gh_pull_request()).await;
 
     // Long enough for the second server to have taken up everything it was going
     // to, and for the sweep that follows it to have looked as well.
@@ -39416,7 +40331,7 @@ async fn a_halt_nobody_chose_is_driven_again_by_the_next_server() {
             printf 'prompt was: %s\n' "$2"
             sleep 300
             "#,
-            PULL_REQUEST,
+            gh_pull_request(),
         )
         .await;
 
@@ -39492,7 +40407,7 @@ async fn a_stop_the_human_pressed_survives_a_restart_quietly() {
                 printf 'prompt was: %s\n' "$2"
                 sleep 300
                 "#,
-                PULL_REQUEST,
+                gh_pull_request(),
             )
             .await;
 
@@ -39555,7 +40470,7 @@ async fn a_stop_the_human_pressed_survives_a_restart_quietly() {
 async fn a_restart_that_can_start_nothing_halts_with_the_refusal_on_the_timeline() {
     let fixture = grilling_asking(
         &a_backlog_that_cannot_open_a_pull_request(),
-        NO_PULL_REQUEST,
+        no_pull_request(),
     )
     .await;
 
@@ -39575,7 +40490,7 @@ async fn a_restart_that_can_start_nothing_halts_with_the_refusal_on_the_timeline
     std::fs::remove_dir_all(&worktree).unwrap();
     std::fs::write(&worktree, "not a worktree\n").unwrap();
 
-    let _restarted = fixture.restarted("true", NO_PULL_REQUEST).await;
+    let _restarted = fixture.restarted("true", no_pull_request()).await;
 
     let refused = fixture
         .until(|view| {
@@ -39724,7 +40639,7 @@ async fn an_answered_deferred_set_is_folded_into_the_next_session_and_no_later_o
     let fixture = grilling_spilling(
         spill,
         &a_backlog_of_two_writing_prompts(&written),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -39838,46 +40753,35 @@ async fn an_answered_deferred_set_is_folded_into_the_next_session_and_no_later_o
 /// requests; this is about what is happening to them afterwards, which is a
 /// different answer per repository — a suite runs against a branch in a
 /// repository, and the two have nothing to do with each other.
-fn gh_alongside_checking(own: &str, companion: &str) -> String {
-    format!(
-        r#"
-if [ "$1" = api ]; then printf '[]'; exit 0; fi
-if [ "$2" = list ]; then printf '[]'; exit 0; fi
-case "$(pwd -P)" in
-*/askance*)
-    case "$5" in
-    *statusCheckRollup*)
-{companion}
-        ;;
-    *commits*)
-        printf '{{"commits":[],"comments":[]}}'
-        ;;
-    *comments*)
-        printf '{{"comments":[],"reviews":[]}}'
-        ;;
-    *)
-        printf '{{"number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7","headRefName":"%s"}}' "$3"
-        ;;
-    esac
-    exit 0
-    ;;
-esac
-case "$5" in
-*statusCheckRollup*)
-{own}
-    ;;
-*commits*)
-    printf '{{"commits":[],"comments":[]}}'
-    ;;
-*comments*)
-    printf '{{"comments":[],"reviews":[]}}'
-    ;;
-*)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
-    ;;
-esac
-"#
-    )
+fn gh_alongside_checking(own: impl Into<Rollup>, companion: impl Into<Rollup>) -> Github {
+    let (own, companion) = (own.into(), companion.into());
+
+    answering(move |asked| match asked.repository.as_str() {
+        COMPANION => match asked.asking {
+            Asking::Checks => on_the_companion(companion.said(), asked),
+            Asking::Open | Asking::OnTheDiff => Said::Nothing,
+            _ => Said::About(the_companions_pull_request(asked)),
+        },
+        _ => match asked.asking {
+            Asking::Checks => own.said(),
+            _ => usually(asked),
+        },
+    })
+}
+
+/// A rollup answer, as the companion's pull request answers it: the same
+/// checks and whether it merges, on the companion's own pull request rather
+/// than on the work's.
+fn on_the_companion(said: Said, asked: &Asked) -> Said {
+    match said {
+        Said::About(about) => Said::About(PullRequest {
+            checks: about.checks,
+            mergeable: about.mergeable,
+            head_oid: about.head_oid,
+            ..the_companions_pull_request(asked)
+        }),
+        said => said,
+    }
 }
 
 /// A red suite, as an answer about the checks — whichever repository it is asked
@@ -39886,16 +40790,17 @@ esac
 /// The same check name in both, which is the whole point of asking twice: `Rust`
 /// red on two pull requests is two different failures, and neither of them
 /// spends the other's attempts.
-const RED: &str = r#"    printf '{"mergeable":"MERGEABLE","statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'"#;
+const RED: &str = r#"{"mergeable":"MERGEABLE","statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}"#;
 
 /// One that is red until `fixed` is there and green once it is, which is what a
 /// fix session that reached the right pull request does to it.
-fn red_until(fixed: &Path) -> String {
-    format!(
-        r#"    if [ -s {fixed} ]; then how=SUCCESS; else how=FAILURE; fi
-    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"%s","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$how""#,
-        fixed = quoted(fixed),
-    )
+fn red_until(fixed: &Path) -> Rollup {
+    let fixed = fixed.to_owned();
+
+    Rollup::reading(move || match read_if_there(&fixed).is_some() {
+        true => GREEN.to_owned(),
+        false => RED.to_owned(),
+    })
 }
 
 /// The backlog worked alongside a companion and carried to two pull requests,
@@ -40007,7 +40912,7 @@ async fn a_red_check_on_a_companions_pull_request_is_fixed_in_that_companions_wo
         spill,
         &a_backlog_alongside_then_fixes(&dispatched, &busy, &own, &companion),
         "askance",
-        &gh_alongside_checking(GREEN, RED),
+        gh_alongside_checking(GREEN, RED),
     )
     .await;
 
@@ -40085,7 +40990,7 @@ async fn two_red_pull_requests_are_fixed_one_session_at_a_time() {
         spill,
         &a_backlog_alongside_then_fixes(&dispatched, &busy, &own, &companion),
         "askance",
-        &gh_alongside_checking(&red_until(&own), &red_until(&companion)),
+        gh_alongside_checking(red_until(&own), red_until(&companion)),
     )
     .await;
 
@@ -40148,7 +41053,7 @@ async fn a_wrap_up_waits_for_every_pull_requests_checks() {
         spill,
         &a_backlog_alongside_then_fixes(&dispatched, &busy, &own, &running),
         "askance",
-        &gh_alongside_checking(GREEN, &green_after(&running)),
+        gh_alongside_checking(GREEN, green_after(&running)),
     )
     .await;
 
@@ -40212,7 +41117,7 @@ async fn a_wrap_up_waits_for_every_pull_request_to_merge() {
         spill,
         &a_backlog_alongside_then_fixes(&dispatched, &busy, &own, &companion),
         "askance",
-        &gh_alongside_checking(GREEN, &green_but_conflicting_until(&resolved)),
+        gh_alongside_checking(GREEN, green_but_conflicting_until(&resolved)),
     )
     .await;
 
@@ -40279,7 +41184,7 @@ async fn a_conflicted_companion_pull_request_is_merged_in_that_companions_worktr
         spill,
         &a_backlog_alongside_then_fixes(&dispatched, &busy, &own, &companion),
         "askance",
-        &gh_alongside_checking(GREEN, &green_but_conflicting_until(&companion)),
+        gh_alongside_checking(GREEN, green_but_conflicting_until(&companion)),
     )
     .await;
 
@@ -40348,9 +41253,9 @@ async fn two_conflicted_pull_requests_are_merged_one_session_at_a_time() {
         spill,
         &a_backlog_alongside_then_fixes(&dispatched, &busy, &own, &companion),
         "askance",
-        &gh_alongside_checking(
-            &green_but_conflicting_until(&own),
-            &green_but_conflicting_until(&companion),
+        gh_alongside_checking(
+            green_but_conflicting_until(&own),
+            green_but_conflicting_until(&companion),
         ),
     )
     .await;
@@ -40416,9 +41321,9 @@ async fn each_resolution_session_is_told_the_strategy_the_settings_file_names() 
         spill,
         &a_backlog_alongside_then_fixes(&dispatched, &busy, &own, &companion),
         "askance",
-        &gh_alongside_checking(
-            &green_but_conflicting_until(&own),
-            &green_but_conflicting_until(&companion),
+        gh_alongside_checking(
+            green_but_conflicting_until(&own),
+            green_but_conflicting_until(&companion),
         ),
     )
     .await;
@@ -40485,7 +41390,7 @@ async fn the_same_check_red_on_two_pull_requests_gets_two_goes_each() {
         spill,
         &a_backlog_alongside_then_fixes(&dispatched, &busy, &own, &companion),
         "askance",
-        &gh_alongside_checking(RED, RED),
+        gh_alongside_checking(RED, RED),
     )
     .await;
 
@@ -40536,73 +41441,69 @@ async fn the_same_check_red_on_two_pull_requests_gets_two_goes_each() {
 ///
 /// The checks are green in both, so that what holds a wrap-up up in these tests
 /// is what was said and nothing else.
-fn gh_alongside_saying(own: &str, companion: &str) -> String {
-    format!(
-        r#"
-if [ "$1" = api ]; then printf '[]'; exit 0; fi
-if [ "$2" = list ]; then printf '[]'; exit 0; fi
-case "$(pwd -P)" in
-*/askance*)
-    case "$5" in
-    *statusCheckRollup*)
-{GREEN}
-        ;;
-    *commits*)
-        printf '{{"commits":[],"comments":[]}}'
-        ;;
-    *comments*)
-{companion}
-        ;;
-    *)
-        printf '{{"number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7","headRefName":"%s"}}' "$3"
-        ;;
-    esac
-    exit 0
-    ;;
-esac
-case "$5" in
-*statusCheckRollup*)
-{GREEN}
-    ;;
-*commits*)
-    printf '{{"commits":[],"comments":[]}}'
-    ;;
-*comments*)
-{own}
-    ;;
-*)
-    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
-    ;;
-esac
-"#
-    )
+fn gh_alongside_saying(own: Conversation, companion: Conversation) -> Github {
+    let green = Rollup::from(GREEN);
+
+    answering(move |asked| match asked.repository.as_str() {
+        COMPANION => match asked.asking {
+            Asking::Checks => on_the_companion(green.said(), asked),
+            Asking::Comments => on_the_companion(companion.said(), asked),
+            Asking::Open | Asking::OnTheDiff => Said::Nothing,
+            _ => Said::About(the_companions_pull_request(asked)),
+        },
+        _ => match asked.asking {
+            Asking::Checks => green.said(),
+            Asking::Comments => own.said(),
+            _ => usually(asked),
+        },
+    })
+}
+
+/// What a bench's GitHub answers about one pull request's conversation: the
+/// comments and the reviews on it, read afresh at every question.
+#[derive(Clone)]
+struct Conversation(Arc<dyn Fn() -> Said + Send + Sync>);
+
+impl Conversation {
+    fn of(said: impl Fn() -> Said + Send + Sync + 'static) -> Conversation {
+        Conversation(Arc::new(said))
+    }
+
+    fn said(&self) -> Said {
+        (self.0)()
+    }
 }
 
 /// Nothing said, as an answer about one pull request's conversation.
-const NOTHING_SAID: &str = r#"    printf '{"comments":[],"reviews":[]}'"#;
+fn nothing_said() -> Conversation {
+    Conversation::of(|| Said::About(the_pull_request()))
+}
 
 /// One comment said in it, `id` being what GitHub calls the comment — which is
 /// what tells one pull request's from another's in the record.
-fn saying(id: &str, body: &str) -> String {
-    format!(
-        r#"    printf '{{"comments":[{{"id":"{id}","author":{{"login":"tobico"}},"body":"{body}","createdAt":"2026-08-21T09:00:00Z"}}],"reviews":[]}}'"#
-    )
+fn saying(id: &str, body: &str) -> Conversation {
+    let one = one_said(&format!(
+        r#"{{"id":"{id}","author":{{"login":"tobico"}},"body":"{body}","createdAt":"2026-08-21T09:00:00Z"}}"#
+    ));
+
+    Conversation::of(move || {
+        Said::About(PullRequest {
+            comments: vec![one.clone()],
+            ..the_pull_request()
+        })
+    })
 }
 
 /// The same, said only once `after` is there with something in it — which is how
 /// a test says a comment landed after the review had started, and so is a batch
 /// session's rather than the review's.
-fn saying_once(after: &Path, id: &str, body: &str) -> String {
-    format!(
-        r#"    if [ -s {after} ]; then
-{said}
-    else
-{nothing}
-    fi"#,
-        after = quoted(after),
-        said = saying(id, body),
-        nothing = NOTHING_SAID,
-    )
+fn saying_once(after: &Path, id: &str, body: &str) -> Conversation {
+    let (after, said) = (after.to_owned(), saying(id, body));
+
+    Conversation::of(move || match read_if_there(&after).is_some() {
+        true => said.said(),
+        false => Said::About(the_pull_request()),
+    })
 }
 
 /// And one that cannot be asked what was said at all until `logged_in` is there,
@@ -40611,17 +41512,13 @@ fn saying_once(after: &Path, id: &str, body: &str) -> String {
 /// An account whose login has expired, which is the ordinary way this goes wrong
 /// on a machine nobody is sitting at — and the one answer that is neither
 /// *something was said* nor *nothing was*.
-fn nothing_said_once_asked(logged_in: &Path) -> String {
-    format!(
-        r#"    if [ -s {logged_in} ]; then
-{nothing}
-    else
-        printf 'gh: To use GitHub CLI, run: gh auth login\n' >&2
-        exit 1
-    fi"#,
-        logged_in = quoted(logged_in),
-        nothing = NOTHING_SAID,
-    )
+fn nothing_said_once_asked(logged_in: &Path) -> Conversation {
+    let logged_in = logged_in.to_owned();
+
+    Conversation::of(move || match read_if_there(&logged_in).is_some() {
+        true => Said::About(the_pull_request()),
+        false => Said::not_logged_in(),
+    })
 }
 
 /// The backlog worked alongside a companion and carried to two pull requests,
@@ -40730,7 +41627,7 @@ async fn a_comment_on_a_companions_pull_request_is_answered_in_that_companions_w
         spill,
         &a_backlog_alongside_then_answers(&reviews, &batches, RESPOND_AND_FIND_NOTHING),
         "askance",
-        &gh_alongside_saying(NOTHING_SAID, &said),
+        gh_alongside_saying(nothing_said(), said),
     )
     .await;
 
@@ -40799,7 +41696,7 @@ async fn a_rule_covers_a_companions_pull_request_as_much_as_the_works_own() {
         spill,
         &a_backlog_alongside_then_answers(&reviews, &batches, RESPOND_AND_FIND_NOTHING),
         "askance",
-        &gh_alongside_saying(NOTHING_SAID, &said),
+        gh_alongside_saying(nothing_said(), said),
     )
     .await;
 
@@ -40855,7 +41752,7 @@ async fn the_review_is_told_every_pull_request_and_where_to_read_it() {
         spill,
         &a_backlog_alongside_then_answers(&reviews, &batches, RESPOND_AND_FIND_NOTHING),
         "askance",
-        &gh_alongside_saying(NOTHING_SAID, NOTHING_SAID),
+        gh_alongside_saying(nothing_said(), nothing_said()),
     )
     .await;
 
@@ -40921,7 +41818,7 @@ async fn the_second_wrap_of_a_split_out_backlog_reviews_every_pull_request_again
             RESPOND_AND_FIND_NOTHING,
         ),
         "askance",
-        &gh_alongside_saying(NOTHING_SAID, NOTHING_SAID),
+        gh_alongside_saying(nothing_said(), nothing_said()),
     )
     .await;
 
@@ -41009,7 +41906,7 @@ async fn a_review_that_accepts_findings_in_two_repositories_lands_them_in_both()
             RESPOND_AND_FIND_NOTHING,
         ),
         "askance",
-        &gh_alongside_saying(NOTHING_SAID, NOTHING_SAID),
+        gh_alongside_saying(nothing_said(), nothing_said()),
     )
     .await;
 
@@ -41108,9 +42005,9 @@ async fn the_review_is_given_what_was_said_on_every_pull_request() {
         spill,
         &a_backlog_alongside_then_answers(&reviews, &batches, RESPOND_AND_FIND_NOTHING),
         "askance",
-        &gh_alongside_saying(
-            &saying("IC_41", "Rename the window field."),
-            &saying("IC_7", "This is the wrong way round."),
+        gh_alongside_saying(
+            saying("IC_41", "Rename the window field."),
+            saying("IC_7", "This is the wrong way round."),
         ),
     )
     .await;
@@ -41169,7 +42066,7 @@ async fn a_wrap_up_waits_for_every_pull_requests_comments() {
         spill,
         &a_backlog_alongside_then_answers(&reviews, &batches, RESPOND_AND_FIND_NOTHING),
         "askance",
-        &gh_alongside_saying(NOTHING_SAID, &nothing_said_once_asked(&logged_in)),
+        gh_alongside_saying(nothing_said(), nothing_said_once_asked(&logged_in)),
     )
     .await;
 
@@ -41233,7 +42130,7 @@ async fn a_conversation_with_no_review_wraps_up_without_one_and_reaches_done() {
     let fixture = grilling_unreviewed(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -41284,7 +42181,7 @@ async fn a_wrap_up_with_no_review_answers_what_was_said_and_narrows_to_its_check
     let fixture = grilling_unreviewed(
         spill,
         &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
-        &gh_about(STILL_RUNNING, THREE_COMMENTS, ""),
+        gh_about(STILL_RUNNING, THREE_COMMENTS, ""),
     )
     .await;
 
@@ -41334,7 +42231,7 @@ async fn a_wrap_up_with_no_review_still_dispatches_a_fix_session_at_a_red_check(
     let fixture = grilling_unreviewed(
         spill,
         &a_backlog_then_fixes(&written),
-        &gh_checking("FAILURE"),
+        gh_checking("FAILURE"),
     )
     .await;
 
@@ -41367,7 +42264,7 @@ async fn a_stage_inherits_the_no_review_its_roadmap_was_grilled_with() {
     let fixture = grilling_unreviewed(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -41406,7 +42303,7 @@ async fn a_stage_inherits_where_its_roadmap_may_be_transferred_to() {
     let fixture = grilling_unreviewed(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -41461,7 +42358,7 @@ async fn a_stage_wanting_this_devices_platform_is_planned_here_unmoved() {
     let fixture = grilling_unreviewed(
         spill,
         &a_roadmap_then_wraps_up(&planning, &worked, &stages, "", ""),
-        &gh_about(GREEN, "", ""),
+        gh_about(GREEN, "", ""),
     )
     .await;
 
@@ -42053,7 +42950,7 @@ async fn closing_a_terminal_ends_its_shell_and_takes_it_off_the_register() {
         printf 'reading the brief\r\n'
         while :; do sleep 0.05; done
         "#,
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -42193,7 +43090,7 @@ async fn a_terminal_says_whether_somebody_is_working_in_it() {
         printf 'reading the brief\r\n'
         while :; do sleep 0.05; done
         "#,
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -42314,7 +43211,7 @@ async fn the_sidebar_row_says_whether_a_terminal_is_running_something() {
         printf 'reading the brief\r\n'
         while :; do sleep 0.05; done
         "#,
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -42867,7 +43764,7 @@ async fn closing_a_conversation_ends_its_terminals_before_the_worktree_goes() {
         printf 'reading the brief\r\n'
         while :; do sleep 0.05; done
         "#,
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -43054,7 +43951,7 @@ async fn a_wrap_up_session_is_refused_a_memo_naming_the_kinds_that_may() {
     let fixture = reviewing_a_branch(
         spill,
         &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
-        &gh_opened_by_hand(&opened),
+        gh_opened_by_hand(&opened),
         None,
         None,
         None,
@@ -43119,7 +44016,7 @@ async fn the_memos_left_are_in_the_prompt_of_every_later_session() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_of_two_writing_prompts(&written),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -43285,7 +44182,7 @@ async fn every_building_session_is_told_to_suggest_a_preview_when_none_stands() 
     let fixture = grilling_spilling(
         spill,
         &a_backlog_of_two_writing_prompts(&written),
-        PULL_REQUEST,
+        gh_pull_request(),
     )
     .await;
 
@@ -43451,7 +44348,7 @@ async fn a_memo_a_task_session_retires_leaves_every_later_prompt() {
         1,
     );
 
-    let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
+    let fixture = grilling_spilling(spill, &stub, gh_pull_request()).await;
 
     let grilling = fixture
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
@@ -44252,8 +45149,10 @@ const ALL_AS_MEANT: &str = "tick first:steered second:done standing:cleanly:open
 async fn a_component_waits_on_sessions_asks_the_forge_and_keeps_the_wrap_ups_records() {
     use verkstead_server::store::WaitingOn;
 
-    let fixture = grilling(
-        r#"
+    let fixture = on_a_forge_declaring(
+        &all_but(verkstead_server::forge::Capability::Checks),
+        grilling(
+            r#"
 case "$2" in
 *"first session waits"*)
     printf 'the first session is waiting\n'
@@ -44270,15 +45169,10 @@ case "$2" in
     ;;
 esac
 "#,
+        ),
     )
     .await;
     fixture.grilling_printed().await;
-
-    fixture
-        .hosting
-        .as_ref()
-        .expect("this bench hosts Activities")
-        .lacking(verkstead_server::forge::Capability::Checks);
 
     let component = std::fs::read(ACTIVITY_FIXTURE).expect("the fixture's component is built");
     let running = fixture.activity_of(component, &[ALL_AS_MEANT], &["verkstead/implementing"]);

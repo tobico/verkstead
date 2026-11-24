@@ -58,22 +58,77 @@ pub struct RepoEntry {
     #[serde(default)]
     pub github: Option<String>,
 
-    /// And the URL of that `origin` remote itself, as git spelled it, where the
-    /// repository has one.
+    /// What its `origin` remote is: the URL git spells for it, and the Forge
+    /// that remote's host matches — or `None` where the remote was not read,
+    /// which is the rows nothing draws a pull request beside.
     ///
-    /// **Only a registration's answer says it**, the way `github` is only the
-    /// list's: everywhere else a Repo is drawn it is `None`, a create's answer
-    /// and a clone's among them. It is there for the one press that registers on
-    /// one machine and clones on another — **Open repo** on an Annex's draft,
-    /// told the repository is on the Keeper (ADR-0024, *Open repo asks where the
-    /// repository is*). The clone is made from this, and it is read off the
-    /// repository the registration has just been over rather than asked for a
-    /// second time.
+    /// **One `git remote get-url` answers both.** The list of Repos reads the
+    /// remote as a row is drawn and a registration's answer carries what the
+    /// registration has just been over, so the URL and the Forge are the one
+    /// reading rather than two. A create's answer and a clone's say `None`,
+    /// there being no remote on a repository just made.
+    #[serde(default)]
+    pub forge: Option<RepoForge>,
+}
+
+/// What a Repo's `origin` remote is: the URL, and the Forge its host matches
+/// (ADR-0030, *Forge*).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct RepoForge {
+    /// The URL of the `origin` remote, as git spelled it, where the repository
+    /// has one.
+    ///
+    /// **What the one press that registers on one machine and clones on
+    /// another clones from** — **Open repo** on an Annex's draft, told the
+    /// repository is on the Keeper (ADR-0024, *Open repo asks where the
+    /// repository is*).
     ///
     /// `None` is a repository with no origin, which is one there is nothing to
     /// clone from: refused on the card, with a sentence saying what to do.
     #[serde(default)]
     pub origin: Option<String>,
+
+    /// Which Forge answers for that remote's host.
+    pub on: ForgeMatch,
+}
+
+/// Which Forge a Repo is on, by its remote's host (ADR-0030, *Forge*).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+#[serde(tag = "kind")]
+pub enum ForgeMatch {
+    /// An enabled Forge answers for its remote's host: the plugin's uuid, its
+    /// name, and the noun it calls a pull request — *pull request*, *merge
+    /// request* — which the viewer says wherever this Repo's is drawn. Whether
+    /// the Repo's Author holds a token for it is the Author's — see
+    /// [`crate::AuthorEntry::tokens`] — which the row reads to say where it
+    /// holds none.
+    On {
+        uuid: String,
+        name: String,
+        noun: String,
+
+        /// What it can do, as its manifest declares — where one is absent,
+        /// the viewer draws nothing that would ask for it, and says so.
+        capabilities: Vec<ForgeCapability>,
+    },
+
+    /// None does: the host the remote names, which the row and the card say
+    /// *No forge for* — or no host, where no Forge is enabled at all.
+    Unmatched { host: Option<String> },
+}
+
+/// Something a Forge can do, in ADR-0030's words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+#[serde(rename_all = "snake_case")]
+pub enum ForgeCapability {
+    Checks,
+    Review,
+    Publish,
+    Stacks,
+    Create,
 }
 
 /// One registered Repo as a member across the link is told of it: the row, and
@@ -346,6 +401,15 @@ pub struct Repointing {
 /// Refused while work that is neither Done nor Closed has the Repo in it, the
 /// rule unregistering follows and for the reason ADR-0025 gives: a branch half
 /// committed as one Author would carry on as another.
+///
+/// One variant carries a whole Repo and the other three carry little or
+/// nothing, which is what the size lint is about — the row's `origin` and the
+/// Forge its remote is on are what make it big. Left as it is for
+/// [`crate::PickedView`]'s reason: these are made one at a time on the way to
+/// being serialized, none of them is held in a collection, and a `Box` in a
+/// view type would be a pointer written into the shape the viewer is generated
+/// from.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Repointed {

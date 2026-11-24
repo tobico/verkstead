@@ -106,6 +106,7 @@ import type {
   TimelineEvent,
   TranscriptView,
   Turn,
+  ForgeCapability,
 } from "../src/api/types";
 // The one menu, which all three of this page's ⋯ and dropdowns are drawn as.
 // The app's own retry rule, which is what a read that gave up on its deadline
@@ -9547,7 +9548,7 @@ describe("the author on the brief", () => {
     display_name: "Home",
     name: "A. L.",
     email: "al@home.example",
-    github_token: null,
+    tokens: [],
   };
   const TWO_AUTHORS: SettingsView = { ...ONE_AUTHOR, authors: [WORK, HOME] };
 
@@ -11796,6 +11797,85 @@ describe("the share pane", () => {
     expect(
       screen.getByText(/This conversation hasn't been published\./),
     ).toBeTruthy();
+  });
+
+  /// A Repo whose remote no forge answers for has nowhere to publish to: the
+  /// download stands, the Publish goes, and the pane says why.
+  it("has no publish on a repo on no forge, and says why", async () => {
+    theGrillingStanding({
+      repo: {
+        ...GRILLING.repo,
+        forge: { origin: null, on: { kind: "Unmatched", host: "git.example.org" } },
+      },
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openShare(container);
+
+    expect(container.querySelector(`.${sharePane.download}`)).not.toBeNull();
+    expect(container.querySelector(`.${sharePane.publish}`)).toBeNull();
+    expect(
+      screen.getByText(
+        "No forge for git.example.org, so there's nowhere to publish the share.",
+      ),
+    ).toBeTruthy();
+  });
+
+  /// And so has a Repo on a forge that declares no `publish`, nor the press
+  /// that publishes to its pull requests.
+  it("has no publish on a repo whose forge can't publish, and says why", async () => {
+    theGrillingStanding({
+      repo: {
+        ...GRILLING.repo,
+        forge: {
+          origin: null,
+          on: {
+            kind: "On",
+            uuid: "x",
+            name: "Workshop",
+            noun: "pull request",
+            capabilities: ["checks", "review"],
+          },
+        },
+      },
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openShare(container);
+
+    expect(container.querySelector(`.${sharePane.download}`)).not.toBeNull();
+    expect(container.querySelector(`.${sharePane.publish}`)).toBeNull();
+    expect(container.querySelector(`.${sharePane.comment}`)).toBeNull();
+    expect(
+      screen.getByText(
+        "Workshop can't publish shares, so there's nowhere to publish this one.",
+      ),
+    ).toBeTruthy();
+  });
+});
+
+describe("a repo on no forge", () => {
+  /// Said where a pull request's card would be, above the record.
+  it("says so where the pull request would be", async () => {
+    theGrillingStanding({
+      repo: {
+        ...GRILLING.repo,
+        forge: { origin: null, on: { kind: "Unmatched", host: "git.example.org" } },
+      },
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const said = await drawn(container, `.${timeline.unforged}`);
+    expect(said.textContent).toBe("No forge for git.example.org");
+  });
+
+  /// And a Repo on a forge says nothing of the kind.
+  it("says nothing on a repo on a forge", async () => {
+    theGrillingStanding({});
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.timeline}`);
+    expect(container.querySelector(`.${timeline.unforged}`)).toBeNull();
   });
 });
 
@@ -18632,6 +18712,58 @@ const SHAPED = {
   Failed: faXmark,
 } as const;
 
+describe("a forge that calls it a merge request", () => {
+  /// The conversation's Repo on a Forge declaring *merge request* (ADR-0030,
+  /// *Forge*): the screen says what the Forge says.
+  const MERGING_REPO = {
+    ...WRAPPING.repo,
+    forge: {
+      origin: null,
+      on: {
+        kind: "On" as const,
+        uuid: "7a3d1f20-5b4e-4c8a-9e61-2d0f4b7c9a35",
+        name: "GitLab",
+        noun: "merge request",
+        capabilities: [
+        "checks",
+        "review",
+        "publish",
+        "stacks",
+        "create",
+        ] as ForgeCapability[],
+      },
+    },
+  };
+
+  it("heads the pinned card and the pane it opens with the forge's noun", async () => {
+    theWrapping({ repo: MERGING_REPO });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
+    expect(opened.querySelector("h2")!.textContent).toBe("Merge Request");
+    expect(opened.textContent).not.toContain("Pull Request");
+
+    fireEvent.click(opened);
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${shell.detailsPane} h1`)?.textContent,
+      ).toBe("Merge Request"),
+    );
+  });
+
+  it("offers the share to the forge's noun", async () => {
+    theWrapping({ repo: MERGING_REPO });
+    const { container } = mount(`/conversations/${WRAPPING.id}/share`);
+
+    await drawn(container, `.${shell.detailsPane} .${sharePane.doing}`);
+    await waitFor(() =>
+      screen.getByRole("button", { name: "Share to merge request" }),
+    );
+    expect(screen.queryByRole("button", { name: "Share to pull request" })).toBeNull();
+  });
+});
+
 describe("the pinned pull request", () => {
   it("says what it is called and what number it answers to", async () => {
     theWrapping();
@@ -20485,7 +20617,7 @@ describe("the configuration on the brief's pane", () => {
       author: null,
       author_unpicked: false,
       github: null,
-      origin: null,
+      forge: null,
     },
     mode: "ReadOnly",
     base_ref: null,
@@ -20506,7 +20638,7 @@ describe("the configuration on the brief's pane", () => {
       author: null,
       author_unpicked: false,
       github: null,
-      origin: null,
+      forge: null,
     },
     mode: "ReadWrite",
     base_ref: "main",

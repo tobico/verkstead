@@ -39,7 +39,6 @@ use verkstead_render::{
 };
 
 use crate::device::Devices;
-use crate::github::Gh;
 use crate::relaying::{self, Call, Streamed, as_json};
 use crate::resolved::{Resolved, resolve};
 use crate::settings::{Author, Config, Signature};
@@ -57,6 +56,7 @@ use crate::unseen::Unseen;
 /// the thread it borrows costs nothing.
 pub(crate) async fn register(
     pool: &SqlitePool,
+    enabled: &[crate::forges::Enabled],
     config: &Config,
     asked: &str,
     author: Option<&str>,
@@ -66,16 +66,14 @@ pub(crate) async fn register(
         Err(refusal) => return Ok(refusal.into()),
     };
 
-    // And this is the one caller that answers with the repository's `origin` —
-    // see [`Registration::reported`], which is where it is put in.
-    Ok(registering(
+    registering(
         pool,
+        enabled,
         config.authors(),
         author.map(Author::id),
         PathBuf::from(asked),
     )
-    .await?
-    .reported())
+    .await
 }
 
 /// Which Author a Repo registered now is recorded as, out of the uuid the
@@ -140,18 +138,14 @@ impl From<Unpicked> for Created {
 /// revived keeps the Author it had — see [`store::register_repo_as`].
 async fn registering(
     pool: &SqlitePool,
+    enabled: &[crate::forges::Enabled],
     authors: &[Author],
     author: Option<&str>,
     asked: PathBuf,
-) -> Result<Registration> {
+) -> Result<Registered> {
     let facts = match tokio::task::spawn_blocking(move || inspect(&asked)).await? {
         Ok(facts) => facts,
-        Err(refusal) => {
-            return Ok(Registration {
-                outcome: *refusal,
-                origin: None,
-            });
-        }
+        Err(refusal) => return Ok(*refusal),
     };
 
     // The Repo goes back either way, because both of these leave one registered
@@ -159,75 +153,36 @@ async fn registering(
     // second read is the price of the insert deciding for itself whether the
     // path was taken: it is asked after the write rather than before it, so
     // nothing here looks first.
-    let outcome = match store::register_repo_as(
-        pool,
-        &facts.path,
-        &facts.name,
-        &facts.default_branch,
-        author,
-    )
-    .await?
-    {
-        Some(repo) => Registered::Added(entry(repo, authors)),
-        None => {
-            let held = store::registered_repo_at(pool, &facts.path)
-                .await?
-                // The insert refused because a row that nobody has flagged
-                // holds this path, and unregistering flags rather than
-                // deletes — so the row is there. Nothing left to answer with
-                // if it is not, which is a broken store rather than an
-                // outcome to put in front of anybody.
-                .with_context(|| {
-                    format!(
-                        "the Repo at {} is registered but could not be read back",
-                        facts.path.display()
-                    )
-                })?;
+    Ok(
+        match store::register_repo_as(
+            pool,
+            &facts.path,
+            &facts.name,
+            &facts.default_branch,
+            author,
+        )
+        .await?
+        {
+            Some(repo) => Registered::Added(forged(enabled, entry(repo, authors)).await),
+            None => {
+                let held = store::registered_repo_at(pool, &facts.path)
+                    .await?
+                    // The insert refused because a row that nobody has flagged
+                    // holds this path, and unregistering flags rather than
+                    // deletes — so the row is there. Nothing left to answer with
+                    // if it is not, which is a broken store rather than an
+                    // outcome to put in front of anybody.
+                    .with_context(|| {
+                        format!(
+                            "the Repo at {} is registered but could not be read back",
+                            facts.path.display()
+                        )
+                    })?;
 
-            Registered::AlreadyRegistered(entry(held, authors))
-        }
-    };
-
-    Ok(Registration {
-        outcome,
-        origin: facts.origin,
-    })
-}
-
-/// What a registration came to, and the URL of the `origin` remote git named
-/// while it was being asked about the repository.
-///
-/// **The origin travels beside the outcome rather than inside it**, because
-/// [`registering`] is where a create and a clone register as well and neither of
-/// those answers with an origin — only the registration endpoint does, for the
-/// press that registers on the Keeper and clones on the Annex (see
-/// [`RepoEntry::origin`]). So it is put into the Repo by the one caller that
-/// reports it, and the other two take the outcome and leave it.
-struct Registration {
-    outcome: Registered,
-    origin: Option<String>,
-}
-
-impl Registration {
-    /// The outcome with that origin filled into the Repo it carries — both
-    /// outcomes that carry one, a path registered already being the repository
-    /// somebody named and the same clone to make.
-    ///
-    /// Off the reading [`inspect`] already made rather than a second
-    /// `git remote get-url`: the registration has just been over this
-    /// repository, and the origin is one more thing git was asked about while it
-    /// was there.
-    fn reported(self) -> Registered {
-        let origin = self.origin;
-
-        match self.outcome {
-            Registered::Added(repo) => Registered::Added(RepoEntry { origin, ..repo }),
-            Registered::AlreadyRegistered(repo) => {
-                Registered::AlreadyRegistered(RepoEntry { origin, ..repo })
+                Registered::AlreadyRegistered(forged(enabled, entry(held, authors)).await)
             }
-            refused => refused,
-        }
-    }
+        },
+    )
 }
 
 /// A stored Repo as the viewer's list draws one.
@@ -250,21 +205,51 @@ pub(crate) fn entry(repo: store::Repo, authors: &[Author]) -> RepoEntry {
         author_unpicked: unpicked(repo.author.as_deref(), authors),
         author: repo.author,
         github: None,
-        origin: None,
+        forge: None,
     }
 }
 
-/// And the same row with the GitHub repository its origin is filled in: what
-/// the list of Repos draws, and nothing else.
+/// And the same row with its `origin` remote read in: the GitHub repository it
+/// is, and the Forge its host matches.
 ///
-/// One `git remote get-url` per Repo, which is the list's cost and no other
-/// page's — see [`RepoEntry::github`].
-pub(crate) fn listed(repo: store::Repo, authors: &[Author]) -> RepoEntry {
-    let github = origin(&repo.path).and_then(|origin| crate::matching::github_repository(&origin));
+/// **One `git remote get-url` per Repo answers both** — the list's cost and no
+/// other page's, which is why the two are read together rather than each
+/// asking git for the same URL. See [`RepoEntry::forge`].
+///
+/// The Forge is matched against `enabled` — the Forges enabled as the list is
+/// read — which is what the row says *No forge for* where none answers.
+pub(crate) fn listed(
+    repo: store::Repo,
+    authors: &[Author],
+    forge: &dyn crate::forges::Forge,
+    enabled: &[crate::forges::Enabled],
+) -> RepoEntry {
+    let origin = origin(&repo.path);
+    let github = origin
+        .as_deref()
+        .and_then(|origin| forge.repository_of(origin));
+    let matched = crate::forges::matched(enabled, origin.as_deref());
 
     RepoEntry {
         github,
+        forge: Some(matched.drawn(origin)),
         ..entry(repo, authors)
+    }
+}
+
+/// The same row with its `origin` remote read in — what the registry's own
+/// pane is handed back after a press on it, so the row it redraws says what
+/// the list does.
+///
+/// One reading here too, the URL the match was made against going back with
+/// it: a registration's answer is what the press that clones on an Annex
+/// clones from — see [`RepoForge::origin`].
+async fn forged(enabled: &[crate::forges::Enabled], entry: RepoEntry) -> RepoEntry {
+    let forge = crate::forges::drawn_for(enabled, Path::new(&entry.path)).await;
+
+    RepoEntry {
+        forge: Some(forge),
+        ..entry
     }
 }
 
@@ -296,7 +281,7 @@ fn unpicked(author: Option<&str>, authors: &[Author]) -> bool {
 /// **And where `github` is asked for, a fifth thing: the same repository on
 /// GitHub.** `gh repo create`, private, sourced from the directory it has just
 /// made, with `origin` written and `main` pushed — see
-/// [`crate::github::create_repository`]. Run after the first commit, there being
+/// [`crate::forges::Forge::create_repository`]. Run after the first commit, there being
 /// nothing to push before it, and before the registration, so that what is read
 /// back is a Repo with its remote on it.
 ///
@@ -314,8 +299,9 @@ fn unpicked(author: Option<&str>, authors: &[Author]) -> bool {
 /// rare enough that the thread it borrows costs nothing.
 pub(crate) async fn create(
     pool: &SqlitePool,
+    enabled: &[crate::forges::Enabled],
     config: &Config,
-    gh: &Gh,
+    gh: &dyn crate::forges::Forge,
     creation: &Creation,
     at_once: usize,
 ) -> Result<Created> {
@@ -361,8 +347,18 @@ pub(crate) async fn create(
     // return: a repository that is on somebody's disk is made, whatever GitHub
     // said about it, and taking the local one back over a token that has
     // expired would be the worse of the two mistakes.
+    // The Forge it is made on is the first enabled, which is the one a Repo
+    // with no remote is on: and one that declares no `create` makes nothing,
+    // the repository being made here only and the answer saying so.
+    let creating = enabled.first();
+
     let unpushed = match github {
         false => None,
+        true if !creating.is_some_and(|forge| forge.has(crate::forges::Capability::Create)) => {
+            Some(crate::forges::createless(
+                creating.map(|forge| forge.name.as_str()),
+            ))
+        }
         true => {
             // As the Author it was committed as, whose Repo it is about to be.
             let gh = gh.as_author(picked.map(Author::id));
@@ -378,14 +374,12 @@ pub(crate) async fn create(
             let awaited = picked.is_some_and(|author| config.token_awaited(author.id()));
 
             if awaited {
-                Some(crate::github::awaited())
+                Some(crate::forges::awaited())
             } else if gh.tokened() {
-                tokio::task::spawn_blocking(move || {
-                    crate::github::create_repository(&gh, &dir, &called)
-                })
-                .await?
-                .err()
-                .map(|trouble| trouble.why())
+                tokio::task::spawn_blocking(move || gh.create_repository(&dir, &called))
+                    .await?
+                    .err()
+                    .map(|trouble| trouble.why())
             } else {
                 Some(untokened(authors, picked))
             }
@@ -396,12 +390,8 @@ pub(crate) async fn create(
     // what was just made is a repository like any other, and a second way of
     // taking one on would be a second chance for the two to come apart.
     //
-    // The outcome alone: a repository made a moment ago has no remote yet, and a
-    // create answers with the Repo rather than with what git would clone it from
-    // — see [`Registration`].
-    let registered = registering(pool, authors, picked.map(Author::id), path.clone())
-        .await?
-        .outcome;
+    let registered =
+        registering(pool, enabled, authors, picked.map(Author::id), path.clone()).await?;
 
     let (Registered::Added(repo) | Registered::AlreadyRegistered(repo)) = registered else {
         // A repository this call made a moment ago, with a commit on `main`,
@@ -617,8 +607,9 @@ fn is_a_name(name: &str) -> bool {
 /// patience, as it is for a local press.
 pub(crate) async fn clone(
     pool: &SqlitePool,
+    enabled: &[crate::forges::Enabled],
     config: &Config,
-    gh: &Gh,
+    gh: &dyn crate::forges::Forge,
     cloning: &verkstead_render::Cloning,
 ) -> Result<Cloned> {
     let authors = config.authors();
@@ -629,7 +620,7 @@ pub(crate) async fn clone(
     };
 
     if picked.is_some_and(|author| config.token_awaited(author.id())) {
-        return Ok(Cloned::Refused(crate::github::awaited()));
+        return Ok(Cloned::Refused(crate::forges::awaited()));
     }
 
     let credential = gh.as_author(picked.map(Author::id)).credential();
@@ -658,7 +649,9 @@ pub(crate) async fn clone(
     if let Resolved::At(there) = resolve(&path)
         && let Some(held) = store::registered_repo_at(pool, &there).await?
     {
-        return Ok(Cloned::AlreadyRegistered(entry(held, authors)));
+        return Ok(Cloned::AlreadyRegistered(
+            forged(enabled, entry(held, authors)).await,
+        ));
     }
 
     let into = path.clone();
@@ -687,12 +680,7 @@ pub(crate) async fn clone(
     }
 
     Ok(
-        // The origin is the registration endpoint's to report and not this
-        // one's, so the outcome is taken and it is left — see [`Registration`].
-        match registering(pool, authors, picked.map(Author::id), path.clone())
-            .await?
-            .outcome
-        {
+        match registering(pool, enabled, authors, picked.map(Author::id), path.clone()).await? {
             Registered::Added(repo) => Cloned::Cloned(repo),
             Registered::AlreadyRegistered(repo) => Cloned::AlreadyRegistered(repo),
             refusal => {
@@ -724,13 +712,13 @@ pub(crate) async fn clone(
 /// `\\?\C:\…`, which the process can stand in and git cannot be handed.
 ///
 /// **Authenticated the way the rest of Verkstead's own git is** — see
-/// [`crate::github::Credential`]: the Author's token and no other, the host's
+/// [`crate::forges::Credential`]: the Author's token and no other, the host's
 /// login where it holds none. And GitHub's SSH spellings rewritten to HTTPS, as
 /// a session's are — see [`crate::sandbox::github_credentials`] — so an origin a
 /// member cloned over SSH is fetched here with the token rather than with keys
 /// this machine may not have. Only the rewrites of those: the helper there
 /// answers out of `gh`'s own login where `GH_TOKEN` is missing, which is the
-/// host's login a [`Credential`](crate::github::Credential) exists to keep out.
+/// host's login a [`Credential`](crate::forges::Credential) exists to keep out.
 /// Said as `-c` on the command line rather than in the environment, which may
 /// be carrying counted pairs of its own.
 ///
@@ -740,7 +728,7 @@ fn cloned_by(
     origin: &str,
     parent: &Path,
     name: &str,
-    credential: &crate::github::Credential,
+    credential: &crate::forges::Credential,
 ) -> Command {
     let mut command = Command::new("git");
 
@@ -760,7 +748,7 @@ fn cloned_by(
 /// are. A plugin's clone and pull go the same way (ADR-0030).
 pub(crate) fn reaching_as<'c>(
     command: &'c mut Command,
-    credential: &crate::github::Credential,
+    credential: &crate::forges::Credential,
 ) -> &'c mut Command {
     for (key, value) in crate::sandbox::github_credentials() {
         if key.ends_with(".insteadOf") {
@@ -825,11 +813,6 @@ struct Facts {
     path: PathBuf,
     name: String,
     default_branch: String,
-
-    /// The `origin` remote's URL, where there is one: not recorded anywhere, and
-    /// handed back on the registration's answer for the press that clones from
-    /// it on another machine — see [`RepoEntry::origin`].
-    origin: Option<String>,
 }
 
 /// Everything the filesystem and git have to say about a path someone wants
@@ -852,7 +835,6 @@ fn inspect(asked: &Path) -> Result<Facts, Box<Registered>> {
     Ok(Facts {
         name: name(&path),
         default_branch,
-        origin: origin(&path),
         path,
     })
 }
@@ -975,6 +957,7 @@ pub(crate) async fn remove(pool: &SqlitePool, id: i64) -> Result<RepoRemoved> {
 /// reads the Author at launch, so the next one is the new Author's.
 pub(crate) async fn repoint(
     pool: &SqlitePool,
+    enabled: &[crate::forges::Enabled],
     config: &Config,
     id: i64,
     author: &str,
@@ -984,7 +967,9 @@ pub(crate) async fn repoint(
     }
 
     Ok(match store::repoint_repo(pool, id, author).await? {
-        store::Repointing::Repointed(repo) => Repointed::Repointed(entry(repo, config.authors())),
+        store::Repointing::Repointed(repo) => {
+            Repointed::Repointed(forged(enabled, entry(repo, config.authors())).await)
+        }
         store::Repointing::NoSuchRepo => Repointed::NoSuchRepo,
         store::Repointing::InUse { on, beside } => Repointed::InUse { on, beside },
     })
@@ -1073,7 +1058,7 @@ pub(crate) async fn repoint_authors(
 
     for one in pointing {
         let why = match &one.on {
-            None => match repoint(pool, &config, one.id, to).await? {
+            None => match repoint(pool, &[], &config, one.id, to).await? {
                 Repointed::Repointed(_) | Repointed::NoSuchRepo => None,
                 Repointed::NoSuchAuthor => Some(Unrepointing::NoSuchAuthor),
                 Repointed::InUse { on, beside } => Some(Unrepointing::InUse { on, beside }),
@@ -1447,14 +1432,14 @@ mod tests {
     /// SSH rewrites a session's sandbox configures, with nobody asked for
     /// anything — and never `gh`'s own helper, which would answer as the host.
     ///
-    /// [`Credential`]: crate::github::Credential
+    /// [`Credential`]: crate::forges::Credential
     #[test]
     fn a_clone_authenticates_as_its_author() {
         let command = cloned_by(
             "git@github.com:you/widgets.git",
             Path::new("/srv/repos"),
             "widgets",
-            &crate::github::Credential::token("ghp_thetoken"),
+            &crate::forges::Credential::token("ghp_thetoken"),
         );
 
         assert_eq!(
@@ -1505,7 +1490,7 @@ mod tests {
             "https://github.com/you/widgets",
             Path::new("/srv"),
             "w",
-            &crate::github::Credential::host(),
+            &crate::forges::Credential::host(),
         );
 
         assert_eq!(set(&command, "GH_TOKEN"), None);

@@ -631,7 +631,7 @@ fn listed(paths: &[String]) -> String {
 /// name the branch was pushed as, so that in a stack it is this branch's own
 /// pull request that is asked about.
 ///
-/// **GitHub out of reach reads as accepted.** No `gh`, no account, no remote, a
+/// **GitHub out of reach reads as accepted.** No account, no remote, a
 /// rate limit or an answer nobody can read: none of them is GitHub saying there
 /// is no pull request, and a session is not to be held hostage by somebody
 /// else's outage. What comes after the session asks again either way.
@@ -647,7 +647,10 @@ async fn unopened(state: &AppState, conversation_id: i64) -> Option<String> {
 
     match found {
         Ok(_) => None,
-        Err(crate::github::Trouble::NoPullRequest) => Some(format!(
+        // A Repo on no Forge has no pull request to open, so the signal is
+        // taken as it stands.
+        Err(crate::forges::Trouble::NoForge(_)) => None,
+        Err(crate::forges::Trouble::NoPullRequest) => Some(format!(
             "this session is not done yet: the branch `{branch}` has no open pull request. Push \
              it and open one the way the repository's own review process says, then run \
              `verkstead done` again"
@@ -700,20 +703,26 @@ async fn uncovered(state: &AppState, conversation_id: i64) -> Option<String> {
     let mut missing = Vec::new();
 
     for companion in committed {
+        // On no Forge, there is no pull request to hold the signal for.
+        if let crate::forges::Matched::Unmatched { .. } =
+            crate::forges::of(state, &companion.path).await
+        {
+            continue;
+        }
+
         let asked = {
             let gh = state.github.as_author(companion.author.as_deref());
             let repo = companion.path.clone();
             let head = companion.head.clone();
 
-            // Off the runtime's threads: `gh` is a process, and one that goes to
+            // Off the runtime's threads: a Forge call blocks, and one that goes to
             // the network.
-            tokio::task::spawn_blocking(move || crate::github::pull_request(&gh, &repo, &head))
-                .await
+            tokio::task::spawn_blocking(move || gh.pull_request(&repo, &head)).await
         };
 
         match asked {
             Ok(Ok(_)) => {}
-            Ok(Err(crate::github::Trouble::NoPullRequest)) => missing.push(format!(
+            Ok(Err(crate::forges::Trouble::NoPullRequest)) => missing.push(format!(
                 "`{}`, where the branch is `{}`",
                 companion.name, companion.head
             )),
@@ -729,7 +738,7 @@ async fn uncovered(state: &AppState, conversation_id: i64) -> Option<String> {
                 error = ?error,
                 conversation_id,
                 repo = companion.name,
-                "asking gh for a companion's pull request failed, so the Done signal is taken \
+                "asking the Forge for a companion's pull request failed, so the Done signal is taken \
                  without it"
             ),
         }

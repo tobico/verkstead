@@ -30,6 +30,15 @@
 //! A record whose token was cleared, or that was removed, takes the copy away.
 //! A member not answering leaves the copy as it stands, and it is used
 //! (ADR-0025).
+//!
+//! **One token per Forge per Author** (ADR-0030, *Forge*), and the record
+//! changed additively for it (Set 1878, Q5): `holds_token` and `token_digest`
+//! go on meaning the built-in GitHub's token, so an older member of the
+//! cluster still reads and copies it right, and `forge_tokens` beside them
+//! holds the digest of every other Forge's. Each is copied on its own, by the
+//! Forge's uuid.
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -43,6 +52,7 @@ use verkstead_schema::Nudge;
 use super::Replicating;
 use crate::AppState;
 use crate::peer::authors::TOKEN;
+use crate::plugins::built_in::GITHUB;
 use crate::relaying::{Read, asking, word_from};
 use crate::settings::{Author, Recorded, Settings};
 use crate::store::replicated::{self, Kind, Written};
@@ -127,7 +137,7 @@ pub(crate) fn listed(settings: &Settings) -> Vec<AuthorEntry> {
             display_name: author.display_name().unwrap_or_default().to_owned(),
             name: author.name().unwrap_or_default().to_owned(),
             email: author.email().unwrap_or_default().to_owned(),
-            holds_token: secrets.author_token(author.id()).is_some(),
+            tokens: secrets.author_tokens_of(author.id()).into_keys().collect(),
         })
         .collect()
 }
@@ -154,35 +164,72 @@ pub struct Fields {
     /// Which token that is — see [`digest`] — so a rotation is a write to the
     /// record, and a copy of the token it replaced is known for one. Absent on
     /// a record written before there was one, whose copy is taken as current.
+    ///
+    /// These two are the built-in GitHub's token, and stay so: they are what
+    /// an older member reads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_digest: Option<String>,
+
+    /// And the digest of the token held for every other Forge, by the Forge
+    /// plugin's uuid — empty where it holds none but GitHub's. Never GitHub's,
+    /// which is the two fields above.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub forge_tokens: BTreeMap<String, String>,
 }
 
 impl Fields {
-    fn of(author: &Author, token: Option<&str>) -> Fields {
+    /// The fields of `author`, holding a token for each Forge of `tokens` —
+    /// this device's file's, by Forge uuid.
+    fn of(author: &Author, tokens: &BTreeMap<String, String>) -> Fields {
+        let github = tokens.get(GITHUB);
+
         Fields {
             display_name: author.display_name().map(str::to_owned),
             name: author.name().map(str::to_owned),
             email: author.email().map(str::to_owned),
-            holds_token: token.is_some(),
-            token_digest: token.map(digest),
+            holds_token: github.is_some(),
+            token_digest: github.map(|token| digest(token)),
+            forge_tokens: tokens
+                .iter()
+                .filter(|(forge, _)| *forge != GITHUB)
+                .map(|(forge, token)| (forge.clone(), digest(token)))
+                .collect(),
         }
     }
 
-    /// And with the token as `held` says it, rather than as a file does.
+    /// And with the tokens as `held` says them, rather than as a file does.
     fn keeping_the_token_of(self, held: &Fields) -> Fields {
         Fields {
             holds_token: held.holds_token,
             token_digest: held.token_digest.clone(),
+            forge_tokens: held.forge_tokens.clone(),
             ..self
         }
     }
 
-    /// Whether `copy`, a token this device holds for it, is the one it names.
-    fn names(&self, copy: &str) -> bool {
-        self.token_digest
-            .as_deref()
-            .is_none_or(|named| named == digest(copy))
+    /// The Forges it says a token is held for, each with the digest naming
+    /// which — `None` for a GitHub token recorded before there was one.
+    pub fn tokens(&self) -> BTreeMap<String, Option<String>> {
+        let mut tokens: BTreeMap<String, Option<String>> = self
+            .forge_tokens
+            .iter()
+            .map(|(forge, named)| (forge.clone(), Some(named.clone())))
+            .collect();
+
+        if self.holds_token {
+            tokens.insert(GITHUB.to_owned(), self.token_digest.clone());
+        }
+
+        tokens
+    }
+
+    /// Whether `copy`, a token this device holds for it for `forge`, is the
+    /// one it names.
+    fn names(&self, forge: &str, copy: &str) -> bool {
+        match self.tokens().get(forge) {
+            Some(named) => named.as_deref().is_none_or(|named| named == digest(copy)),
+            None => false,
+        }
     }
 
     fn author(&self, uuid: &str) -> Author {
@@ -231,8 +278,8 @@ pub async fn taken_up(pool: &SqlitePool, settings: &Settings, device: &str) -> R
                 authors
                     .into_iter()
                     .map(|author| {
-                        let token = secrets.author_token(author.id());
-                        (author.id().to_owned(), Fields::of(&author, token))
+                        let tokens = secrets.author_tokens_of(author.id());
+                        (author.id().to_owned(), Fields::of(&author, &tokens))
                     })
                     .collect::<Vec<_>>(),
             )
@@ -294,9 +341,9 @@ async fn held_over(pool: &SqlitePool, settings: &Settings, only: Option<String>)
         .await?
         .into_iter()
         .map(|record| {
-            Recorded::of(
+            Recorded::holding(
                 record.fields.author(&record.uuid),
-                record.fields.holds_token,
+                record.fields.tokens().into_keys().collect::<BTreeSet<_>>(),
             )
         })
         .collect();
@@ -358,15 +405,14 @@ async fn writing(
 ) -> Result<Written> {
     taken_up(pool, settings, device).await?;
 
-    let token = {
+    let tokens = {
         let settings = settings.clone();
         let id = author.id().to_owned();
 
-        tokio::task::spawn_blocking(move || settings.secrets().author_token(&id).map(str::to_owned))
-            .await?
+        tokio::task::spawn_blocking(move || settings.secrets().author_tokens_of(&id)).await?
     };
 
-    let fields = Fields::of(author, token.as_deref());
+    let fields = Fields::of(author, &tokens);
 
     // A record already held keeps its token's word where this write has none,
     // and a new one says what this device's file holds.
@@ -418,9 +464,9 @@ pub async fn removed(
 
     let settings = settings.clone();
     let id = id.to_owned();
-    tokio::task::spawn_blocking(move || settings.setting_author_token(&id, None))
+    tokio::task::spawn_blocking(move || settings.clearing_author_tokens(&id))
         .await?
-        .context("taking a removed Author's token out of secrets.yaml")?;
+        .context("taking a removed Author's tokens out of secrets.yaml")?;
 
     Ok(true)
 }
@@ -451,16 +497,16 @@ pub(crate) async fn copied(state: &AppState) -> Result<()> {
 
     let mut copies = Vec::new();
 
-    for (record, writer) in wanted {
-        let copy = match record.fields.holds_token && !record.removed() {
+    for (record, forge, writer) in wanted {
+        let copy = match record.fields.tokens().contains_key(&forge) && !record.removed() {
             false => None,
-            true => match fetched(state, &record.uuid, &record.fields, &writer).await {
+            true => match fetched(state, &record.uuid, &forge, &record.fields, &writer).await {
                 Some(token) => Some(token),
                 None => continue,
             },
         };
 
-        copies.push((record.uuid, copy));
+        copies.push((record.uuid, forge, copy));
     }
 
     if copies.is_empty() {
@@ -476,21 +522,24 @@ pub(crate) async fn copied(state: &AppState) -> Result<()> {
         let secrets = settings.secrets();
         let mut moved = false;
 
-        for (uuid, copy) in copies {
+        for (uuid, forge, copy) in copies {
             let Some(record) = records.iter().find(|record| record.uuid == uuid) else {
                 continue;
             };
-            let held = secrets.author_token(&uuid);
+            let held = secrets.author_token_on(&uuid, &forge);
+            let named = record.fields.tokens().contains_key(&forge) && !record.removed();
 
-            let token = match (copy, record.fields.holds_token && !record.removed()) {
+            let token = match (copy, named) {
                 (None, false) if held.is_some() => None,
-                (Some(token), true) if record.fields.names(&token) && held != Some(&*token) => {
+                (Some(token), true)
+                    if record.fields.names(&forge, &token) && held != Some(&*token) =>
+                {
                     Some(token)
                 }
                 _ => continue,
             };
 
-            settings.setting_author_token(&uuid, token)?;
+            settings.setting_author_token_on(&uuid, &forge, token)?;
             moved = true;
         }
 
@@ -506,9 +555,10 @@ pub(crate) async fn copied(state: &AppState) -> Result<()> {
     Ok(())
 }
 
-/// The records whose token this device's copy is out of line with, each with
-/// the device that wrote it — removed ones included, whose copy goes.
-async fn wanted(state: &AppState) -> Result<Vec<(replicated::Record<Fields>, String)>> {
+/// The records whose token for a Forge this device's copy is out of line
+/// with, each with that Forge and the device that wrote it — removed ones
+/// included, whose copies go.
+async fn wanted(state: &AppState) -> Result<Vec<(replicated::Record<Fields>, String, String)>> {
     let records = replicated::records::<Authors>(&state.pool).await?;
     let settings = state.settings.clone();
 
@@ -517,17 +567,30 @@ async fn wanted(state: &AppState) -> Result<Vec<(replicated::Record<Fields>, Str
 
         records
             .into_iter()
-            .filter(|record| {
-                let held = secrets.author_token(&record.uuid);
+            .flat_map(|record| {
+                let held = secrets.author_tokens_of(&record.uuid);
+                let named = match record.removed() {
+                    true => BTreeMap::new(),
+                    false => record.fields.tokens(),
+                };
 
-                match record.fields.holds_token && !record.removed() {
-                    false => held.is_some(),
-                    true => held.is_none_or(|copy| !record.fields.names(copy)),
-                }
-            })
-            .map(|record| {
-                let writer = record.written_by.clone();
-                (record, writer)
+                // Every Forge either side names: one the record names and
+                // this device holds no current copy of, and one this device
+                // holds a copy of that the record no longer names.
+                let forges: BTreeSet<String> = held.keys().chain(named.keys()).cloned().collect();
+
+                forges
+                    .into_iter()
+                    .filter(|forge| match (named.contains_key(forge), held.get(forge)) {
+                        (false, held) => held.is_some(),
+                        (true, None) => true,
+                        (true, Some(copy)) => !record.fields.names(forge, copy),
+                    })
+                    .map(|forge| {
+                        let writer = record.written_by.clone();
+                        (record.clone(), forge, writer)
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect()
     })
@@ -539,7 +602,13 @@ async fn wanted(state: &AppState) -> Result<Vec<(replicated::Record<Fields>, Str
 /// The token named by `fields` for the Author `uuid`, from the first member
 /// that holds it — `writer` first, where it is a member — or `None` where no
 /// member answering does.
-async fn fetched(state: &AppState, uuid: &str, fields: &Fields, writer: &str) -> Option<String> {
+async fn fetched(
+    state: &AppState,
+    uuid: &str,
+    forge: &str,
+    fields: &Fields,
+    writer: &str,
+) -> Option<String> {
     let devices = state.devices.as_ref()?;
 
     let mut members: Vec<String> = match devices.membership().rows().await {
@@ -557,12 +626,13 @@ async fn fetched(state: &AppState, uuid: &str, fields: &Fields, writer: &str) ->
     members.sort_by_key(|member| member != writer);
 
     for member in members {
-        match token_at(Some(devices), &member, uuid).await {
-            Ok(Some(token)) if fields.names(&token) => return Some(token),
+        match token_at(Some(devices), &member, uuid, forge).await {
+            Ok(Some(token)) if fields.names(forge, &token) => return Some(token),
             Ok(_) => {}
             Err(why) => tracing::debug!(
                 device = member,
                 author = uuid,
+                forge,
                 "a member's copy of an Author's token could not be read: {}",
                 why.saying,
             ),
@@ -572,21 +642,26 @@ async fn fetched(state: &AppState, uuid: &str, fields: &Fields, writer: &str) ->
     None
 }
 
-/// The token the member at `device` holds for the Author `id`, `None` where it
-/// holds none — or the refusal naming the machine, which is a member not
-/// answering, a caller it holds no membership for, or a uuid it holds no live
-/// record of (ADR-0025).
+/// The token the member at `device` holds for the Author `id` for the Forge
+/// `forge`, `None` where it holds none — or the refusal naming the machine,
+/// which is a member not answering, a caller it holds no membership for, or a
+/// uuid it holds no live record of (ADR-0025).
+///
+/// **The Forge rides as a query**, which an older member ignores and answers
+/// with its one GitHub token: the digest it is checked against is what keeps
+/// that answer from being copied as another Forge's.
 ///
 /// Public for the suite that stands devices up and asks it.
 pub async fn token_at(
     devices: Option<&crate::device::Devices>,
     device: &str,
     id: &str,
+    forge: &str,
 ) -> Result<Option<String>, crate::Refusal> {
     let said: AuthorToken = word_from(
         devices,
         device,
-        asking(TOKEN.replace("{author}", id)),
+        asking(format!("{}?forge={forge}", TOKEN.replace("{author}", id))),
         MOST_A_TOKEN_IS,
     )
     .await?;
@@ -807,6 +882,49 @@ mod tests {
         assert_eq!(absent, Written::Absent);
     }
 
+    /// The record says GitHub's token in the two fields an older member reads,
+    /// and every other Forge's in the map beside them; and what it says is
+    /// held reads back as one set of Forges either way.
+    #[test]
+    fn a_record_says_githubs_token_where_it_always_did_and_the_others_beside() {
+        const GITEA: &str = "7a3d1f20-5b4e-4c8a-9e61-2d0f4b7c9a35";
+
+        let tokens = BTreeMap::from([
+            (GITHUB.to_owned(), "ghp_work".to_owned()),
+            (GITEA.to_owned(), "gta_work".to_owned()),
+        ]);
+        let fields = Fields::of(&author("work", "Ada"), &tokens);
+
+        assert!(fields.holds_token);
+        assert_eq!(fields.token_digest, Some(digest("ghp_work")));
+        assert_eq!(
+            fields.forge_tokens,
+            BTreeMap::from([(GITEA.to_owned(), digest("gta_work"))])
+        );
+        assert_eq!(
+            fields.tokens().into_keys().collect::<Vec<_>>(),
+            [GITEA.to_owned(), GITHUB.to_owned()],
+            "by uuid"
+        );
+        assert!(fields.names(GITEA, "gta_work"));
+        assert!(!fields.names(GITEA, "ghp_work"), "never another Forge's");
+
+        // A record an older member wrote: the two fields alone, a digest or
+        // not, which is GitHub's.
+        let older: Fields = serde_json::from_str(r#"{"name":"Ada","holds_token":true}"#).unwrap();
+        assert_eq!(older.tokens(), BTreeMap::from([(GITHUB.to_owned(), None)]));
+        assert!(older.names(GITHUB, "anything"), "taken as current");
+        assert!(!older.names(GITEA, "anything"));
+
+        // And one holding a second Forge's alone says no GitHub token to it.
+        let only = Fields::of(
+            &author("work", "Ada"),
+            &BTreeMap::from([(GITEA.to_owned(), "gta_work".to_owned())]),
+        );
+        assert!(!only.holds_token);
+        assert_eq!(only.token_digest, None);
+    }
+
     /// A Repo registered with no Author on the list, recording none.
     async fn recording_none(pool: &SqlitePool) -> i64 {
         crate::store::register_repo(
@@ -855,7 +973,7 @@ mod tests {
                 updated_at: 1,
                 deleted_at: None,
                 written_by: "other-device".into(),
-                fields: Fields::of(&author("theirs", "Grace"), None),
+                fields: Fields::of(&author("theirs", "Grace"), &BTreeMap::new()),
             }],
         )
         .await

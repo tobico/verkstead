@@ -36,7 +36,8 @@ use verkstead_server::platform::Platform;
 use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
-use verkstead_server::{Agents, Gh, open_database, router_running_sessions, store};
+use verkstead_server::stand_in::Forge;
+use verkstead_server::{Agents, open_database, router_running_sessions, store};
 
 use crate::stub_harness::{self, StubHarness};
 
@@ -253,7 +254,7 @@ impl Workbench {
             pool.clone(),
             dir.path().to_owned(),
             agents,
-            Gh::running(vec!["/bin/false".to_owned()]),
+            Forge::unanswerable(),
         );
 
         Workbench {

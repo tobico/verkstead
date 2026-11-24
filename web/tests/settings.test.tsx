@@ -49,6 +49,7 @@ import { App } from "../src/App";
 import type {
   AuthorSaved,
   ConflictResolution,
+  ForgeToken,
   ConversationEntry,
   Nudge,
   ProfileEntry,
@@ -88,6 +89,7 @@ import { stream, streaming } from "./streaming";
 import { listenForNudges } from "../src/nudge";
 import { CLIENT, oneList } from "./authors";
 import { authorLabel } from "../src/authors";
+import { GITHUB } from "../src/forges";
 import conversations from "./fixtures/conversations.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
@@ -123,6 +125,11 @@ const FIRST_REPO = REPOS[0]!;
 const SIDEBAR = conversations as ConversationEntry[];
 const UNSET = unset as SettingsView;
 const SAVED = saved as SettingsSaved;
+
+/// The built-in GitHub's token among `tokens`, which is the one a read with a
+/// single forge enabled holds.
+const githubToken = (tokens: ForgeToken[]) =>
+  tokens.find(({ forge }) => forge === GITHUB)?.saved;
 
 /// The sidebar's one setting, off — which is where a workbench nobody has
 /// archived anything in stands.
@@ -222,7 +229,7 @@ describe("the card", () => {
     const status = await theLine(container);
 
     expect(status.textContent).toMatch(
-      new RegExp(` · token …${TOLD.github_token!.last_four}$`),
+      new RegExp(` · token …${githubToken(TOLD.tokens)!.last_four}$`),
     );
     expect(screen.queryByText(/2026-08-03/)).toBeNull();
   });
@@ -237,7 +244,7 @@ describe("the card", () => {
     const status = await theLine(container);
 
     expect(status.textContent).toBe(
-      `${TOLD.git_author.name} · token …${TOLD.github_token!.last_four}`,
+      `${TOLD.git_author.name} · token …${githubToken(TOLD.tokens)!.last_four}`,
     );
     expect(status.classList).not.toContain(line.warn);
     expect(screen.queryByText(new RegExp(TOLD.git_author.email))).toBeNull();
@@ -375,7 +382,7 @@ describe("what is not configured", () => {
         container.querySelector(`.${styles.gitCard} .${line.status}`)!
           .textContent,
       ).toBe(
-        `${SAVED.settings.git_author.name} · token …${SAVED.settings.github_token!.last_four}`,
+        `${SAVED.settings.git_author.name} · token …${githubToken(SAVED.settings.tokens)!.last_four}`,
       ),
     );
 
@@ -525,7 +532,7 @@ describe("saving", () => {
           ...TOLD.git_author,
           email: "ada@analytical.engine",
         },
-        github_token: "Keep",
+        tokens: [],
         // The rules ride along as an action rather than a value: nothing this
         // form does says anything about them — see [`IgnoredCommentsEdit`].
         ignored_comments: "Keep",
@@ -556,7 +563,7 @@ describe("saving", () => {
           email: "ada@example.com",
         },
       },
-      verified: null,
+      verified: [],
       refused: [],
       refused_servers: [],
       tried: [],
@@ -592,9 +599,7 @@ describe("saving", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
-      expect((sent(fetching) as { github_token: unknown }).github_token).toBe(
-        "Keep",
-      ),
+      expect((sent(fetching) as { tokens: unknown }).tokens).toEqual([]),
     );
   });
 
@@ -609,9 +614,9 @@ describe("saving", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
-      expect((sent(fetching) as { github_token: unknown }).github_token).toEqual(
-        { Set: { token: TOKEN } },
-      ),
+      expect((sent(fetching) as { tokens: unknown }).tokens).toEqual([
+        { forge: GITHUB, token: { Set: { token: TOKEN } } },
+      ]),
     );
   });
 
@@ -632,14 +637,18 @@ describe("saving", () => {
   });
 
   /// A token can be whose it should be and still not do what Verkstead needs of
-  /// it. Publishing a share writes a secret gist, which is the `gist` scope, and
-  /// a token issued for reading repositories does not carry it — so the pane
-  /// says so here, where the human already is, rather than leaving it to be
-  /// found by a press on a conversation weeks later.
-  it("says which scope a verified token is missing", async () => {
+  /// it: short of the scopes the GitHub plugin declares, it is refused and not
+  /// saved — so the pane says so here, naming what to tick, where the human
+  /// already is.
+  it("says a token short of the declared scopes was not saved, naming them", async () => {
     const unscoped: SettingsSaved = {
-      settings: SAVED.settings,
-      verified: { Account: { login: "ada", missing: ["gist"] } },
+      settings: UNSET,
+      verified: [
+        {
+          forge: GITHUB,
+          verified: { Short: { login: "ada", missing: ["repo", "gist"] } },
+        },
+      ],
       refused: [],
       refused_servers: [],
       tried: [],
@@ -653,13 +662,11 @@ describe("saving", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    // Whose it is, and what it may not do: two lines, because they are two
-    // different things to do about it.
-    await waitFor(() => screen.getByText(/GitHub says it's/));
-    await waitFor(() => screen.getByText(/It can't publish a share/));
+    await waitFor(() => screen.getByText(/Not saved: the token for/));
     expect(container.querySelector(`.${styles.scope}`)!.textContent).toBe(
-      "gist",
+      "repo, gist",
     );
+    expect(screen.queryByText(/GitHub says it's/)).toBeNull();
   });
 
   /// And a token that can do everything asked of it says nothing extra, which
@@ -675,7 +682,7 @@ describe("saving", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => screen.getByText(/GitHub says it's/));
-    expect(screen.queryByText(/It can't publish a share/)).toBeNull();
+    expect(screen.queryByText(/Not saved/)).toBeNull();
   });
 
   /// A token GitHub would not vouch for is saved all the same — it is pasted
@@ -684,11 +691,16 @@ describe("saving", () => {
   it("says in words why a token could not be verified, and shows it stored", async () => {
     const unverified: SettingsSaved = {
       settings: SAVED.settings,
-      verified: {
-        Refused: {
-          why: "The gh command said: gh: Bad credentials (HTTP 401).",
+      verified: [
+        {
+          forge: GITHUB,
+          verified: {
+            Refused: {
+              why: "The gh command said: gh: Bad credentials (HTTP 401).",
+            },
+          },
         },
-      },
+      ],
       refused: [],
       refused_servers: [],
       tried: [],
@@ -758,9 +770,9 @@ describe("replacing and clearing the token", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
-      expect((sent(fetching) as { github_token: unknown }).github_token).toEqual(
-        { Set: { token: TOKEN } },
-      ),
+      expect((sent(fetching) as { tokens: unknown }).tokens).toEqual([
+        { forge: GITHUB, token: { Set: { token: TOKEN } } },
+      ]),
     );
 
     await waitFor(() => screen.getByRole("button", { name: "Replace" }));
@@ -774,8 +786,9 @@ describe("replacing and clearing the token", () => {
     const cleared: SettingsSaved = {
       settings: {
         git_author: TOLD.git_author,
-        github_token: null,
-        authors: TOLD.authors.map((one) => ({ ...one, github_token: null })),
+        tokens: [],
+        forges: TOLD.forges,
+        authors: TOLD.authors.map((one) => ({ ...one, tokens: [] })),
         // Untouched by this form, and so untouched in what the save answers
         // with — see the sections below it for what does change these.
         languages: TOLD.languages,
@@ -789,7 +802,7 @@ describe("replacing and clearing the token", () => {
         mcp_servers: TOLD.mcp_servers,
         instructions: "Keep",
       },
-      verified: null,
+      verified: [],
       refused: [],
       refused_servers: [],
       tried: [],
@@ -803,7 +816,7 @@ describe("replacing and clearing the token", () => {
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         git_author: TOLD.git_author,
-        github_token: "Clear",
+        tokens: [{ forge: GITHUB, token: "Clear" }],
         // The rules ride along as an action rather than a value: nothing this
         // form does says anything about them — see [`IgnoredCommentsEdit`].
         ignored_comments: "Keep",
@@ -846,6 +859,57 @@ describe("replacing and clearing the token", () => {
 /// settings.rs` is what says which comments a rule matches and which rules are
 /// refused. This side's job is to draw the rows, to send the list, and to put
 /// the answer where the row it is about is.
+describe("a token per forge", () => {
+  /// A second Forge enabled is a second token under each Author (ADR-0030,
+  /// *Forge*): a section of its own, labelled with the forge's name, under
+  /// GitHub's — its declared scopes said where GitHub's list stands.
+  const GITEA = "7a3d1f20-5b4e-4c8a-9e61-2d0f4b7c9a35";
+  const TWO_FORGES: SettingsView = {
+    ...TOLD,
+    forges: [
+      ...TOLD.forges,
+      { uuid: GITEA, name: "Gitea", scopes: ["write:repository"] },
+    ],
+  };
+
+  it("draws a token field for each enabled forge, named for it", async () => {
+    theSettings(TWO_FORGES);
+    const { container } = mountPane();
+
+    await waitFor(() => screen.getByText("Gitea Token"));
+    screen.getByText("GitHub Token");
+    expect(container.querySelector(`#token-${GITEA}`)).not.toBeNull();
+    screen.getByText("write:repository");
+  });
+
+  /// And a token typed there is sent under that forge's uuid alone, leaving
+  /// GitHub's where it was.
+  it("sends a token typed for the second forge under its own uuid", async () => {
+    const fetching = theSettings(TWO_FORGES, json(SAVED));
+    const { container } = mountPane();
+    await waitFor(() => screen.getByText("Gitea Token"));
+
+    fireEvent.input(container.querySelector(`#token-${GITEA}`)!, {
+      target: { value: "gta_thetoken" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect((sent(fetching) as { tokens: unknown }).tokens).toEqual([
+        { forge: GITEA, token: { Set: { token: "gta_thetoken" } } },
+      ]),
+    );
+  });
+
+  /// And the card says which forge an Author has no token for.
+  it("says on the card which forge's token is missing", async () => {
+    theSettings(TWO_FORGES);
+    const { container } = mountCard();
+
+    expect((await theLine(container)).textContent).toBe("No Gitea token");
+  });
+});
+
 describe("the ignore rules", () => {
   /// The row a rule is drawn as, by where it stands: the two boxes in the order
   /// the section holds them.
@@ -869,7 +933,7 @@ describe("the ignore rules", () => {
   function turnedDown(...refused: SettingsSaved["refused"]): SettingsSaved {
     return {
       settings: TOLD,
-      verified: null,
+      verified: [],
       refused,
       refused_servers: [],
       tried: [],
@@ -1140,7 +1204,7 @@ describe("the ignore rules", () => {
         ...SAVED.settings,
         ignored_comments: [{ author: "", body: "^nit:" }],
       },
-      verified: null,
+      verified: [],
       refused: [],
       refused_servers: [],
       tried: [],
@@ -1162,7 +1226,7 @@ describe("the ignore rules", () => {
 /// says anything about the rules.
 const answering = (standing: SettingsView): SettingsSaved => ({
   settings: standing,
-  verified: null,
+  verified: [],
   refused: [],
   refused_servers: [],
   tried: [],
@@ -1206,7 +1270,7 @@ describe("sharing on Done", () => {
         // The author as the server holds it, and the token untouched: a tick is
         // not a submit.
         git_author: TOLD.git_author,
-        github_token: "Keep",
+        tokens: [],
         share_on_done: false,
         // The rules ride along as an action rather than a value: a tick says
         // nothing about them — see [`ruleEdit`].
@@ -1327,7 +1391,7 @@ describe("how a conflict is resolved", () => {
         // The author as the server holds it, and the token untouched: a pick is
         // not a submit either.
         git_author: TOLD.git_author,
-        github_token: "Keep",
+        tokens: [],
         ignored_comments: "Keep",
         mcp_servers: "Keep",
         conflict_resolution: "Merge",
@@ -1436,7 +1500,12 @@ const SECOND: AuthorSaved = {
   display_name: "",
   name: "Toby Cohen",
   email: "toby@example.com",
-  github_token: { last_four: "home", at: TOLD.github_token!.at },
+  tokens: [
+    {
+      forge: GITHUB,
+      saved: { last_four: "home", at: githubToken(TOLD.tokens)!.at },
+    },
+  ],
 };
 
 /// And the settings with both: the first Author named *Work* for its rows,
@@ -1458,7 +1527,7 @@ const ELSEWHERE: SettingsView = {
       display_name: CLIENT.display_name,
       name: CLIENT.name,
       email: CLIENT.email,
-      github_token: null,
+      tokens: [],
     },
   ],
 };
@@ -1692,7 +1761,7 @@ describe("the authors", () => {
       ...TOLD,
       authors: [
         TOLD.authors[0]!,
-        { ...TOLD.authors[0]!, id: CLIENT.id, github_token: null },
+        { ...TOLD.authors[0]!, id: CLIENT.id, tokens: [] },
       ],
     };
     theSettings(twice);
@@ -1844,7 +1913,7 @@ describe("the authors", () => {
     expect(
       (screen.getByLabelText("Display name") as HTMLInputElement).placeholder,
     ).toBe(SECOND.name);
-    screen.getByText(SECOND.github_token!.last_four);
+    screen.getByText(githubToken(SECOND.tokens)!.last_four);
   });
 
   /// What was typed about one Author was typed about that one: switching drops
@@ -1891,7 +1960,7 @@ describe("the authors", () => {
     const fetching = theSettings(TWO, json({
       ...SAVED,
       settings: TWO,
-      verified: { Account: { login: "toby", missing: [] } },
+      verified: [{ forge: GITHUB, verified: { Account: { login: "toby" } } }],
     }));
     mountPane();
     await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
@@ -1908,10 +1977,12 @@ describe("the authors", () => {
 
     const edit = sent(fetching) as {
       git_author: { id: string };
-      github_token: unknown;
+      tokens: unknown;
     };
     expect(edit.git_author.id).toBe(SECOND.id);
-    expect(edit.github_token).toEqual({ Set: { token: TOKEN } });
+    expect(edit.tokens).toEqual([
+      { forge: GITHUB, token: { Set: { token: TOKEN } } },
+    ]);
 
     // And nothing of it under the first.
     await pickAuthor("Work");
@@ -1952,13 +2023,15 @@ describe("the authors", () => {
     await waitFor(() => sent(fetching));
     const edit = sent(fetching) as {
       git_author: { id: string; display_name: string; email: string };
-      github_token: unknown;
+      tokens: unknown;
     };
     expect(edit.git_author.id).toMatch(MINTED);
     expect(TWO.authors.map((one) => one.id)).not.toContain(edit.git_author.id);
     expect(edit.git_author.display_name).toBe("Client");
     expect(edit.git_author.email).toBe("ada@client.example");
-    expect(edit.github_token).toEqual({ Set: { token: TOKEN } });
+    expect(edit.tokens).toEqual([
+      { forge: GITHUB, token: { Set: { token: TOKEN } } },
+    ]);
   });
 
   /// And an Author added and never filled in is nobody: the rest of the form
@@ -1975,7 +2048,7 @@ describe("the authors", () => {
     await waitFor(() =>
       expect(sent(fetching)).toMatchObject({
         git_author: TOLD.git_author,
-        github_token: "Keep",
+        tokens: [],
       }),
     );
   });
@@ -1990,7 +2063,7 @@ describe("the authors", () => {
   });
 
   it("says on the card which Author is missing a token", async () => {
-    theSettings({ ...TWO, authors: [TWO.authors[0]!, { ...SECOND, github_token: null }] });
+    theSettings({ ...TWO, authors: [TWO.authors[0]!, { ...SECOND, tokens: [] }] });
     const { container } = mountCard();
 
     expect((await theLine(container)).textContent).toBe(

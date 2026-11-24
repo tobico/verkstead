@@ -6,8 +6,9 @@
 //! the Skill Pack `verkstead` first, then Codex and the six Language plugins,
 //! each Language plugin saying the languages it provides. A built-in has no
 //! Remove, and is always on, so its row has no checkbox — but for a Language
-//! plugin, whose tick is whether sessions get its languages, and an Agent
-//! plugin, whose tick is whether its harness is offered. An installer's own
+//! plugin, whose tick is whether sessions get its languages, an Agent plugin,
+//! whose tick is whether its harness is offered, and a Forge, whose tick is
+//! whether a Repo's remote is matched against it. An installer's own
 //! language — a `languages:`
 //! entry of this device's `config.yaml` that no plugin provides — is a row
 //! under Installed, saying where it comes from, with no Update or Remove: the
@@ -386,7 +387,8 @@ export function PluginsPane(props: {
                           pressing={enable.isPending}
                           flip={
                             row.languages.length > 0 ||
-                            row.provides.includes("agent")
+                            row.provides.includes("agent") ||
+                            row.provides.includes("forge")
                               ? (enabled) =>
                                   enable.mutate({ uuid: row.uuid, enabled })
                               : undefined
@@ -418,7 +420,8 @@ function Row(props: {
   of: PluginRow;
   pressing: boolean;
   /// Its checkbox, where it has one: every installed plugin, and a built-in
-  /// only where it is a Language or an Agent plugin — the rest are always on.
+  /// only where it is a Language, an Agent or a Forge plugin — the rest are
+  /// always on.
   flip?: (enabled: boolean) => void;
   /// **Update**, where the row has one: a git plugin, or a local plugin on
   /// this device.
@@ -762,6 +765,12 @@ function asked(capability: PluginCapability): JSX.Element {
       );
     case "Conversations":
       return <>Start conversations of its own</>;
+    case "Secrets":
+      return (
+        <>
+          Read a secret Verkstead keeps for it, as <code>{capability.name}</code>
+        </>
+      );
   }
 }
 

@@ -942,6 +942,37 @@ impl host::Host for Lent {
             },
         };
 
+        // And which Forge the Repo is on, under whatever the Activity built:
+        // the skills name no forge's own tool, so this is where a session is
+        // told which forge its pull request is opened on, what that forge
+        // calls one, whether the branch is on one already, the branch its work
+        // goes into, and whether a chain of them stacks there. Here rather
+        // than in each prompt builder, for the listings' reason — this is the
+        // one place every session is launched from — and read off the remote
+        // and off the record at the launch, as every other reading of a Repo's
+        // Forge is. See [`crate::skills::forged`].
+        //
+        // The base is the record's, with the Repo's own default branch where
+        // it holds none, which is the rule every other reading of that column
+        // is under — see [`crate::pull_requests`], which opens against the
+        // same branch.
+        let opened = store::pull_request(&state.pool, conversation_id, conversation.repo.id)
+            .await
+            .unwrap_or_else(|error| {
+                tracing::error!(error = ?error, conversation_id, "reading whether the branch is on a pull request to say so failed");
+                None
+            });
+
+        let prompt = crate::skills::forged(
+            &prompt,
+            &crate::forges::of(&state, &conversation.repo.path).await,
+            conversation
+                .base_ref
+                .as_deref()
+                .unwrap_or(&conversation.repo.default_branch),
+            opened.as_ref(),
+        );
+
         // And whatever the human has since answered on this Conversation's
         // Deferred Asks that no session has been told about — under everything
         // above. Never into a grilling, which is primed with every Set already:
@@ -1642,9 +1673,9 @@ impl host::Host for Lent {
             return Ok(Vec::new());
         };
 
-        let said: Vec<crate::github::Comment> = comments
+        let said: Vec<crate::forges::Comment> = comments
             .into_iter()
-            .map(|comment| crate::github::Comment {
+            .map(|comment| crate::forges::Comment {
                 which: comment.which,
                 author: comment.author,
                 at: comment.at,

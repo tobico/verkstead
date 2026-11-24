@@ -126,7 +126,7 @@ export function useWritingPaths() {
         // The rest of both files as they stand: the endpoint writes them whole,
         // and a paths editor has no business with any of it.
         git_author: heldAuthor(standing),
-        github_token: "Keep",
+        tokens: [],
         // And what becomes of an archived Conversation — see [`heldCleanup`].
         cleanup: heldCleanup(standing),
         // And how much Verkstead runs at once, likewise — see [`heldAtOnce`].

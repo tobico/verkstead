@@ -48,11 +48,10 @@ use verkstead_render::{
     Dependency, DependencyState, DependencyView, Distro, OnboardingView, PrefillView,
     ProfileAccount, Seen, Source,
 };
-use verkstead_server::github::Gh;
 use verkstead_server::onboarding::Machine;
 use verkstead_server::platform::{Environment, Platform};
 use verkstead_server::store::{Account, AgentType, ProfileFacts};
-use verkstead_server::{open_database, router_onboarding_asking_github, store};
+use verkstead_server::{open_database, router_onboarding, store};
 
 /// A program that is there and does nothing, which is the whole of what a row
 /// probed by a `PATH` walk asks of one.
@@ -158,7 +157,9 @@ fn served_holding(dir: &Path, pool: &SqlitePool, programs: &[(&str, &str)], held
     )
     .called(HOSTNAME.to_owned());
 
-    router_onboarding_asking_github(pool.clone(), dir.to_owned(), machine, host_gh(dir, held))
+    host_gh(dir, held);
+
+    router_onboarding(pool.clone(), dir.to_owned(), machine)
 }
 
 /// What a start is holding that is neither on its `PATH` nor in its Data
@@ -171,13 +172,13 @@ struct Held {
     host_login: Option<&'static str>,
 }
 
-/// The `gh` this server reaches GitHub through: one that answers `gh auth
-/// token` with the login it is holding, or one that is logged into nothing.
+/// A `gh` on the machine that is logged in as somebody, or is logged into
+/// nothing — which the server never asks either way (Set 1878, Q3).
 ///
 /// Written outside the `PATH` the probes walk, because it is not that question:
 /// whether this machine has a `gh` is a row on the dependencies step, and this
-/// is the `gh` the server itself runs.
-fn host_gh(dir: &Path, held: Held) -> Gh {
+/// is a `gh` nothing here runs at all.
+fn host_gh(dir: &Path, held: Held) {
     let path = dir.join("host-gh");
 
     program(
@@ -189,8 +190,6 @@ fn host_gh(dir: &Path, held: Held) -> Gh {
             None => "#!/bin/sh\nexit 1\n".to_owned(),
         },
     );
-
-    Gh::running(vec![path.to_string_lossy().into_owned()])
 }
 
 /// The one directory on a session's `PATH` here: where this suite's programs

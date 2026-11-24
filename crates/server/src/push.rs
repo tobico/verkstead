@@ -245,8 +245,9 @@ pub(crate) enum News {
     SignedOut { profile: String },
 
     /// The work the Conversation was for is on a pull request, and the wrap-up
-    /// has started.
-    OnAPullRequest { number: i64 },
+    /// has started — `noun` being what the Repo's Forge calls one, which the
+    /// title says (ADR-0030, *Forge*).
+    OnAPullRequest { number: i64, noun: String },
 
     /// The stage after the one that just settled has started, on a Conversation
     /// of its own — which is this one.
@@ -300,7 +301,7 @@ impl News {
             // The account rather than the branch: one login unblocks every run
             // on it, so the account is what the human has to go and fix.
             News::SignedOut { profile } => format!("{profile} has signed out."),
-            News::OnAPullRequest { number } => format!("{branch} is on pull request #{number}."),
+            News::OnAPullRequest { number, noun } => format!("{branch} is on {noun} #{number}."),
             // Read by the stage rather than by the branch: a stage is a
             // Conversation whose name in the human's head is its number in the
             // roadmap, and the branch is named after that anyway.
@@ -1019,7 +1020,14 @@ mod tests {
             News::SignedOut {
                 profile: "implementation".to_owned(),
             },
-            News::OnAPullRequest { number: 41 },
+            News::OnAPullRequest {
+                number: 41,
+                noun: "pull request".to_owned(),
+            },
+            News::OnAPullRequest {
+                number: 41,
+                noun: "merge request".to_owned(),
+            },
             News::StageStarted {
                 label: "01".to_owned(),
                 roadmap: "rate-limiting".to_owned(),
@@ -1077,6 +1085,25 @@ mod tests {
             titles.len(),
             said.len(),
             "two of these read the same: {said:?}"
+        );
+    }
+
+    /// A pull request is named in the word its Repo's Forge calls one: GitHub's
+    /// reads as it always did, and a Forge declaring *merge request* says so.
+    #[test]
+    fn a_pull_request_is_named_in_its_forges_word() {
+        let on = |noun: &str| {
+            News::OnAPullRequest {
+                number: 41,
+                noun: noun.to_owned(),
+            }
+            .title("rate-limiting")
+        };
+
+        assert_eq!(on("pull request"), "rate-limiting is on pull request #41.");
+        assert_eq!(
+            on("merge request"),
+            "rate-limiting is on merge request #41."
         );
     }
 

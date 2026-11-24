@@ -44,6 +44,7 @@ import type {
   DirectoryListing,
   RepoEntry,
   SettingsView,
+  ForgeCapability,
 } from "../src/api/types";
 import card from "../src/CardButton.module.css";
 import { Reaching, type Device } from "../src/reaching";
@@ -73,6 +74,7 @@ import {
   whenever,
   type Answer,
 } from "./serving";
+import { GITHUB } from "../src/forges";
 import { CLIENT, oneList } from "./authors";
 import repos from "./fixtures/repos.json" with { type: "json" };
 import listing from "./fixtures/directories.json" with { type: "json" };
@@ -222,6 +224,25 @@ describe("the card", () => {
   /// And none is said as none rather than as `0 repos` — and as a reading,
   /// not a warning: a Verkstead with nothing registered yet is waiting on
   /// nobody, the first Repo being registered from wherever it is wanted.
+  /// A Repo whose remote no forge answers for says so on its row, under the
+  /// path — and one on a forge says nothing about it.
+  it("says a repo on no forge is on none, naming the host", async () => {
+    const hosted: RepoEntry[] = [
+      {
+        ...FIRST,
+        forge: { origin: null, on: { kind: "Unmatched", host: "git.example.org" } },
+      },
+    ];
+    serving(whenever("/api/ui/repos", json(hosted)));
+    mountPane();
+
+    await waitFor(() => screen.getByText(FIRST.name));
+
+    expect(theRow(FIRST.name).textContent).toBe(
+      `${FIRST.name}${FIRST.path}No forge for git.example.orgRemove`,
+    );
+  });
+
   it("says so plainly when none are registered", async () => {
     serving(whenever("/api/ui/repos", json([])));
     mountCard();
@@ -304,6 +325,81 @@ describe("the pane it opens", () => {
     expect(row.querySelector(`.${card.card}`)).toBeNull();
   });
 
+  /// A Repo on a forge its Author holds no token for says so on its row: the
+  /// forge is not asked, so no wrap-up is started there (Set 1878, Q3).
+  it("says on a row that its author has no token for its forge", async () => {
+    const on: RepoEntry = {
+      ...FIRST,
+      author: null,
+      forge: {
+        origin: null,
+        on: {
+          kind: "On",
+          uuid: GITHUB,
+          name: "GitHub",
+          noun: "pull request",
+          capabilities: [
+          "checks",
+          "review",
+          "publish",
+          "stacks",
+          "create",
+          ] as ForgeCapability[],
+        },
+      },
+    };
+    const author = {
+      id: "6f1c2a52-7d0e-4c55-9a43-0d6b8f3e2a11",
+      display_name: "Work",
+      name: "Ada Lovelace",
+      email: "ada@work.example",
+    };
+    serving(
+      whenever("/api/ui/repos", json([on])),
+      whenever("/api/ui/authors", json([{ ...author, tokens: [] }])),
+    );
+    mountPane();
+
+    await waitFor(() => screen.getByText("No GitHub token for Work"));
+  });
+
+  /// And says nothing of it where the Author holds one.
+  it("says nothing of a token its author holds", async () => {
+    const on: RepoEntry = {
+      ...FIRST,
+      author: null,
+      forge: {
+        origin: null,
+        on: {
+          kind: "On",
+          uuid: GITHUB,
+          name: "GitHub",
+          noun: "pull request",
+          capabilities: ["checks", "review", "publish", "stacks", "create"],
+        },
+      },
+    };
+    serving(
+      whenever("/api/ui/repos", json([on])),
+      whenever(
+        "/api/ui/authors",
+        json([
+          {
+            id: "6f1c2a52-7d0e-4c55-9a43-0d6b8f3e2a11",
+            display_name: "Work",
+            name: "Ada Lovelace",
+            email: "ada@work.example",
+            tokens: [GITHUB],
+          },
+        ]),
+      ),
+    );
+    mountPane();
+
+    await waitFor(() => screen.getByText(FIRST.name));
+    expect(theRow(FIRST.name).textContent).toBe(`${FIRST.name}${FIRST.path}Remove`);
+  });
+
   /// And the path is on the row because the name is not unique.
   ///
   /// A name is the directory's own and nothing stops two registered
@@ -313,8 +409,8 @@ describe("the pane it opens", () => {
   /// would be a press somebody could only get right by luck.
   it("tells two repos of one name apart", async () => {
     const twins: RepoEntry[] = [
-      { id: 3, name: "api", path: "/srv/repos/api", default_branch: "main", author: null, author_unpicked: false, github: null, origin: null },
-      { id: 4, name: "api", path: "/work/api", default_branch: "main", author: null, author_unpicked: false, github: null, origin: null },
+      { id: 3, name: "api", path: "/srv/repos/api", default_branch: "main", author: null, author_unpicked: false, github: null, forge: null },
+      { id: 4, name: "api", path: "/work/api", default_branch: "main", author: null, author_unpicked: false, github: null, forge: null },
     ];
     serving(whenever("/api/ui/repos", json(twins)));
     const { container } = mountPane();
@@ -521,7 +617,7 @@ const HOME: SettingsView["authors"][number] = {
   display_name: "Home",
   name: "A. L.",
   email: "al@home.example",
-  github_token: null,
+  tokens: [],
 };
 
 const TWO_AUTHORS: SettingsView = {
@@ -993,13 +1089,19 @@ describe("the choice an Annex's draft asks first", () => {
   /// carrying the `origin` the server read off the repository, which is what the
   /// clone is made from — and the Author it is recorded as, which the clone
   /// follows.
+  ///
+  /// The origin sits beside the Forge it was matched against, the two being the
+  /// one reading of the remote.
   const KEEPERS: RepoEntry = {
     ...FIRST,
     id: 12,
     name: "widgets",
     path: "C:\\Users\\ada\\src\\widgets",
     author: "7a1f",
-    origin: "https://github.com/you/widgets.git",
+    forge: {
+      origin: "https://github.com/you/widgets.git",
+      on: { kind: "Unmatched", host: "github.com" },
+    },
   };
 
   /// And the Repo the clone leaves on the Annex, which is the draft's: a Repo id
@@ -1248,7 +1350,7 @@ describe("the choice an Annex's draft asks first", () => {
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({
-            origin: KEEPERS.origin,
+            origin: KEEPERS.forge?.origin,
             parent: ANNEX_REPOS,
             author: KEEPERS.author,
           }),
@@ -1270,7 +1372,14 @@ describe("the choice an Annex's draft asks first", () => {
       PAIR,
       whenever(
         "/api/ui/repos",
-        json({ Added: { ...KEEPERS, origin: null } }),
+        json({
+          Added: {
+            ...KEEPERS,
+            // Registered, and nothing to clone from: a repository `git init`
+            // made and nobody has pushed, which names no host either.
+            forge: { origin: null, on: { kind: "Unmatched", host: null } },
+          },
+        }),
         "POST",
       ),
     );

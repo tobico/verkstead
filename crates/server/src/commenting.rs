@@ -19,7 +19,6 @@
 //! is published either way: the human's next move is to paste the link
 //! themselves, and they can only do that if they are told where it did not go.
 
-use crate::github::{self, Gh};
 use crate::store;
 
 /// What became of the comment on one pull request.
@@ -33,7 +32,7 @@ pub(crate) struct Landing {
     /// for the same reason: unlabeled means the repo the work is in.
     pub(crate) repo: Option<String>,
 
-    /// Where the comment landed, or what `gh` said about why it did not.
+    /// Where the comment landed, or what the Forge said about why it did not.
     pub(crate) landed: Result<String, String>,
 }
 
@@ -43,10 +42,10 @@ pub(crate) struct Landing {
 /// first and the companions as the wrap-up found them — the order the workbench
 /// draws their cards in, so a report of what happened reads down the same list.
 ///
-/// Blocking from end to end: one `gh` per pull request, and a Conversation ends
+/// Blocking from end to end: one call per pull request, and a Conversation ends
 /// on one per repository it was worked in. The caller is on `spawn_blocking`.
 pub(crate) fn on_each(
-    gh: &Gh,
+    gh: &dyn crate::forges::Forge,
     token: &str,
     pulls: &[(store::Repo, store::PullRequest)],
     body: &str,
@@ -56,50 +55,45 @@ pub(crate) fn on_each(
         .map(|(repo, pull)| Landing {
             number: pull.number,
             repo: pull.repo.clone(),
-            landed: github::comment(gh, &repo.path, token, pull.number, body)
+            landed: gh
+                .comment(&repo.path, token, pull.number, body)
                 .map_err(|trouble| trouble.why()),
         })
         .collect()
 }
 
-/// The same shell-script `gh` [`crate::github`]'s own tests run, and asked on
-/// the same platforms — a stand-in that is a script wants a machine with a
-/// shell at `/bin/sh`.
-#[cfg(all(test, unix))]
+/// Asked of GitHub's own component with a stand-in behind it — see
+/// [`crate::stand_in`].
+///
+/// A multi-thread runtime, because the trait blocks the thread it is called on
+/// and the stand-in answers on the runtime: under a single-threaded one the
+/// call would wait on an answer nothing could serve.
+#[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     use super::*;
+    use crate::stand_in::{Asking, Forge, GitHub, Said};
 
     /// The comment as a share leaves one, cut down to what this module does with
     /// it: it is written once and said everywhere, byte for byte.
     const COMMENT: &str = "[Read this conversation](https://tobico.github.io/shares/#9f1)\n";
 
-    /// A `gh` that takes a comment on `#41` and refuses everything else, writing
-    /// down what it was given.
+    /// A GitHub that takes a comment on `#41` and refuses everything else.
     ///
-    /// A script rather than a mock, for [`crate::github`]'s reason: what is being
-    /// proved is that a process was run with the right arguments in the right
-    /// directory and given the right body on its stdin.
-    fn gh(notes: &std::path::Path) -> Gh {
-        let notes = notes.display();
-
-        Gh::running(vec![
-            "/bin/sh".to_owned(),
-            "-c".to_owned(),
-            format!(
-                r#"printf '%s\n' "$*" >> "{notes}/asked"
-                case "$*" in
-                    "api -X POST repos/{{owner}}/{{repo}}/issues/41/comments --input -")
-                        cat > "{notes}/said.json"
-                        pwd > "{notes}/where"
-                        printf '{{"html_url":"https://github.com/tobico/verkstead/pull/41#issuecomment-1"}}' ;;
-                    *)
-                        printf 'gh: Not Found (HTTP 404)\n' >&2; exit 1 ;;
-                esac"#,
+    /// A stand-in rather than a mock, for [`crate::stand_in`]'s reason: what is
+    /// being proved is that the request went out with the right body, to the
+    /// right repository, about the right number.
+    async fn github() -> Arc<GitHub> {
+        GitHub::answering(|asked| match (asked.asking, asked.number) {
+            (Asking::Saying, Some(41)) => Said::This(
+                r#"{"html_url":"https://github.com/tobico/verkstead/pull/41#issuecomment-1"}"#
+                    .to_owned(),
             ),
-            "gh".to_owned(),
-        ])
+            _ => Said::Refused(404, "Not Found".to_owned()),
+        })
+        .await
     }
 
     fn repo(path: &std::path::Path, name: &str) -> store::Repo {
@@ -123,18 +117,22 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_comment_is_said_in_the_repository_the_pull_request_is_in() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_comment_is_said_in_the_repository_the_pull_request_is_in() {
         let dir = tempfile::tempdir().unwrap();
-        let where_said = dir.path().join("repo");
+        let where_said = dir.path().join("verkstead");
         std::fs::create_dir(&where_said).unwrap();
 
-        let landings = on_each(
-            &gh(dir.path()),
-            "ghp_token",
-            &[(repo(&where_said, "verkstead"), pull(41, None))],
-            COMMENT,
-        );
+        let github = github().await;
+        let forge = Forge::standing_in(&github).alone();
+
+        let landings = tokio::task::spawn_blocking({
+            let pulls = [(repo(&where_said, "verkstead"), pull(41, None))];
+
+            move || on_each(&*forge, "ghp_token", &pulls, COMMENT)
+        })
+        .await
+        .unwrap();
 
         assert_eq!(
             landings,
@@ -145,42 +143,40 @@ mod tests {
             }],
         );
 
-        // What GitHub was asked to say, and where it was asked from: the body is
-        // the comment as it was written, and the `gh` ran inside the repository
-        // the number belongs to.
-        let said: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(dir.path().join("said.json")).unwrap())
-                .unwrap();
+        // What GitHub was asked to say, and which repository it was asked
+        // about: the body is the comment as it was written, and the request
+        // names the repository the number belongs to.
+        let asked = github.asked_about(Asking::Saying);
+        assert_eq!(asked.len(), 1, "one comment, once: {asked:?}");
+
+        let said: serde_json::Value = serde_json::from_str(&asked[0].body).unwrap();
 
         assert_eq!(said["body"], serde_json::json!(COMMENT));
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("where"))
-                .unwrap()
-                .trim(),
-            where_said.canonicalize().unwrap().display().to_string(),
-        );
+        assert_eq!(asked[0].path, "/repos/tobico/verkstead/issues/41/comments");
     }
 
     /// A pull request the comment could not land on is named against the ones
     /// that worked, and the ones after it are still tried: they are separate
     /// repositories with separate permissions, and one that is gone says nothing
     /// about the next.
-    #[test]
-    fn a_pull_request_that_missed_out_is_named_and_the_rest_go_on() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_pull_request_that_missed_out_is_named_and_the_rest_go_on() {
         let dir = tempfile::tempdir().unwrap();
+        let forge = Forge::standing_in(&*github().await).alone();
 
-        let landings = on_each(
-            &gh(dir.path()),
-            "ghp_token",
-            &[
+        let landings = tokio::task::spawn_blocking({
+            let pulls = [
                 (
                     repo(dir.path(), "verkstead-site"),
                     pull(7, Some("verkstead-site")),
                 ),
                 (repo(dir.path(), "verkstead"), pull(41, None)),
-            ],
-            COMMENT,
-        );
+            ];
+
+            move || on_each(&*forge, "ghp_token", &pulls, COMMENT)
+        })
+        .await
+        .unwrap();
 
         assert_eq!(landings.len(), 2);
         assert_eq!(landings[0].number, 7);
@@ -190,7 +186,7 @@ mod tests {
                 .landed
                 .as_ref()
                 .is_err_and(|why| why.contains("Not Found")),
-            "in `gh`'s own words, not {:?}",
+            "in GitHub's own words, not {:?}",
             landings[0].landed,
         );
 
@@ -205,29 +201,36 @@ mod tests {
     /// and nothing here ever asks GitHub to change anything that is already
     /// there: two presses are two comments, and the pull request's own
     /// description is never touched.
-    #[test]
-    fn sharing_twice_leaves_two_comments_and_edits_nothing() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn sharing_twice_leaves_two_comments_and_edits_nothing() {
         let dir = tempfile::tempdir().unwrap();
-        let pulls = [(repo(dir.path(), "verkstead"), pull(41, None))];
+        let where_said = dir.path().join("verkstead");
+        std::fs::create_dir(&where_said).unwrap();
+
+        let github = github().await;
 
         for _ in 0..2 {
-            assert!(
-                on_each(&gh(dir.path()), "ghp_token", &pulls, COMMENT)[0]
-                    .landed
-                    .is_ok()
-            );
+            let forge = Forge::standing_in(&github).alone();
+            let landed = tokio::task::spawn_blocking({
+                let pulls = [(repo(&where_said, "verkstead"), pull(41, None))];
+
+                move || on_each(&*forge, "ghp_token", &pulls, COMMENT)
+            })
+            .await
+            .unwrap();
+
+            assert!(landed[0].landed.is_ok(), "{:?}", landed[0].landed);
         }
 
-        let asked: Vec<String> = std::fs::read_to_string(dir.path().join("asked"))
-            .unwrap()
-            .lines()
-            .map(str::trim)
-            .map(str::to_owned)
+        let asked: Vec<String> = github
+            .asked_about(Asking::Saying)
+            .into_iter()
+            .map(|asked| asked.path)
             .collect();
 
         assert_eq!(
             asked,
-            vec!["api -X POST repos/{owner}/{repo}/issues/41/comments --input -".to_owned(); 2],
+            vec!["/repos/tobico/verkstead/issues/41/comments".to_owned(); 2],
         );
     }
 }

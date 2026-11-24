@@ -73,7 +73,6 @@ use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
 use crate::drivers::Driving;
-use crate::github;
 use crate::store::{self, Lifecycle};
 
 /// Who asked for the run to start again.
@@ -451,7 +450,12 @@ async fn recompute(
 
                     if matches!(
                         asked,
-                        None | Some((_, _, Err(github::Trouble::NoPullRequest)))
+                        None | Some((
+                            _,
+                            _,
+                            Err(crate::forges::Trouble::NoPullRequest
+                                | crate::forges::Trouble::NoForge(_))
+                        ))
                     ) {
                         return Ok(Resumed::NothingToWork);
                     }

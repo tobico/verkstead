@@ -11,7 +11,6 @@
 use crate::AppState;
 use crate::activities::built_in;
 use crate::drivers::Driving;
-use crate::github;
 use crate::lending::Lent;
 use crate::runner::{anything_to_work, backlog_runner, documents, stop, worktree};
 use crate::sessions::Ended;
@@ -60,7 +59,7 @@ pub(crate) async fn to_a_pull_request(
         return;
     };
 
-    if !matches!(found, Err(github::Trouble::NoPullRequest)) {
+    if !matches!(found, Err(crate::forges::Trouble::NoPullRequest)) {
         return crate::wrapping::record(
             state,
             conversation_id,
@@ -385,9 +384,15 @@ pub(crate) async fn follow_inline(state: AppState, conversation_id: i64, driving
             // A branch that could not be asked about at all falls the same way,
             // that being in the log already and no more of an answer than it
             // was.
-            Some((_, _, Err(github::Trouble::NoPullRequest))) | None => {
-                "The session ended without committing anything.".to_owned()
-            }
+            //
+            // And so does a Repo on no Forge, where there is no pull request to
+            // be asked about at all.
+            Some((
+                _,
+                _,
+                Err(crate::forges::Trouble::NoPullRequest | crate::forges::Trouble::NoForge(_)),
+            ))
+            | None => "The session ended without committing anything.".to_owned(),
             // Anything else is what the landed arm above makes of it, made in
             // the one place that knows how: a pull request found is a wrap-up,
             // and a `gh` that cannot answer at all is a halt naming what the
@@ -437,7 +442,7 @@ pub(crate) async fn follow_inline(state: AppState, conversation_id: i64, driving
 ///
 /// - a pull request, and the wrap-up takes it from here without a session being
 ///   spent on work that is already done;
-/// - [`github::Trouble::NoPullRequest`], which is the ordinary case — the work
+/// - [`crate::forges::Trouble::NoPullRequest`], which is the ordinary case — the work
 ///   really is unfinished, so a fresh session builds it exactly as before;
 /// - anything else, which is `gh` unable to answer at all, and that halts. A
 ///   session launched into it could only dead-end on the same missing thing
@@ -469,7 +474,11 @@ pub(crate) async fn inline_again(state: AppState, conversation_id: i64, driving:
             // Resume.
             crate::wrapping::opened(&state, conversation_id, None).await
         }
-        Err(github::Trouble::NoPullRequest) => follow_inline(state, conversation_id, driving).await,
+        // On no Forge there is no pull request to say the work is done, so it
+        // is built again, the session finding what the branch already holds.
+        Err(crate::forges::Trouble::NoPullRequest | crate::forges::Trouble::NoForge(_)) => {
+            follow_inline(state, conversation_id, driving).await
+        }
         Err(trouble) => {
             tracing::warn!(
                 conversation_id,
@@ -697,7 +706,10 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
 
             crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
         }
-        Err(github::Trouble::NoPullRequest) => {
+        Err(crate::forges::Trouble::NoForge(host)) => {
+            crate::wrapping::unforged(&state, conversation_id, host.as_deref()).await;
+        }
+        Err(crate::forges::Trouble::NoPullRequest) => {
             tracing::info!(
                 conversation_id,
                 "the instruction is done and the branch holds nothing to carry on with",

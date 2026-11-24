@@ -178,32 +178,50 @@ and the `### Finish sequence` inside it — and follow that sequence step by ste
 It is the repository's process rather than Verkstead's, so what is written there
 is what to do, whatever another project's habits would suggest.
 
+**The pull request itself is Verkstead's to open.** Push the branch, then open
+it with one line:
+
+    git push -u origin HEAD
+    verkstead pull-request open --title '<feature name>' --body '<the tasks this delivered>'
+
+Verkstead knows where this repo's pull requests live and which token to open one
+with — this prompt's *The forge this repo is on* names the forge and what it
+calls a pull request — so that line works wherever the work is hosted, and it
+opens a draft. Wherever the repository's own sequence says to open one with a
+forge's own tool, this is what opens it instead; everything else that sequence
+says — the push, the branch's name, what the body covers — is the repository's
+and stands. Where a section of this prompt names the branch to open against,
+*The chain this stage joins* above all, that branch is the base: `--base <that
+branch>` on the open.
+
 Two shapes, and which one this is, is a fact about the branch rather than a
 choice:
 
 - an **unstacked** branch — the ordinary case — is pushed, and then opened as a
-  **draft** pull request titled for the feature, with a summary of the completed
+  draft pull request titled for the feature, with a summary of the completed
   tasks as its body;
 - a **stacked** branch, one with a chain under it, goes through
   `gh stack submit --auto` instead, after which this branch's own pull request
   has its title and body corrected. Leave the stack's other pull requests
   alone: they belong to finished work.
 
-Work out which of the two this branch is before running either, and follow what
-the repository's own sequence says about it. **A prompt carrying a *The chain
-this stage joins* section is what settles it**: that branch is a stacked one,
-whatever this checkout says. `gh stack` keeps its registry per worktree and
-every stage is worked in a worktree of its own, so `gh stack view` erroring
-here is an empty registry rather than proof of anything — adopt the chain and
-join it the way the repository's block says, and come back to the sequence
-above. Where no chain was carried, `gh stack view` naming this branch is what
-says it is in a stack, and an error or a stack without it says it is not.
+**The stacked shape is on offer only where this prompt says the forge stacks
+pull requests**, under *The forge this repo is on*. A forge that does not has no
+stack to submit: a chain under this branch is then a chain of ordinary pull
+requests, each opened against the branch below it, which is exactly what *The
+chain this stage joins* says to rebase onto and open against — so this branch is
+the unstacked shape, opened against that section's branch.
 
-A repository whose file says nothing about finishing, or has no such file: push
-the branch and open a draft pull request titled for the feature —
-
-    git push -u origin HEAD
-    gh pr create --draft --title '<feature name>' --body '<the tasks this delivered>'
+Where the prompt says the forge does stack them, work out which of the two this
+branch is before running either, and follow what the repository's own sequence
+says about it. **A prompt carrying a *The chain this stage joins* section is
+what settles it**: that branch is a stacked one, whatever this checkout says.
+`gh stack` keeps its registry per worktree and every stage is worked in a
+worktree of its own, so `gh stack view` erroring here is an empty registry
+rather than proof of anything — adopt the chain and join it the way the
+repository's block says, and come back to the sequence above. Where no chain was
+carried, `gh stack view` naming this branch is what says it is in a stack, and
+an error or a stack without it says it is not.
 
 **Nothing waits on approval here either.** No gate, no confirmation and nobody
 at this terminal: the pull request opens unasked, and it opens as a *draft*
@@ -269,7 +287,7 @@ needs nothing at all, and a read-only one could hold nothing to begin with —
 `git log --oneline <base>..HEAD` in its worktree, against the commit its branch
 was cut from, is what says which is which.
 
-Verkstead asks GitHub about each of them when you run `verkstead done`, so a
+Verkstead asks the forge about each of them when you run `verkstead done`, so a
 companion holding commits and no pull request refuses the signal, naming the
 repository. Open the missing one and run it again.
 

@@ -26,10 +26,11 @@
 //! **A token stops the wizard for one more press only where it is not good
 //! enough as it stands.** The press always reads *Finish setup*, and where the
 //! answer is clean it is the press that finishes: no token to verify, or one
-//! GitHub verified with every scope Verkstead uses. The step stays up only
-//! where GitHub refused the token, or named a scope it was not given — with the
-//! answer on it, and the next press goes on without the scope or the token,
-//! the token being outside the objective (ADR-0016, *The rail*).
+//! GitHub verified with every scope the GitHub plugin declares. The step stays
+//! up only where GitHub refused the token, or named a scope it was not given —
+//! which is a token refused and not saved — with the answer on it, and the next
+//! press goes on without the token, it being outside the objective (ADR-0016,
+//! *The rail*).
 //!
 //! **And the press that finishes takes the mode off for this run.** Nothing is
 //! written by it: the author went through the save a moment before, and the
@@ -52,8 +53,10 @@ import type {
   SettingsEdit,
   SettingsSaved,
   Source,
-  TokenEdit,
+  ForgeTokenEdit,
+  Verified,
 } from "../api/types";
+import { GITHUB } from "../forges";
 import { useReading } from "../freshness";
 import { Icon } from "../Icon";
 import { ErrorLine } from "../notices";
@@ -85,21 +88,19 @@ const SOURCES: Record<Source, { short: string; whole: string }> = {
     short: "GITHUB_TOKEN",
     whole: "From GITHUB_TOKEN, in this server's own environment.",
   },
-  HostGh: {
-    short: "gh login",
-    whole: "From the login this machine's gh is holding.",
-  },
 };
+
+/// What GitHub made of the token a save set, where it set one.
+function githubs(answer: SettingsSaved): Verified | null {
+  return answer.verified.find(({ forge }) => forge === GITHUB)?.verified ?? null;
+}
 
 /// Whether a save's answer leaves nothing to read: no token was verified, or
 /// GitHub named the account and every scope it asked about is there. Anything
 /// else — a refusal, or a scope missing — holds the step for one more press.
 function clean(answer: SettingsSaved): boolean {
-  const verified = answer.verified;
-  return (
-    verified === null ||
-    ("Account" in verified && verified.Account.missing.length === 0)
-  );
+  const verified = githubs(answer);
+  return verified === null || "Account" in verified;
 }
 
 /// What the machine offered for one field: a prefill, `null` where it offered
@@ -185,8 +186,10 @@ export function Git(): JSX.Element {
   /// What the save says about the token: the field's contents where it holds
   /// anything, and *leave it alone* where it does not — an empty write-only
   /// field means nothing was typed rather than take the credentials away.
-  const tokenEdit = (): TokenEdit =>
-    authorToken().trim() === "" ? "Keep" : { Set: { token: authorToken() } };
+  const tokenEdit = (): ForgeTokenEdit[] =>
+    authorToken().trim() === ""
+      ? []
+      : [{ forge: GITHUB, token: { Set: { token: authorToken() } } }];
 
   /// The whole save: the three fields, and everything else in `config.yaml`
   /// exactly as it stands — one request writes the whole file, so a section
@@ -204,7 +207,7 @@ export function Git(): JSX.Element {
       name: authorName().trim(),
       email: authorEmail().trim(),
     },
-    github_token: tokenEdit(),
+    tokens: tokenEdit(),
     share_on_done: told()?.share_on_done ?? false,
     ignored_comments: "Keep",
     mcp_servers: "Keep",
@@ -268,16 +271,21 @@ export function Git(): JSX.Element {
 
   /// The account the saved token authenticates as, and what GitHub says it may
   /// not do — neither of them until a token has been saved from here.
-  const verified = () => saved()?.verified ?? null;
+  const verified = () => {
+    const answer = saved();
+    return answer ? githubs(answer) : null;
+  };
 
   const login = () => {
     const answer = verified();
     return answer && "Account" in answer ? answer.Account.login : null;
   };
 
-  const missing = () => {
+  /// And a token refused for being short of the scopes GitHub needs: whose
+  /// it was and what it is missing. It was not saved.
+  const short = () => {
     const answer = verified();
-    return answer && "Account" in answer ? answer.Account.missing : [];
+    return answer && "Short" in answer ? answer.Short : null;
   };
 
   const refused = () => {
@@ -361,7 +369,9 @@ export function Git(): JSX.Element {
               settings pane, where the same rule is why the field there is
               write-only. So what is said about one is its last four characters
               and when it was written, and the box above replaces it. */}
-          <Show when={told()?.github_token}>
+          <Show
+            when={told()?.tokens.find(({ forge }) => forge === GITHUB)?.saved}
+          >
             {(configured) => (
               <p class={styles.quiet}>
                 A token ending <code>{configured().last_four}</code> is already
@@ -395,17 +405,23 @@ export function Git(): JSX.Element {
             )}
           </Show>
 
-          <Show when={missing().length > 0}>
-            <p class={`${styles.callout} ${styles.unscoped}`}>
-              <span class={styles.mark} aria-hidden="true">
-                !
-              </span>
-              <span>
-                It can't publish a share without the{" "}
-                <code class={styles.scope}>{missing().join(", ")}</code> scope.
-                That can be put right later in the settings.
-              </span>
-            </p>
+          <Show when={short()}>
+            {(short) => (
+              <p class={`${styles.callout} ${styles.unscoped}`} role="alert">
+                <span class={styles.mark} aria-hidden="true">
+                  !
+                </span>
+                <span>
+                  Not saved: the token for{" "}
+                  <span class={styles.login}>{short().login}</span> is missing
+                  the{" "}
+                  <code class={styles.scope}>{short().missing.join(", ")}</code>{" "}
+                  {short().missing.length === 1 ? "scope" : "scopes"}. Correct
+                  it above, or press <strong>Finish setup</strong> again to go
+                  on without it.
+                </span>
+              </p>
+            )}
           </Show>
 
           <Show when={refused()}>

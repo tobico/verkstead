@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use verkstead_schema::{
-    ApiError, GuideSection, MemoLeaving, MemoLeft, PreviewLeft, PreviewSuggestion, QuestionSet,
-    Response, SetCreated,
+    ApiError, GuideSection, MemoLeaving, MemoLeft, PreviewLeft, PreviewSuggestion,
+    PullRequestOpened, PullRequestOpening, QuestionSet, Response, SetCreated,
 };
 
 /// How long the server is asked to hold each wait open. Its own ceiling is a
@@ -367,6 +367,38 @@ impl Client {
         }
     }
 
+    /// Ask the Repo's Forge to open a draft pull request on this session's
+    /// branch, and hand back where it is.
+    ///
+    /// No retry, for [`Client::submit`]'s reason turned round: opening one is
+    /// not idempotent — a retry that both landed would leave the branch on two
+    /// pull requests — and a refusal is a branch to push or a token to set,
+    /// which the agent is owed straight away.
+    pub fn open_pull_request(&self, opening: &PullRequestOpening) -> Result<PullRequestOpened> {
+        let body = serde_saphyr::to_string(opening).context("writing what to open")?;
+
+        let mut reply = self
+            .agent
+            .post(format!("{}/api/v1/pull-requests", self.base))
+            .send(&body)
+            .with_context(|| format!("opening a pull request with {}", self.said))?;
+
+        let status = reply.status().as_u16();
+        let text = reply
+            .body_mut()
+            .read_to_string()
+            .context("reading the server's reply")?;
+
+        match status {
+            200 => serde_saphyr::from_str(&text)
+                .with_context(|| format!("reading the server's reply: {}", text.trim())),
+            404 => bail!(
+                "the server at {} has no pull requests to open — it is older than this command",
+                self.said
+            ),
+            _ => bail!("the server refused: {}", refusal(&text)),
+        }
+    }
     /// Say this session is waiting on work of its own for `length` — the
     /// server's default where `None` — and hand back what the server made of it.
     ///

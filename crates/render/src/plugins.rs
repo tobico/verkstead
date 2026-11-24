@@ -178,6 +178,8 @@ pub enum PluginCapability {
     Environment { name: String },
     /// Starting conversations of its own.
     Conversations,
+    /// A secret the host sets for it, in the environment variable named.
+    Secrets { name: String },
 }
 
 /// **Install**: the directory or git URL, and the capabilities the card

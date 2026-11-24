@@ -2140,7 +2140,7 @@ async fn plan(
                     .collect();
 
                 checkouts.push(alongside(
-                    &data_dir, &gh, id, &branch, joining, companion, &claimed,
+                    &data_dir, &*gh, id, &branch, joining, companion, &claimed,
                 )?);
             }
 
@@ -2199,7 +2199,7 @@ async fn plan(
 /// companion refuse without having made another.
 fn alongside(
     data: &Path,
-    gh: &crate::github::Gh,
+    gh: &dyn crate::forges::Forge,
     id: i64,
     branch: &str,
     joining: Joining,
@@ -2360,7 +2360,7 @@ impl Alongside {
                     .collect();
 
                 checkouts.push(alongside(
-                    &data, &gh, id, &branch, joining, companion, &claimed,
+                    &data, &*gh, id, &branch, joining, companion, &claimed,
                 )?);
             }
 

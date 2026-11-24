@@ -44,7 +44,8 @@ use verkstead_server::sandbox::account::machine::Account;
 use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
-use verkstead_server::{Agents, Gh, open_database, router_running_sessions, store};
+use verkstead_server::stand_in::Forge;
+use verkstead_server::{Agents, open_database, router_running_sessions, store};
 
 /// How long anything here is waited for before the test says what it saw.
 ///
@@ -188,11 +189,7 @@ impl Workbench {
             pool.clone(),
             dir.path().to_owned(),
             agents,
-            Gh::running(vec![
-                "cmd.exe".to_owned(),
-                "/c".to_owned(),
-                "exit 1".to_owned(),
-            ]),
+            Forge::unanswerable(),
         );
 
         Workbench {

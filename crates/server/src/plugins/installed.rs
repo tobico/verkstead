@@ -70,7 +70,7 @@ use super::component;
 use super::git::{self, Staged};
 use super::manifest::{Access, Capability, Dependency, Files, Manifest, Mark};
 use crate::AppState;
-use crate::github::Credential;
+use crate::forges::Credential;
 use crate::platform::Platform;
 use crate::replicating::plugins::{Declared, Fields, Plugins, Source};
 use crate::store::replicated::{self, Record, Written};
@@ -101,6 +101,11 @@ pub(crate) struct Installed {
     /// they were installed: what this server offers beside its built-ins —
     /// see [`crate::harness::plugged`].
     harnesses: Arc<Mutex<Vec<crate::store::AgentType>>>,
+
+    /// The Forges the plugins that loaded here declare, in the order they
+    /// were installed: what a token is asked for under each Author beside the
+    /// built-in GitHub — see [`crate::forges::taking_tokens`].
+    forges: Arc<Mutex<Vec<verkstead_render::TokenForge>>>,
 }
 
 impl Installed {
@@ -137,6 +142,14 @@ impl Installed {
         self.harnesses
             .lock()
             .expect("nothing panics holding the harnesses")
+            .clone()
+    }
+
+    /// The Forges the plugins that loaded here declare.
+    pub(crate) fn forges(&self) -> Vec<verkstead_render::TokenForge> {
+        self.forges
+            .lock()
+            .expect("nothing panics holding the forges")
             .clone()
     }
 
@@ -348,6 +361,35 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
         offered
     };
 
+    // And every Forge a plugin that loaded and is in no trouble declares, for
+    // the tokens asked for under each Author.
+    let forges: Vec<verkstead_render::TokenForge> = records
+        .iter()
+        .filter_map(|record| {
+            let manifest = manifests.get(&record.uuid)?;
+            let forge = manifest
+                .provides
+                .iter()
+                .find_map(|provision| provision.forge())?;
+
+            Some(verkstead_render::TokenForge {
+                uuid: record.uuid.clone(),
+                name: manifest.name.clone(),
+                scopes: forge.scopes.clone(),
+            })
+        })
+        .collect();
+    let forged = {
+        let mut held = state
+            .plugins
+            .forges
+            .lock()
+            .expect("nothing panics holding the forges");
+        let forged = *held != forges;
+        *held = forges;
+        forged
+    };
+
     let moved = {
         let mut held = state
             .plugins
@@ -363,6 +405,12 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
     // reads with the Plugins, and which Profiles are runnable.
     if moved || offered {
         state.nudges.announce_here(Nudge::Plugins);
+    }
+
+    // And a Forge declared or taken away moves the token fields under every
+    // Author, which the Git section draws off the settings.
+    if forged {
+        state.nudges.announce_here(Nudge::Authors);
     }
     if offered {
         state.nudges.announce_here(Nudge::Profiles);
@@ -773,6 +821,7 @@ fn capabilities(manifest: &Manifest) -> Vec<PluginCapability> {
                 PluginCapability::Environment { name: name.clone() }
             }
             Capability::Conversations => PluginCapability::Conversations,
+            Capability::Secrets { name } => PluginCapability::Secrets { name: name.clone() },
         })
         .collect()
 }

@@ -626,14 +626,21 @@ A session's GitHub auth and the author of its commits are two of those settings
 rather than anything found in a home directory. Who you are is an **Author**,
 keyed by a uuid and kept in the database as a **Replicated record**
 ([ADR-0028](adr/0028-records-are-the-clusters.md)) — added, edited and removed
-on the settings page rather than in a file — and its token is in `secrets.yaml`
-beside the database under that uuid:
+on the settings page rather than in a file — and its tokens are in
+`secrets.yaml` beside the database under that uuid, one per Forge, keyed by the
+Forge plugin's uuid (the built-in GitHub's below). A file from before held the
+one token alone under the Author, which reads as GitHub's:
 
 ```yaml
 # secrets.yaml
 author_tokens:
-  3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01: ghp_...
+  3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01:
+    b357e557-3716-4ea6-a3a8-d904c92c5eac: ghp_...
 ```
+
+An Author with no token for a Repo's Forge leaves that Forge unasked: nothing
+falls back to a login the machine happens to hold, and the onboarding wizard
+prefills the token from `GH_TOKEN` or `GITHUB_TOKEN` alone.
 
 ```yaml
 # config.yaml
@@ -695,16 +702,18 @@ what the server goes by is the union of this file and the installation's own
 flags.
 
 Every session started after that gets the token as `GH_TOKEN`, which `gh`
-honours without being told to — as does the server's own `gh`, the one that
-reads a pull request's checks, commits and comments onto a Timeline — and gets
+honours without being told to — and so does the GitHub plugin's own component,
+the thing that reads a pull request's checks, commits and comments onto a
+Timeline, which the host sets it in the environment of for that one call. The
+server runs no `gh` of its own. A session also gets
 git configured through the
 environment — the author, `gh auth git-credential` as the credential helper for
 GitHub, and SSH GitHub remotes rewritten to HTTPS so a `git push` inside
 authenticates with the token. There is no file to write and nothing to log in
 to inside a sandbox. With no token — no file, an empty one, one that will not
 parse — sessions start anyway and `gh` inside says it is not logged in, and the
-server's own `gh` falls back to whatever login the host has; with no author, git
-inside asks to be told who you are.
+Forge is not asked at all rather than asked as somebody else; with no author,
+git inside asks to be told who you are.
 
 Either file can be written through the viewer's API instead of by hand, which is
 what the settings page saves through:

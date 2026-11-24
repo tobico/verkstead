@@ -12,6 +12,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
@@ -32,7 +33,8 @@ use verkstead_render::{
     SteerPairingView, SteerSaved, TakenUp, TargetRecorded, TimelineEvent, Uncommitted,
 };
 use verkstead_server::settings::{Author, Recorded, Settings};
-use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
+use verkstead_server::stand_in::{Asking, Forge, GitHub, PullRequest, Said};
+use verkstead_server::{open_database, router_asking_github, router_keeping, store};
 
 use crate::fixture_repositories::{repository, repository_and_clone};
 
@@ -168,7 +170,7 @@ async fn workbench_with_origin() -> (
     PathBuf,
     i64,
 ) {
-    cloned_workbench(Gh::on_path()).await
+    cloned_workbench(false).await
 }
 
 /// The same with a `gh` of its own behind it, which is what a **Review** wants:
@@ -185,12 +187,12 @@ async fn workbench_reviewing() -> (
     PathBuf,
     i64,
 ) {
-    cloned_workbench(gh_answering()).await
+    cloned_workbench(true).await
 }
 
-/// What both of those are, `gh` apart.
+/// What both of those are, GitHub apart.
 async fn cloned_workbench(
-    gh: Gh,
+    answering: bool,
 ) -> (
     tempfile::TempDir,
     tempfile::TempDir,
@@ -205,7 +207,17 @@ async fn cloned_workbench(
         .await
         .unwrap();
     std::fs::write(dir.path().join(CONFIG), THE_AUTHOR).unwrap();
-    let app = router_asking_github(pool, dir.path().to_owned(), gh);
+
+    // GitHub answering out of the files the tests write into the checkout, or
+    // GitHub itself — which nothing here asks anything of, no Author holding a
+    // token for it.
+    let at = elsewhere.path().join("verkstead");
+    let forge = match answering {
+        true => Forge::standing_in(&*github_reading(&at).await),
+        false => Forge::itself(),
+    };
+
+    let app = router_asking_github(pool, dir.path().to_owned(), forge);
 
     // With an identity configured in the clone, rather than in whichever test
     // commits first, because being able to commit is what a repository is for.
@@ -11405,32 +11417,70 @@ async fn taking_up_is_refused_by_name_when_the_fetch_fails() {
 /// the `pull_requests` suite is off it for the same reason. `sh -c` gives `$0`
 /// the script's own name, so what Verkstead passes lands in `$1` onwards and the
 /// number of `pr view <n> --json …` is `$3`.
-#[cfg(unix)]
-fn gh_answering() -> Gh {
-    Gh::running(vec![
-        "/bin/sh".to_owned(),
-        "-c".to_owned(),
-        r#"if [ "$2" = list ]; then
-               if [ -f ./pr-list-refused ]; then
-                   printf 'gh: the open pull requests could not be listed\n' >&2
-                   exit 1
-               fi
-               if [ -f ./pr-list.json ]; then cat ./pr-list.json; else printf '[]'; fi
-               exit 0
-           fi
-           if [ -f "./pr-$3.json" ]; then cat "./pr-$3.json"; exit 0; fi
-           case "$3" in
-           ''|*[!0-9]*)
-               printf 'no pull requests found for branch "%s"\n' "$3" >&2
-               ;;
-           *)
-               printf 'GraphQL: Could not resolve to a PullRequest with the number of %s. (repository.pullRequest)\n' "$3" >&2
-               ;;
-           esac
-           exit 1"#
-            .to_owned(),
-        "gh".to_owned(),
-    ])
+async fn github_reading(repo: &Path) -> Arc<GitHub> {
+    let repo = repo.to_owned();
+
+    GitHub::answering(move |asked| match asked.asking {
+        Asking::Open => match repo.join("pr-list-refused").exists() {
+            true => Said::Refused(500, "the open pull requests could not be listed".to_owned()),
+            false => match held(&repo.join("pr-list.json")) {
+                Some(serde_json::Value::Array(open)) => {
+                    Said::Open(open.iter().map(pull_request_of).collect())
+                }
+                _ => Said::Nothing,
+            },
+        },
+
+        // Both selectors read the same way: `pr-41.json` and
+        // `pr-rate-limiting.json` are the one pull request written twice, which
+        // is what GitHub answers to a number and to a branch.
+        _ => {
+            let named = asked
+                .number
+                .map(|number| number.to_string())
+                .or_else(|| asked.branch.clone())
+                .unwrap_or_default();
+
+            match held(&repo.join(format!("pr-{named}.json"))) {
+                Some(said) => Said::About(pull_request_of(&said)),
+                None => Said::Nothing,
+            }
+        }
+    })
+    .await
+}
+
+/// What a file holds, where it is there and is JSON.
+fn held(path: &Path) -> Option<serde_json::Value> {
+    serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+}
+
+/// One of those files as a pull request, in the fields [`on_github`] writes.
+fn pull_request_of(said: &serde_json::Value) -> PullRequest {
+    let text = |key: &str| {
+        said.get(key)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+
+    PullRequest {
+        number: said
+            .get("number")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or_default(),
+        title: text("title"),
+        url: text("url"),
+        head: text("headRefName"),
+        base: text("baseRefName"),
+        fork: said
+            .get("isCrossRepository")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        state: text("state"),
+        mergeable: String::new(),
+        ..PullRequest::default()
+    }
 }
 
 /// Put an open pull request where that `gh` will find it.

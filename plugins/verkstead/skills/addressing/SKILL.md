@@ -31,10 +31,10 @@ open: there is nothing to create, nothing to switch to and nothing to open.
 more than one repository — its own, and one per companion repository the work
 committed in — so feedback about one of them names the repository, the pull
 request and the worktree to work in. `cd` into that worktree first and do the
-whole job there: `git` and `gh` both read their repository from wherever they
-are run, so a `gh pr checks` from the wrong directory asks about somebody else's
-pull request. Feedback that names no worktree is about the branch you started
-on, and that is where to work.
+whole job there: `git` reads its repository from wherever it is run, so a diff
+or a push from the wrong directory is about somebody else's pull request.
+Feedback that names no worktree is about the branch you started on, and that is
+where to work.
 
 Whichever it is, it is one branch and one pull request: the one in the worktree
 you are working in, already pushed and already open. **Except a stack**, which
@@ -66,7 +66,7 @@ Read the feedback whole before changing anything, then go and see for yourself.
   around it. What is being asked for is usually smaller than it sounds and
   occasionally larger.
 - **A merge conflict**: fetch first, so the base you work against is the one
-  GitHub is looking at, then start what the feedback asked for — a merge or a
+  the forge is looking at, then start what the feedback asked for — a merge or a
   rebase — and let git show you where the two sides disagree. **The feedback
   names which of the two**, because they are different acts on the branch and
   the human has configured which one this repository gets: do the one you were
@@ -74,10 +74,10 @@ Read the feedback whole before changing anything, then go and see for yourself.
   change and what has landed on the base since it parted — before you write
   anything, and read what each was for rather than only what each says. A merge
   that comes through clean is still a merge to commit and push: it is what puts
-  the base's work on the branch, and it is what GitHub reads next.
+  the base's work on the branch, and it is what the forge reads next.
 - **A stack that will not sync**: the feedback names the chain and the verbs.
   Run them rather than reaching for `git rebase` yourself — the extension is
-  what keeps the chain linked on GitHub, and a branch rebased by hand is one it
+  what keeps the chain linked on the forge, and a branch rebased by hand is one it
   no longer recognises. Where the sync backs out on a conflict, resolve it the
   way the paragraph above says, in the branch the rebase stopped in, and carry
   on through the chain.
@@ -141,11 +141,13 @@ you rebased: each of those is the other strategy's ending, and one of them
 fails while the other quietly undoes what was asked for.
 
 **A stack is pushed by its sync**, which is the third ending and the one
-exception to the branch you were sent to. `gh stack sync` rewrites and
-force-pushes every branch of the chain atomically — that is what it is for, and
-it is the one place force-pushing branches you did not start on is what was
-asked for. So do not push them one at a time by hand, and do check before you
-finish that every branch the feedback named is pushed.
+exception to the branch you were sent to — and one the feedback has to have
+asked for, which it does only on a forge that stacks pull requests.
+`gh stack sync` rewrites and force-pushes every branch of the chain atomically —
+that is what it is for, and it is the one place
+force-pushing branches you did not start on is what was asked for. So do not
+push them one at a time by hand, and do check before you finish that every
+branch the feedback named is pushed.
 
 **The commit that resolves a conflict is bookkeeping**, so it carries no message
 body under the rule below: what it puts on the branch is the base branch
@@ -212,7 +214,7 @@ commit, not the push, and not going quiet. So a session that waits on a test
 run, or on an answer, is not cut off while it waits.
 
 A fix that found nothing to commit runs it too: what judges the fix is the check
-on GitHub, which Verkstead asks about again once this session is over.
+on the forge, which Verkstead asks about again once this session is over.
 
 Verkstead checks the repository when you run it. A refusal exits non-zero and
 says on stderr what is missing — changes left uncommitted, say — and the session

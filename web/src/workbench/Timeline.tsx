@@ -176,6 +176,7 @@ import { inFlight, settled, stageState } from "./stages";
 import { STATE } from "./states";
 import { opensRoadmap, type Opening } from "./openings";
 import { windowed } from "./windowing";
+import { headed, nounOf, opening, unforged } from "../forges";
 
 /// How much of a commit's hash the timeline shows.
 ///
@@ -957,6 +958,7 @@ export function Timeline(props: {
                   {(opened) => (
                     <PullRequest
                       opened={opened()}
+                      noun={nounOf(props.conversation.repo)}
                       selected={props.selected === opened().id}
                       open={() => {
                         props.select(opened().id);
@@ -1095,13 +1097,21 @@ function Pinned(props: {
   go?: (conversation: number) => void;
 }): JSX.Element {
   return (
-    <Show when={props.conversation.pinned.length > 0}>
-      <div class={styles.pinned}>
+    <>
+      {/* Where a pull request's card would have been, on a Repo whose remote
+          no forge answers for: said once, quietly, so a Done with nothing
+          pinned reads as the Repo's fact rather than as something missing. */}
+      <Show when={unforged(props.conversation.repo)}>
+        {(said) => <p class={styles.unforged}>{said()}</p>}
+      </Show>
+      <Show when={props.conversation.pinned.length > 0}>
+        <div class={styles.pinned}>
         <Show
           when={props.conversation.pinned.length > 1}
           fallback={
             <Card
               event={props.conversation.pinned[0]!}
+              noun={nounOf(props.conversation.repo)}
               profiles={props.profiles}
               selected={props.selected}
               select={props.select}
@@ -1119,8 +1129,9 @@ function Pinned(props: {
             go={props.go}
           />
         </Show>
-      </div>
-    </Show>
+        </div>
+      </Show>
+    </>
   );
 }
 
@@ -1286,7 +1297,7 @@ function Carousel(props: {
             <li>
               <button
                 type="button"
-                aria-label={named(card)}
+                aria-label={named(card, nounOf(props.conversation.repo))}
                 aria-current={showing() === index() ? "true" : undefined}
                 onClick={() => turn(index())}
               />
@@ -1320,6 +1331,7 @@ function Carousel(props: {
                 <div class={parting(pane)}>
                   <Card
                     event={card()}
+                    noun={nounOf(props.conversation.repo)}
                     profiles={props.profiles}
                     selected={props.selected}
                     select={props.select}
@@ -1404,7 +1416,7 @@ function fronting(conversation: ConversationView): number {
 /// reading "Pull request" would be two cards a reader who cannot see them could
 /// not tell apart. The work's own stays unlabelled, by the rule the card itself
 /// follows.
-function named(event: PinnedEvent): string {
+function named(event: PinnedEvent, noun = "pull request"): string {
   if ("AgentOutput" in event) {
     return "Agent run";
   }
@@ -1415,9 +1427,9 @@ function named(event: PinnedEvent): string {
     return "Roadmap";
   }
   if ("PullRequest" in event && event.PullRequest.repo) {
-    return `Pull request in ${event.PullRequest.repo}`;
+    return `${opening(noun)} in ${event.PullRequest.repo}`;
   }
-  return "Pull request";
+  return opening(noun);
 }
 
 /// One pinned card, whichever of the four kinds it is.
@@ -1431,6 +1443,8 @@ function named(event: PinnedEvent): string {
 /// and the card drawn there is this same card — see the module docs.
 function Card(props: {
   event: PinnedEvent;
+  /// What the Repo's Forge calls a pull request, which its card is headed with.
+  noun: string;
   /// For the session's card, which is the one of the four that reads them —
   /// see [`Pinned`].
   profiles: ProfileEntry[] | undefined;
@@ -1490,6 +1504,7 @@ function Card(props: {
         {(opened) => (
           <PullRequest
             opened={opened()}
+            noun={props.noun}
             selected={props.selected === opened().id}
             open={() => {
               props.select(opened().id);
@@ -1528,6 +1543,8 @@ function Card(props: {
 /// opens the one details pane, and both read as selected while it is open.
 function PullRequest(props: {
   opened: PullRequestEvent;
+  /// What the Repo's Forge calls one — see [`nounOf`].
+  noun: string;
   selected: boolean;
   open: () => void;
 }): JSX.Element {
@@ -1538,7 +1555,7 @@ function PullRequest(props: {
       open={props.open}
     >
       <div class={styles.eventHead}>
-        <h2>Pull Request</h2>
+        <h2>{headed(props.noun)}</h2>
         <span class={styles.number}>#{props.opened.number}</span>
         <Show when={props.opened.repo}>
           {(repo) => <span class={styles.repo}>{repo()}</span>}

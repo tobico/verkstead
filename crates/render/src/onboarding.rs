@@ -670,8 +670,4 @@ pub enum Source {
 
     /// And `GITHUB_TOKEN`, where `GH_TOKEN` said nothing.
     GithubToken,
-
-    /// And the login the host's own `gh` is holding — `gh auth token`, asked
-    /// last because it is the one of the three that is a process.
-    HostGh,
 }

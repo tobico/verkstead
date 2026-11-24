@@ -123,6 +123,7 @@ import type {
 } from "../api/types";
 import { brokenReading } from "../broken";
 import { useReading } from "../freshness";
+import { nounOf, opening } from "../forges";
 import { Empty, ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { Listbox, Picker, type Action, type Clonable } from "../picking";
@@ -1981,7 +1982,15 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
 /// Said as the placeholder rather than in a note under it: the label is
 /// *Target* and what may go in it is the placeholder's job, exactly as the
 /// branch field's *Verkstead chooses* is.
-export const TARGET = "Pull request or branch";
+///
+/// In the word the Repo's Forge calls one (ADR-0030, *Forge*).
+export function targetPlaceholder(noun: string): string {
+  return `${opening(noun)} or branch`;
+}
+
+/// And the same for a Repo on GitHub, which is every Repo there was before a
+/// Forge could call one anything else.
+export const TARGET = targetPlaceholder("pull request");
 
 /// What the work is pointed at: a pull request URL, a `#number` or a branch,
 /// and empty until the human or the Brief names one.
@@ -2061,7 +2070,7 @@ function TargetName(props: { conversation: ConversationView }): JSX.Element {
       id="target"
       label="Target"
       class={styles.target!}
-      placeholder={TARGET}
+      placeholder={targetPlaceholder(nounOf(props.conversation.repo))}
       value={target()}
       set={(named) => {
         setNamed(named);

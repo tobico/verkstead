@@ -256,6 +256,7 @@ fn the_guide_covers_every_core_area() {
         "## Waiting in the background",
         "## Leaving a memo for the sessions after you",
         "## Suggesting a preview",
+        "## Opening the pull request",
         "## Ending the session",
         "## Moving the work to another device",
     ] {
@@ -716,6 +717,63 @@ fn the_guides_quoted_preview_contract_is_the_real_one() {
     );
 }
 
+/// `verkstead pull-request open --help` is quoted beside the preview's, and
+/// held to the binary the same way: the subcommand that replaced every skill's
+/// `gh pr create` line is read in the Guide and nowhere else.
+#[test]
+fn the_guides_quoted_pull_request_contract_is_the_real_one() {
+    let guide = stdout(&run(&["guide"]));
+    let contract = section(&guide, "## The CLI contract");
+    let quoted = fenced_blocks(contract)
+        .into_iter()
+        .find(|block| block.contains("Usage: verkstead pull-request open"))
+        .expect("the CLI contract should quote `verkstead pull-request open --help`");
+    let real = stdout(&run(&["pull-request", "open", "--help"]));
+
+    assert_eq!(
+        lines(&quoted),
+        lines(&real),
+        "the Guide quotes `verkstead pull-request open --help` verbatim — copy the \
+         current output into the CLI contract section of crates/cli/guide/core.md"
+    );
+}
+
+/// The pull request is opened before the signal and after the push, so its
+/// section sits between the preview's and *Ending the session* — and says the
+/// one line, what each flag is read off the record where it is not given, that
+/// it opens a draft, that the branch has to be pushed, what comes back on
+/// stdout, and every refusal, so a session reads nothing else to open one.
+#[test]
+fn the_guide_says_how_to_open_the_pull_request() {
+    let guide = stdout(&run(&["guide"]));
+    let opening = section(&guide, "## Opening the pull request");
+    let flowed = opening.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    assert!(
+        guide.find("## Opening the pull request").unwrap()
+            < guide.find("## Ending the session").unwrap(),
+        "the pull request is opened before the signal, so its section comes first"
+    );
+    for phrase in [
+        "verkstead pull-request open --title",
+        "git push -u origin HEAD",
+        "opens as a **draft**",
+        "merging is the human's act",
+        "The title is the branch's own name where none is given",
+        "--base <branch>",
+        "url: https://…",
+        "the branch is not pushed",
+        "holds no token for its forge",
+        "on no forge at all",
+        "**The forge this repo is on**",
+    ] {
+        assert!(
+            flowed.contains(phrase),
+            "the pull request section should say {phrase:?}, got:\n{opening}"
+        );
+    }
+}
+
 /// A preview is suggested during the work, beside the memo and before the
 /// signal, and the section carries the brief's rule — suggest one the moment
 /// anything could be tried — with both invocations, the bounds, what the
@@ -1075,6 +1133,7 @@ fn only_the_two_asking_sections_differ_between_the_backends() {
         "## Waiting in the background",
         "## Leaving a memo for the sessions after you",
         "## Suggesting a preview",
+        "## Opening the pull request",
         "## Ending the session",
         "## Moving the work to another device",
     ] {

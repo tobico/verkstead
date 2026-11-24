@@ -289,13 +289,14 @@ pub fn providing(name: &str) -> Option<&'static Manifest> {
 
 /// Whether `manifest`'s built-in has a tick: a Language plugin's is whether
 /// sessions get its languages, an Agent plugin's whether its harness is
-/// offered, and every other built-in is always on.
+/// offered, a Forge's whether a Repo's remote is matched against it, and every
+/// other built-in is always on.
 pub fn switched(manifest: &Manifest) -> bool {
     languages(manifest).next().is_some()
         || manifest
             .provides
             .iter()
-            .any(|provision| provision.agent().is_some())
+            .any(|provision| provision.agent().is_some() || provision.forge().is_some())
 }
 
 /// The languages `manifest` provides, by the name `config.yaml` keys each by,
@@ -311,6 +312,20 @@ pub fn languages(manifest: &Manifest) -> impl Iterator<Item = &crate::languages:
 /// one component each: *Follow-up rounds* first, then the *Backlog runner*,
 /// the *Stage runner*, *One session* and the *Interview* (Set 1803, Q3).
 pub const ACTIVITIES: &str = "d7a5e719-8491-46a7-b7d7-8f9f85e57bd6";
+
+/// The uuid of the built-in that is the GitHub Forge: the hosts, the noun, the
+/// credential, the tool and the capabilities of the one Forge Verkstead ships.
+/// Answered in-process over the host's `gh` until it has a component of its
+/// own.
+pub const GITHUB: &str = "b357e557-3716-4ea6-a3a8-d904c92c5eac";
+
+/// The built-in that is GitHub.
+pub fn github() -> BuiltIn {
+    *BUILT_INS
+        .iter()
+        .find(|built_in| built_in.directory == "github")
+        .expect("build.rs embeds every directory under plugins/, and plugins/github is one")
+}
 
 /// The built-in the shipped Activities are.
 pub fn activities() -> BuiltIn {
@@ -376,6 +391,55 @@ impl Started {
 mod tests {
     use super::*;
     use crate::plugins::manifest::Capability;
+
+    /// GitHub is a built-in Forge declaring github.com, the noun *pull
+    /// request*, git's `x-access-token`, `gh` with `GH_TOKEN`, all five
+    /// capabilities and the scopes Verkstead needs — and its component loads,
+    /// asking for its API host and its token as a secret.
+    #[tokio::test]
+    async fn github_is_a_built_in_forge() {
+        use crate::plugins::manifest::forge;
+
+        let started = start(github(), Platform::HERE, None).await;
+        assert_eq!(started.trouble, None);
+
+        let manifest = started.manifest.expect("the manifest reads");
+        assert_eq!(manifest.uuid, GITHUB);
+        assert_eq!(manifest.name, "GitHub");
+        assert_eq!(
+            manifest.component.as_deref(),
+            Some(Path::new("github.wasm"))
+        );
+        assert_eq!(
+            manifest.capabilities,
+            [
+                Capability::Outbound {
+                    host: "api.github.com".to_owned()
+                },
+                Capability::Secrets {
+                    name: "GH_TOKEN".to_owned()
+                },
+            ]
+        );
+
+        let [provision] = manifest.provides.as_slice() else {
+            panic!("one provision: {:?}", manifest.provides);
+        };
+        let forge = provision.forge().expect("it provides a forge");
+        assert_eq!(forge.hosts, ["github.com"]);
+        assert_eq!(forge.noun, "pull request");
+        assert_eq!(forge.credential.username, "x-access-token");
+        assert_eq!(forge.credential.hosts, ["github.com"]);
+        assert_eq!(
+            forge.tool,
+            Some(forge::Tool {
+                name: "gh".to_owned(),
+                token: "GH_TOKEN".to_owned()
+            })
+        );
+        assert_eq!(forge.capabilities, forge::Capability::ALL);
+        assert_eq!(forge.scopes, ["repo", "gist"]);
+    }
 
     /// The fixture's bytes are in the binary, whichever way `build.rs` came by
     /// them, and it loads.

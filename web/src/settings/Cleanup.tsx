@@ -214,7 +214,7 @@ export function CleanupPane(props: {
         // Untouched. This form has no business with the credentials, and a
         // blank token field read as *clear this* is exactly what `Keep` is
         // here to stop.
-        github_token: "Keep",
+        tokens: [],
         cleanup: edit,
         // And how much Verkstead runs at once — see [`heldAtOnce`].
         at_once: heldAtOnce(told()),

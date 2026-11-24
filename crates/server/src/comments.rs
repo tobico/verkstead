@@ -32,7 +32,7 @@
 //! change what happens next rather than what happened.
 
 use crate::AppState;
-use crate::github::Comment;
+use crate::forges::Comment;
 use crate::store;
 
 /// Which of `said`, in the Repo `repo`, nobody is to be sent to answer — see
@@ -251,7 +251,7 @@ mod tests {
     /// A comment left on a line of the diff is matched the same way as one said
     /// in the conversation. What a rule reads is who said it and what they
     /// wrote, and both are the same comment whichever of the three places it
-    /// was left in — see [`crate::github::comments`].
+    /// was left in — see [`crate::forges::Forge::comments`].
     #[test]
     fn a_comment_on_the_diff_is_matched_like_any_other() {
         assert!(ignored(

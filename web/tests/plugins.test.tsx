@@ -126,7 +126,7 @@ describe("a row", () => {
     const row = await theRow("Shared skills");
 
     expect(row.textContent).toContain(
-      "file:///home/you/src/sources/skills at d9327cd",
+      "file:///home/you/src/sources/skills at f23bae9",
     );
     expect(row.textContent).toContain("Update");
   });
@@ -236,6 +236,7 @@ describe("the Built-in group", () => {
       "Activities",
       "Codex",
       ".NET",
+      "GitHub",
       "Go",
       "JVM",
       "Node",

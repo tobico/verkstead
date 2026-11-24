@@ -55,7 +55,7 @@ use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::{
-    Agents, Gh, Refusal, Routers, mirroring, open_database, routers_answering_devices_telling,
+    Agents, Refusal, Routers, mirroring, open_database, routers_answering_devices_telling,
     routers_running_sessions_answering_devices, store,
 };
 
@@ -155,10 +155,6 @@ printf 'ran\n'
 /// because a memory sync asks the home device for its worktrees directory and a
 /// router with nowhere to keep anything has none.
 const NOTHING_RUNS: &str = "exit 0";
-
-/// A `gh` that answers nothing: no finish step in this suite reaches GitHub, and
-/// the real one would need an account.
-const NO_GITHUB: &str = "exit 1";
 
 /// How long one address has to answer here, rather than the two seconds a running
 /// server gives one.
@@ -285,7 +281,7 @@ impl Verkstead {
                 pool.clone(),
                 dir.path().to_owned(),
                 agents(stub, home.path(), dir.path()),
-                gh_stub(NO_GITHUB),
+                verkstead_server::stand_in::Forge::unanswerable(),
                 cluster.clone(),
                 nudges.clone(),
                 probing(dir.path()),
@@ -950,16 +946,6 @@ fn agents(stub: &str, home: &Path, data_dir: &Path) -> Agents {
 /// `VERKSTEAD_SERVER` a session inside is told.
 const LISTENING: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 8422);
-
-/// A `gh` that is a shell script, so nothing here reaches GitHub.
-fn gh_stub(script: &str) -> Gh {
-    Gh::running(vec![
-        "/bin/sh".to_owned(),
-        "-c".to_owned(),
-        script.to_owned(),
-        "gh".to_owned(),
-    ])
-}
 
 /// The streams one device is holding, given back when the test drops it.
 struct Holding(tokio::task::JoinHandle<()>);

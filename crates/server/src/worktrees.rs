@@ -47,7 +47,7 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, LazyLock, Mutex, Weak, mpsc};
 use std::time::Duration;
 
-use crate::github::Credential;
+use crate::forges::Credential;
 use crate::repos::git;
 use crate::store;
 use crate::unseen::Unseen;

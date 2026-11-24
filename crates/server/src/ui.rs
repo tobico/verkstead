@@ -44,20 +44,21 @@ use verkstead_render::{
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Creation,
     Cursor, DevicesView, DiskUse, DroppedRow, Eviction, FileDeleted, FileDeleting, FileListsView,
     FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView,
-    FileWrite, FileWritten, FolderListing, GrillingStarted, HeaderEdit, IgnoreRule,
-    IgnoredCommentsEdit, InstallPress, InstructionsEdit, LanguageCleared, LanguageView, Lifecycle,
-    Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption,
-    NewAnnex, NewCompanion, NewConversation, NewJoin, NewRank, OfferedPack, OpenTerminal,
-    PackAttached, PackRemoved, PairingView, Parked, PendingSteerView, Permitting, Picking, Process,
-    ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
-    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
-    RuleField, RuleRefused, Running, ServeEdit, ServePress, ServerAttached, ServerField,
-    ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
-    ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
-    SteerSaved, SteerSubmission, StoreView, Submitted, Subscribed, Subscription, TakenUp,
-    TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
-    TransferredTo, Transferring, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    FileWrite, FileWritten, FolderListing, ForgeToken, ForgeTokenEdit, ForgeVerified,
+    GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress, InstructionsEdit,
+    LanguageCleared, LanguageView, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit,
+    McpServersEdit, Merging, MissedOut, NewAdoption, NewAnnex, NewCompanion, NewConversation,
+    NewJoin, NewRank, OfferedPack, OpenTerminal, PackAttached, PackRemoved, PairingView, Parked,
+    PendingSteerView, Permitting, Picking, Process, ProcessChoice, ProcessPicked, ProfileChoice,
+    ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice,
+    RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, Running,
+    ServeEdit, ServePress, ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading,
+    SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled,
+    SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, StoreView, Submitted,
+    Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent,
+    TokenEdit, TokenForge, TokenSaved, TransferredTo, Transferring, UnreadableSet, Unsubscribe,
+    UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -1271,10 +1272,17 @@ async fn repos(State(state): State<AppState>) -> HttpResponse {
     // Each row asks git for its origin, so the list is read off the runtime's
     // own threads.
     let authors = state.settings.config().authors().to_vec();
+    let enabled = match crate::forges::enabled(&state).await {
+        Ok(enabled) => enabled,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading which forges are enabled failed");
+            return unavailable("The registered repos couldn't be read.");
+        }
+    };
     let rows = tokio::task::spawn_blocking(move || {
         repos
             .into_iter()
-            .map(|repo| crate::repos::listed(repo, &authors))
+            .map(|repo| crate::repos::listed(repo, &authors, &*state.github, &enabled))
             .collect::<Vec<RepoEntry>>()
     })
     .await;
@@ -1388,6 +1396,7 @@ async fn register_repo(
 ) -> HttpResponse {
     match crate::repos::register(
         &state.pool,
+        &crate::forges::enabled_now(&state).await,
         &state.settings.config(),
         &registration.path,
         registration.author.as_deref(),
@@ -1416,7 +1425,7 @@ async fn register_repo(
 /// The author is read at the moment of the call rather than held from startup,
 /// the way a publish reads it: somebody filling the settings in and coming
 /// straight back has an author. The token the `gh` authenticates as is read the
-/// same way and for the same reason — see [`crate::github`].
+/// same way and for the same reason — see [`crate::forges`].
 async fn create_repo(
     State(state): State<AppState>,
     Json(creation): Json<Creation>,
@@ -1425,8 +1434,9 @@ async fn create_repo(
 
     match crate::repos::create(
         &state.pool,
+        &crate::forges::enabled_now(&state).await,
         &config,
-        &state.github,
+        &*state.github,
         &creation,
         // What the Repo pane this comes back with says is waiting in it, which is
         // bounded by the same setting the notice is — see [`crate::stages::waiting`].
@@ -1454,7 +1464,9 @@ async fn create_repo(
 async fn clone_repo(State(state): State<AppState>, Json(cloning): Json<Cloning>) -> HttpResponse {
     let config = state.settings.config();
 
-    match crate::repos::clone(&state.pool, &config, &state.github, &cloning).await {
+    let enabled = crate::forges::enabled_now(&state).await;
+
+    match crate::repos::clone(&state.pool, &enabled, &config, &*state.github, &cloning).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "cloning a Repo failed");
@@ -1513,6 +1525,7 @@ async fn edit_author(
 ) -> HttpResponse {
     let settings = state.settings.clone();
     let gh = state.github.clone();
+    let forges = crate::forges::taking_tokens(&state).await;
 
     let saved = async {
         let author = crate::settings::Author::of(
@@ -1530,25 +1543,33 @@ async fn edit_author(
             return Ok::<_, anyhow::Error>(AuthorEdited::NoSuchAuthor);
         }
 
-        // The token into `secrets.yaml` first, so that the record written
-        // after it says whether the file holds one — the two together, so the
+        // What each Forge makes of a token set, before anything is written —
+        // a token short of its Forge's scopes is refused and never written.
+        let (writes, verified) = {
+            let gh = gh.clone();
+            let forges = forges.clone();
+            let tokens = edit.tokens.clone();
+
+            tokio::task::spawn_blocking(move || token_verdicts(&*gh, &forges, &tokens)).await?
+        };
+
+        // The tokens into `secrets.yaml` first, so that the record written
+        // after it says whether the file holds them — the two together, so the
         // copying never reads one without the other.
         let _writing = crate::replicating::authors::writing_held().await;
 
-        let token = match &edit.github_token {
-            TokenEdit::Keep => None,
-            TokenEdit::Set { token } => Some(Some(token.clone())),
-            TokenEdit::Clear => Some(None),
-        };
+        let token_moved = !writes.is_empty();
 
-        let token_moved = token.is_some();
-
-        if let Some(token) = token {
+        if token_moved {
             let settings = settings.clone();
             let id = id.clone();
 
-            tokio::task::spawn_blocking(move || settings.setting_author_token(&id, token))
-                .await??;
+            tokio::task::spawn_blocking(move || {
+                writes.into_iter().try_for_each(|(forge, token)| {
+                    settings.setting_author_token_on(&id, &forge, token)
+                })
+            })
+            .await??;
         }
 
         let written = crate::replicating::authors::edited(
@@ -1565,24 +1586,6 @@ async fn edit_author(
         if matches!(written, Written::Absent | Written::Removed) {
             return Ok(AuthorEdited::NoSuchAuthor);
         }
-
-        // Read back off the file rather than taken from the request, for the
-        // settings save's reason: a token of whitespace is nothing configured.
-        let verified = match &edit.github_token {
-            TokenEdit::Set { .. } => {
-                let settings = settings.clone();
-                let id = id.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    settings
-                        .secrets()
-                        .author_token(&id)
-                        .map(|token| verifying(&gh, token))
-                })
-                .await?
-            }
-            TokenEdit::Keep | TokenEdit::Clear => None,
-        };
 
         Ok(AuthorEdited::Saved { verified })
     }
@@ -1686,6 +1689,7 @@ async fn repoint_repo(
 
     match crate::repos::repoint(
         &state.pool,
+        &crate::forges::enabled_now(&state).await,
         &state.settings.config(),
         id,
         &repointing.author,
@@ -2828,9 +2832,17 @@ pub(crate) async fn conversation_view(
     // if they were read at different times.
     let now = OffsetDateTime::now_utc();
 
+    // And what its Repo's `origin` remote is, read now — the Forge it is on,
+    // which is what the card says *No forge for* where a pull request would
+    // have been.
+    let forge = crate::forges::drawn_of(state, &conversation.repo.path).await;
+
     let view = ConversationView {
         id: conversation.id,
-        repo: crate::repos::entry(conversation.repo, config.authors()),
+        repo: RepoEntry {
+            forge: Some(forge),
+            ..crate::repos::entry(conversation.repo, config.authors())
+        },
         process: process(conversation.process),
         branch: conversation.branch,
         branch_named: conversation.branch_named,
@@ -3300,9 +3312,10 @@ pub(crate) async fn commented(
 
     // One blocking hop for the lot: a `gh` per pull request, and a Conversation
     // ends on one per repository it was worked in.
-    let landings =
-        tokio::task::spawn_blocking(move || crate::commenting::on_each(&gh, &token, &pulls, &body))
-            .await;
+    let landings = tokio::task::spawn_blocking(move || {
+        crate::commenting::on_each(&*gh, &token, &pulls, &body)
+    })
+    .await;
 
     let landings = match landings {
         Ok(landings) => landings,
@@ -3390,6 +3403,29 @@ async fn publishing(
 ) -> Result<Published, Unpublished> {
     let conversation_id = bundle.conversation.id;
 
+    // On no Forge there is nowhere to publish to, nor on one that declares no
+    // `publish`, and nothing is asked.
+    match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => match crate::forges::of(state, &conversation.repo.path).await {
+            crate::forges::Matched::Unmatched { host } => {
+                return Err(Unpublished::Refused(SharePublished::NoForge { host }));
+            }
+            crate::forges::Matched::On(forge) if !forge.has(crate::forges::Capability::Publish) => {
+                return Err(Unpublished::Refused(SharePublished::NoPublish {
+                    forge: forge.name,
+                }));
+            }
+            crate::forges::Matched::On(_) => {}
+        },
+        Ok(None) => {}
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation to publish failed");
+            return Err(Unpublished::Broken(
+                "The share couldn't be published.".to_owned(),
+            ));
+        }
+    }
+
     let (name, file) = document(bundle).map_err(Unpublished::Broken)?;
 
     // What the gist is called on GitHub's own pages. Readable by whoever holds
@@ -3409,7 +3445,7 @@ async fn publishing(
     // runtime's threads.
     let published = tokio::task::spawn_blocking(move || {
         crate::publishing::publish_as(
-            &gh,
+            &*gh,
             &settings,
             recorded.as_deref(),
             &description,
@@ -4863,7 +4899,7 @@ async fn pull_request(
     let asked = {
         let path = repo.path.clone();
 
-        tokio::task::spawn_blocking(move || crate::github::details(&gh, &path, number)).await
+        tokio::task::spawn_blocking(move || gh.details(&path, number)).await
     };
 
     match asked {
@@ -4891,13 +4927,13 @@ async fn pull_request(
                 conversation_id = id,
                 event_id = event,
                 why = trouble.why(),
-                "a pull request could not be read through the host gh",
+                "a pull request could not be read through the Forge",
             );
 
             refused(StatusCode::BAD_GATEWAY, ApiError::new(trouble.why()))
         }
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, event_id = event, "asking gh about a pull request failed");
+            tracing::error!(error = ?error, conversation_id = id, event_id = event, "asking the Forge about a pull request failed");
             unavailable("The pull request couldn't be read.")
         }
     }
@@ -4914,7 +4950,9 @@ async fn save_brief(
     };
 
     let config = state.settings.config();
-    match crate::conversations::save_brief(&state.pool, &config, id, &edit.markdown).await {
+    match crate::conversations::save_brief(&state.pool, &config, &state.github, id, &edit.markdown)
+        .await
+    {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "saving a Brief failed");
@@ -6857,12 +6895,15 @@ async fn unsubscribe(
 /// the two said it and whether the server can see what it names — see
 /// [`crate::paths`].
 async fn settings(State(state): State<AppState>) -> HttpResponse {
+    let forges = crate::forges::taking_tokens(&state).await;
+
     Json(as_told(
         &state.settings,
         state.sessions.caches_compiles(),
         &state.binds,
         taken(&state),
         running(&state),
+        forges,
     ))
     .into_response()
 }
@@ -6939,6 +6980,7 @@ async fn clear_language(State(state): State<AppState>, Path(name): Path<String>)
                     &state.binds,
                     taken(&state),
                     running(&state),
+                    crate::forges::taking_tokens(&state).await,
                 )),
             })
             .into_response()
@@ -7044,7 +7086,14 @@ async fn save_settings(
     // And whether it set or cleared a token, which the rows above cannot show:
     // a rotation leaves an Author holding one, and every member's copy of it is
     // what the news is for.
-    let token_moved = !matches!(edit.github_token, TokenEdit::Keep);
+    let token_moved = edit
+        .tokens
+        .iter()
+        .any(|edit| !matches!(edit.token, TokenEdit::Keep));
+
+    // And the Forges a token is asked for, which is what a token set is
+    // verified against and what the view that rides back draws.
+    let forges = crate::forges::taking_tokens(&state).await;
 
     // One blocking hop for the whole save: two files written and, where a token
     // was set, a `gh` run. Everything here is the filesystem or a process, and
@@ -7142,8 +7191,15 @@ async fn save_settings(
                     // How things stand, which is how they stood: nothing was
                     // written, and the page draws the errors over what the human
                     // still has in front of them.
-                    settings: as_told(&settings, caches_compiles, &installed, taking, running),
-                    verified: None,
+                    settings: as_told(
+                        &settings,
+                        caches_compiles,
+                        &installed,
+                        taking,
+                        running,
+                        forges,
+                    ),
+                    verified: Vec::new(),
                     refused,
                     refused_servers,
                     // And nothing was spoken to. A refusal is the whole request
@@ -7167,7 +7223,9 @@ async fn save_settings(
         let said = [&drawn.display_name, &drawn.name, &drawn.email]
             .iter()
             .any(|field| !field.trim().is_empty())
-            || matches!(&edit.github_token, TokenEdit::Set { token } if !token.trim().is_empty());
+            || edit.tokens.iter().any(
+                |edit| matches!(&edit.token, TokenEdit::Set { token } if !token.trim().is_empty()),
+            );
         let id = match drawn.id.or_else(|| {
             settings
                 .config()
@@ -7286,6 +7344,15 @@ async fn save_settings(
             }
         };
 
+        // What each Forge makes of a token set, asked before anything is
+        // written and outside the lock below — it is a call over the network —
+        // so that a token short of its Forge's scopes is refused and never
+        // written. No uuid is no Author, and nothing to keep a token under.
+        let (token_writes, verified) = match &id {
+            Some(_) => token_verdicts(&*gh, &forges, &edit.tokens),
+            None => (Vec::new(), Vec::new()),
+        };
+
         // And the Author's token and record written together, so the copying
         // of the members' tokens never reads one without the other — see
         // [`crate::replicating::authors::copied`].
@@ -7302,30 +7369,14 @@ async fn save_settings(
             writing = true;
         }
 
-        // Under the uuid of the Author the fields were about, which leaves
-        // every other Author's token where it was. No uuid is no Author, and
-        // nothing to keep a token under: the save said nothing that would make
-        // one, so the token's half said nothing either.
-        let verifying = match (&edit.github_token, &id) {
-            (TokenEdit::Keep, _) | (_, None) => None,
-            (TokenEdit::Set { token }, Some(id)) => {
-                secrets = secrets.with_author_token(id, Some(token.clone()));
+        // Under the uuid of the Author the fields were about and the Forge
+        // each is for, which leaves every other token where it was.
+        if let Some(id) = &id {
+            for (forge, token) in token_writes {
+                secrets = secrets.with_author_token_on(id, &forge, token);
                 writing = true;
-
-                // Read back off the secrets that are to be written rather than
-                // taken from the request: a token that was only whitespace is
-                // nothing configured, and verifying what was typed would
-                // announce an account for a token no session will ever be
-                // given.
-                secrets.author_token(id).map(str::to_owned)
             }
-            (TokenEdit::Clear, Some(id)) => {
-                secrets = secrets.with_author_token(id, None);
-                writing = true;
-
-                None
-            }
-        };
+        }
 
         if writing {
             settings.save_secrets(&secrets)?;
@@ -7375,13 +7426,6 @@ async fn save_settings(
                 .map_err(std::io::Error::other)?,
         };
 
-        // What GitHub made of it: whose it is, and what it may do. The second
-        // half is here because a token that authenticates perfectly and cannot
-        // write a gist is a token whose failure would otherwise be found by a
-        // human pressing Share — and the answer to it is on this page, which is
-        // where they already are.
-        let verified = verifying.map(|token| self::verifying(&gh, &token));
-
         // And the declarations this save wrote down, each with the header values
         // just written beside it — which is what is spoken to below. Read back
         // off the two files rather than built out of what came in, the way the
@@ -7407,7 +7451,14 @@ async fn save_settings(
 
         Ok::<_, std::io::Error>((
             SettingsSaved {
-                settings: as_told(&settings, caches_compiles, &installed, taking, running),
+                settings: as_told(
+                    &settings,
+                    caches_compiles,
+                    &installed,
+                    taking,
+                    running,
+                    forges,
+                ),
                 verified,
                 // Nothing turned down: a save that got this far was one there was
                 // nothing wrong with — of either list.
@@ -7469,32 +7520,91 @@ async fn save_settings(
     }
 }
 
-/// What GitHub made of a token just saved: whose it is, and what it may do.
-fn verifying(gh: &crate::github::Gh, token: &str) -> Verified {
-    match crate::github::authenticates_as(gh, token) {
-        Ok(account) => Verified::Account {
-            login: account.login,
-            missing: needed(&account.scopes),
+/// What `forge` made of `token`: whose it is, and whether it carries every
+/// scope the Forge's manifest declares it needs — see
+/// [`crate::forges::Account::short_of`].
+///
+/// Asked through the Forge's verify operation. **Only the built-in GitHub has
+/// one to ask yet**, in-process; a token for a Forge whose component cannot be
+/// asked is written down unverified, the way one is when GitHub cannot be
+/// reached.
+fn verifying(gh: &dyn crate::forges::Forge, forge: &TokenForge, token: &str) -> Verified {
+    if forge.uuid != crate::plugins::built_in::GITHUB {
+        return Verified::Refused {
+            why: format!(
+                "{} can't be asked about a token yet, so it was saved unchecked.",
+                forge.name
+            ),
+        };
+    }
+
+    match gh.verify(token) {
+        Ok(account) => match account.short_of(&forge.scopes) {
+            missing if missing.is_empty() => Verified::Account {
+                login: account.login,
+            },
+            missing => Verified::Short {
+                login: account.login,
+                missing,
+            },
         },
         Err(trouble) => Verified::Refused { why: trouble.why() },
     }
 }
 
-/// The scopes Verkstead needs that this token has not been given.
+/// What is to become of each of an Author's tokens that `edits` sets or
+/// clears, decided against its Forge among `forges`: each token to write — a
+/// token, or `None` to take one away — and what each Forge made of a token
+/// set.
 ///
-/// One question rather than a sweep: publishing a share writes a secret gist,
-/// which needs `gist`, and that is the whole of what this server asks a token
-/// for on its own account. The scopes a *session* spends inside a sandbox are
-/// the repository's review process rather than anything checked here.
+/// **A token short of the scopes its Forge declares is refused**: not
+/// written, its verdict naming what is missing. Verified before anything is
+/// written, so a refusal leaves the token that was there. A token of
+/// whitespace is a clear, and an edit for a Forge that is not among `forges`
+/// is nothing — no token is kept under a uuid no enabled Forge has.
 ///
-/// Empty where GitHub said nothing about scopes at all — see
-/// [`crate::github::Scopes`], where a fine-grained token's silence is kept
-/// apart from a classic one's answer.
-fn needed(scopes: &crate::github::Scopes) -> Vec<String> {
-    match scopes.known_to_lack(crate::github::GIST) {
-        true => vec![crate::github::GIST.to_owned()],
-        false => Vec::new(),
+/// Blocks: a token set for GitHub is a `gh` run.
+fn token_verdicts(
+    gh: &dyn crate::forges::Forge,
+    forges: &[TokenForge],
+    edits: &[ForgeTokenEdit],
+) -> (Vec<(String, Option<String>)>, Vec<ForgeVerified>) {
+    let mut writes = Vec::new();
+    let mut verified = Vec::new();
+
+    for edit in edits {
+        let Some(forge) = forges.iter().find(|forge| forge.uuid == edit.forge) else {
+            continue;
+        };
+
+        match &edit.token {
+            TokenEdit::Keep => {}
+            TokenEdit::Clear => writes.push((forge.uuid.clone(), None)),
+            TokenEdit::Set { token } => {
+                // Read as the file would hold it rather than as typed: a token
+                // of whitespace is nothing configured, and verifying what was
+                // typed would announce an account for a token no session will
+                // ever be given.
+                let Some(token) = crate::settings::blank_is_nothing(token.clone()) else {
+                    writes.push((forge.uuid.clone(), None));
+                    continue;
+                };
+
+                let said = verifying(gh, forge, &token);
+
+                if !matches!(said, Verified::Short { .. }) {
+                    writes.push((forge.uuid.clone(), Some(token)));
+                }
+
+                verified.push(ForgeVerified {
+                    forge: forge.uuid.clone(),
+                    verified: said,
+                });
+            }
+        }
     }
+
+    (writes, verified)
 }
 
 /// Whether a session's compiling is cached, and where it is not, why not — see
@@ -7612,6 +7722,7 @@ fn as_told(
     binds: &crate::sandbox::SandboxConfig,
     taking: usize,
     running: Running,
+    forges: Vec<TokenForge>,
 ) -> SettingsView {
     let secrets = settings.secrets();
     let config = settings.config();
@@ -7711,7 +7822,11 @@ fn as_told(
         instructions: config.instructions().to_owned(),
         // And what is running, which is no file's either.
         running,
-        github_token: author.and_then(|author| token_saved(settings, &secrets, author)),
+        tokens: author
+            .map(|author| tokens_saved(settings, &secrets, author))
+            .unwrap_or_default(),
+        // And the Forges a token is asked for under each Author.
+        forges,
         // And every Author with its token's standing, the first included: the
         // Git section draws the one it is about out of this list, and offers
         // the whole of it once there are two.
@@ -7723,7 +7838,7 @@ fn as_told(
                 display_name: author.display_name().unwrap_or_default().to_owned(),
                 name: author.name().unwrap_or_default().to_owned(),
                 email: author.email().unwrap_or_default().to_owned(),
-                github_token: token_saved(settings, &secrets, author),
+                tokens: tokens_saved(settings, &secrets, author),
             })
             .collect(),
     }
@@ -7758,21 +7873,31 @@ async fn recording_the_only_author(state: &AppState, drawn: Option<&str>) -> any
     store::record_the_repo_authors(&state.pool, only.id()).await
 }
 
-/// What can be said about an Author's token, which is everything but the
-/// token: its last four characters and when the secrets file was written — the
-/// file's, there being one file for every Author's token.
-fn token_saved(
+/// What can be said about each of an Author's tokens, which is everything but
+/// the token: its last four characters and when the secrets file was written —
+/// the file's, there being one file for every Author's token. One per Forge it
+/// holds one for, by the Forge's uuid.
+fn tokens_saved(
     settings: &crate::settings::Settings,
     secrets: &crate::settings::Secrets,
     author: &crate::settings::Author,
-) -> Option<TokenSaved> {
-    secrets.author_token(author.id()).map(|token| TokenSaved {
-        last_four: last_four(token),
-        at: settings
-            .secrets_written_at()
-            .and_then(|at| at.format(&Rfc3339).ok())
-            .unwrap_or_default(),
-    })
+) -> Vec<ForgeToken> {
+    let at = settings
+        .secrets_written_at()
+        .and_then(|at| at.format(&Rfc3339).ok())
+        .unwrap_or_default();
+
+    secrets
+        .author_tokens_of(author.id())
+        .into_iter()
+        .map(|(forge, token)| ForgeToken {
+            forge,
+            saved: TokenSaved {
+                last_four: last_four(&token),
+                at: at.clone(),
+            },
+        })
+        .collect()
 }
 
 /// One ignore rule as the settings file holds it, out of what the page sent:
@@ -8061,11 +8186,7 @@ async fn onboarding(State(state): State<AppState>) -> HttpResponse {
 /// every start. A field Verkstead already holds a value for is not prefilled at
 /// all, which is what keeps a configured token out of this entirely.
 async fn onboarding_git(State(state): State<AppState>) -> HttpResponse {
-    match state
-        .onboarding
-        .prefill(&state.settings, &state.github)
-        .await
-    {
+    match state.onboarding.prefill(&state.settings).await {
         Ok(prefill) => Json(prefill).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "reading what the git step could be prefilled with failed");

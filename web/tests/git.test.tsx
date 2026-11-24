@@ -24,6 +24,7 @@ import type {
   SettingsView,
 } from "../src/api/types";
 import scopes from "../src/settings/scopes.module.css";
+import { GITHUB } from "../src/forges";
 import { Git } from "../src/setup/Git";
 import { SETUP_STEP } from "../src/setup/steps";
 import { SET_UP, theWorkbench } from "./bench";
@@ -61,14 +62,19 @@ const SAVED = saved as SettingsSaved;
 
 /// The same with no token to verify, which is a save that has nothing to be
 /// read and goes straight on.
-const UNVERIFIED: SettingsSaved = { ...SAVED, verified: null };
+const UNVERIFIED: SettingsSaved = { ...SAVED, verified: [] };
 
 /// And one whose token GitHub would not answer for.
 const REFUSED: SettingsSaved = {
   ...SAVED,
-  verified: {
-    Refused: { why: "The gh command said: HTTP 401: Bad credentials." },
-  },
+  verified: [
+    {
+      forge: GITHUB,
+      verified: {
+        Refused: { why: "The gh command said: HTTP 401: Bad credentials." },
+      },
+    },
+  ],
 };
 
 /// A bare machine, which is the reading the wizard is a page under.
@@ -146,10 +152,16 @@ function onwards(container: ParentNode): HTMLButtonElement {
   )!;
 }
 
-/// What the save answers where GitHub named the account but not every scope.
+/// What the save answers where GitHub named the account but not every scope:
+/// the token refused, and not saved.
 const UNSCOPED: SettingsSaved = {
   ...SAVED,
-  verified: { Account: { login: "ada", missing: ["gist"] } },
+  verified: [
+    {
+      forge: GITHUB,
+      verified: { Short: { login: "ada", missing: ["gist"] } },
+    },
+  ],
 };
 
 /// The step alone over a machine that offers nothing, saving to `answer`, with
@@ -339,7 +351,9 @@ describe("what the press saves", () => {
 
     expect(sent(fetching)).toEqual({
       git_author: { ...TOLD.git_author, name: "Ada King", email: "ada@example.com" },
-      github_token: { Set: { token: "ghp_intheenvironment" } },
+      tokens: [
+        { forge: GITHUB, token: { Set: { token: "ghp_intheenvironment" } } },
+      ],
       share_on_done: TOLD.share_on_done,
       // The one thing a save can be refused over, left alone: a wizard turned
       // down over a pattern somebody hand-edited into the file weeks ago would
@@ -380,7 +394,7 @@ describe("what the press saves", () => {
     fireEvent.click(onwards(container));
 
     await waitFor(() => expect(wrote(fetching, SETTINGS)).toBe(true));
-    expect(sent(fetching).github_token).toBe("Keep");
+    expect(sent(fetching).tokens).toEqual([]);
   });
 });
 
@@ -400,19 +414,19 @@ describe("what the save answers", () => {
     expect(saves(fetching)).toBe(1);
   });
 
-  /// A scope GitHub did not give it holds the step for one more press: whose
-  /// the token is and what it can't do are read, Saved stands beside the
-  /// press, and the next press goes on without the scope.
+  /// A token short of a scope GitHub declares holds the step for one more
+  /// press: it was refused rather than saved, what it is missing is read, and
+  /// the next press goes on without it.
   it("stays for a missing scope, and finishes on the next press", async () => {
     const { container, fetching } = await filled(UNSCOPED);
 
     fireEvent.click(onwards(container));
 
     await waitFor(() => expect(container.textContent).toContain("Saved"));
-    expect(container.textContent).toContain("GitHub says it's ada.");
     expect(container.textContent).toContain(
-      "It can't publish a share without the gist scope.",
+      "Not saved: the token for ada is missing the gist scope.",
     );
+    expect(container.textContent).not.toContain("GitHub says it's");
     expect(wrote(fetching, FINISHED)).toBe(false);
 
     // The press that follows the save, once the save is over: the button is

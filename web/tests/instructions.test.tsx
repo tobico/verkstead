@@ -46,7 +46,7 @@ const UNSET = unset as SettingsView;
 /// read said, left exactly where it was.
 const REST = {
   git_author: TOLD.git_author,
-  github_token: "Keep",
+  tokens: [],
   // The rules ride along as an action rather than a value: nothing this form
   // does says anything about them — see [`IgnoredCommentsEdit`].
   ignored_comments: "Keep",
@@ -107,7 +107,7 @@ function theSettings(
 function saying(standing: SettingsView, instructions: string): SettingsSaved {
   return {
     settings: { ...standing, instructions },
-    verified: null,
+    verified: [],
     refused: [],
     refused_servers: [],
     tried: [],

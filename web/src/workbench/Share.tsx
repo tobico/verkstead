@@ -59,6 +59,7 @@ import { keyOf, useDevice } from "../reaching";
 import { PaneHead } from "./PaneHead";
 import styles from "./Share.module.css";
 import { onAPullRequest } from "./Steer";
+import { nounOf, publishless, unpublishable, unpublished } from "../forges";
 
 /// What a publish came back with, as the toast it is said in.
 ///
@@ -98,6 +99,14 @@ export function published(outcome: SharePublished): JSX.Element {
     return <>{ended(outcome.Refused.why)}</>;
   }
 
+  if ("NoForge" in outcome) {
+    return <>{unpublishable(outcome.NoForge.host)}</>;
+  }
+
+  if ("NoPublish" in outcome) {
+    return <>{publishless(outcome.NoPublish.forge)}</>;
+  }
+
   // Through the share viewer, which is what the server composed it as — see
   // `link` in `crates/server/src/sharing.rs`. The gist itself is what was
   // published; a link that draws it as a conversation is what is worth handing
@@ -121,9 +130,14 @@ export function published(outcome: SharePublished): JSX.Element {
 /// moved. And a share that went says where it went, naming whatever missed out
 /// beside what worked: the file is up either way, and a human told which pull
 /// request it never reached can paste the link there themselves.
-export function commented(outcome: ShareCommented): JSX.Element {
+///
+/// `noun` is what the Repo's Forge calls a pull request (ADR-0030, *Forge*).
+export function commented(
+  outcome: ShareCommented,
+  noun = "pull request",
+): JSX.Element {
   if (outcome === "NoPullRequest") {
-    return <>This conversation has no pull request.</>;
+    return <>This conversation has no {noun}.</>;
   }
 
   if ("NotPublished" in outcome) {
@@ -198,7 +212,7 @@ export function Share(props: {
   const comment = useMutation(() => ({
     mutationFn: (id: number) => shareToPullRequests(device(), id),
     onSuccess: (outcome: ShareCommented) => {
-      toast(() => commented(outcome));
+      toast(() => commented(outcome, nounOf(props.conversation.repo)));
       reread();
     },
     onError: (error: Error) => {
@@ -280,18 +294,20 @@ export function Share(props: {
             rather than instead of it — one is a file to attach and the other is
             a link to paste, and which of the two a colleague wants is not this
             pane's to decide. */}
-        <button
-          type="button"
-          class={styles.publish}
-          disabled={publish.isPending}
-          onClick={() => publish.mutate(props.conversation.id)}
-        >
-          {publish.isPending
-            ? "Publishing…"
-            : props.conversation.shared
-              ? "Publish again"
-              : "Publish"}
-        </button>
+        <Show when={unpublished(props.conversation.repo) === null}>
+          <button
+            type="button"
+            class={styles.publish}
+            disabled={publish.isPending}
+            onClick={() => publish.mutate(props.conversation.id)}
+          >
+            {publish.isPending
+              ? "Publishing…"
+              : props.conversation.shared
+                ? "Publish again"
+                : "Publish"}
+          </button>
+        </Show>
 
         {/* And the whole of it in one press, on a conversation whose work is on
             a pull request: the same publish, and a comment carrying the link
@@ -299,23 +315,41 @@ export function Share(props: {
 
             Offered only where there is a pull request to say it on, which is
             what the pinned cards already say: a conversation with none has
-            nowhere for this press to go. */}
-        <Show when={onAPullRequest(props.conversation)}>
+            nowhere for this press to go. And only where there is a publish
+            for it to carry. */}
+        <Show
+          when={
+            onAPullRequest(props.conversation) &&
+            unpublished(props.conversation.repo) === null
+          }
+        >
           <button
             type="button"
             class={styles.comment}
             disabled={comment.isPending}
             onClick={() => comment.mutate(props.conversation.id)}
           >
-            {comment.isPending ? "Sharing…" : "Share to pull request"}
+            {comment.isPending
+              ? "Sharing…"
+              : `Share to ${nounOf(props.conversation.repo)}`}
           </button>
         </Show>
       </div>
 
-      <Note>
-        Publishing takes a fresh snapshot every time. What was already sent stays
-        where it is.
-      </Note>
+      {/* And on a Repo no forge answers for, or on one that can't publish,
+          there is nowhere to publish to: the download is the whole of it,
+          and the pane says why. */}
+      <Show
+        when={unpublished(props.conversation.repo)}
+        fallback={
+          <Note>
+            Publishing takes a fresh snapshot every time. What was already sent
+            stays where it is.
+          </Note>
+        }
+      >
+        {(why) => <Note>{why()}</Note>}
+      </Show>
     </>
   );
 }

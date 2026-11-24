@@ -72,8 +72,9 @@ use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
+use verkstead_server::stand_in::Forge;
 use verkstead_server::terminal::COLUMNS;
-use verkstead_server::{Agents, Gh, Pace, open_database, router_running_sessions};
+use verkstead_server::{Agents, Pace, open_database, router_running_sessions};
 
 use crate::stub_harness::{self, StubHarness};
 
@@ -906,12 +907,8 @@ async fn grilling_caching(script: &str, cache: Option<&Path>, builds: Builds, on
         state.path().to_owned(),
         agents,
         // Nothing here reaches a wrap-up, so nothing here asks GitHub anything
-        // — and what stands where `gh` goes is a program that answers nobody.
-        Gh::running(vec![
-            "cmd.exe".to_owned(),
-            "/c".to_owned(),
-            "exit 1".to_owned(),
-        ]),
+        // — and what stands where GitHub goes is reachable by nobody.
+        Forge::unanswerable(),
     );
 
     let repo = repository(repo, builds);

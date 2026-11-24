@@ -39,7 +39,6 @@ use verkstead_render::{
     AgentType, Dependency, DependencyState, DependencyView, InstallPress, InstallState,
     OnboardingView, RunPhase,
 };
-use verkstead_server::github::Gh;
 use verkstead_server::onboarding::Machine;
 use verkstead_server::platform::{Environment, Platform};
 use verkstead_server::remote::{Elevate, Raised};
@@ -170,7 +169,7 @@ fn stood_up(
         pool.clone(),
         dir.to_owned(),
         machine,
-        Gh::on_path(),
+        verkstead_server::stand_in::Forge::itself(),
         dialog.map(|dialog| dialog as Arc<dyn Elevate>),
     )
 }

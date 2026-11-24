@@ -71,6 +71,11 @@
   overflow-wrap: anywhere;
 }
 
+.forge {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
 /* Drawn as an outline rather than as a filled press — the way the Profile
    pane's Remove is, and for the same reason: it undoes rather than does. */
 .remove {

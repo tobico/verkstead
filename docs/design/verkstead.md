@@ -21,7 +21,7 @@ flowchart LR
   ORC --> WT[Worktree in bwrap sandbox]
   WT --> AG[claude session]
   AG -- askance CLI --> SRV
-  SRV -- host gh --> GH[GitHub PRs and CI]
+  SRV -- github plugin --> GH[GitHub PRs and CI]
 ```
 
 ## Product decisions
@@ -608,8 +608,8 @@ flowchart LR
     no author git's own "tell me who you are" stands. Both files are read and
     written through `/api/ui/settings` as well as by hand — the token
     write-only, coming back as its last four characters and the moment
-    `secrets.yaml` was written, and a saved one verified against GitHub through
-    the host `gh` so the answer names the account it authenticates as, or says
+    `secrets.yaml` was written, and a saved one verified against the Forge
+    through its plugin so the answer names the account it authenticates as, or says
     in words why nobody could be asked. The save lands either way: a token is
     pasted once out of a page that will not show it again (*refined 2026-08-23,
     building intentional-credentials*). *Refined 2026-10-16, grilling authors*:
@@ -799,13 +799,25 @@ flowchart LR
   also one of the things an answer can add (ADR-0028), picked beside the
   servers and, like them, a change to the sandbox that carries the session
   waiting on that set on.
-- **Verkstead itself reaches GitHub through host `gh`** (CI status, PR commit
-  lists and comments), authenticating as the same configured token the sessions
-  get — `GH_TOKEN` in the environment of each call, read from `secrets.yaml` at
-  the moment of the call so a rotation applies without a restart, and unset
-  where nothing is configured so the host's own login still stands (*refined
-  2026-08-23, building intentional-credentials*). Agents keep using `gh` inside
-  the sandbox for push/PR as today.
+- **Verkstead itself reaches GitHub through the built-in GitHub plugin's wasm
+  component** (CI status, PR commit lists and comments), which speaks REST and
+  GraphQL to the one outbound host its manifest asks for — a component per
+  call, authenticating as the same configured token the sessions get, set in
+  `GH_TOKEN` in that call's environment and read from `secrets.yaml` at the
+  moment of the call so a rotation applies without a restart (*refined
+  2026-08-23, building intentional-credentials; crossed the plugin boundary
+  2026-11-22, Set 1768, Q36*). Where the Repo's Author holds
+  no token for its Forge, the Forge is not asked at all and the work is treated
+  as the Forge being out of reach — the host's own login no longer stands in
+  (*refined 2026-11-22, Set 1878, Q3*). One token per Forge per Author, the
+  Author record carrying a digest of each beside the GitHub one older members
+  read. **And `gh` is gone from the server** (*2026-11-22, roadmap stage
+  plugins/12*): it is no program Verkstead runs, the suites stand an HTTP
+  stand-in behind GitHub's own component rather than a script where `gh` went,
+  and whether a session would find a `gh` extension is read off the directory
+  it would be in under that session's home. Sessions keep using `gh` inside the
+  sandbox — it is the Forge's declared tool — for pushing and for `gh stack`,
+  with the pull request itself opened by `verkstead pull-request open`.
 - **Full Captures** are stored per session; the timeline event summarizes (turn
   count, and what the run was launched under), the details pane shows
   everything. The turns are the session's own Transcript, counted as the pane

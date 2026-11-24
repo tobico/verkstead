@@ -24,6 +24,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
@@ -34,11 +35,9 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{SharedConversation, TimelineEvent};
 use verkstead_schema::QuestionSet;
+use verkstead_server::router_asking_github;
+use verkstead_server::stand_in::{Forge, GitHub, Said};
 use verkstead_server::{open_database, router, router_keeping, store};
-// The `gh` half, which the six tests that reach GitHub want — see
-// [`app_asking_github`] for what keeps them, and these, off Windows.
-#[cfg(unix)]
-use verkstead_server::{Gh, router_asking_github};
 
 /// The device every Conversation started here is ranked by, named the way a
 /// cluster names one (ADR-0020, *Ranks*).
@@ -55,41 +54,34 @@ async fn app() -> (tempfile::TempDir, SqlitePool, Router) {
     (dir, pool.clone(), router(pool))
 }
 
-/// The same, reaching GitHub through a `gh` that answers nothing and writes down
-/// every call it was asked to make.
+/// The same, reaching GitHub through a stand-in that answers nothing and
+/// records every call it was asked to make.
 ///
 /// For the presses that write: what they are being asked here is whether GitHub
-/// was reached at all, and a script that records what it was asked is what can
-/// say so. The directory it writes in is the one the router keeps its settings
-/// in, which holds no token — so nothing here could publish even if it tried.
+/// was reached at all, and a stand-in that remembers what it was asked is what
+/// can say so. The Data Directory the router keeps its settings in holds no
+/// token — so nothing here could publish even if it tried.
 ///
-/// The script is a `/bin/sh` one, which is what leaves this and the six tests
-/// that ask for it off Windows: a stand-in that is a shell script is a stand-in
-/// for a machine with a shell at that path. What they are about — which presses
-/// reach GitHub — is nothing a platform changes, and the rest of this file is
-/// asked wherever the suite runs.
+/// **On the Unixes**, which is where the six tests that ask for it have been
+/// run: nothing about them is platform-specific now that the stand-in is an
+/// HTTP listener rather than a shell script, and lifting the gate is a Windows
+/// run nobody has made.
 #[cfg(unix)]
-async fn app_asking_github() -> (tempfile::TempDir, SqlitePool, Router) {
+async fn app_asking_github() -> (tempfile::TempDir, SqlitePool, Router, Arc<GitHub>) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
 
-    let gh = Gh::running(vec![
-        "/bin/sh".to_owned(),
-        "-c".to_owned(),
-        format!(
-            r#"printf '%s\n' "$*" >> "{}/asked"; exit 1"#,
-            dir.path().display(),
-        ),
-        // `sh -c` gives `$0` the script's own name, so what Verkstead passes
-        // lands in `$1` onwards.
-        "gh".to_owned(),
-    ]);
-
+    let github = GitHub::saying(Said::Nothing).await;
     let data_dir = dir.path().to_owned();
 
-    (dir, pool.clone(), router_asking_github(pool, data_dir, gh))
+    (
+        dir,
+        pool.clone(),
+        router_asking_github(pool, data_dir, Forge::standing_in(&github)),
+        github,
+    )
 }
 
 /// Verkstead's own hosted **share viewer**, which is where every published
@@ -1528,11 +1520,10 @@ async fn a_commit_the_repository_has_lost_says_so_rather_than_stopping_the_expor
 /// The gist's own URL travels beside it, because the Share pane draws both: the
 /// viewer's link is what a reader is sent, and the gist is where the file is and
 /// the only place a share can be deleted.
-// The `gh` behind this one is a shell script — see `app_asking_github`.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_published_share_is_on_the_conversation_the_workbench_draws() {
-    let (_dir, pool, app) = app_asking_github().await;
+    let (_dir, pool, app, _github) = app_asking_github().await;
     let id = everything(&pool).await;
 
     let before: verkstead_render::ConversationView =
@@ -1564,11 +1555,10 @@ async fn a_published_share_is_on_the_conversation_the_workbench_draws() {
 /// somebody *now* — one link at a time rather than a history of them. What was
 /// already sent goes on standing at its own URL; this is only what the next
 /// comment is written from.
-// The `gh` behind this one is a shell script — see `app_asking_github`.
 #[cfg(unix)]
 #[tokio::test]
 async fn publishing_again_replaces_the_link_the_workbench_draws() {
-    let (_dir, pool, app) = app_asking_github().await;
+    let (_dir, pool, app, _github) = app_asking_github().await;
     let id = everything(&pool).await;
 
     store::record_share(&pool, id, "https://gist.github.com/tobico/9f1")
@@ -1614,11 +1604,10 @@ async fn a_share_does_not_carry_the_link_to_a_share() {
 /// automatic share is gated on: the fact says a comment *landed*, and a press
 /// that left none anywhere leaves the next settle free to try — see
 /// `share_to_pull_requests` in `crates/server/src/settling.rs`.
-// The `gh` behind this one is a shell script — see `app_asking_github`.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_conversation_on_no_pull_request_is_not_published_at_all() {
-    let (dir, pool, app) = app_asking_github().await;
+    let (_dir, pool, app, github) = app_asking_github().await;
     let id = drafting(&pool).await;
 
     let outcome: verkstead_render::ShareCommented =
@@ -1627,9 +1616,9 @@ async fn a_conversation_on_no_pull_request_is_not_published_at_all() {
     assert_eq!(outcome, verkstead_render::ShareCommented::NoPullRequest);
 
     assert!(
-        !dir.path().join("asked").exists(),
+        github.asked().is_empty(),
         "GitHub was asked something: {:?}",
-        std::fs::read_to_string(dir.path().join("asked")).ok(),
+        github.asked(),
     );
 
     assert!(
@@ -1640,11 +1629,10 @@ async fn a_conversation_on_no_pull_request_is_not_published_at_all() {
 
 /// And an id that names no Conversation is the same 404 every other reading of
 /// one is: there is nothing to compose a share of, let alone comment.
-// The `gh` behind this one is a shell script — see `app_asking_github`.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_conversation_that_is_not_there_is_a_miss() {
-    let (_dir, _pool, app) = app_asking_github().await;
+    let (_dir, _pool, app, _github) = app_asking_github().await;
 
     let response = app
         .oneshot(

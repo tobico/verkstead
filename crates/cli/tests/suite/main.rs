@@ -18,6 +18,7 @@ mod memo;
 mod pipe_windows;
 mod plugin;
 mod preview;
+mod pull_request;
 mod repo;
 mod sandbox;
 mod sandbox_windows;
