@@ -301,7 +301,7 @@
           "key": "claude_dir",
           "label": "Claude directory",
           "placeholder": "/home/you/accounts/work/.claude",
-          "purpose": "A session's `~/.claude` is built from it."
+          "purpose": "A session's `~/.claude` is built from it. Verkstead makes it and the config file if they aren't there yet."
         },
         {
           "file": true,
