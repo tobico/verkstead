@@ -243,7 +243,7 @@ pub(crate) async fn stopped(state: &AppState, conversation_id: i64) -> bool {
 /// its neighbour reads its failures and right for the same reason: the caller
 /// stops on either `true`, and the stop below is the one that has evidence to
 /// say so.
-async fn undriven(state: &AppState, conversation_id: i64) -> bool {
+pub(crate) async fn undriven(state: &AppState, conversation_id: i64) -> bool {
     let lifecycle = match store::load_conversation(&state.pool, conversation_id).await {
         Ok(Some(conversation)) => conversation.state,
         // Nothing to launch into and nothing to say about it: whatever took the

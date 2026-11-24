@@ -403,7 +403,7 @@ async fn recompute(
             // with the whole of the work on it and one `gh pr create` to go.
             // Refusing on the backlog alone would be Resume turning down the one
             // Conversation that most needs it — see
-            // [`crate::runner::backlog_again`], which is what the spawn below
+            // [`crate::runner::implementing_again`], which is what the spawn below
             // does about both.
             //
             // So the branch is the tiebreak, and `gh` is the tiebreak after it.
@@ -427,16 +427,15 @@ async fn recompute(
                 // request on — and asked here for the reason every other refusal
                 // is asked here, so that the press either starts something or
                 // says why not. See [`crate::runner::stage_to_plan`], which is
-                // the same reading [`crate::runner::backlog_again`] makes a
+                // the same reading [`crate::runner::implementing_again`] makes a
                 // moment later to decide what to launch.
-                let planned = crate::runner::stage_to_plan(
+                let planned = !crate::runner::stage_to_plan(
                     state,
                     conversation_id,
                     &worktree,
                     conversation.base_commit.as_deref(),
                 )
-                .await
-                .is_none();
+                .await;
 
                 // And what the branch has written since it was made, which is
                 // the same reading again asked for the other thing it decides:

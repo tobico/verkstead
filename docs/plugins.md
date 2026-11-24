@@ -280,7 +280,49 @@ of Verkstead's:
   branch, the commits past its base, and whether anything is uncommitted.
 - **`notice`**, which puts a notice on the Timeline.
 - **`stop`**, with a reason: the Conversation stays where it is, the reason goes
-  on the Timeline, and a question set left open is closed.
+  on the Timeline, and a question set left open is closed — unless the newest
+  session launched was building (a backlog task, the finish, a stage's
+  planning), whose question sets stand to be answered into the next session's
+  prompt.
+- **`read-file`** and **`list-directory`** of the Worktree's repository or a
+  Companion's, at the Worktree's HEAD or at a named branch or commit — one no
+  Worktree holds as well — answering a file's bytes or a directory's entry
+  names, or none where nothing is there. They read what is committed, never the
+  working tree, and need no capability: the repositories are the
+  Conversation's own, as for `git-facts`. A repository that is neither, a
+  revision naming no commit, or a path leading out of the repository is refused
+  in a sentence.
+- **`place-task`**, for a backlog task whose line wants a platform — the word
+  after its `on` — before its session is launched: the host answers `here`, or
+  `elsewhere` where it moved the Conversation to a device of that platform or
+  asked the human where the task runs. Which device is always the host's. An
+  Activity told `elsewhere` launches nothing and ends `steered`; it is started
+  again wherever the Conversation lands.
+- **`join-chain`**, before a roadmap stage's finish: the host holds it until
+  every stage already in the roadmap's chain has settled, then answers the
+  chain, bottom to top, for the finish's prompt — the rebase onto its top is
+  the session's. A Conversation that is no stage is answered at once, with no
+  branches.
+- **`start-conversation`**, for a roadmap stage: its roadmap, number, title,
+  brief and the brief's path, the branch it is cut from, the platform its line
+  wants, and whether the Repo records stacking. The host starts it as it
+  always started a stage — the branch and its Worktree, the companions, the
+  record, where it runs, the Timeline's sentences — and answers its
+  Conversation and branch. Over the roadmap's `roadmap_stages` or the server's
+  `conversations` (`at_once`, in this device's `config.yaml`) it answers
+  `no-place`, with the sentence saying what the stage waits for and nothing
+  made, and the same start succeeds once a place frees. Anything else that
+  stops it answers
+  `halted`, with the sentence the host has already said.
+- **`conversation-state`** of one of the Repo's Conversations — its state's
+  word, and whether it has settled — and **`stage-standings`** and
+  **`stage-chain`** of a roadmap: what the record holds of each stage, and
+  which have joined its chain. That is how an Activity learns what is done and
+  in flight without keeping anything.
+
+  These four need the **`conversations: start`** capability (below): an
+  Activity whose plugin does not declare it is refused at each call, in a
+  sentence.
 
 **An Activity keeps nothing between starts.** A server restarted starts it
 again with the same facts and the Timeline as it now stands, and the files in
@@ -317,6 +359,7 @@ capabilities:
     access: read-write
   - outbound: gitlab.com              # a host it may connect to
   - environment: GITLAB_HOST          # a variable it may read
+  - conversations: start              # an Activity starting Conversations
 ```
 
 - **`filesystem`** — a directory on the host, with `access` either
@@ -331,6 +374,9 @@ capabilities:
   sockets and name lookups are not granted, whatever is asked.
 - **`environment`** — an environment variable it may read, with the value
   Verkstead's own process has. No other variable is set.
+- **`conversations`** — `start`, and nothing else: an Activity may start
+  Conversations of its own and read them back, through the host functions
+  above. Nothing of WASI's comes with it.
 
 Any other kind is refused, and so is an entry naming two.
 

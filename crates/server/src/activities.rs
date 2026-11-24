@@ -26,13 +26,16 @@
 //! read.
 
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use verkstead_store as store;
 
 use crate::AppState;
+use crate::continuing::Brought;
 use crate::drivers::Driving;
 use crate::lending::Lent;
+use crate::memos::Building;
 use crate::plugins::component::worlds::category::activity::verkstead::plugin::{
     activity_types as world, host,
 };
@@ -64,6 +67,18 @@ impl Hosting {
         component: Vec<u8>,
         activity: Activity,
     ) -> tokio::task::JoinHandle<Option<String>> {
+        self.start_granted(conversation_id, component, activity, Vec::new())
+    }
+
+    /// The same, granted `capabilities`, as a run brought about by a settle
+    /// is.
+    pub fn start_granted(
+        &self,
+        conversation_id: i64,
+        component: Vec<u8>,
+        activity: Activity,
+        capabilities: Vec<Capability>,
+    ) -> tokio::task::JoinHandle<Option<String>> {
         let state = self.state.clone();
         let driving = state.drivers.driving(conversation_id);
 
@@ -78,13 +93,26 @@ impl Hosting {
                 &driving,
                 Files::Embedded(&files),
                 &activity,
-                &[],
+                &capabilities,
                 Vec::new(),
                 &activity.name,
+                Brought::Settle,
             )
             .await
+            .map(|ran| ran.outcome)
         })
     }
+}
+
+/// How a component's run ended, where it ended in an Outcome.
+pub(crate) struct Ran {
+    /// The word it answered: one the block declares, or `steered`.
+    pub(crate) outcome: String,
+
+    /// The Timeline Event the newest session it launched printed into, where
+    /// it launched one — what a stop over what that session left behind
+    /// carries the tail of.
+    pub(crate) writing: Option<i64>,
 }
 
 /// Run `activity` on `conversation_id` to its Outcome, `driving` held
@@ -95,6 +123,9 @@ impl Hosting {
 /// `doing` is what the rescue and a stop the component asks for say it was
 /// doing — the words the state it runs in is judged by, *following the work
 /// up*, rather than the Activity's name.
+///
+/// `brought` is what brought the run about, which a Conversation the component
+/// starts is held to the limits by — see [`crate::continuing::begin`].
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run(
     state: &AppState,
@@ -105,7 +136,8 @@ pub(crate) async fn run(
     capabilities: &[Capability],
     options: Vec<(String, String)>,
     doing: &str,
-) -> Option<String> {
+    brought: Brought,
+) -> Option<Ran> {
     let name = &activity.name;
 
     let facts = match facts(state, conversation_id, activity, options).await {
@@ -125,12 +157,20 @@ pub(crate) async fn run(
 
     let home = crate::sandbox::Homes::of_the_server(&state.data_dir)
         .map(|homes| homes.servers().to_owned());
+    let writing = Arc::new(Mutex::new(None));
     let lent = Hosted {
-        lent: Lent::new(state, conversation_id).doing(doing),
+        lent: Lent::new(state, conversation_id)
+            .doing(doing)
+            .brought(brought),
         state: state.clone(),
         conversation_id,
         name: name.clone(),
         declared: activity.skills.clone(),
+        starts: capabilities.contains(&Capability::Conversations),
+        doing: doing.to_owned(),
+        writing: writing.clone(),
+        planning: None,
+        beside: false,
     };
 
     let ran =
@@ -150,7 +190,11 @@ pub(crate) async fn run(
                 outcome,
                 "an Activity ended"
             );
-            return Some(outcome);
+            let writing = *writing
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+            return Some(Ran { outcome, writing });
         }
         Ok(outcome) => {
             format!("{name} ended in `{outcome}`, which isn't one of the outcomes it declares.")
@@ -167,6 +211,87 @@ pub(crate) async fn run(
     stopping(state, conversation_id, name, &how).await;
 
     None
+}
+
+/// Run `activity` **beside** `conversation_id` rather than driving it: the
+/// word it answered, where it was one the block declares, and `None` where it
+/// could not be run or answered anything else — which is said in the log
+/// alone.
+///
+/// What the **Stage runner** runs as — see [`crate::continuing`]. The
+/// Conversation it is handed is one that has settled, or the foot of a roadmap's
+/// chain, which nothing here drives: so it holds no Driving registration, a stop
+/// standing on the Conversation does not end it, and nothing it does or fails
+/// to do stops the Conversation. What it notices is said as `brought` says it
+/// is — see [`crate::continuing::Brought::noticed`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn beside(
+    state: &AppState,
+    conversation_id: i64,
+    files: Files<'_>,
+    activity: &Activity,
+    capabilities: &[Capability],
+    options: Vec<(String, String)>,
+    brought: Brought,
+) -> Option<String> {
+    let name = &activity.name;
+
+    let facts = match facts(state, conversation_id, activity, options).await {
+        Ok(facts) => facts,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, activity = activity.id, "reading what an Activity starts with failed");
+            return None;
+        }
+    };
+
+    let home = crate::sandbox::Homes::of_the_server(&state.data_dir)
+        .map(|homes| homes.servers().to_owned());
+    let lent = Hosted {
+        lent: Lent::new(state, conversation_id)
+            .doing(name)
+            .brought(brought),
+        state: state.clone(),
+        conversation_id,
+        name: name.clone(),
+        declared: activity.skills.clone(),
+        starts: capabilities.contains(&Capability::Conversations),
+        doing: name.clone(),
+        writing: Arc::new(Mutex::new(None)),
+        planning: None,
+        beside: true,
+    };
+
+    match component::run_activity(files, activity, capabilities, home.as_deref(), lent, &facts)
+        .await
+    {
+        Ok(outcome) if activity.outcomes.contains(&outcome) => {
+            tracing::info!(
+                conversation_id,
+                activity = activity.id,
+                outcome,
+                "an Activity run beside a Conversation ended"
+            );
+            Some(outcome)
+        }
+        Ok(outcome) => {
+            tracing::error!(
+                conversation_id,
+                activity = activity.id,
+                outcome,
+                "an Activity run beside a Conversation ended in an outcome it doesn't declare"
+            );
+            None
+        }
+        Err(trouble) => {
+            tracing::error!(
+                conversation_id,
+                activity = activity.id,
+                why = trouble.why,
+                "an Activity run beside a Conversation couldn't be run"
+            );
+            None
+        }
+    }
 }
 
 /// Stop the Conversation as `name` saying `how`, closing any Set left open.
@@ -187,7 +312,20 @@ async fn stopping(state: &AppState, conversation_id: i64, name: &str, how: &str)
 /// Whether a stop stands on the Conversation, read and nothing written — a
 /// Stop the human asked for after the step is the session's to land, at its
 /// next launch.
+///
+/// **Or nothing is to drive it any more**: a steer put it in a state nothing
+/// drives — into Done, its session left to finish — or the work is being moved
+/// to another device. Either refuses the component's next launch with no stop
+/// behind it, and a stop written over that refusal would put a badge on work
+/// the human has finished with or sent elsewhere. See
+/// [`crate::stopping::stopped`], which asks the same two of every launch.
 async fn already_stopped(state: &AppState, conversation_id: i64) -> bool {
+    if crate::stopping::undriven(state, conversation_id).await
+        || crate::transfers::going(state, conversation_id).await
+    {
+        return true;
+    }
+
     match store::stopped(&state.pool, conversation_id).await {
         Ok(stopped) => stopped.is_some(),
         Err(error) => {
@@ -303,18 +441,72 @@ struct Hosted {
     /// (Set 1771, Q1), so a launch under any other is refused, as the loader
     /// refuses a block naming a skill it cannot reach.
     declared: Vec<String>,
+
+    /// Whether its plugin was granted `conversations: start`, without which
+    /// every host function about starting Conversations is refused.
+    starts: bool,
+
+    /// What the rescue and a stop say it is doing between the steps its
+    /// launches name — see [`step`].
+    doing: String,
+
+    /// The Event the newest session launched here prints into, read back by
+    /// [`run`] once the component has ended.
+    writing: Arc<Mutex<Option<i64>>>,
+
+    /// The session launched to plan a roadmap stage, where the newest was one:
+    /// its backlog landing is the host's to record once it has been waited on.
+    planning: Option<world::Session>,
+
+    /// Whether it runs beside the Conversation rather than driving it — see
+    /// [`beside`] — so that a stop standing on it ends nothing.
+    beside: bool,
 }
 
 impl Hosted {
     /// Trap the component where the Conversation has stopped under it.
     async fn ended_by_a_stop(&self) -> wasmtime::Result<()> {
-        if already_stopped(&self.state, self.conversation_id).await {
+        if !self.beside && already_stopped(&self.state, self.conversation_id).await {
             return Err(wasmtime::Error::new(Ended(
                 "The conversation was stopped.".to_owned(),
             )));
         }
 
         Ok(())
+    }
+}
+
+impl Hosted {
+    /// The sentence a call about starting Conversations is refused in, where
+    /// the plugin was not granted it.
+    fn ungranted(&self) -> Option<String> {
+        if self.starts {
+            return None;
+        }
+
+        tracing::error!(
+            conversation_id = self.conversation_id,
+            "an Activity asked about starting Conversations without the capability",
+        );
+
+        Some(format!(
+            "{} doesn't ask to start conversations, so it can't start or read one.",
+            self.name
+        ))
+    }
+
+    /// Whether `.tasks/TODO.md` is in the Worktree, committed as it stands.
+    async fn backlog_committed(&self) -> bool {
+        let worktree = store::load_conversation(&self.state.pool, self.conversation_id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|conversation| conversation.worktree);
+
+        match worktree {
+            Some(worktree) => crate::runner::backlog_landed(&worktree).await,
+            None => false,
+        }
     }
 }
 
@@ -342,21 +534,57 @@ impl host::Host for Hosted {
             )));
         }
 
+        // What the session builds, and what it is said to be doing, read off
+        // what it is expected to leave — see [`step`].
+        let building = step(&self.state, self.conversation_id, &evidence).await;
+        let planning = matches!(building, Some((Building::Stage, _)));
+
+        match building {
+            Some((building, doing)) => self.lent.now(Some(building), &doing),
+            None => self.lent.now(None, &self.doing),
+        }
+
         let launched =
             host::Host::launch(&mut self.lent, skill, role, prompt, evidence, ends).await?;
 
-        if launched.is_err() {
-            self.ended_by_a_stop().await?;
+        match &launched {
+            Ok(session) => {
+                self.planning = planning.then_some(*session);
+
+                *self
+                    .writing
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                    Some(self.lent.event_id(*session));
+            }
+            Err(_) => self.ended_by_a_stop().await?,
         }
 
         Ok(launched)
     }
 
+    /// A session that gave its Done signal and has been quiet since is ended
+    /// as the wait comes back, as the runner always ended a step's: whatever
+    /// the component does next — another launch, a placement that moves the
+    /// Conversation — happens with nothing running.
+    ///
+    /// **And a stage's backlog landing is recorded** once its planning session
+    /// is waited on and the list is committed, however the session ended, as
+    /// the runner recorded it after seeing the planning out. A second sighting
+    /// writes nothing — see [`crate::conversations::backlog_landed`].
     async fn wait(&mut self, session: world::Session) -> wasmtime::Result<world::Waited> {
         let waited = host::Host::wait(&mut self.lent, session).await?;
 
-        if !matches!(waited, world::Waited::Done) {
-            self.ended_by_a_stop().await?;
+        if self.planning == Some(session) && self.backlog_committed().await {
+            crate::conversations::backlog_landed(&self.state, self.conversation_id).await;
+        }
+
+        match waited {
+            world::Waited::Done => {
+                self.state.sessions.end(self.conversation_id).await;
+                self.lent.now(None, &self.doing);
+            }
+            _ => self.ended_by_a_stop().await?,
         }
 
         Ok(waited)
@@ -375,5 +603,143 @@ impl host::Host for Hosted {
 
     async fn stop(&mut self, reason: String) -> wasmtime::Result<()> {
         host::Host::stop(&mut self.lent, reason).await
+    }
+
+    async fn read_file(
+        &mut self,
+        repo: String,
+        at: host::Revision,
+        path: String,
+    ) -> wasmtime::Result<Result<Option<Vec<u8>>, String>> {
+        host::Host::read_file(&mut self.lent, repo, at, path).await
+    }
+
+    async fn list_directory(
+        &mut self,
+        repo: String,
+        at: host::Revision,
+        path: String,
+    ) -> wasmtime::Result<Result<Option<Vec<String>>, String>> {
+        host::Host::list_directory(&mut self.lent, repo, at, path).await
+    }
+
+    async fn place_task(
+        &mut self,
+        task: u32,
+        label: String,
+        platform: String,
+    ) -> wasmtime::Result<host::Placed> {
+        host::Host::place_task(&mut self.lent, task, label, platform).await
+    }
+
+    /// The chain's wait, and a stop that landed while it waited ending the
+    /// component rather than letting it launch the finish.
+    async fn join_chain(&mut self) -> wasmtime::Result<Vec<host::Link>> {
+        let chain = host::Host::join_chain(&mut self.lent).await?;
+
+        self.ended_by_a_stop().await?;
+
+        Ok(chain)
+    }
+
+    async fn start_conversation(
+        &mut self,
+        stage: host::Stage,
+    ) -> wasmtime::Result<Result<host::Started, host::NotStarted>> {
+        if let Some(why) = self.ungranted() {
+            return Ok(Err(host::NotStarted::Halted(why)));
+        }
+
+        self.ended_by_a_stop().await?;
+
+        host::Host::start_conversation(&mut self.lent, stage).await
+    }
+
+    /// A stop that landed ends the component here too, as an Activity reading
+    /// a Conversation over and over until it settles has no launch or wait to
+    /// be ended at.
+    async fn conversation_state(
+        &mut self,
+        conversation: i64,
+    ) -> wasmtime::Result<Result<host::Stands, String>> {
+        if let Some(why) = self.ungranted() {
+            return Ok(Err(why));
+        }
+
+        self.ended_by_a_stop().await?;
+
+        host::Host::conversation_state(&mut self.lent, conversation).await
+    }
+
+    async fn stage_standings(
+        &mut self,
+        roadmap: String,
+    ) -> wasmtime::Result<Result<host::Standings, String>> {
+        if let Some(why) = self.ungranted() {
+            return Ok(Err(why));
+        }
+
+        host::Host::stage_standings(&mut self.lent, roadmap).await
+    }
+
+    async fn stage_chain(
+        &mut self,
+        roadmap: String,
+    ) -> wasmtime::Result<Result<Vec<host::Link>, String>> {
+        if let Some(why) = self.ungranted() {
+            return Ok(Err(why));
+        }
+
+        host::Host::stage_chain(&mut self.lent, roadmap).await
+    }
+}
+
+/// What a session launched expecting `evidence` builds, and what it is said to
+/// be doing, where it builds: the host's reading of the evidence rather than
+/// anything the component says, so no launch needs a word for it (Set 1839).
+/// A box ticked is that task, `.tasks/TODO.md` gone is the finish, and the
+/// list arriving is a stage's planning — the three a backlog's sessions are
+/// launched expecting. See [`crate::memos`].
+async fn step(
+    state: &AppState,
+    conversation_id: i64,
+    evidence: &world::Evidence,
+) -> Option<(Building, String)> {
+    let world::Evidence::Landed(landing) = evidence else {
+        return None;
+    };
+
+    let todo = Path::new(crate::tasks::BACKLOG).join(crate::tasks::TODO);
+
+    match landing {
+        world::Landing::Ticked(number) => {
+            let worktree = store::load_conversation(&state.pool, conversation_id)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|conversation| conversation.worktree);
+
+            let file = worktree.and_then(|worktree| {
+                crate::tasks::files(&worktree.join(crate::tasks::BACKLOG)).remove(number)
+            });
+
+            let doing = match file {
+                Some(file) => format!(
+                    "the task in {}",
+                    Path::new(crate::tasks::BACKLOG).join(file).display()
+                ),
+                None => format!("task {number} of the backlog"),
+            };
+
+            Some((Building::Task(*number), doing))
+        }
+        world::Landing::Gone(path) if Path::new(path) == todo => {
+            Some((Building::Finish, "finishing the feature".to_owned()))
+        }
+        world::Landing::Arrived(path) if Path::new(path) == todo => Some((
+            Building::Stage,
+            "planning the roadmap stage into a backlog".to_owned(),
+        )),
+        _ => None,
     }
 }

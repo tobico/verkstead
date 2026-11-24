@@ -534,8 +534,9 @@ pub(crate) async fn asked(state: &AppState, tombstone: i64) -> StageJoin {
 /// goes on top of, bottom to top, with the branch it joins above last.
 ///
 /// Asked the moment [`hold`] lets the stage in, and handed to the finish session
-/// as a section of its prompt — see [`crate::skills::joining`], where the words
-/// are. The chain is Verkstead's to say because Verkstead recorded it: which
+/// as a section of its prompt — the **Backlog runner** component's `joining`,
+/// which it is handed to through the *join chain* host function, is where the
+/// words are. The chain is Verkstead's to say because Verkstead recorded it: which
 /// stages joined and in what order is a fact about a pipeline rather than
 /// anything a branch could be read for. What is done with it is the session's:
 /// `gh stack` is a session's to run and never the server's.

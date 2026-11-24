@@ -8,6 +8,7 @@
 //! under one, for the suites that launch a session on a plugin harness.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
@@ -294,6 +295,99 @@ provides:
             .expect("the stub harness is listed once installed");
         assert_eq!(row.trouble, None, "the stub harness loads");
     }
+
+    /// Install it on `app` from a git repository under `under`, its directory
+    /// committed there, the way the Plugins section installs one by its URL.
+    ///
+    /// **For the suites with two devices of one cluster running it.** A local
+    /// plugin is one device's (Set 1772, Q2), so a second device's Install of
+    /// the same uuid is refused once the first's record has reached it — and
+    /// a loaded runner sometimes has it there first. A git plugin is every
+    /// device's: install it on one and wait on the other with
+    /// [`Self::loaded`].
+    pub(crate) async fn installed_from_git(self, app: &Router, under: &Path, models: [&str; 2]) {
+        let dir = self.written(under, models);
+        git(&dir, &["init", "--quiet"]);
+        git(&dir, &["add", "--all"]);
+        git(&dir, &["commit", "--quiet", "-m", "the stub harness"]);
+
+        let path = dir.to_string_lossy().replace('\\', "/");
+        let source = match path.starts_with('/') {
+            true => format!("file://{path}"),
+            false => format!("file:///{path}"),
+        };
+
+        let (status, said) = pressing(
+            app,
+            "/api/ui/plugins/read",
+            serde_json::json!({ "source": source }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+        let consent: PluginConsent = serde_json::from_str(&said).unwrap();
+
+        let (status, said) = pressing(
+            app,
+            "/api/ui/plugins",
+            serde_json::json!({ "source": source, "granted": consent.capabilities }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+
+        self.loaded(app).await;
+    }
+
+    /// Wait until `app` lists it loaded: installed on another device of its
+    /// cluster from git, its record merged here and its clone read.
+    pub(crate) async fn loaded(self, app: &Router) {
+        let mut last = None;
+
+        let waited = tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let (status, said) = getting(app, "/api/ui/plugins").await;
+                assert_eq!(status, StatusCode::OK, "{said}");
+                let view: PluginsView = serde_json::from_str(&said).unwrap();
+
+                let row = view
+                    .installed
+                    .into_iter()
+                    .find(|row| row.uuid == self.uuid());
+                if row.as_ref().is_some_and(|row| row.trouble.is_none()) {
+                    return;
+                }
+
+                last = row;
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await;
+
+        waited.unwrap_or_else(|_| panic!("the stub harness never loaded here: {last:#?}"));
+    }
+}
+
+/// One git command in `dir`, under an identity of its own.
+fn git(dir: &Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=Ada Lovelace",
+            "-c",
+            "user.email=ada@example.com",
+            "-c",
+            "init.defaultBranch=main",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("git should be on the PATH for these tests");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed in {}: {}",
+        dir.display(),
+        String::from_utf8_lossy(&output.stderr),
+    );
 }
 
 /// An account of a stub harness under `under`: its directory, holding a
@@ -325,6 +419,18 @@ async fn pressing(app: &Router, path: &str, body: serde_json::Value) -> (StatusC
                 .body(Body::from(body.to_string()))
                 .unwrap(),
         )
+        .await
+        .unwrap();
+
+    let status = answered.status();
+    let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+async fn getting(app: &Router, path: &str) -> (StatusCode, String) {
+    let answered = app
+        .clone()
+        .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
         .await
         .unwrap();
 

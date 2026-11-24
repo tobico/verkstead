@@ -24,7 +24,9 @@
     },
     {
       "activities": [
-        "Follow-up rounds"
+        "Follow-up rounds",
+        "Backlog runner",
+        "Stage runner"
       ],
       "author": "Tobias Cohen",
       "dependents": [],

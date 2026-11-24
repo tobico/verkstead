@@ -2994,12 +2994,15 @@ What a Process's state runs: a wasm component the server drives, started with
 the Conversation's facts and its Timeline, handed events, lent sessions — one
 launched under a named Skill and role, waited on for its Done signal — the
 Forge, Question Sets of Verkstead's own, Timeline notices, the Worktree's git
-facts and the capabilities its manifest asked for, and ending in one of the
-**Outcomes** its manifest declares. Stateless across a restart: started again
-with the same facts, it works out where it was from them and from the files in
-the Repo, which stay the truth. Six are Verkstead's — the interview, one
-session, follow-up rounds, the wrap-up with its declared watchers, the backlog
-runner and the stage runner — and a Plugin may bring one of its own.
+facts and the Repo's committed files, a task placed by platform, a roadmap's
+chain to join, and the capabilities its manifest asked for — starting a
+**Conversation** among them — and ending in one of the **Outcomes** its
+manifest declares. Stateless across a restart: started again with the same
+facts, it works out where it was from them and from the files in the Repo,
+which stay the truth. Six are Verkstead's — the interview, one session,
+follow-up rounds, the wrap-up with its declared watchers, the backlog runner
+and the stage runner, each a component of the built-in Activities plugin — and
+a Plugin may bring one of its own.
 _Avoid_: step, stage, phase, task, runner, driver, handler
 
 **Outcome**:

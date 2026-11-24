@@ -607,6 +607,7 @@ describe("Add a plugin…", () => {
     expect(screen.getByText("gitlab.com")).toBeTruthy();
     expect(screen.getByText("~/.config/glab")).toBeTruthy();
     expect(screen.getByText("GITLAB_TOKEN")).toBeTruthy();
+    expect(screen.getByText("Start conversations of its own")).toBeTruthy();
 
     fireEvent.click(screen.getByText("Install"));
 

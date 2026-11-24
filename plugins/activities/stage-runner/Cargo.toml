@@ -1,0 +1,15 @@
+[package]
+name = "verkstead-activity-stage-runner"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# Embedded as `stage-runner.wasm`, which is what the `activity` block in
+# `../plugin.yaml` names: see `crates/server/build.rs`.
+[lib]
+name = "stage_runner"
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.46"

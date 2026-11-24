@@ -5,7 +5,13 @@
 # `cargo build --workspace` there should not try.
 [workspace]
 resolver = "3"
-members = ["activities/follow-up-rounds", "codex", "fixture"]
+members = [
+    "activities/backlog-runner",
+    "activities/follow-up-rounds",
+    "activities/stage-runner",
+    "codex",
+    "fixture",
+]
 
 [workspace.package]
 version = "0.1.0"

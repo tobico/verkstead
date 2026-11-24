@@ -85,12 +85,16 @@ const STAGING: &str = "verkstead/staging/SKILL.md";
 
 /// And the fork of next-stage, which the one session a roadmap stage starts
 /// with runs inside: the session that re-grounds the stage's brief and writes
-/// the backlog the runner then works.
+/// the backlog the **Backlog runner** then works. Its prompt is the
+/// component's to write; what is read here is the skill's own text.
+#[cfg(test)]
 const NEXT_STAGE: &str = "verkstead/next-stage/SKILL.md";
 
-/// And the fork of next-task, which every session the runner launches is put
-/// inside — the task sessions and the finish one alike, because which of them it
-/// is, is read off `.tasks/` rather than told.
+/// And the fork of next-task, which every session of a backlog is put inside —
+/// the task sessions and the finish one alike, because which of them it is, is
+/// read off `.tasks/` rather than told. Its prompt is the **Backlog runner**'s
+/// to write, as [`NEXT_STAGE`]'s is.
+#[cfg(test)]
 const NEXT_TASK: &str = "verkstead/next-task/SKILL.md";
 
 /// And the submitting skill's, which the one session launched over a finish
@@ -628,74 +632,6 @@ pub(crate) fn staging(skills: &Skills, brief: &str) -> String {
     )
 }
 
-/// What a stage's first session is started on: the stage brief, under the line
-/// that sends the agent into the fork of next-stage — and the one sentence only
-/// this kind of session gets, about where its branch came from.
-///
-/// One document rather than two, alone among these. A stage has no grilling of
-/// its own and so no handoff: what a grilling would have settled was settled by
-/// the grilling that wrote the roadmap, and the stage brief is what it settled.
-/// It arrives as the Conversation's Brief, so it is primed exactly as every
-/// other session is primed with one — see [`on_the_documents`].
-///
-/// `cut_from` is the branch this stage's was cut from, and `None` where it came
-/// off the default branch. Said because it is the one thing about the stage the
-/// session cannot read out of the repository: a branch says what it is
-/// descended from, not what somebody meant by it.
-///
-/// **The base rather than what it will be stacked on.** Those stopped being one
-/// fact when the join moved to the finish: a stage is cut from the highest
-/// settled branch of its roadmap's chain and joins that chain later, on top of
-/// whatever is there by then — see [`crate::joins`]. A planning session told
-/// *stacks on* would be told something its own finish contradicts, and would go
-/// and register a stack the join is about to rebuild.
-pub(crate) fn next_stage(skills: &Skills, brief: &str, cut_from: Option<&str>) -> String {
-    let skill = skills.named(NEXT_STAGE);
-
-    let prompt = on_the_documents(
-        &format!("Read {skill} and plan the roadmap stage described below, the way it says."),
-        brief,
-        None,
-    );
-
-    let branch = match cut_from {
-        Some(base) => format!(
-            "This stage's branch was cut from `{base}`, the highest settled branch of its \
-             roadmap's chain, which is not merged yet. Where it goes in that chain is settled \
-             at this stage's finish rather than now, so there is nothing to stack here.",
-        ),
-        None => "This stage's branch came off the repository's default branch, there being \
-                 nothing unmerged left to stand on."
-            .to_owned(),
-    };
-
-    format!("{prompt}\n# Where this stage's branch came from\n\n{branch}\n")
-}
-
-/// What each session of a backlog is started on: the same two documents again,
-/// under the line that sends the agent into the fork of next-task.
-///
-/// Which task is not said. The fork reads `.tasks/` and takes the lowest number
-/// left, which is what the runner reads too — Verkstead decides the step in
-/// order to know what to watch for, not to hand it over.
-///
-/// The documents rather than the task file alone, because a slice of the work is
-/// still the work: the task file says where this session stops, and the two
-/// documents say what it is a slice of. A session that had only the first would
-/// be building to a description written for somebody who had read the other two.
-pub(crate) fn next_task(skills: &Skills, brief: &str, handoff: Option<&str>) -> String {
-    let skill = skills.named(NEXT_TASK);
-
-    on_the_documents(
-        &format!(
-            "Read {skill} and work the next task of the backlog for the work described \
-             below, the way it says."
-        ),
-        brief,
-        handoff,
-    )
-}
-
 /// What the session sent after a finish that opened nothing is started on: the
 /// same two documents again, under the line that sends the agent into the
 /// submitting skill.
@@ -713,8 +649,7 @@ pub(crate) fn next_task(skills: &Skills, brief: &str, handoff: Option<&str>) -> 
 /// base in its own history and needs nothing said, and this one was taken up off
 /// a base that is the picker's choice and nothing else.
 ///
-/// `None` says nothing at all rather than saying the default branch, for the
-/// reason [`next_stage`] says which of its two cases a stage is: what the
+/// `None` says nothing at all rather than saying the default branch: what the
 /// repository's finish sequence does about a base is the repository's, and a
 /// sentence naming one would be Verkstead overruling it.
 pub(crate) fn submitting(
@@ -1221,8 +1156,9 @@ pub(crate) fn alongside(prompt: &str, branch: &str, companions: &[store::Compani
 /// `stage` is the label the roadmap's own line gives it — `02`, with the
 /// roadmap's zero-padding kept. `None` is the **foot** of the chain, which is
 /// the branch the stage was cut from rather than a stage of the roadmap: the
-/// Conversation that wrote the roadmap, while its pull request is unmerged. See
-/// [`joining`].
+/// Conversation that wrote the roadmap, while its pull request is unmerged.
+/// What the **Backlog runner** is handed by the *join chain* host function and
+/// writes into its finish's prompt — see [`crate::joins::let_in`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Link {
     /// Which stage of the roadmap this branch is, or `None` for the branch at
@@ -1231,93 +1167,6 @@ pub(crate) struct Link {
 
     /// The branch, as Verkstead's own record names it.
     pub(crate) branch: String,
-}
-
-/// The same prompt again, with the chain this stage joins listed under it —
-/// bottom to top — and the one instruction the chain is told for: the rebase
-/// comes before the push.
-///
-/// **Only the finish of a stage carries this.** A roadmap is one chain of
-/// branches in the order its stages finish, and a stage joins it at its finish:
-/// the branch is rebased onto the top of the chain, and only then pushed, opened
-/// and wrapped up. So the session that runs the finish is the one session that
-/// has to know what the chain is, and the session that runs a task is told
-/// nothing — the two are one skill and two steps, and the runner is what tells
-/// them apart.
-///
-/// **The chain is Verkstead's to say and the rebase is the session's to do.**
-/// The server recorded which stages joined and in what order, and no agent could
-/// work that out from a branch; `gh stack` is a session's to run and never the
-/// server's, and how a branch joins a stack is the target repository's
-/// `docs/agents/git-workflow.md`. So this says what the chain is and that the
-/// rebase comes first, and hands the how to the block.
-///
-/// **And where the repository records no stacking mechanism the rebase still
-/// happens.** It is Verkstead's rather than the block's: the work is built on
-/// the branch below it and a pull request opened anywhere else would be read
-/// against the wrong base. What the unrecorded case opens is an ordinary pull
-/// request carrying the stage below it until that one merges, which is the
-/// sentence already written where a stage's base is decided — see
-/// [`crate::continuing::Stands`].
-///
-/// **A stage cut from what is still the top rebases nothing**, which is every
-/// stage of every roadmap run in order: the top of the chain is what the branch
-/// was cut from, and the rebase finds it there and moves no commit. The section
-/// is written the same way either way — a session told the chain only when it
-/// had moved would have to be told that too.
-///
-/// A stage with nothing under it is the prompt unchanged: an empty heading would
-/// tell a session there was a chain to join.
-///
-/// **And the chain is the Conversation's own repository's.** A companion
-/// repository a stage commits in has a chain of its own shape and nothing joins
-/// it: its branch is left where [`crate::continuing::beside`] cut it, which is
-/// the companion of whatever this stage's own branch was cut from. That is the
-/// same branch as the top of the chain while a roadmap runs its stages one at a
-/// time, so nothing was out of place while every roadmap ran that way — and a
-/// declaring roadmap does not, so a stage that rebases onto a top above its base
-/// leaves its companion's branch behind. **Known and not yet done**, and it
-/// costs nothing until a roadmap both declares and has a companion its stages
-/// commit in. See CONTEXT's **Chain**, where the deferral is written down.
-pub(crate) fn joining(prompt: &str, chain: &[Link]) -> String {
-    let Some((top, under)) = chain.split_last() else {
-        return prompt.to_owned();
-    };
-
-    let listed: Vec<String> = chain
-        .iter()
-        .map(|link| match &link.stage {
-            Some(stage) => format!("- `{}` — stage {stage}.", link.branch),
-            None => format!(
-                "- `{}` — the branch this stage was cut from, which the chain starts at.",
-                link.branch
-            ),
-        })
-        .collect();
-
-    let top = &top.branch;
-
-    let bottom = match under.is_empty() {
-        true => "one branch".to_owned(),
-        false => format!("{} branches, bottom to top", chain.len()),
-    };
-
-    format!(
-        "{}\n\n# The chain this stage joins\n\nThis stage's roadmap is one chain of branches, in \
-         the order its stages finished, and this branch joins it at this finish. The chain is \
-         {bottom}:\n\n{listed}\n\nSo **rebase this branch onto `{top}` before anything is \
-         pushed**, and open the pull request against `{top}`. Do the rebase the way this \
-         repository's own `docs/agents/git-workflow.md` says a stage joins a chain, where it says \
-         anything; where it records no stacking mechanism, rebase onto `{top}` all the same and \
-         open an ordinary pull request against it, which carries the stage below this one until \
-         that one merges.\n\nA branch already sitting on top of `{top}` is a rebase that moves \
-         nothing, which is the ordinary case rather than a sign anything is wrong. Rebase **once**, \
-         before the pull request exists: nothing in the chain below moves because this stage \
-         joined above it — no branch of it is rebased, and no pull request of it changes base — \
-         and this branch is never force-pushed once its own pull request is open.\n",
-        prompt.trim_end(),
-        listed = listed.join("\n"),
-    )
 }
 
 /// The same prompt again, with the files the human attached to the Conversation
@@ -3196,63 +3045,6 @@ mod tests {
         );
     }
 
-    /// A stage session is put inside the fork the same way every other session
-    /// is — and primed with one document rather than two, there being no
-    /// grilling of its own to have written a handoff.
-    #[test]
-    fn a_stage_session_is_started_on_its_brief_inside_the_fork() {
-        let prompt = next_stage(
-            &mounted(),
-            "# 05. Roadmap direction\n\nThe third Direction.\n",
-            None,
-        );
-
-        assert!(
-            prompt.contains(&at(NEXT_STAGE)),
-            "the fork is named by the path it is mounted at: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("The third Direction."),
-            "and the stage brief is what it is primed with: {prompt:?}"
-        );
-        assert!(
-            !prompt.contains("What the grilling settled"),
-            "nothing is said about a document a stage never had: {prompt:?}"
-        );
-        assert!(
-            !prompt.contains(&at(BREAKING_DOWN)) && !prompt.contains(&at(NEXT_TASK)),
-            "and nothing sends this session to break down a feature or work a task: \
-             {prompt:?}"
-        );
-    }
-
-    /// Where the branch came from is the one thing about a stage the session
-    /// cannot read out of the repository, so it is the one thing it is told.
-    ///
-    /// The **base** rather than what the stage will be stacked on: the join is
-    /// at the finish, so a planning session promised a place in the chain would
-    /// be promised something its own finish decides.
-    #[test]
-    fn a_stage_session_is_told_what_its_branch_was_cut_from() {
-        let cut = next_stage(&mounted(), "# 05. Roadmap direction\n", Some("wrap-up"));
-
-        assert!(
-            cut.contains("cut from `wrap-up`"),
-            "the branch it came off is named: {cut:?}"
-        );
-        assert!(
-            !cut.contains("stacks on"),
-            "and not as a place in the chain, which the finish settles: {cut:?}"
-        );
-
-        let alone = next_stage(&mounted(), "# 05. Roadmap direction\n", None);
-
-        assert!(
-            alone.contains("default branch") && !alone.contains("stacks on"),
-            "and a stage off the default branch is told that plainly: {alone:?}"
-        );
-    }
-
     /// One task per session is the whole reason there is a session per task, and
     /// the fork has to say so: nothing else will. The done-signal the runner
     /// watches is the entry ticked and committed, so the box and the commit are
@@ -5034,7 +4826,7 @@ mod tests {
     #[test]
     fn deferred_answers_are_folded_under_the_documents() {
         let prompt = folded(
-            &next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
+            &implementing(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
             "## The wording\n\n**Q9** Which status?\n\n429 Too Many Requests\n",
         );
 
@@ -5052,7 +4844,7 @@ mod tests {
     /// would tell one that something had been decided.
     #[test]
     fn a_session_with_nothing_to_fold_is_started_on_the_prompt_as_it_stands() {
-        let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
+        let prompt = implementing(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
 
         assert_eq!(folded(&prompt, "  \n"), prompt);
     }
@@ -5099,7 +4891,7 @@ mod tests {
         };
 
         let prompt = left(
-            &next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
+            &implementing(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
             &[
                 memo(
                     42,
@@ -5168,7 +4960,7 @@ mod tests {
     /// No Memos standing is the prompt unchanged — no heading at all.
     #[test]
     fn no_standing_memos_leave_the_prompt_unchanged() {
-        let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
+        let prompt = implementing(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
 
         assert_eq!(left(&prompt, &[], true), prompt);
     }
@@ -5216,7 +5008,7 @@ mod tests {
     #[test]
     fn a_building_prompt_lists_the_standing_previews_and_names_the_shell() {
         let prompt = previewed(
-            &next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
+            &implementing(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
             &[
                 preview("Build and test", "cargo build && cargo run -- serve"),
                 preview("Serve the docs", "mdbook serve docs"),
@@ -5336,7 +5128,7 @@ mod tests {
     #[test]
     fn every_companion_is_named_with_its_path_its_branch_and_its_write_status() {
         let prompt = alongside(
-            &next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
+            &implementing(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
             "rate-limiting",
             &[
                 companion(
@@ -5622,7 +5414,7 @@ mod tests {
     /// configured.
     #[test]
     fn a_conversation_with_no_companions_is_started_on_the_prompt_as_it_stands() {
-        let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
+        let prompt = implementing(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
 
         assert_eq!(alongside(&prompt, "rate-limiting", &[]), prompt);
     }
@@ -5653,7 +5445,7 @@ mod tests {
     #[test]
     fn every_attached_file_is_named_at_the_path_a_session_opens_it_at() {
         let prompt = attached(
-            &next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
+            &implementing(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
             &[
                 attachment("wireframe.png", 1_240_000),
                 attachment("rates.csv", 4_096),
@@ -5879,7 +5671,7 @@ mod tests {
     /// session that something had been handed over.
     #[test]
     fn a_conversation_with_nothing_attached_is_started_on_the_prompt_as_it_stands() {
-        let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
+        let prompt = implementing(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
 
         assert_eq!(attached(&prompt, &[], &[], &attachments_inside()), prompt);
     }
@@ -5890,7 +5682,7 @@ mod tests {
     #[test]
     fn every_attached_server_is_named_with_how_its_tools_are_named() {
         let prompt = served(
-            &next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
+            &implementing(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
             &["docs".to_owned(), "tickets".to_owned()],
             store::AgentType::CLAUDE,
         );
@@ -5937,7 +5729,7 @@ mod tests {
     /// something had been configured.
     #[test]
     fn a_conversation_with_no_servers_is_started_on_the_prompt_as_it_stands() {
-        let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
+        let prompt = implementing(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
 
         for agent in [
             store::AgentType::CLAUDE,
@@ -5954,7 +5746,7 @@ mod tests {
     /// this that is not the same everywhere.
     #[test]
     fn each_harness_is_told_the_naming_its_own_tools_come_out_under() {
-        let prompt = next_task(&mounted(), "# Rate limiting\n", None);
+        let prompt = implementing(&mounted(), "# Rate limiting\n", None);
 
         for (agent, naming) in [
             (store::AgentType::CLAUDE, "`mcp__<server>__<tool>`"),
@@ -6043,7 +5835,7 @@ mod tests {
     /// is the prompt as it stands, as the servers' is.
     #[test]
     fn the_packs_are_listed_with_each_skills_path_and_none_is_no_heading() {
-        let prompt = next_task(&mounted(), "# Rate limiting\n", None);
+        let prompt = implementing(&mounted(), "# Rate limiting\n", None);
 
         assert_eq!(packed(&prompt, &[], &mounted()), prompt);
 
@@ -6397,117 +6189,5 @@ mod tests {
             !note.to_lowercase().contains("attach"),
             "nothing is said about attachments: {note:?}",
         );
-    }
-
-    /// One branch of a chain, as the runner reads it off the record.
-    fn link(stage: Option<&str>, branch: &str) -> Link {
-        Link {
-            stage: stage.map(str::to_owned),
-            branch: branch.to_owned(),
-        }
-    }
-
-    /// The finish of a stage is told what the chain is, bottom to top, and the
-    /// one thing the chain is told for: the rebase comes before the push.
-    ///
-    /// The chain is the server's to say — it recorded which stages joined and in
-    /// what order, and no agent could read that off a branch — and the rebase is
-    /// the session's to do, `gh stack` being a session's to run and never the
-    /// server's.
-    #[test]
-    fn the_finish_of_a_stage_is_told_the_chain_it_joins_bottom_to_top() {
-        let prompt = joining(
-            &next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
-            &[
-                link(None, "rate-limiting"),
-                link(Some("01"), "roadmaps/rate-limiting/01-the-counter"),
-                link(Some("02"), "roadmaps/rate-limiting/02-the-window"),
-            ],
-        );
-
-        assert!(
-            prompt.contains("# The Brief this started from"),
-            "the work is still what the session is being told about: {prompt:?}"
-        );
-
-        let chain = prompt
-            .split_once("# The chain this stage joins")
-            .expect("the chain is a section of its own")
-            .1;
-
-        let counter = chain
-            .find("`roadmaps/rate-limiting/01-the-counter`")
-            .expect("the stage below is named");
-        let window = chain
-            .find("`roadmaps/rate-limiting/02-the-window`")
-            .expect("and so is the one above it");
-
-        assert!(
-            chain.find("`rate-limiting`").expect("and the foot") < counter && counter < window,
-            "bottom to top, which is the order it is rebased through: {chain:?}"
-        );
-        assert!(
-            chain.contains("stage 01") && chain.contains("stage 02"),
-            "each named as the stage of the roadmap it is: {chain:?}"
-        );
-        assert!(
-            chain.contains("cut from"),
-            "and the foot as the branch this one came off: {chain:?}"
-        );
-    }
-
-    /// The rebase comes before the push, it is onto the top of the chain, and
-    /// the pull request opens against the same branch.
-    ///
-    /// Which is the whole instruction. How it is done is the target
-    /// repository's own block, and where that records no stacking mechanism the
-    /// rebase happens all the same — it is Verkstead's rather than the block's.
-    #[test]
-    fn the_finish_is_told_the_rebase_comes_before_the_push() {
-        let prompt = joining(
-            &next_task(&mounted(), "# Rate limiting\n", None),
-            &[link(Some("01"), "roadmaps/rate-limiting/01-the-counter")],
-        );
-
-        assert!(
-            prompt.contains(
-                "**rebase this branch onto `roadmaps/rate-limiting/01-the-counter` before \
-                 anything is pushed**"
-            ),
-            "the rebase is before the push, and onto the top: {prompt:?}"
-        );
-        assert!(
-            prompt
-                .contains("open the pull request against `roadmaps/rate-limiting/01-the-counter`"),
-            "and the stage below it in the chain is what it opens against: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("docs/agents/git-workflow.md"),
-            "how it is done is the target repository's own: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("records no stacking mechanism"),
-            "and one that records nothing gets the rebase anyway: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("never force-pushed once its own pull request is open"),
-            "rebased once, before anybody is reading one: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("is a rebase that moves nothing"),
-            "and a branch already on the top is the ordinary case: {prompt:?}"
-        );
-    }
-
-    /// A task session carries none of it, and neither does the finish of
-    /// anything that joins no chain.
-    ///
-    /// The one thing the finish of a stage is told that a task session is not.
-    /// A heading over an empty chain would tell a session there was one to join.
-    #[test]
-    fn a_session_with_no_chain_to_join_is_started_on_the_prompt_as_it_stands() {
-        let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
-
-        assert_eq!(joining(&prompt, &[]), prompt);
     }
 }

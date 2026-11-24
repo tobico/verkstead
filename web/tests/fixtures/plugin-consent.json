@@ -14,6 +14,9 @@
     {
       "kind": "Environment",
       "name": "GITLAB_TOKEN"
+    },
+    {
+      "kind": "Conversations"
     }
   ],
   "description": null,

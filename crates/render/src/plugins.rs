@@ -176,6 +176,8 @@ pub enum PluginCapability {
     Outbound { host: String },
     /// An environment variable it may read.
     Environment { name: String },
+    /// Starting conversations of its own.
+    Conversations,
 }
 
 /// **Install**: the directory or git URL, and the capabilities the card

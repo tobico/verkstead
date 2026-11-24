@@ -140,7 +140,7 @@
 //! Two numbers, because there are two limits and both are in force:
 //! `roadmap_stages` is how many stages of one roadmap may be under way together,
 //! three where nobody has said otherwise — see [`AtOnce`], and
-//! [`crate::stages::next_stage`], which is handed it at every start — and
+//! [`crate::continuing::begin`], which holds every start to it — and
 //! `conversations` is how many Conversations take a place across the **whole
 //! server**, whatever roadmap or Process they belong to, four where nobody has
 //! said otherwise. The second sits beside the first so that one roadmap cannot
@@ -1566,8 +1566,8 @@ pub struct Config {
 
     /// And how much Verkstead runs at once: how many stages of one roadmap may be
     /// under way together, and how many Conversations take a place across the
-    /// whole server — see [`AtOnce`], [`crate::stages::next_stage`], which is
-    /// handed both numbers at every start, and [`crate::places`], which counts the
+    /// whole server — see [`AtOnce`], [`crate::continuing::begin`], which holds
+    /// every start to both numbers, and [`crate::places`], which counts the
     /// second at every look.
     ///
     /// Written the way the two above it are: an absent key, an absent file and one
@@ -2443,9 +2443,9 @@ fn days_typed(days: String) -> Option<u32> {
 ///
 /// Two numbers, because there are two limits and both are in force: how many
 /// stages of **one roadmap** may be under way together — see
-/// [`crate::stages::next_stage`], which is handed it at every start — and how
+/// [`crate::continuing::begin`], which holds every start to it — and how
 /// many Conversations take a place across the **whole server**, whatever roadmap
-/// or Process they belong to, which the same reading is handed beside it and
+/// or Process they belong to, which the same start is held to beside it and
 /// [`crate::places`] counts at every look. ADR-0021 is where the three and the
 /// four came from, and why the second sits beside the first: one roadmap cannot
 /// take the whole server by default.

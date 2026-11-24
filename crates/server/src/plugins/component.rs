@@ -638,6 +638,65 @@ mod unlent {
         async fn stop(&mut self, _reason: String) -> wasmtime::Result<()> {
             Err(refused())
         }
+
+        async fn read_file(
+            &mut self,
+            _repo: String,
+            _at: host::Revision,
+            _path: String,
+        ) -> wasmtime::Result<Result<Option<Vec<u8>>, String>> {
+            Err(refused())
+        }
+
+        async fn list_directory(
+            &mut self,
+            _repo: String,
+            _at: host::Revision,
+            _path: String,
+        ) -> wasmtime::Result<Result<Option<Vec<String>>, String>> {
+            Err(refused())
+        }
+
+        async fn place_task(
+            &mut self,
+            _task: u32,
+            _label: String,
+            _platform: String,
+        ) -> wasmtime::Result<host::Placed> {
+            Err(refused())
+        }
+
+        async fn join_chain(&mut self) -> wasmtime::Result<Vec<host::Link>> {
+            Err(refused())
+        }
+
+        async fn start_conversation(
+            &mut self,
+            _stage: host::Stage,
+        ) -> wasmtime::Result<Result<host::Started, host::NotStarted>> {
+            Err(refused())
+        }
+
+        async fn conversation_state(
+            &mut self,
+            _conversation: i64,
+        ) -> wasmtime::Result<Result<host::Stands, String>> {
+            Err(refused())
+        }
+
+        async fn stage_standings(
+            &mut self,
+            _roadmap: String,
+        ) -> wasmtime::Result<Result<host::Standings, String>> {
+            Err(refused())
+        }
+
+        async fn stage_chain(
+            &mut self,
+            _roadmap: String,
+        ) -> wasmtime::Result<Result<Vec<host::Link>, String>> {
+            Err(refused())
+        }
     }
 }
 
@@ -704,6 +763,9 @@ fn grant(capabilities: &[Capability], home: Option<&Path>) -> Result<Grant, Trou
                 }
             }
             Capability::Outbound { host } => outbound.hosts.push(host.clone()),
+            // Nothing of WASI's: the host functions that start a Conversation
+            // ask the grant themselves — see [`crate::activities`].
+            Capability::Conversations => {}
         }
     }
 

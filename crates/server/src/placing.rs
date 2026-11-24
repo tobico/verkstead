@@ -70,7 +70,6 @@
 //! by a Resume of it, so a stage moved home by hand stays home.
 
 use std::future::Future;
-use std::path::Path;
 
 use crate::AppState;
 use crate::platform::{self, Platform};
@@ -319,24 +318,16 @@ fn either(names: &[String]) -> String {
     }
 }
 
-/// Place task `number` of the backlog in `worktree` before it is launched.
-pub(crate) async fn task(
+/// Place task `number` of the backlog, written `label`, whose line wants
+/// `wants` — read off the line by whoever is launching it: the backlog runner's
+/// component, through the `activity` world's `place-task`.
+pub(crate) async fn wanting(
     state: &AppState,
     conversation_id: i64,
-    worktree: &Path,
     number: u32,
+    label: String,
+    wants: Platform,
 ) -> Placed {
-    let backlog = worktree.join(crate::tasks::BACKLOG);
-
-    let Some((label, wants)) = crate::tasks::entries(&backlog)
-        .into_iter()
-        .flatten()
-        .find(|entry| entry.number == number)
-        .and_then(|entry| Some((entry.label, entry.platform?)))
-    else {
-        return Placed::Here;
-    };
-
     place(state, conversation_id, Work::Task { number, label }, wants).await
 }
 

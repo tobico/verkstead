@@ -69,8 +69,9 @@ const NOWHERE: &str = "127.0.0.1:1";
 /// The port the workbench is taken to be on, which nothing here asks about.
 const PORT: u16 = 8422;
 
-/// How long a dial in this suite gives one address, rather than the two seconds a
-/// running server gives one.
+/// How long a dial through [`Verkstead::workbench_in_a_hurry`] or a hurried
+/// renewal gives one address: the two seconds a running server gives one to
+/// connect.
 ///
 /// Spent only where a dial is meant to reach nobody, which here is the member
 /// whose machine is not there — so it reaches a dial through

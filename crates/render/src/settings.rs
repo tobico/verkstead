@@ -537,7 +537,7 @@ pub struct AtOnceView {
     /// always: a roadmap with no places would start nothing at all.
     ///
     /// A count of places rather than a quantity of anything, which is what the
-    /// scheduler is handed — see `stages::next_stage` on the server.
+    /// host holds a *start a Conversation* to — see `continuing::begin` on the server.
     pub roadmap_stages: usize,
 
     /// Whether that number is one somebody typed, rather than the default being
