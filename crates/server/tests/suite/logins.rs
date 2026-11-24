@@ -9,7 +9,9 @@
 //! session's ending does carries there.
 //!
 //! And the Antigravity CLI's the same way, against a script that is what agy
-//! 1.4.12 does — see [`agy_stub`].
+//! 1.4.12 does — see [`agy_stub`]; and a harness a plugin declares, against
+//! the stub harness plugin and a script written for its component to read —
+//! see [`plugin_stub`].
 
 #![cfg(target_os = "linux")]
 
@@ -25,7 +27,7 @@ use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    AgentType, Broken, GrillingStarted, LoginState, ProfileEntry, ProfileTrouble,
+    AgentType, Broken, GrillingStarted, HarnessEntry, LoginState, ProfileEntry, ProfileTrouble,
 };
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
@@ -35,6 +37,11 @@ use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::{Agents, Gh, open_database, router_running_sessions, store};
+
+use crate::stub_harness::{self, StubHarness};
+
+/// The models a stub harness Profile here offers: the first its default.
+const PLUGIN_MODELS: [&str; 2] = ["stub-large", "stub-grilling"];
 
 /// How long anything here is waited for before the test says what it saw.
 const WAITING: Duration = Duration::from_secs(20);
@@ -120,6 +127,60 @@ esac
     )
 }
 
+/// What stands where a plugin harness's binary goes: a login that says what the
+/// stub harness's component recognises — see `plugins/tests/stub-harness` —
+/// and nothing a built-in says. `$1` is the second of the manifest's words,
+/// `auth login` or `auth status`.
+///
+/// It prints the address on a line, then a prompt with no line ending, and
+/// reads a code: one with no `#` in it is too short and asked for again, a
+/// wrong one is refused with an exit. Where `./expiring` is in the directory it
+/// was started in, the first of it gives up at once. And its status question
+/// leaves `./asked` behind, so that a suite can see it was asked.
+fn plugin_stub(marker: &str) -> String {
+    format!(
+        r#"# {marker}
+case "$1" in
+login)
+  echo started >> ./started
+  echo "Stub login. Go to: https://stub.example/login?state=$(od -An -N4 -tu4 /dev/urandom | tr -d ' ')"
+  if [ -f ./expiring ] && [ "$(wc -l < ./started)" -eq 1 ]; then
+    sleep 1
+    echo "Gave up." >&2
+    exit 1
+  fi
+  printf 'Code? '
+  while read code; do
+    case "$code" in
+    *#*) break ;;
+    *) echo "Too short."; printf 'Code? ' ;;
+    esac
+  done
+  [ "$code" = "{GOOD_CODE}" ] || {{ echo "Wrong code." >&2; exit 1; }}
+  printf '{{"token":"%s"}}' "$code" > "$HOME/.stub/auth.json"
+  echo "Signed in."
+  ;;
+status)
+  echo asked >> ./asked
+  [ -f "$HOME/.stub/auth.json" ]
+  ;;
+esac
+"#
+    )
+}
+
+/// What a [`Workbench`] stands where every type's binary goes.
+enum Standing {
+    /// [`stub`].
+    Claude,
+    /// [`agy_stub`].
+    Agy,
+    /// [`plugin_stub`].
+    Plugin,
+    /// This line, whatever it is.
+    Line(Vec<String>),
+}
+
 struct Workbench {
     app: Router,
     pool: SqlitePool,
@@ -131,17 +192,21 @@ struct Workbench {
 
 impl Workbench {
     async fn new(limit: Duration) -> Workbench {
-        Workbench::harnessed(limit, None).await
+        Workbench::harnessed(limit, Standing::Claude).await
     }
 
     /// The same, with [`agy_stub`] standing where every type's binary goes.
     async fn agy(limit: Duration) -> Workbench {
-        Workbench::harnessed(limit, Some(Vec::new())).await
+        Workbench::harnessed(limit, Standing::Agy).await
     }
 
-    /// The same, with `harness` standing where every type's binary goes in
-    /// place of the stub — or, empty, [`agy_stub`].
-    async fn harnessed(limit: Duration, harness: Option<Vec<String>>) -> Workbench {
+    /// The same, with [`plugin_stub`] standing there.
+    async fn plugin(limit: Duration) -> Workbench {
+        Workbench::harnessed(limit, Standing::Plugin).await
+    }
+
+    /// The same, with `harness` standing where every type's binary goes.
+    async fn harnessed(limit: Duration, harness: Standing) -> Workbench {
         let dir = tempfile::tempdir().unwrap();
         let home = tempfile::tempdir().unwrap();
         let accounts = tempfile::tempdir().unwrap();
@@ -156,11 +221,12 @@ impl Workbench {
 
         let agents = Agents::running(
             match harness {
-                None => vec!["/bin/sh".to_owned(), "-c".to_owned(), stub(&marker)],
-                Some(agy) if agy.is_empty() => {
-                    vec!["/bin/sh".to_owned(), "-c".to_owned(), agy_stub(&marker)]
+                Standing::Claude => vec!["/bin/sh".to_owned(), "-c".to_owned(), stub(&marker)],
+                Standing::Agy => vec!["/bin/sh".to_owned(), "-c".to_owned(), agy_stub(&marker)],
+                Standing::Plugin => {
+                    vec!["/bin/sh".to_owned(), "-c".to_owned(), plugin_stub(&marker)]
                 }
-                Some(harness) => harness,
+                Standing::Line(harness) => harness,
             },
             Homes::on(Platform::HERE, home.path().to_owned(), dir.path()),
             Reachable::at(LISTENING),
@@ -211,8 +277,10 @@ impl Workbench {
                     "name": name,
                     "account": {
                         "agent_type": "Claude",
-                        "claude_dir": claude_dir,
-                        "config_file": config_file,
+                        "paths": {
+                            "claude_dir": claude_dir,
+                            "config_file": config_file,
+                        },
                     },
                     "models": ["claude-opus-5"],
                 }),
@@ -241,7 +309,7 @@ impl Workbench {
                 "/api/ui/profiles",
                 serde_json::json!({
                     "name": name,
-                    "account": { "agent_type": "Agy", "home": home },
+                    "account": { "agent_type": "Agy", "paths": { "home": home } },
                     "models": ["gemini-pro"],
                 }),
             )
@@ -256,6 +324,74 @@ impl Workbench {
             .find(|profile| profile.name.as_deref() == Some(name))
             .expect("the Profile was saved")
             .id
+    }
+
+    /// A Profile of the stub harness plugin `harness`, installed first, with
+    /// no login yet — saved the way the form saves one.
+    async fn plugin_profile(&self, harness: StubHarness, name: &str) -> String {
+        harness
+            .installed(&self.app, self.accounts.path(), PLUGIN_MODELS)
+            .await;
+
+        let saved = self
+            .press(
+                "/api/ui/profiles",
+                serde_json::json!({
+                    "name": name,
+                    "account": {
+                        "agent_type": harness.uuid(),
+                        "paths": stub_harness::account(&self.accounts.path().join(name)),
+                    },
+                    "models": PLUGIN_MODELS,
+                }),
+            )
+            .await;
+
+        assert_eq!(saved.0, StatusCode::OK, "{}", saved.1);
+
+        store::profiles(&self.pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|profile| profile.name.as_deref() == Some(name))
+            .expect("the Profile was saved")
+            .id
+    }
+
+    /// The entry the harness list has for the stub harness plugin `harness`.
+    async fn listed(&self, harness: StubHarness) -> HarnessEntry {
+        let answered = self
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/ui/harnesses")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+        let listed: Vec<HarnessEntry> = serde_json::from_slice(&bytes).unwrap();
+
+        listed
+            .into_iter()
+            .find(|entry| entry.id.as_str() == harness.uuid())
+            .expect("the stub harness is on the list")
+    }
+
+    /// The login a stub harness account named `name` holds, if any.
+    fn plugin_login_of(&self, name: &str) -> Option<String> {
+        std::fs::read_to_string(self.accounts.path().join(name).join(".stub/auth.json")).ok()
+    }
+
+    /// How many times the status of `profile`'s account has been asked of a
+    /// plugin harness — see [`plugin_stub`].
+    fn asked(&self, profile: &str) -> usize {
+        std::fs::read_to_string(self.place(profile).join("asked"))
+            .unwrap_or_default()
+            .lines()
+            .count()
     }
 
     /// The login an Antigravity CLI account named `name` holds, if any.
@@ -798,10 +934,7 @@ async fn a_profile_bound_on_another_device_is_not_logged_in_here() {
         "0011223344556677889900aabbccddee",
         &store::ProfileFacts {
             name: Some("away".to_owned()),
-            account: store::Account::Claude {
-                claude_dir,
-                config_file,
-            },
+            account: store::Account::claude(claude_dir, config_file),
             models: vec!["claude-opus-5".to_owned()],
             memory: true,
         },
@@ -832,7 +965,7 @@ async fn a_profile_of_another_harness_is_not_logged_in_here() {
             "/api/ui/profiles",
             serde_json::json!({
                 "name": "codex",
-                "account": { "agent_type": "Codex", "home": codex },
+                "account": { "agent_type": "Codex", "paths": { "home": codex } },
                 "models": ["gpt-5"],
             }),
         )
@@ -872,7 +1005,7 @@ async fn a_press_under_a_signed_out_account_is_refused_until_it_logs_in() {
         workbench.pressed(conversation).await,
         GrillingStarted::ProfileBroken(ProfileTrouble {
             broken: Broken::SignedOut,
-            agent_type: AgentType::Claude,
+            agent_type: AgentType::CLAUDE,
         }),
     );
     assert_eq!(workbench.broken(&profile).await, Some(Broken::SignedOut));
@@ -915,7 +1048,7 @@ async fn a_press_under_a_signed_out_account_is_refused_until_it_logs_in() {
 async fn a_harness_that_is_not_there_does_not_read_as_signed_out() {
     let workbench = Workbench::harnessed(
         Duration::from_secs(600),
-        Some(vec!["/nonexistent/verkstead-test/claude".to_owned()]),
+        Standing::Line(vec!["/nonexistent/verkstead-test/claude".to_owned()]),
     )
     .await;
     let profile = workbench.claude_profile("work").await;
@@ -1053,7 +1186,7 @@ async fn a_press_under_a_signed_out_agy_account_is_refused_until_it_logs_in() {
         workbench.pressed(conversation).await,
         GrillingStarted::ProfileBroken(ProfileTrouble {
             broken: Broken::SignedOut,
-            agent_type: AgentType::Agy,
+            agent_type: AgentType::AGY,
         }),
     );
     assert_eq!(workbench.broken(&profile).await, Some(Broken::SignedOut));
@@ -1072,4 +1205,241 @@ async fn a_press_under_a_signed_out_agy_account_is_refused_until_it_logs_in() {
         workbench.pressed(conversation).await,
         GrillingStarted::Started
     );
+}
+
+/// A harness a plugin declares logs in through its component: the address the
+/// `login` export found in what the harness wrote is shown, the code typed in
+/// the modal reaches the harness, and the export saying the login is over
+/// leaves it in the account.
+#[tokio::test]
+async fn a_plugin_harness_logs_in_through_its_login_export() {
+    let workbench = Workbench::plugin(Duration::from_secs(600)).await;
+    let profile = workbench
+        .plugin_profile(StubHarness::LoggingIn, "work")
+        .await;
+
+    assert_eq!(
+        workbench.opened(&profile, "laptop").await,
+        LoginState::Starting
+    );
+
+    assert_eq!(
+        workbench
+            .listed(StubHarness::LoggingIn)
+            .await
+            .login
+            .as_deref(),
+        Some("Stub Harness"),
+        "its list entry offers a Log in, under the name the manifest gives it"
+    );
+
+    let url = workbench.waiting(&profile).await;
+    assert!(
+        url.starts_with("https://stub.example/login?state="),
+        "{url}"
+    );
+    assert_eq!(workbench.plugin_login_of("work"), None);
+
+    let (status, said) = workbench.coded(&profile, GOOD_CODE).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    workbench
+        .read_until(&profile, |reading| reading == &Some(LoginState::LoggedIn))
+        .await;
+
+    let login = workbench
+        .plugin_login_of("work")
+        .expect("the account has a login");
+    assert!(login.contains(GOOD_CODE), "{login}");
+
+    workbench.closed(&profile, "laptop").await;
+    workbench.none_running().await;
+}
+
+/// A code the harness says is cut short is asked for again on the same
+/// address, said as the export words it.
+#[tokio::test]
+async fn a_plugin_harness_s_cut_code_is_said_as_its_export_words_it() {
+    let workbench = Workbench::plugin(Duration::from_secs(600)).await;
+    let profile = workbench
+        .plugin_profile(StubHarness::LoggingIn, "work")
+        .await;
+
+    workbench.opened(&profile, "laptop").await;
+    let url = workbench.waiting(&profile).await;
+
+    let (status, said) = workbench.coded(&profile, "good").await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    let again = workbench
+        .read_until(&profile, |reading| {
+            matches!(
+                reading,
+                Some(LoginState::Waiting {
+                    refused: Some(_),
+                    ..
+                })
+            )
+        })
+        .await;
+
+    assert_eq!(
+        again,
+        Some(LoginState::Waiting {
+            url,
+            refused: Some("The stub wants all of the code.".to_owned()),
+        })
+    );
+    assert_eq!(workbench.started(&profile), 1);
+
+    let (status, said) = workbench.coded(&profile, GOOD_CODE).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    workbench
+        .read_until(&profile, |reading| reading == &Some(LoginState::LoggedIn))
+        .await;
+
+    workbench.closed(&profile, "laptop").await;
+    workbench.none_running().await;
+}
+
+/// A code the harness refuses is a fresh login with a fresh address, said as
+/// the export words the refusal.
+#[tokio::test]
+async fn a_code_a_plugin_harness_refuses_is_said_as_its_export_words_it() {
+    let workbench = Workbench::plugin(Duration::from_secs(600)).await;
+    let profile = workbench
+        .plugin_profile(StubHarness::LoggingIn, "work")
+        .await;
+
+    workbench.opened(&profile, "laptop").await;
+    let first = workbench.waiting(&profile).await;
+
+    let (status, said) = workbench.coded(&profile, "wrong#code").await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    let again = workbench
+        .read_until(
+            &profile,
+            |reading| matches!(reading, Some(LoginState::Waiting { url, .. }) if url != &first),
+        )
+        .await;
+
+    let Some(LoginState::Waiting { refused, .. }) = again else {
+        unreachable!()
+    };
+    assert_eq!(refused.as_deref(), Some("The stub turned that code down."));
+    assert_eq!(workbench.started(&profile), 2);
+    assert_eq!(workbench.plugin_login_of("work"), None);
+
+    workbench.closed(&profile, "laptop").await;
+    workbench.none_running().await;
+}
+
+/// A harness that gives up waiting for a code is a fresh address in its
+/// place, said as the export words the giving up.
+#[tokio::test]
+async fn a_plugin_harness_giving_up_is_said_as_its_export_words_it() {
+    let workbench = Workbench::plugin(Duration::from_secs(600)).await;
+    let profile = workbench
+        .plugin_profile(StubHarness::LoggingIn, "work")
+        .await;
+
+    std::fs::create_dir_all(workbench.place(&profile)).unwrap();
+    std::fs::write(workbench.place(&profile).join("expiring"), "").unwrap();
+
+    workbench.opened(&profile, "laptop").await;
+    let first = workbench.waiting(&profile).await;
+
+    let again = workbench
+        .read_until(
+            &profile,
+            |reading| matches!(reading, Some(LoginState::Waiting { url, .. }) if url != &first),
+        )
+        .await;
+
+    let Some(LoginState::Waiting { refused, .. }) = again else {
+        unreachable!()
+    };
+    assert_eq!(
+        refused.as_deref(),
+        Some("The stub stopped waiting for a code.")
+    );
+    assert_eq!(workbench.started(&profile), 2);
+
+    let (status, said) = workbench.coded(&profile, GOOD_CODE).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    workbench
+        .read_until(&profile, |reading| reading == &Some(LoginState::LoggedIn))
+        .await;
+
+    workbench.closed(&profile, "laptop").await;
+    workbench.none_running().await;
+}
+
+/// A press under a plugin harness's account with no login is refused before
+/// anything starts, its status asked of it the way a built-in's is, until a
+/// login from the card.
+#[tokio::test]
+async fn a_press_under_a_signed_out_plugin_account_is_refused_until_it_logs_in() {
+    let workbench = Workbench::plugin(Duration::from_secs(600)).await;
+    let profile = workbench
+        .plugin_profile(StubHarness::LoggingIn, "work")
+        .await;
+    let conversation = workbench.investigation_on(&profile, PLUGIN_MODELS[0]).await;
+
+    let GrillingStarted::ProfileBroken(trouble) = workbench.pressed(conversation).await else {
+        panic!("the press went ahead under an account with no login");
+    };
+    assert_eq!(trouble.broken, Broken::SignedOut);
+    assert_eq!(trouble.agent_type.as_str(), StubHarness::LoggingIn.uuid());
+    assert_eq!(workbench.asked(&profile), 1);
+
+    workbench.opened(&profile, "laptop").await;
+    workbench.waiting(&profile).await;
+    let (status, said) = workbench.coded(&profile, GOOD_CODE).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    workbench
+        .read_until(&profile, |reading| reading == &Some(LoginState::LoggedIn))
+        .await;
+    workbench.closed(&profile, "laptop").await;
+
+    assert_eq!(workbench.broken(&profile).await, None);
+    assert_eq!(
+        workbench.pressed(conversation).await,
+        GrillingStarted::Started
+    );
+}
+
+/// A harness whose manifest declares no login is one Verkstead does not log
+/// in: its list entry offers no Log in, a login opened on one of its Profiles
+/// is refused, and a press under one goes ahead without asking its status.
+#[tokio::test]
+async fn a_plugin_harness_declaring_no_login_is_not_logged_in_or_asked() {
+    let workbench = Workbench::plugin(Duration::from_secs(600)).await;
+    let profile = workbench.plugin_profile(StubHarness::Silent, "work").await;
+
+    assert_eq!(
+        workbench.listed(StubHarness::Silent).await.login,
+        None,
+        "no Log in is offered"
+    );
+
+    let (status, said) = workbench
+        .press(
+            &format!("/api/ui/profiles/{profile}/login"),
+            serde_json::json!({ "viewer": "laptop" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{said}");
+    assert_eq!(workbench.running(), 0);
+
+    let conversation = workbench.investigation_on(&profile, PLUGIN_MODELS[0]).await;
+    assert_eq!(
+        workbench.pressed(conversation).await,
+        GrillingStarted::Started
+    );
+    assert_eq!(workbench.asked(&profile), 0, "its status was never asked");
+    assert_eq!(workbench.broken(&profile).await, None);
 }

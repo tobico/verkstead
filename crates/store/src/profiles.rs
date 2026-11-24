@@ -3,8 +3,8 @@
 //!
 //! A Profile is a name, an account and a list of models, because that is the
 //! whole of what launching a session needs. The account is what keeps one
-//! account's sessions out of another's, and its shape is its agent type's — see
-//! [`Account`]; the models are what a session may be run on.
+//! account's sessions out of another's, and it is the paths its harness
+//! declares — see [`Account`]; the models are what a session may be run on.
 //!
 //! The models are a list and not one model, and the list is the Profile's own:
 //! different Profiles reach different accounts, so each names what it can
@@ -40,7 +40,7 @@
 //! kept so the Pairings that name it hold until that member's records arrive
 //! carrying where it was minted — see [`settle`]. It is in no list.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -49,69 +49,162 @@ use sqlx::SqlitePool;
 
 use super::replicated::{self, Kind};
 
-/// Which coding agent a Profile runs.
+/// Which coding agent a Profile runs: the id of its harness.
 ///
-/// One word apiece, spelled out in the column so the table reads as something.
-/// A word this does not know is a database written by a Verkstead that has a
-/// backend this one does not, which is worth saying rather than guessing past.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AgentType {
-    Claude,
-    Codex,
-    Grok,
-    OpenCode,
-    Agy,
+/// **A string rather than a closed list of words** (ADR-0030, *Agent*): a
+/// harness is a Plugin of the Agent Category, so what a Profile names is
+/// whatever harness the plugin that provides it declares. The five built into
+/// this binary each have a fixed uuid — see [`BUILT_IN`] — and **are written
+/// down as the word they always were**, `claude`, `codex`, `grok`, `opencode`
+/// and `agy`, so that a device of the cluster still on an older release reads
+/// a record of one. A plugin harness is written down as its plugin's uuid.
+/// Either is read, and a built-in's uuid reads as its word.
+///
+/// **An id this binary does not know is still an id**: a Profile of a harness
+/// that is not here — one installed on another device, or since removed — is
+/// read like any other and judged broken above the store, rather than being a
+/// row that stops a read.
+///
+/// Interned, so that it stays a value as cheap to pass around as the enum it
+/// replaces: the set of harness ids a server ever meets is a handful.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct AgentType(&'static str);
+
+/// One harness built into this binary: the word it is written down as, the
+/// uuid its plugin is known by, and the keys of the paths its account is made
+/// of, in the order it declares them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuiltIn {
+    pub agent_type: AgentType,
+    pub uuid: &'static str,
+    pub paths: &'static [&'static str],
 }
+
+/// The key of Claude Code's directory among its account's paths.
+pub const CLAUDE_DIR: &str = "claude_dir";
+
+/// The key of Claude Code's config file among its account's paths.
+pub const CONFIG_FILE: &str = "config_file";
+
+/// The key of the one home every built-in harness after Claude keeps its
+/// account under.
+pub const HOME: &str = "home";
+
+/// The five harnesses built into this binary, in the order they arrived.
+///
+/// The keys are the binding's own field names from before an account was a
+/// map of paths — see [`Binding`] — which is what lets a binding an older
+/// release wrote be read as one, and one written now be read by it.
+pub const BUILT_IN: [BuiltIn; 5] = [
+    BuiltIn {
+        agent_type: AgentType::CLAUDE,
+        uuid: "985e669b-5cf2-4aee-bbf2-6074626949f4",
+        paths: &[CLAUDE_DIR, CONFIG_FILE],
+    },
+    BuiltIn {
+        agent_type: AgentType::CODEX,
+        uuid: "49ea40c6-298c-412a-95b5-c89b9f539616",
+        paths: &[HOME],
+    },
+    BuiltIn {
+        agent_type: AgentType::GROK,
+        uuid: "d40d8f19-7261-4ddf-9a98-539f460577a7",
+        paths: &[HOME],
+    },
+    BuiltIn {
+        agent_type: AgentType::OPENCODE,
+        uuid: "8c53a219-6c1a-41ca-b127-0f9e75730f4b",
+        paths: &[HOME],
+    },
+    BuiltIn {
+        agent_type: AgentType::AGY,
+        uuid: "7c2f6b59-0b54-4198-bfd2-b2fae4da2418",
+        paths: &[HOME],
+    },
+];
 
 impl AgentType {
-    /// The word this type is written down as.
+    pub const CLAUDE: Self = Self("claude");
+    pub const CODEX: Self = Self("codex");
+    pub const GROK: Self = Self("grok");
+    pub const OPENCODE: Self = Self("opencode");
+    pub const AGY: Self = Self("agy");
+
+    /// The id this harness is written down as: a built-in's word, a plugin's
+    /// uuid.
     ///
-    /// The `agent_type` column's, and the same word a sandbox carries in its
-    /// environment so that `verkstead guide` printed inside one knows which
-    /// backend it is being printed for. One spelling for both, because a second
-    /// vocabulary would be a second thing to keep in step.
+    /// What the record's `harness` field holds, and the same id a sandbox
+    /// carries in its environment so that `verkstead guide` printed inside one
+    /// knows which harness it is being printed for. One spelling for both,
+    /// because a second vocabulary would be a second thing to keep in step.
     pub fn word(self) -> &'static str {
-        match self {
-            Self::Claude => "claude",
-            Self::Codex => "codex",
-            Self::Grok => "grok",
-            Self::OpenCode => "opencode",
-            Self::Agy => "agy",
+        self.0
+    }
+
+    /// And back again, which is the only way one is ever read: a built-in's
+    /// word or its uuid as that built-in, and any other id as itself.
+    pub fn read(id: &str) -> Self {
+        if let Some(built_in) = BUILT_IN
+            .iter()
+            .find(|built_in| built_in.agent_type.0 == id || built_in.uuid.eq_ignore_ascii_case(id))
+        {
+            return built_in.agent_type;
         }
+
+        let mut interned = INTERNED
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        if let Some(held) = interned.get(id) {
+            return Self(held);
+        }
+
+        let held: &'static str = Box::leak(id.to_owned().into_boxed_str());
+        interned.insert(held);
+
+        Self(held)
     }
 
-    /// And back again, which is the only way one is ever read.
-    pub fn read(word: &str) -> Result<Self> {
-        Ok(match word {
-            "claude" => Self::Claude,
-            "codex" => Self::Codex,
-            "grok" => Self::Grok,
-            "opencode" => Self::OpenCode,
-            "agy" => Self::Agy,
-            other => bail!("a Profile names the unknown agent type {other:?}"),
-        })
-    }
-
-    /// How a session of this type puts a Question Set to the human.
+    /// The id `id` is, where it is one already known to this process — a
+    /// built-in's, or one read before — and nothing where it is not.
     ///
-    /// A fact about the backend rather than about the Set (ADR-0011): the CLI
-    /// asks the same way everywhere, and what differs is whether the backend can
-    /// afford to hold a shell command open for hours. Kept beside the type
-    /// itself so that the Guide a session reads and the server that takes its
-    /// Set answer the question the same way.
-    pub fn channel(self) -> Channel {
-        match self {
-            // The Antigravity CLI blocks for free: agy 1.4.12's shell tool
-            // turns a long command into a background task, ends the turn, and
-            // wakes the session when it returns — an hour's hold measured with
-            // no model turn spent on it.
-            Self::Claude | Self::OpenCode | Self::Agy => Channel::Blocking,
-            Self::Codex | Self::Grok => Channel::StoreAndNudge,
+    /// **For an id from outside**, which [`AgentType::read`] would keep for
+    /// the life of the process: asked by anyone who can reach an open route, a
+    /// new id each time, that is memory nothing gives back.
+    pub fn known(id: &str) -> Option<Self> {
+        if let Some(built_in) = BUILT_IN
+            .iter()
+            .find(|built_in| built_in.agent_type.0 == id || built_in.uuid.eq_ignore_ascii_case(id))
+        {
+            return Some(built_in.agent_type);
         }
+
+        INTERNED
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(id)
+            .map(|held| Self(held))
+    }
+
+    /// The built-in this is, where it is one.
+    pub fn built_in(self) -> Option<&'static BuiltIn> {
+        BUILT_IN.iter().find(|built_in| built_in.agent_type == self)
     }
 }
 
-/// How a backend's sessions ask, which is one of two things.
+/// Every id [`AgentType::read`] has kept, each held for the life of the
+/// process.
+static INTERNED: std::sync::Mutex<std::collections::BTreeSet<&'static str>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
+
+impl std::fmt::Display for AgentType {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.0)
+    }
+}
+
+/// How a backend's sessions ask, which is one of two things — which one being
+/// the harness's answer, in the server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Channel {
     /// `verkstead ask` idles until the Response comes back, so the Answers are
@@ -127,102 +220,103 @@ pub enum Channel {
     StoreAndNudge,
 }
 
-/// The account a Profile runs as, in the shape the agent type running it keeps
-/// one.
+/// The account a Profile runs as: its harness, and the **labelled paths** that
+/// harness declares an account to be made of, each resolved.
 ///
-/// Claude Code's account is a pair — a directory and a file beside it, bound
-/// over `~/.claude` and `~/.claude.json` — because that is how Claude Code keeps
-/// one. Every backend after it keeps its whole account under a single
-/// relocatable home, which is a shape of its own and a table of its own: see
-/// `profile_homes` in [`apply_schema`].
+/// Claude Code's is a pair — a directory and a file beside it, bound over
+/// `~/.claude` and `~/.claude.json` — under the keys [`CLAUDE_DIR`] and
+/// [`CONFIG_FILE`]. Every built-in after it keeps its whole account under one
+/// relocatable home, under [`HOME`]: Codex's over `~/.codex`, Grok Build's over
+/// `~/.grok`, the Antigravity CLI's over `~/.gemini` (an account only where it
+/// holds `antigravity-cli/`), and OpenCode's, the home its XDG directories sit
+/// inside. A plugin harness declares its own. What each path is *for* is the
+/// harness's to say, in the server; here they are only keys and paths.
 ///
-/// The shape *is* the discriminator, rather than sitting beside one: a Profile
-/// holding a pair runs Claude, and there is no second field for it to disagree
-/// with. Which agent type that comes to is [`Account::agent_type`], and the
-/// column is what it is written down as.
+/// The paths are in the order the harness declares them, so that the first is
+/// the directory the account is — see [`Account::directory`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Account {
-    /// Claude Code's pair.
-    Claude {
-        /// The directory a session's `~/.claude` is built from, resolved.
-        claude_dir: PathBuf,
-
-        /// The file a session's `~/.claude.json` is copied from, resolved.
-        config_file: PathBuf,
-    },
-
-    /// Codex's one relocatable home, bind-mounted over `~/.codex`, resolved.
-    ///
-    /// The whole account: the credentials and the configuration are files inside
-    /// it, so there is nothing beside it to travel with.
-    Codex { home: PathBuf },
-
-    /// Grok Build's one relocatable home, bind-mounted over `~/.grok`,
-    /// resolved.
-    ///
-    /// Codex's shape, for the reason Codex's is that shape: a subscription
-    /// login writes its `auth.json` inside the home and an API key arrives by
-    /// environment, so the directory is the whole of what a Profile names
-    /// either way.
-    Grok { home: PathBuf },
-
-    /// OpenCode's one relocatable home, resolved — the same shape again, but
-    /// mounted as more than one directory.
-    ///
-    /// opencode keeps no single dot-directory: it reads the four XDG base
-    /// directories and appends `opencode` to each, so what a Profile names here
-    /// is a *home* those paths resolve inside, holding
-    /// `.config/opencode` and `.local/share/opencode` — the account being the
-    /// second of them, where `auth.json` and the session store are written. It
-    /// is the shape one `HOME=<the directory> opencode` leaves behind, which is
-    /// how such an account is made in the first place. Which of them are bound
-    /// where the sandbox says, as every other account's mounting is.
-    OpenCode { home: PathBuf },
-
-    /// The Antigravity CLI's one relocatable home, bind-mounted over
-    /// `~/.gemini`, resolved.
-    ///
-    /// Codex's shape again: agy keeps its settings, its conversations and its
-    /// global customisation under `antigravity-cli/` and `config/` inside it.
-    /// **A `~/.gemini` is an account only where it holds `antigravity-cli/`**:
-    /// a bare one is what Gemini CLI left behind, which is another program's.
-    Agy { home: PathBuf },
+pub struct Account {
+    harness: AgentType,
+    paths: Vec<(String, PathBuf)>,
 }
 
 impl Account {
-    /// Which agent runs an account of this shape.
-    pub fn agent_type(&self) -> AgentType {
-        match self {
-            Self::Claude { .. } => AgentType::Claude,
-            Self::Codex { .. } => AgentType::Codex,
-            Self::Grok { .. } => AgentType::Grok,
-            Self::OpenCode { .. } => AgentType::OpenCode,
-            Self::Agy { .. } => AgentType::Agy,
+    /// An account of `harness` made of `paths`, each under its key, in the
+    /// order its harness declares them.
+    pub fn new<K: Into<String>, P: Into<PathBuf>>(
+        harness: AgentType,
+        paths: impl IntoIterator<Item = (K, P)>,
+    ) -> Self {
+        Self {
+            harness,
+            paths: paths
+                .into_iter()
+                .map(|(key, path)| (key.into(), path.into()))
+                .collect(),
         }
     }
 
-    /// An account of `harness`'s shape with no paths in it: what a Profile
-    /// carries that no device this one has heard of is bound on — see
-    /// [`Unbound`].
+    /// Claude Code's pair.
+    pub fn claude(claude_dir: impl Into<PathBuf>, config_file: impl Into<PathBuf>) -> Self {
+        Self::new(
+            AgentType::CLAUDE,
+            [
+                (CLAUDE_DIR, claude_dir.into()),
+                (CONFIG_FILE, config_file.into()),
+            ],
+        )
+    }
+
+    /// The one home of a harness that keeps its account under one.
+    pub fn home(harness: AgentType, home: impl Into<PathBuf>) -> Self {
+        Self::new(harness, [(HOME, home.into())])
+    }
+
+    /// The account's paths, in the order its harness declares them: Claude's
+    /// directory and then its file, and every other built-in's one home.
+    pub fn paths(&self) -> Vec<&Path> {
+        self.paths.iter().map(|(_, path)| path.as_path()).collect()
+    }
+
+    /// And each under its key.
+    pub fn keyed(&self) -> &[(String, PathBuf)] {
+        &self.paths
+    }
+
+    /// The path under `key`, where the account has one.
+    pub fn path(&self, key: &str) -> Option<&Path> {
+        self.paths
+            .iter()
+            .find(|(held, _)| held == key)
+            .map(|(_, path)| path.as_path())
+    }
+
+    /// And the first of them, which is the directory the account is: what its
+    /// login and its memory are said from. The empty path for an account with
+    /// none — see [`Unbound`].
+    pub fn directory(&self) -> &Path {
+        self.paths
+            .first()
+            .map(|(_, path)| path.as_path())
+            .unwrap_or(Path::new(""))
+    }
+
+    /// Which harness runs this account.
+    pub fn agent_type(&self) -> AgentType {
+        self.harness
+    }
+
+    /// An account of `harness` with no paths in it: what a Profile carries
+    /// that no device this one has heard of is bound on — see [`Unbound`]. A
+    /// built-in's keys are each there and empty, which is the shape it has
+    /// always had.
     fn nowhere(harness: AgentType) -> Self {
-        match harness {
-            AgentType::Claude => Self::Claude {
-                claude_dir: PathBuf::new(),
-                config_file: PathBuf::new(),
-            },
-            AgentType::Codex => Self::Codex {
-                home: PathBuf::new(),
-            },
-            AgentType::Grok => Self::Grok {
-                home: PathBuf::new(),
-            },
-            AgentType::OpenCode => Self::OpenCode {
-                home: PathBuf::new(),
-            },
-            AgentType::Agy => Self::Agy {
-                home: PathBuf::new(),
-            },
-        }
+        let keys = harness
+            .built_in()
+            .map(|built_in| built_in.paths)
+            .unwrap_or_default();
+
+        Self::new(harness, keys.iter().map(|key| (*key, PathBuf::new())))
     }
 }
 
@@ -243,7 +337,8 @@ pub struct Profile {
     /// name is unique.
     pub name: Option<String>,
 
-    /// The account a session under this Profile is run as, in its type's shape.
+    /// The account a session under this Profile is run as: the paths its
+    /// harness declares.
     pub account: Account,
 
     /// The models this account can run a session on, in the order they were
@@ -494,8 +589,8 @@ pub struct ProfileRecord {
     /// [`Profile::name`].
     pub name: Option<String>,
 
-    /// The harness it runs, in [`AgentType::word`]'s spelling: the shape every
-    /// device's binding of it is in.
+    /// The harness it runs, in [`AgentType::word`]'s spelling — a built-in's
+    /// word, a plugin's uuid: which paths every device's binding of it holds.
     pub harness: String,
 
     /// The models it can run a session on, in the order they were written.
@@ -544,9 +639,17 @@ impl Kind for Bindings {
     type Fields = Binding;
 }
 
-/// One device's binding of a Profile: the account's paths there, resolved, in
-/// the shape its harness keeps one — Claude's pair, or the one home every
-/// harness after it keeps. See [`Account`].
+/// One device's binding of a Profile: the account's paths there, resolved,
+/// each under the key its harness declares it by — see [`Account`].
+///
+/// **The map is the binding**, and for a built-in harness the fields it had
+/// before there was one are written beside it: Claude's pair as `claude_dir`
+/// and `config_file`, every other built-in's one home as `home`. Those are
+/// what a device still on an older release reads, so a binding written here
+/// stays one it can run; a plugin harness, which no older release could run
+/// anyway, is written as the map alone. A binding an older release wrote has
+/// no map, and its fields are read as one — their names being the built-ins'
+/// keys.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Binding {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -557,6 +660,10 @@ pub struct Binding {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home: Option<String>,
+
+    /// Each of the account's paths under its key.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub paths: BTreeMap<String, String>,
 
     /// Whether the account at those paths holds a **login file**, as the
     /// device bound on it last looked — see [`logins_held`]. A binding without
@@ -578,64 +685,62 @@ fn holding() -> bool {
 impl Binding {
     /// The binding `account` is written down as.
     fn of(account: &Account) -> Result<Self> {
-        Ok(match account {
-            Account::Claude {
-                claude_dir,
-                config_file,
-            } => Self {
-                claude_dir: Some(text(claude_dir)?.to_owned()),
-                config_file: Some(text(config_file)?.to_owned()),
-                home: None,
-                login: holding(),
-            },
-            Account::Codex { home }
-            | Account::Grok { home }
-            | Account::OpenCode { home }
-            | Account::Agy { home } => Self {
-                claude_dir: None,
-                config_file: None,
-                home: Some(text(home)?.to_owned()),
-                login: holding(),
-            },
+        let paths = account
+            .keyed()
+            .iter()
+            .map(|(key, path)| Ok((key.clone(), text(path)?.to_owned())))
+            .collect::<Result<BTreeMap<_, _>>>()?;
+
+        // The fields an older release reads, for a harness it could run.
+        let old = |key: &str| match account.agent_type().built_in() {
+            Some(_) => paths.get(key).cloned(),
+            None => None,
+        };
+
+        Ok(Self {
+            claude_dir: old(CLAUDE_DIR),
+            config_file: old(CONFIG_FILE),
+            home: old(HOME),
+            paths,
+            login: holding(),
         })
     }
 
-    /// The paths it names, whatever it says of the login.
-    fn paths(&self) -> (&Option<String>, &Option<String>, &Option<String>) {
-        (&self.claude_dir, &self.config_file, &self.home)
-    }
-
-    /// And the account it is, for a Profile of `harness` — refused where it is
-    /// not of that harness's shape, which is a record somebody edited by hand:
-    /// an account of nowhere is a bind that would land on `/`.
+    /// And the account it is, for a Profile of `harness` — refused where it
+    /// lacks a path a built-in harness declares, which is a record somebody
+    /// edited by hand: an account of nowhere is a bind that would land on `/`.
+    ///
+    /// A plugin harness's paths are taken as the map holds them, in the order
+    /// of their keys: which it declares is the plugin's to say, above the
+    /// store.
     fn account(&self, harness: AgentType, id: &str) -> Result<Account> {
-        let missing = |what| {
-            anyhow!(
-                "Profile {id} runs {} and has no {what} bound here to run it under",
-                harness.word()
-            )
+        let held = |key: &str| {
+            self.paths.get(key).cloned().or_else(|| {
+                match key {
+                    CLAUDE_DIR => &self.claude_dir,
+                    CONFIG_FILE => &self.config_file,
+                    HOME => &self.home,
+                    _ => &None,
+                }
+                .clone()
+            })
         };
 
-        let home = || {
-            self.home
-                .as_deref()
-                .map(PathBuf::from)
-                .ok_or_else(|| missing("home"))
+        let Some(built_in) = harness.built_in() else {
+            return Ok(Account::new(harness, self.paths.clone()));
         };
 
-        Ok(match harness {
-            AgentType::Claude => match (&self.claude_dir, &self.config_file) {
-                (Some(claude_dir), Some(config_file)) => Account::Claude {
-                    claude_dir: PathBuf::from(claude_dir),
-                    config_file: PathBuf::from(config_file),
-                },
-                _ => return Err(missing("pair")),
-            },
-            AgentType::Codex => Account::Codex { home: home()? },
-            AgentType::Grok => Account::Grok { home: home()? },
-            AgentType::OpenCode => Account::OpenCode { home: home()? },
-            AgentType::Agy => Account::Agy { home: home()? },
-        })
+        let paths = built_in
+            .paths
+            .iter()
+            .map(|key| {
+                held(key).map(|path| (*key, PathBuf::from(path))).ok_or_else(|| {
+                    anyhow!("Profile {id} runs {harness} and has no {key} bound here to run it under")
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(Account::new(harness, paths))
     }
 }
 
@@ -1126,7 +1231,7 @@ async fn rewrite_profile(
     let facts = match bound {
         true => facts.clone(),
         false => ProfileFacts {
-            account: Account::nowhere(AgentType::read(&held.fields.harness)?),
+            account: Account::nowhere(AgentType::read(&held.fields.harness)),
             ..facts.clone()
         },
     };
@@ -1150,9 +1255,15 @@ async fn rewrite_profile(
     if let Some(held) = binding {
         let mut binding = Binding::of(&facts.account)?;
 
+        // The same account whatever shape the binding was written in: one an
+        // older release wrote has no map, and is no less the same paths.
+        let kept = held
+            .account(facts.account.agent_type(), id)
+            .is_ok_and(|held| held == facts.account);
+
         binding.login = match login {
             Some(looked) => looked,
-            None if binding.paths() == held.paths() => held.login,
+            None if kept => held.login,
             None => binding.login,
         };
 
@@ -1503,7 +1614,7 @@ pub async fn bound_where(pool: &SqlitePool) -> Result<BoundWhere> {
             continue;
         };
 
-        let harness = AgentType::read(&record.fields.harness)?;
+        let harness = AgentType::read(&record.fields.harness);
 
         let accounts = devices
             .into_iter()
@@ -1564,7 +1675,7 @@ fn profile_of(
     bindings: &HashMap<String, Vec<(String, Binding)>>,
     here: &str,
 ) -> Result<Profile> {
-    let harness = AgentType::read(&record.harness)?;
+    let harness = AgentType::read(&record.harness);
     let bound = bindings.get(&id).map(Vec::as_slice).unwrap_or_default();
 
     let (account, unbound) = match bound.iter().find(|(device, _)| device == here) {
@@ -1714,25 +1825,15 @@ fn read_row(row: Row, listed: Vec<String>, home: Option<String>) -> Result<Profi
         _ => listed,
     };
 
-    let agent_type = AgentType::read(&agent_type)?;
+    let agent_type = AgentType::read(&agent_type);
 
-    let account = match agent_type {
-        AgentType::Claude => Account::Claude {
-            claude_dir: PathBuf::from(claude_dir),
-            config_file: PathBuf::from(config_file),
-        },
-        AgentType::Codex => Account::Codex {
-            home: PathBuf::from(kept(agent_type, &id, home)?),
-        },
-        AgentType::Grok => Account::Grok {
-            home: PathBuf::from(kept(agent_type, &id, home)?),
-        },
-        AgentType::OpenCode => Account::OpenCode {
-            home: PathBuf::from(kept(agent_type, &id, home)?),
-        },
-        AgentType::Agy => Account::Agy {
-            home: PathBuf::from(kept(agent_type, &id, home)?),
-        },
+    // The pair in the row itself for Claude, and the one home in
+    // `profile_homes` for every harness after it: the only shapes a row was
+    // ever written in, the table being from before a harness could be a
+    // plugin's.
+    let account = match agent_type == AgentType::CLAUDE {
+        true => Account::claude(claude_dir, config_file),
+        false => Account::home(agent_type, kept(agent_type, &id, home)?),
     };
 
     // Where it was minted, once the serve has said which device that is — see

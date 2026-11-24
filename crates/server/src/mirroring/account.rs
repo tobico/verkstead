@@ -247,7 +247,16 @@ pub async fn fetched(
     // the answer rather than off the file: this is the one thing the ending has to
     // hold, and a session running beside this one may write the mirror's own file
     // between here and there.
-    let inside = root::login_inside(agent_type);
+    let (Some(inside), Some(account)) =
+        (root::login_inside(agent_type), kept_in(agent_type, &under))
+    else {
+        // Only a plugin's harness is ever missing, and its uuid is no name to
+        // show: the plugin that would say what it is called is what is not here.
+        return Err(Refusal::ours(
+            "The plugin its harness comes from isn't installed on this device.".to_owned(),
+        ));
+    };
+
     let came_down = said
         .iter()
         .find(|file| named(&file.inside).as_deref() == Some(inside.as_path()))
@@ -284,7 +293,7 @@ pub async fn fetched(
 
     Ok(Some(Mirrored {
         profile: store::Profile {
-            account: kept_in(agent_type, &under),
+            account,
             ..profile.clone()
         },
         lent: Lent {

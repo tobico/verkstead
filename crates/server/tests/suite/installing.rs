@@ -21,6 +21,7 @@
 //! be handed.
 #![cfg(unix)]
 
+use std::borrow::Borrow;
 use std::ffi::OsString;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -35,8 +36,8 @@ use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    Dependency, DependencyState, DependencyView, InstallPress, InstallState, OnboardingView,
-    RunPhase,
+    AgentType, Dependency, DependencyState, DependencyView, InstallPress, InstallState,
+    OnboardingView, RunPhase,
 };
 use verkstead_server::github::Gh;
 use verkstead_server::onboarding::Machine;
@@ -59,7 +60,11 @@ const DISMISSED: &str = "Error: (-128) User canceled.";
 /// The ticking this suite is mostly about: the two rows that gate the step, and
 /// a harness that comes off npm — which is the press that has a package
 /// manager and an `npm install -g` on one line.
-const TICKED: &[Dependency] = &[Dependency::Sandbox, Dependency::Git, Dependency::Codex];
+const TICKED: &[Dependency] = &[
+    Dependency::Sandbox,
+    Dependency::Git,
+    Dependency::Harness(AgentType::CODEX),
+];
 
 /// What an Ubuntu says about itself.
 const OS_RELEASE: &str = "NAME=\"Ubuntu\"\nID=ubuntu\nID_LIKE=debian\n";
@@ -770,16 +775,16 @@ async fn over(app: &Router) -> OnboardingView {
 }
 
 /// One row of a reading.
-fn row(reading: &OnboardingView, dependency: Dependency) -> &DependencyView {
+fn row(reading: &OnboardingView, dependency: impl Borrow<Dependency>) -> &DependencyView {
     reading
         .dependencies
         .iter()
-        .find(|row| row.dependency == dependency)
+        .find(|row| row.dependency == *dependency.borrow())
         .expect("every dependency is a row")
 }
 
 /// Whether a row says the machine has the thing.
-fn present(reading: &OnboardingView, dependency: Dependency) -> bool {
+fn present(reading: &OnboardingView, dependency: impl Borrow<Dependency>) -> bool {
     matches!(
         row(reading, dependency).state,
         DependencyState::Present { .. }
@@ -787,7 +792,7 @@ fn present(reading: &OnboardingView, dependency: Dependency) -> bool {
 }
 
 /// And what the run has made of it.
-fn install_state(reading: &OnboardingView, dependency: Dependency) -> &InstallState {
+fn install_state(reading: &OnboardingView, dependency: impl Borrow<Dependency>) -> &InstallState {
     &row(reading, dependency).install
 }
 
@@ -827,11 +832,11 @@ async fn ticking_three_rows_raises_one_command_and_the_rows_go_present() {
 
     for ticked in TICKED {
         assert_eq!(
-            install_state(&waiting, *ticked),
+            install_state(&waiting, ticked),
             &InstallState::Installing,
             "{ticked:?} is what the run is doing",
         );
-        assert!(!present(&waiting, *ticked), "{ticked:?} is not there yet");
+        assert!(!present(&waiting, ticked), "{ticked:?} is not there yet");
     }
 
     assert_eq!(
@@ -855,8 +860,8 @@ async fn ticking_three_rows_raises_one_command_and_the_rows_go_present() {
     assert_eq!(dialog.commands().len(), 1, "one press is one dialog");
 
     for ticked in TICKED {
-        assert!(present(&landed, *ticked), "{ticked:?}: {landed:?}");
-        assert_eq!(install_state(&landed, *ticked), &InstallState::Idle);
+        assert!(present(&landed, ticked), "{ticked:?}: {landed:?}");
+        assert_eq!(install_state(&landed, ticked), &InstallState::Idle);
     }
 
     assert!(
@@ -898,7 +903,7 @@ async fn a_mac_installs_its_packages_with_homebrew_and_claude_with_anthropics() 
     let dialog = Dialog::answered(dir.path(), Answer::Typed);
     let app = served_mac(dir.path(), &pool, Some(dialog.clone()));
 
-    let ticked = [Dependency::Git, Dependency::Claude];
+    let ticked = [Dependency::Git, Dependency::Harness(AgentType::CLAUDE)];
 
     let pressed = install(&app, &ticked).await;
     let run = pressed.run.expect("a press makes a run");
@@ -917,7 +922,7 @@ async fn a_mac_installs_its_packages_with_homebrew_and_claude_with_anthropics() 
         dialog.commands(),
     );
 
-    for ticked in ticked {
+    for ticked in &ticked {
         assert_eq!(install_state(&landed, ticked), &InstallState::Idle);
         assert_eq!(
             row(&landed, ticked).state,
@@ -961,7 +966,11 @@ async fn an_intel_mac_installs_with_the_vendors_own_and_raises_nothing() {
     let dialog = Dialog::answered(dir.path(), Answer::Typed);
     let app = served_intel_mac(dir.path(), &pool, Some(dialog.clone()));
 
-    let ticked = [Dependency::Claude, Dependency::OpenCode, Dependency::Git];
+    let ticked = [
+        Dependency::Harness(AgentType::CLAUDE),
+        Dependency::Harness(AgentType::OPENCODE),
+        Dependency::Git,
+    ];
 
     let pressed = install(&app, &ticked).await;
     let run = pressed.run.expect("a press makes a run");
@@ -986,15 +995,18 @@ async fn an_intel_mac_installs_with_the_vendors_own_and_raises_nothing() {
     // The two rows a vendor installs are present where that vendor's own
     // installer puts them, both of them under this user's home.
     for (installed, at) in [
-        (Dependency::Claude, local_bin(dir.path()).join("claude")),
         (
-            Dependency::OpenCode,
+            Dependency::Harness(AgentType::CLAUDE),
+            local_bin(dir.path()).join("claude"),
+        ),
+        (
+            Dependency::Harness(AgentType::OPENCODE),
             opencode_bin(dir.path()).join("opencode"),
         ),
     ] {
-        assert_eq!(install_state(&landed, installed), &InstallState::Idle);
+        assert_eq!(install_state(&landed, &installed), &InstallState::Idle);
         assert_eq!(
-            row(&landed, installed).state,
+            row(&landed, &installed).state,
             DependencyState::Present {
                 at: Some(at.to_string_lossy().into_owned()),
                 target: None,
@@ -1165,28 +1177,32 @@ async fn an_installer_that_failed_fails_its_own_row_and_no_other() {
 
     install(
         &app,
-        &[Dependency::Sandbox, Dependency::Git, Dependency::Claude],
+        &[
+            Dependency::Sandbox,
+            Dependency::Git,
+            Dependency::Harness(AgentType::CLAUDE),
+        ],
     )
     .await;
 
     let landed = over(&app).await;
 
     assert_eq!(
-        install_state(&landed, Dependency::Claude),
+        install_state(&landed, Dependency::Harness(AgentType::CLAUDE)),
         &InstallState::Failed {
             why: UNREACHABLE.to_owned(),
         },
         "the row carries the first line the installer printed",
     );
     assert!(
-        !present(&landed, Dependency::Claude),
+        !present(&landed, Dependency::Harness(AgentType::CLAUDE)),
         "and nothing was installed: {landed:?}",
     );
 
     for installed in [Dependency::Sandbox, Dependency::Git] {
-        assert!(present(&landed, installed), "{installed:?}: {landed:?}");
+        assert!(present(&landed, &installed), "{installed:?}: {landed:?}");
         assert_eq!(
-            install_state(&landed, installed),
+            install_state(&landed, &installed),
             &InstallState::Idle,
             "{installed:?} is another unit's row and the failure is not its",
         );
@@ -1234,7 +1250,7 @@ async fn a_refresh_that_could_not_reach_everything_installs_anyway() {
 
     for ticked in TICKED {
         assert!(
-            present(&landed, *ticked),
+            present(&landed, ticked),
             "{ticked:?} should have been installed over a refresh that only \
              half worked: {landed:?}",
         );
@@ -1265,13 +1281,13 @@ async fn a_dismissed_dialog_fails_every_ticked_row() {
 
     for ticked in TICKED {
         assert_eq!(
-            install_state(&landed, *ticked),
+            install_state(&landed, ticked),
             &InstallState::Failed {
                 why: DISMISSED.to_owned(),
             },
             "{ticked:?}",
         );
-        assert!(!present(&landed, *ticked), "{ticked:?} was not installed");
+        assert!(!present(&landed, ticked), "{ticked:?} was not installed");
     }
 
     assert_eq!(
@@ -1303,8 +1319,8 @@ async fn a_server_with_no_way_to_ask_never_raises_anything() {
     assert_eq!((run.done, run.total), (3, 3));
 
     for ticked in TICKED {
-        let InstallState::Failed { why } = install_state(&pressed, *ticked) else {
-            panic!("{ticked:?}: {:?}", install_state(&pressed, *ticked));
+        let InstallState::Failed { why } = install_state(&pressed, ticked) else {
+            panic!("{ticked:?}: {:?}", install_state(&pressed, ticked));
         };
 
         assert!(why.contains("desktop app"), "{why}");
@@ -1335,8 +1351,8 @@ async fn a_distribution_with_no_command_never_raises_anything() {
     );
 
     for ticked in TICKED {
-        let InstallState::Failed { why } = install_state(&pressed, *ticked) else {
-            panic!("{ticked:?}: {:?}", install_state(&pressed, *ticked));
+        let InstallState::Failed { why } = install_state(&pressed, ticked) else {
+            panic!("{ticked:?}: {:?}", install_state(&pressed, ticked));
         };
 
         assert!(why.contains("configuration"), "{why}");
@@ -1406,7 +1422,9 @@ async fn the_press_is_refused_twice_over_and_after_the_wizard() {
     finished(&app).await;
 
     assert_eq!(
-        pressed(&app, &[Dependency::OpenCode]).await.0,
+        pressed(&app, &[Dependency::Harness(AgentType::OPENCODE)])
+            .await
+            .0,
         StatusCode::CONFLICT,
         "the wizard is over, so there is nothing here to install",
     );
@@ -1547,7 +1565,11 @@ async fn the_viewers_own_tests_are_fed_from_here() {
 
     install(
         &app,
-        &[Dependency::Sandbox, Dependency::Git, Dependency::Claude],
+        &[
+            Dependency::Sandbox,
+            Dependency::Git,
+            Dependency::Harness(AgentType::CLAUDE),
+        ],
     )
     .await;
 
@@ -1571,4 +1593,153 @@ fn write(name: &str, reading: &OnboardingView, ran_in: &Path) {
     let pretty = pretty.replace(&ran_in.to_string_lossy().into_owned(), A_MACHINE) + "\n";
 
     std::fs::write(dir.join(name), pretty).unwrap();
+}
+
+/// **An enabled Agent plugin's harness is a row of the step** (Set 1764, Q19):
+/// drawn after the built-ins, absent until its binary is on a session's `PATH`
+/// — a `PATH` walk by the name its manifest declares, as for the five — and
+/// ticked off the moment it is.
+///
+/// **Its install command runs on the press and at no other time.** Reading the
+/// step again and again leaves it unrun; ticking the row and pressing runs it
+/// as the user, with nothing put behind the dialog, and the row goes present
+/// off the program it wrote.
+#[tokio::test]
+async fn an_agent_plugins_harness_is_a_row_whose_command_runs_on_the_press_alone() {
+    use crate::stub_harness::{INSTALLER, StubHarness};
+
+    let (dir, pool) = ready().await;
+    let dialog = Dialog::answered(dir.path(), Answer::Typed);
+    let app = served(dir.path(), &pool, Some(dialog.clone()));
+
+    let harness = StubHarness::Installing;
+    harness
+        .installed(&app, dir.path(), ["stub-large", "stub-grilling"])
+        .await;
+
+    // What the manifest says to run: a script under the home, which writes the
+    // program into the directory the machine searches and leaves a mark that
+    // it ran.
+    let ran = dir.path().join("installer-ran");
+    program(
+        &home(dir.path()).join(INSTALLER),
+        &format!(
+            "#!/bin/sh\nset -e\n: > '{ran}'\nprintf '#!/bin/sh\\n' > '{binary}'\n'{chmod}' +x '{binary}'\n",
+            ran = ran.display(),
+            binary = bin(dir.path()).join("stub-harness").display(),
+            chmod = found("chmod").display(),
+        ),
+    );
+
+    let stub = Dependency::Harness(AgentType(harness.uuid().into()));
+
+    let drawn = reading(&app).await;
+    let ids: Vec<&str> = drawn
+        .dependencies
+        .iter()
+        .map(|row| row.dependency.as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            "Sandbox",
+            "Git",
+            "Claude",
+            "Codex",
+            "Grok",
+            "OpenCode",
+            "Agy",
+            harness.uuid(),
+            "Gh"
+        ],
+        "the plugin's harness is drawn after the built-ins",
+    );
+    assert!(!present(&drawn, &stub), "its binary is on no PATH yet");
+
+    for _ in 0..3 {
+        reading(&app).await;
+    }
+    assert!(!ran.exists(), "reading the step runs nothing");
+
+    install(&app, std::slice::from_ref(&stub)).await;
+    let landed = over(&app).await;
+
+    assert!(ran.exists(), "the press ran the manifest's command");
+    assert!(
+        present(&landed, &stub),
+        "and the row is found where the command put it: {:?}",
+        row(&landed, &stub),
+    );
+    assert_eq!(install_state(&landed, &stub), &InstallState::Idle);
+    assert!(
+        dialog.commands().is_empty(),
+        "it ran as the user, with nothing behind the dialog",
+    );
+}
+
+/// **And the same run is pressed from the plugin's row** on the Plugins page,
+/// whether or not the wizard is up: the row says its binary isn't here and
+/// offers Install, and the press runs the manifest's command.
+#[tokio::test]
+async fn an_agent_plugins_row_installs_its_harness_on_a_press() {
+    use crate::stub_harness::{INSTALLER, StubHarness};
+
+    let (dir, pool) = ready().await;
+    let dialog = Dialog::answered(dir.path(), Answer::Typed);
+    let app = served(dir.path(), &pool, Some(dialog));
+
+    let harness = StubHarness::Installing;
+    harness
+        .installed(&app, dir.path(), ["stub-large", "stub-grilling"])
+        .await;
+    program(
+        &home(dir.path()).join(INSTALLER),
+        &format!(
+            "#!/bin/sh\nprintf '#!/bin/sh\\n' > '{binary}'\n'{chmod}' +x '{binary}'\n",
+            binary = bin(dir.path()).join("stub-harness").display(),
+            chmod = found("chmod").display(),
+        ),
+    );
+
+    let plugged = |view: verkstead_render::PluginsView| {
+        view.installed
+            .into_iter()
+            .find(|row| row.uuid == harness.uuid())
+            .and_then(|row| row.harness)
+            .expect("an Agent plugin's row carries its harness")
+    };
+
+    let before: verkstead_render::PluginsView = plugins(&app, "GET", "/api/ui/plugins").await;
+    let before = plugged(before);
+    assert!(!before.present);
+    assert!(before.installable);
+    assert_eq!(before.binary, "stub-harness");
+
+    let path = format!("/api/ui/plugins/{}/harness", harness.uuid());
+    plugins(&app, "POST", &path).await;
+    over(&app).await;
+
+    let after = plugged(plugins(&app, "GET", "/api/ui/plugins").await);
+    assert!(after.present, "the press installed it: {after:?}");
+}
+
+/// The Plugins page, read or pressed.
+async fn plugins(app: &Router, method: &str, path: &str) -> verkstead_render::PluginsView {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(method)
+                .uri(path)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    serde_json::from_slice(&body).unwrap()
 }

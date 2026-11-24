@@ -22,10 +22,11 @@
 //! there, every resume of a conversation that had once signed out stopped as
 //! soon as its past was drawn, whatever the login was by then. The log is
 //! followed from where this session began in it, so what is read there is only
-//! what this session said. See [`ReadIn`].
+//! what this session said. See [`crate::harness::ReadIn`].
 //!
 //! **The phrase rule.** A session has signed out when one of its lines *ends*
-//! with its harness's phrase — [`CLAUDE_SIGNED_OUT`], [`AGY_SIGNED_OUT`] — once
+//! with its harness's phrase — Claude's and agy's, each its harness's own answer — see
+//! [`crate::harness::Harness::signed_out`] — once
 //! the terminal's decoration is off both ends of it. Claude says it as
 //! `<reason> · Please run /login`, the reason first and the instruction last,
 //! so what has to be anchored is the end; agy greets before it says so. Anchored, a line
@@ -38,7 +39,8 @@
 //! same sentence, signed in or not, and only then looks for its login: signed
 //! in, the next thing it draws is `Signing in...`, and the line is drawn over a
 //! moment later; signed out, it is its login picker. So agy's sentence counts
-//! only with [`AGY_PICKER`] as the next line drawn — see [`Phrase::then`].
+//! only with its picker as the next line drawn — see
+//! [`crate::harness::SignedOut::then`].
 //!
 //! **A login resumes what it unblocks.** Once a login on the Profile has
 //! landed, every run stopped as Signed out on it is started again through
@@ -74,87 +76,19 @@ use tokio::sync::mpsc;
 use verkstead_schema::{Nudge, Nudged};
 
 use crate::AppState;
+use crate::harness::ReadIn;
 use crate::limits::{DECORATION, Held};
 use crate::nudge::Nudges;
 use crate::store;
 
-/// What claude 2.1.283 ends a line with when its account's login is gone:
-/// `Not logged in · Please run /login`, `Login expired · Please run /login`,
-/// `OAuth token revoked · Please run /login`, and
-/// `API Error: 401 Invalid API key · Please run /login`. Read off the binary.
-///
-/// Matched without regard to case. The reasons in front of it are claude's and
-/// will move; the instruction is the part they all share.
-const CLAUDE_SIGNED_OUT: &str = "please run /login";
-
-/// And what agy 1.4.12 ends a line with when it has no login to run on:
-/// `Welcome to the Antigravity CLI. You are currently not signed in.`, over the
-/// sign-in picker it then waits at.
-///
-/// Drawn the same for an account that never had a login and for one whose
-/// token was refused when agy went to refresh it — both read off the real
-/// binary, the second with Google's token endpoint answered by a stand-in.
-/// **And drawn by a session signed in too**, on its way up: measured on a Mac,
-/// where the Keychain agy is refused first holds it long enough to be seen,
-/// the sentence is followed by `Signing in...` and drawn over once the login
-/// file is read. What tells the two apart is [`AGY_PICKER`].
-const AGY_SIGNED_OUT: &str = "you are currently not signed in.";
-
-/// The line agy 1.4.12 draws next when it really has no login: the head of
-/// its sign-in picker, `Select login method:`, over the methods to pick from.
-const AGY_PICKER: &str = "select login method:";
-
-/// What a session of one harness says when its account has signed out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Phrase {
-    /// The sentence a line ends with.
-    ends: &'static str,
-
-    /// The line that has to be the next one drawn after it, blank lines
-    /// aside, where the sentence alone is also said by a session signed in.
-    then: Option<&'static str>,
-
-    /// Which of the session's records it is read in.
-    read_in: ReadIn,
-}
-
-/// Which of the three records a session leaves a sign-out is read in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ReadIn {
-    /// What it printed, the frame it drew, and its backend's own log.
-    Every,
-
-    /// Its backend's own log, and nothing it puts on the terminal — for a
-    /// harness that draws its conversation so far again on the screen, where a
-    /// sign-out it stopped on before is a line drawn rather than said.
-    Log,
-}
+/// What a session of one harness says when its account has signed out — see
+/// [`crate::harness::Harness::signed_out`].
+type Phrase = crate::harness::SignedOut<'static>;
 
 /// What a session of `agent_type` says when its account has signed out — or
 /// nothing, where Verkstead cannot run that harness's login.
 fn signed_out_phrase(agent_type: store::AgentType) -> Option<Phrase> {
-    match agent_type {
-        // Read in its log alone. claude 2.1.329 writes the line into its log as
-        // the turn's answer — an assistant message marked as an API error — and
-        // draws every message of a conversation it resumes, that one among them:
-        // `--resume` as a Conversation carries on, and `/resume` typed at it by
-        // the human. On the terminal the two are the same line, so a resumed
-        // conversation that had signed out once was stopped on that old line as
-        // soon as it was drawn, every time, whatever the login now was. The log
-        // is followed from where this session began in it, so it holds only what
-        // this session said.
-        store::AgentType::Claude => Some(Phrase {
-            ends: CLAUDE_SIGNED_OUT,
-            then: None,
-            read_in: ReadIn::Log,
-        }),
-        store::AgentType::Agy => Some(Phrase {
-            ends: AGY_SIGNED_OUT,
-            then: Some(AGY_PICKER),
-            read_in: ReadIn::Every,
-        }),
-        store::AgentType::Codex | store::AgentType::Grok | store::AgentType::OpenCode => None,
-    }
+    crate::harness::of(agent_type).and_then(|harness| harness.signed_out())
 }
 
 /// The line in `text` that says the account signed out, tidied of the
@@ -244,7 +178,7 @@ impl Login {
             return None;
         }
 
-        let path = crate::sandbox::root::login_at(&profile.account);
+        let path = crate::sandbox::root::login_at(&profile.account)?;
         let built = written(&path);
 
         Some(Login { path, built })
@@ -382,7 +316,7 @@ impl Watch {
     }
 
     /// The line in the records its harness is read in that says the account
-    /// signed out — see [`ReadIn`].
+    /// signed out — see [`crate::harness::ReadIn`].
     fn found(&self, drawn: &str, said: Option<&str>) -> Option<String> {
         let in_the_log = || saying(said.unwrap_or_default(), self.phrase);
 
@@ -769,14 +703,14 @@ async fn home_named(pool: &SqlitePool, device: &str) -> String {
 mod tests {
     use super::*;
 
-    use store::AgentType::{Agy, Claude, Codex, Grok, OpenCode};
+    use store::AgentType;
 
     fn signed_out(text: &str) -> Option<String> {
-        saying(text, signed_out_phrase(Claude))
+        saying(text, signed_out_phrase(AgentType::CLAUDE))
     }
 
     fn watching() -> Watch {
-        watching_on(Claude)
+        watching_on(AgentType::CLAUDE)
     }
 
     fn watching_on(agent_type: store::AgentType) -> Watch {
@@ -862,7 +796,7 @@ mod tests {
             let drawn = format!("{line}\r\n\n Select login method:\n > 1. Google OAuth\n");
 
             assert_eq!(
-                saying(&drawn, signed_out_phrase(Agy)),
+                saying(&drawn, signed_out_phrase(AgentType::AGY)),
                 Some(crate::capture::plain(line)),
                 "{drawn:?} was not recognised"
             );
@@ -876,7 +810,11 @@ mod tests {
         ] {
             let drawn = format!("{line}\n Select login method:\n");
 
-            assert_eq!(saying(&drawn, signed_out_phrase(Agy)), None, "{line:?}");
+            assert_eq!(
+                saying(&drawn, signed_out_phrase(AgentType::AGY)),
+                None,
+                "{line:?}"
+            );
         }
     }
 
@@ -891,14 +829,18 @@ mod tests {
             " Welcome to the Antigravity CLI. You are currently not signed in.\n",
             " Welcome to the Antigravity CLI. You are currently not signed in.",
         ] {
-            assert_eq!(saying(drawn, signed_out_phrase(Agy)), None, "{drawn:?}");
+            assert_eq!(
+                saying(drawn, signed_out_phrase(AgentType::AGY)),
+                None,
+                "{drawn:?}"
+            );
         }
     }
 
     /// Only the sessions of a harness whose login Verkstead runs are read.
     #[test]
     fn only_a_session_whose_login_verkstead_runs_is_read() {
-        for agent_type in [Codex, Grok, OpenCode] {
+        for agent_type in [AgentType::CODEX, AgentType::GROK, AgentType::OPENCODE] {
             assert_eq!(
                 saying(
                     "Login expired · Please run /login",
@@ -912,7 +854,7 @@ mod tests {
     /// A line split across two chunks is still one line.
     #[test]
     fn a_line_split_across_two_chunks_is_still_one_line() {
-        let mut watch = watching_on(Agy);
+        let mut watch = watching_on(AgentType::AGY);
 
         watch.printed("Welcome to the Antigravity CLI. You are currently not sig");
         watch.printed.looked();
@@ -926,7 +868,7 @@ mod tests {
     /// every record.
     #[test]
     fn the_frame_is_read_too() {
-        let watch = watching_on(Agy);
+        let watch = watching_on(AgentType::AGY);
 
         assert!(
             watch

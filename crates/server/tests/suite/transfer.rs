@@ -592,8 +592,10 @@ impl Verkstead {
                     "name": ACCOUNT,
                     "account": {
                         "agent_type": "Claude",
-                        "claude_dir": claude_dir,
-                        "config_file": config_file,
+                        "paths": {
+                            "claude_dir": claude_dir,
+                            "config_file": config_file,
+                        },
                     },
                     "models": [MODEL],
                     "memory": memory,
@@ -628,7 +630,7 @@ impl Verkstead {
             Some(
                 &serde_json::json!({
                     "name": ACCOUNT,
-                    "account": { "agent_type": "Grok", "home": home },
+                    "account": { "agent_type": "Grok", "paths": { "home": home } },
                     "models": [GROK_MODEL],
                     "memory": true,
                 })
@@ -661,7 +663,7 @@ impl Verkstead {
             Some(
                 &serde_json::json!({
                     "name": ACCOUNT,
-                    "account": { "agent_type": "Codex", "home": home },
+                    "account": { "agent_type": "Codex", "paths": { "home": home } },
                     "models": [CODEX_MODEL],
                     "memory": true,
                 })
@@ -702,7 +704,7 @@ impl Verkstead {
             Some(
                 &serde_json::json!({
                     "name": ACCOUNT,
-                    "account": { "agent_type": "OpenCode", "home": home },
+                    "account": { "agent_type": "OpenCode", "paths": { "home": home } },
                     "models": [OPENCODE_MODEL],
                     "memory": true,
                 })
@@ -775,7 +777,7 @@ impl Verkstead {
             Some(
                 &serde_json::json!({
                     "name": ACCOUNT,
-                    "account": { "agent_type": "Agy", "home": home },
+                    "account": { "agent_type": "Agy", "paths": { "home": home } },
                     "models": [AGY_MODEL],
                     "memory": true,
                 })
@@ -6721,7 +6723,7 @@ async fn a_pairing_on_another_harness_than_the_record_says_so_where_the_work_arr
         there,
         &store::Continued {
             session_id: running.clone(),
-            agent_type: store::AgentType::Grok,
+            agent_type: store::AgentType::GROK,
             widened_by: None,
             kept_here_by: None,
         },

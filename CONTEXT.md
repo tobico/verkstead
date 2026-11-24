@@ -4011,21 +4011,23 @@ tooltip and hint (the card holds markdown, not a line), caption
 **Agent Profile**:
 A coding-agent account Verkstead can run a session under: an agent type, the
 account itself, the models that account can run, and a name where there is
-anything for one to tell apart. **The account's shape is its type's**, rather
-than one shape every Profile is assumed to have — Claude Code's is the directory
-and config file pair at `~/.claude` / `~/.claude.json`, and every backend after
-it keeps its whole account under one relocatable home — Codex's at `~/.codex`,
-Grok Build's at `~/.grok`, the Antigravity CLI's at `~/.gemini`, found where it
-holds `antigravity-cli/`, and OpenCode's at neither, opencode keeping no
+anything for one to tell apart. **The agent type is a harness's id** — a
+built-in's word, `claude`, or a plugin's uuid — and **the account is the
+labelled paths that harness declares**, rather than one shape every Profile is
+assumed to have: Claude Code's is two declared paths, the directory and config
+file pair at `~/.claude` / `~/.claude.json`, and every built-in after it keeps
+its whole account under one declared home — Codex's at `~/.codex`, Grok Build's
+at `~/.grok`, the Antigravity CLI's at `~/.gemini`, found where it holds
+`antigravity-cli/`, and OpenCode's at neither, opencode keeping no
 dot-directory of its own: its home is the directory its XDG config and data
-directories sit inside. Whichever it is, a session is given a **Built Root**
-made out of that one account and no other, never the account whole, which is
-what keeps accounts separate. A type is offered
-to the human only once it can launch the real thing: one that cannot would be a
-lie in a picker, so the form offers Claude, Codex, Grok Build, OpenCode and the
-Antigravity CLI, and
-a Profile of a type whose stage has not landed is one saved over the API until
-it does. Picking a type on the form asks for that type's own account paths.
+directories sit inside. A plugin harness declares its own (ADR-0030, *Agent*).
+Whichever it is, a session is given a **Built Root** made out of that one
+account and no other, never the account whole, which is what keeps accounts
+separate. A harness is offered to the human only once this Verkstead can launch
+it: the form offers the harnesses the server lists, and picking one asks for the
+paths it declares, a field apiece, labelled as it labels them. A Profile naming
+a harness this Verkstead has not got — a plugin installed on the device that
+saved it — is read like any other, drawn **broken**, and offered on no picker.
 **A Claude account nobody has run yet is made by its save** — the directory,
 and the config file as an empty object, each where the directory it goes in is
 already there — because the login that would make them is made under a Profile,

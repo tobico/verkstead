@@ -670,6 +670,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/review-pairing",
             post(choose_review_pairing),
         )
+        .route("/api/ui/harnesses", get(harnesses))
         .route("/api/ui/profiles", get(profiles).post(create_profile))
         .route("/api/ui/profiles/{id}", post(edit_profile))
         // Setting a Profile up on this device, a press of its own rather than
@@ -3599,11 +3600,24 @@ async fn shared(state: &AppState, id: &str) -> Result<SharedConversation, HttpRe
 
     let commits = shared_commits(state, &view).await?;
 
+    // And the harnesses withheld here, so that a session run under a disabled
+    // plugin's harness is drawn under its name.
+    let withheld = crate::profiles::withheld(state).await.map_err(|error| {
+        tracing::error!(error = ?error, "listing the harnesses for a share failed");
+        unavailable("The harnesses couldn't be listed.")
+    })?;
+
     let taken = OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_default();
 
-    Ok(verkstead_render::shared(view, sets, commits, taken))
+    Ok(verkstead_render::shared(
+        view,
+        sets,
+        commits,
+        taken,
+        crate::profiles::harnesses(&state.plugins.harnesses(), &withheld),
+    ))
 }
 
 /// What a share's Set sheets read their pictures out of: the repositories the
@@ -6271,6 +6285,22 @@ async fn choose_review_pairing(
     }
 }
 
+/// `GET /api/ui/harnesses` — every harness this server can run a session on,
+/// with what the Profile form, the cards and the pickers draw of each.
+async fn harnesses(State(state): State<AppState>) -> HttpResponse {
+    match crate::profiles::withheld(&state).await {
+        Ok(withheld) => Json(crate::profiles::harnesses(
+            &state.plugins.harnesses(),
+            &withheld,
+        ))
+        .into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "listing the harnesses failed");
+            unavailable("The harnesses couldn't be listed.")
+        }
+    }
+}
+
 /// `GET /api/ui/profiles` — the Agent Profiles, by name, each saying whether its
 /// pair is still where it was left.
 async fn profiles(State(state): State<AppState>) -> HttpResponse {
@@ -8008,7 +8038,11 @@ async fn directories(
 /// is not a reading at all. See [`crate::onboarding`], where the whole of that
 /// difference is written down.
 async fn onboarding(State(state): State<AppState>) -> HttpResponse {
-    match state.onboarding.read(&state.pool, &state.settings).await {
+    match state
+        .onboarding
+        .read(&state.pool, &state.settings, &state.plugins.harnesses())
+        .await
+    {
         Ok(reading) => Json(reading).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "reading the onboarding objective failed");
@@ -8063,7 +8097,12 @@ async fn onboarding_install(
     // is booted and linked by.
     match state
         .onboarding
-        .install(&state.settings, press.dependencies, state.devices.as_ref())
+        .install(
+            &state.settings,
+            press.dependencies,
+            &state.plugins.harnesses(),
+            state.devices.as_ref(),
+        )
         .await
     {
         Ok(()) => onboarding(State(state)).await,

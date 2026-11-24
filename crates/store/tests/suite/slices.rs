@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use sqlx::SqlitePool;
 use verkstead_schema::Response;
 use verkstead_store::{
-    Account, Addition, AdditionState, Arrival, ArrivingPicked, Ask, Birth, Cell, Commit,
+    Account, Addition, AdditionState, AgentType, Arrival, ArrivingPicked, Ask, Birth, Cell, Commit,
     CompanionMode, Event, Lifecycle, Memo, ProfileFacts, Renaming, STAYS_BEHIND, Settlements,
     Slice, Submission, add_to_set, arrive, ask, capture, carried_tables, companions,
     create_profile, deleted_tables, insert_response, land, load_conversation, load_response,
@@ -887,9 +887,10 @@ async fn moved(branch: &str) -> Moved {
         &here.pool,
         &ProfileFacts {
             name: Some("steered".to_owned()),
-            account: Account::Codex {
-                home: PathBuf::from("/watched/accounts/steered/.codex"),
-            },
+            account: Account::home(
+                AgentType::CODEX,
+                PathBuf::from("/watched/accounts/steered/.codex"),
+            ),
             models: vec!["gpt-5".to_owned()],
             memory: true,
         },

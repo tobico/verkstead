@@ -2,7 +2,8 @@
 //! answered by, and the mode a server that cannot enters at startup.
 //!
 //! **The objective is three things** (ADR-0016): a sandbox, `git` and at least
-//! one of the five harnesses present; at least one Agent Profile; a git author.
+//! one harness present, a built-in or one an enabled Agent plugin declares; at
+//! least one Agent Profile; a git author.
 //! The GitHub token is not among them — GitHub may not be in use at all, while
 //! git is not optional and its author is what git asks for.
 //!
@@ -246,22 +247,82 @@ fn sysctl(platform: Platform) -> Option<String> {
         .then(|| String::from_utf8_lossy(&run.stdout).into_owned())
 }
 
-/// Which harness row is which agent's, so that the name each is probed under is
-/// the program a session of that type is launched as.
+/// One row of the dependencies step, as this server works with it: the wire's
+/// [`Dependency`] with a harness held by its [`store::AgentType`], which is a
+/// value as cheap to pass around as the closed list it replaced.
 ///
-/// The names themselves are the sandbox module's — [`sandbox::PROGRAMS`], which
-/// holds these five with the `git` and `gh` a row is drawn for beside them —
-/// because what is done with a name is that module's: every name here is
-/// followed into its install and granted where that install is the human's own.
-/// What holds the two lists together is
+/// **A harness's row is the harness**, the built-ins in the order
+/// [`crate::harness::every`] lists them and after them the harnesses this
+/// server's enabled Agent plugins declare (ADR-0030, *Agent*). Each is probed
+/// under the program a session of it is launched as. The built-ins' names are
+/// the sandbox module's too — [`sandbox::PROGRAMS`], which holds those five with
+/// the `git` and `gh` a row is drawn for beside them — because what is done with
+/// a name is that module's: every name here is followed into its install and
+/// granted where that install is the human's own. What holds the two lists
+/// together is
 /// `every_name_the_wizard_has_a_row_for_is_a_name_a_session_is_followed_into`.
-const HARNESSES: &[(Dependency, store::AgentType)] = &[
-    (Dependency::Claude, store::AgentType::Claude),
-    (Dependency::Codex, store::AgentType::Codex),
-    (Dependency::Grok, store::AgentType::Grok),
-    (Dependency::OpenCode, store::AgentType::OpenCode),
-    (Dependency::Agy, store::AgentType::Agy),
-];
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Row {
+    Sandbox,
+    Git,
+    Harness(store::AgentType),
+    Gh,
+    Wsl,
+}
+
+impl Row {
+    pub(crate) const CLAUDE: Row = Row::Harness(store::AgentType::CLAUDE);
+    pub(crate) const CODEX: Row = Row::Harness(store::AgentType::CODEX);
+    pub(crate) const GROK: Row = Row::Harness(store::AgentType::GROK);
+    pub(crate) const OPENCODE: Row = Row::Harness(store::AgentType::OPENCODE);
+    pub(crate) const AGY: Row = Row::Harness(store::AgentType::AGY);
+
+    /// The row a reading or a press names.
+    pub(crate) fn of(dependency: &Dependency) -> Row {
+        match dependency {
+            Dependency::Sandbox => Row::Sandbox,
+            Dependency::Git => Row::Git,
+            Dependency::Harness(id) => Row::Harness(profiles::stored(id)),
+            Dependency::Gh => Row::Gh,
+            Dependency::Wsl => Row::Wsl,
+        }
+    }
+
+    /// And as the wire says it.
+    pub(crate) fn shown(self) -> Dependency {
+        match self {
+            Row::Sandbox => Dependency::Sandbox,
+            Row::Git => Dependency::Git,
+            Row::Harness(id) => Dependency::Harness(profiles::agent_type(id)),
+            Row::Gh => Dependency::Gh,
+            Row::Wsl => Dependency::Wsl,
+        }
+    }
+
+    /// The harness a plugin declares, where this row is one: a harness that is
+    /// not built into this binary, which the install run installs with the
+    /// commands its manifest declares — see [`install`].
+    pub(crate) fn plugged(self) -> Option<store::AgentType> {
+        match self {
+            Row::Harness(id) if id.built_in().is_none() => Some(id),
+            _ => None,
+        }
+    }
+}
+
+impl From<Dependency> for Row {
+    fn from(dependency: Dependency) -> Row {
+        Row::of(&dependency)
+    }
+}
+
+/// Every harness a row is drawn for, in the order they are drawn: the
+/// built-ins, and then `plugged`.
+fn harnesses(plugged: &[store::AgentType]) -> impl Iterator<Item = store::AgentType> + '_ {
+    crate::harness::every()
+        .map(|(agent_type, _)| agent_type)
+        .chain(plugged.iter().copied())
+}
 
 /// The machine the probes are made against: whose rules a name is read by,
 /// where a session would look for one, and what this box calls itself.
@@ -582,8 +643,8 @@ impl Machine {
 
     /// Everything a reading of this machine asks it, made in one hop off the
     /// runtime: the rows, and the accounts whose harnesses those rows are.
-    fn probed(&self) -> Probed {
-        let dependencies = self.rows();
+    fn probed(&self, plugged: &[store::AgentType]) -> Probed {
+        let dependencies = self.rows_with(plugged);
         let accounts = self.accounts(&dependencies);
 
         Probed {
@@ -594,7 +655,7 @@ impl Machine {
     }
 
     /// Every row of the dependencies step, in the order it is drawn: the
-    /// sandbox, `git`, the five harnesses, `gh`, and WSL on Windows.
+    /// sandbox, `git`, the five built-in harnesses, `gh`, and WSL on Windows.
     ///
     /// Blocks: a `PATH` walk apiece, one `bwrap` run on Linux, and one
     /// `xcode-select` on a Mac whose `git` is Apple's.
@@ -606,23 +667,37 @@ impl Machine {
     /// is not a directory to stand a server over. See
     /// `tests/suite/account_windows.rs`.
     pub fn rows(&self) -> Vec<DependencyView> {
-        let mut rows = vec![row(Dependency::Sandbox, self.sandbox())];
+        self.rows_with(&[])
+    }
 
-        rows.push(row(Dependency::Git, self.git()));
+    /// The same, with a row for each of `plugged` after the built-ins: the
+    /// harnesses this server's enabled Agent plugins declare, each probed by
+    /// the binary its manifest names, the way the five are.
+    fn rows_with(&self, plugged: &[store::AgentType]) -> Vec<DependencyView> {
+        let mut rows = vec![row(Row::Sandbox, self.sandbox())];
 
-        rows.extend(HARNESSES.iter().map(|(dependency, agent_type)| {
-            row(*dependency, self.installed(sessions::binary(*agent_type)))
-        }));
+        rows.push(row(Row::Git, self.git()));
 
-        rows.push(row(Dependency::Gh, self.installed(sandbox::GH)));
+        rows.extend(
+            harnesses(plugged)
+                .map(|agent_type| row(Row::Harness(agent_type), self.harness_row(agent_type))),
+        );
+
+        rows.push(row(Row::Gh, self.installed(sandbox::GH)));
 
         // And WSL last, on Windows alone: it never gates, and it is the one
         // row a session on this machine has no use for.
         if let Some(annex) = self.annex() {
-            rows.push(row(Dependency::Wsl, annexed(annex.probe())));
+            rows.push(row(Row::Wsl, annexed(annex.probe())));
         }
 
         rows
+    }
+
+    /// And what one harness's row says: the probe of the program a session of
+    /// it is launched as.
+    pub(crate) fn harness_row(&self, agent_type: store::AgentType) -> DependencyState {
+        self.installed(sessions::binary(agent_type))
     }
 
     /// Every agent account already in this server's home, in the order the
@@ -641,9 +716,12 @@ impl Machine {
             return Vec::new();
         };
 
-        HARNESSES
+        dependencies
             .iter()
-            .map(|(dependency, agent_type)| (*agent_type, there(dependencies, *dependency)))
+            .filter_map(|row| match Row::of(&row.dependency) {
+                Row::Harness(agent_type) => Some((agent_type, present(&row.state))),
+                _ => None,
+            })
             .filter_map(|(agent_type, harness)| {
                 Some(AccountView {
                     account: profiles::account(&sandbox::account_in_home(agent_type, home)?),
@@ -708,18 +786,19 @@ impl Machine {
         present(&self.installed(program))
     }
 
-    /// And every one of them, which is what a device answers a member asking
-    /// what could be launched here at all — see [`crate::peer::harnesses`].
+    /// And every one of them, the built-ins and the ones the Agent plugins
+    /// this server offers declare, `plugged` — which is what a device answers
+    /// a member asking what could be launched here at all — see
+    /// [`crate::peer::harnesses`].
     ///
     /// **The dependency step's own list**, walked in the order those rows are
-    /// drawn: a second spelling of *the five harnesses* is a list that would go
-    /// out of step with the one the wizard installs from.
+    /// drawn: a second spelling of *the harnesses* is a list that would go out
+    /// of step with the one the wizard installs from.
     ///
     /// Blocks: one `PATH` walk apiece.
-    pub(crate) fn harnesses(&self) -> Vec<(store::AgentType, bool)> {
-        HARNESSES
-            .iter()
-            .map(|(_, agent_type)| (*agent_type, self.harness(*agent_type)))
+    pub(crate) fn harnesses(&self, plugged: &[store::AgentType]) -> Vec<(store::AgentType, bool)> {
+        harnesses(plugged)
+            .map(|agent_type| (agent_type, self.harness(agent_type)))
             .collect()
     }
 
@@ -1132,10 +1211,14 @@ impl Onboarding {
     /// The probes and the store together, because the steps are the one thing
     /// both halves answer: what is on the machine is a `PATH` and a `bwrap`,
     /// and what is configured is a Profile and an author.
+    ///
+    /// `plugged` is the harnesses this server's enabled Agent plugins declare,
+    /// each a row after the built-ins.
     pub(crate) async fn read(
         &self,
         pool: &SqlitePool,
         settings: &Settings,
+        plugged: &[store::AgentType],
     ) -> Result<OnboardingView> {
         // The run first, where one has been started: what the probe answers is
         // whether the machine has the thing, and what the run answers is
@@ -1158,7 +1241,8 @@ impl Onboarding {
         // meant to be answering requests. The accounts are looked for in the
         // same hop, being more of the same `stat` calls.
         let machine = self.machine.clone();
-        let probed = tokio::task::spawn_blocking(move || machine.probed()).await?;
+        let plugged = plugged.to_vec();
+        let probed = tokio::task::spawn_blocking(move || machine.probed(&plugged)).await?;
 
         let steps = steps(&probed.dependencies, pool, settings).await?;
 
@@ -1201,15 +1285,30 @@ impl Onboarding {
     /// it, and what boots and links that Annex once it is made — see
     /// [`crate::annex::booting::Annexed::up`] — and `None` on a server with no
     /// identity to keep one by.
+    ///
+    /// `offered` is the plugin harnesses this server offers: a row of any other
+    /// plugin's harness is never drawn, so one a press names anyway — a
+    /// disabled plugin's, its harness still standing in this process — is
+    /// left out of the run rather than having its commands run.
     pub(crate) async fn install(
         &self,
         settings: &Settings,
         ticked: Vec<Dependency>,
+        offered: &[store::AgentType],
         devices: Option<&crate::device::Devices>,
     ) -> Result<(), Refusal> {
         if !self.wizarding() {
             return Err(Refusal::Over);
         }
+
+        let ticked = ticked
+            .iter()
+            .map(Row::of)
+            .filter(|row| {
+                row.plugged()
+                    .is_none_or(|harness| offered.contains(&harness))
+            })
+            .collect();
 
         self.run(settings, ticked, devices).await
     }
@@ -1228,14 +1327,45 @@ impl Onboarding {
         settings: &Settings,
         devices: Option<&crate::device::Devices>,
     ) -> Result<(), Refusal> {
-        self.run(settings, vec![Dependency::Wsl], devices).await
+        self.run(settings, vec![Row::Wsl], devices).await
+    }
+
+    /// Start the wizard's run for one plugin's harness alone, from that
+    /// plugin's row on the Plugins page (Set 1764, Q19).
+    ///
+    /// **Taken whether or not the wizard is the page there is**, as
+    /// [`Onboarding::annex`] is, and for the same reason: the press is the
+    /// settings page's, on a machine past its wizard. Everything else is the
+    /// wizard's run, so the commands the manifest declares run here and at the
+    /// onboarding row's press, and at no other time.
+    pub(crate) async fn harness(
+        &self,
+        settings: &Settings,
+        agent_type: store::AgentType,
+    ) -> Result<(), Refusal> {
+        self.run(settings, vec![Row::Harness(agent_type)], None)
+            .await
+    }
+
+    /// What the last run made of one harness's row, where a run has been
+    /// started and that row was in it — the Plugins page's reading of the
+    /// press above.
+    pub(crate) fn installing(&self, agent_type: store::AgentType) -> InstallState {
+        self.installer
+            .reading()
+            .and_then(|(_, rows)| {
+                rows.into_iter()
+                    .find(|(row, _)| *row == Row::Harness(agent_type))
+                    .map(|(_, install)| install)
+            })
+            .unwrap_or(InstallState::Idle)
     }
 
     /// Start a run over `ticked`, whoever pressed for it.
     async fn run(
         &self,
         settings: &Settings,
-        ticked: Vec<Dependency>,
+        ticked: Vec<Row>,
         devices: Option<&crate::device::Devices>,
     ) -> Result<(), Refusal> {
         let keeping = devices.map(crate::device::Devices::keeping);
@@ -1378,7 +1508,7 @@ impl Onboarding {
 /// under it* is not a state this machine is ever in.
 fn installing(
     dependencies: Vec<DependencyView>,
-    run: Option<(RunView, Vec<(Dependency, InstallState)>)>,
+    run: Option<(RunView, Vec<(Row, InstallState)>)>,
 ) -> (Option<RunView>, Vec<DependencyView>) {
     let Some((run, installing)) = run else {
         return (None, dependencies);
@@ -1386,8 +1516,11 @@ fn installing(
 
     let dependencies = dependencies
         .into_iter()
-        .map(
-            |row| match installing.iter().find(|(of, _)| *of == row.dependency) {
+        .map(|row| {
+            match installing
+                .iter()
+                .find(|(of, _)| *of == Row::of(&row.dependency))
+            {
                 // And nothing at all over a row the machine now has. A run holds
                 // what each of its rows came to for the life of this server, so
                 // a row it could not install and somebody installed by hand
@@ -1401,8 +1534,8 @@ fn installing(
                     ..row
                 },
                 _ => row,
-            },
-        )
+            }
+        })
         .collect();
 
     (Some(run), dependencies)
@@ -1419,7 +1552,11 @@ pub(crate) fn at_startup(state: &crate::AppState) {
     let state = state.clone();
 
     tokio::spawn(async move {
-        match state.onboarding.read(&state.pool, &state.settings).await {
+        match state
+            .onboarding
+            .read(&state.pool, &state.settings, &state.plugins.harnesses())
+            .await
+        {
             Ok(reading) => tracing::info!(
                 mode = reading.mode,
                 dependencies = reading.steps.dependencies,
@@ -1480,28 +1617,28 @@ fn met(steps: StepsView) -> bool {
     steps.dependencies && steps.accounts && steps.git
 }
 
-/// And the first of them: a sandbox, `git`, and at least one of the five
-/// harnesses.
+/// And the first of them: a sandbox, `git`, and at least one harness — a
+/// built-in or an enabled Agent plugin's.
 ///
 /// *At least one*, because a session runs under one Profile and a Profile is of
-/// one agent type: four rows left unticked hold nothing up. And `gh` holds
+/// one agent type: the other rows left unticked hold nothing up. And `gh` holds
 /// nothing up at all, GitHub being a choice rather than a dependency.
 fn dependencies_met(dependencies: &[DependencyView]) -> bool {
-    there(dependencies, Dependency::Sandbox)
-        && there(dependencies, Dependency::Git)
-        && HARNESSES
+    there(dependencies, Row::Sandbox)
+        && there(dependencies, Row::Git)
+        && dependencies
             .iter()
-            .any(|(dependency, _)| there(dependencies, *dependency))
+            .any(|row| matches!(Row::of(&row.dependency), Row::Harness(_)) && present(&row.state))
 }
 
 /// Whether one row of a reading says the machine has that thing.
 ///
 /// The one reading of a row's state, so that the objective and an account's
 /// tick are answering off the same list.
-fn there(dependencies: &[DependencyView], dependency: Dependency) -> bool {
+fn there(dependencies: &[DependencyView], dependency: Row) -> bool {
     dependencies
         .iter()
-        .any(|row| row.dependency == dependency && present(&row.state))
+        .any(|row| Row::of(&row.dependency) == dependency && present(&row.state))
 }
 
 /// Whether a row is one the objective can be met with, which is that the
@@ -1599,9 +1736,9 @@ fn said<'a>(os_release: &'a str, key: &str) -> Option<&'a str> {
 
 /// One row, as the probe alone answers it: whatever an install run has made of
 /// it is written over the top afterwards — see [`installing`].
-fn row(dependency: Dependency, state: DependencyState) -> DependencyView {
+fn row(dependency: Row, state: DependencyState) -> DependencyView {
     DependencyView {
-        dependency,
+        dependency: dependency.shown(),
         state,
         install: InstallState::Idle,
     }
@@ -1903,23 +2040,24 @@ mod tests {
     /// a session's account is mounted from.
     fn an_account(home: &Path, agent_type: store::AgentType) {
         let dirs: Vec<PathBuf> = match agent_type {
-            store::AgentType::Claude => vec![home.join(".claude")],
-            store::AgentType::Codex => vec![home.join(".codex")],
-            store::AgentType::Grok => vec![home.join(".grok")],
-            store::AgentType::OpenCode => {
+            store::AgentType::CLAUDE => vec![home.join(".claude")],
+            store::AgentType::CODEX => vec![home.join(".codex")],
+            store::AgentType::GROK => vec![home.join(".grok")],
+            store::AgentType::OPENCODE => {
                 vec![
                     home.join(".config/opencode"),
                     home.join(".local/share/opencode"),
                 ]
             }
-            store::AgentType::Agy => vec![home.join(".gemini/antigravity-cli")],
+            store::AgentType::AGY => vec![home.join(".gemini/antigravity-cli")],
+            other => panic!("no account of {other} to make"),
         };
 
         for dir in dirs {
             std::fs::create_dir_all(dir).unwrap();
         }
 
-        if agent_type == store::AgentType::Claude {
+        if agent_type == store::AgentType::CLAUDE {
             std::fs::write(home.join(".claude.json"), "{}\n").unwrap();
         }
     }
@@ -1928,16 +2066,10 @@ mod tests {
     /// them.
     fn offered(machine: &Machine) -> Vec<store::AgentType> {
         machine
-            .probed()
+            .probed(&[])
             .accounts
             .iter()
-            .map(|found| match found.account {
-                verkstead_render::ProfileAccount::Claude { .. } => store::AgentType::Claude,
-                verkstead_render::ProfileAccount::Codex { .. } => store::AgentType::Codex,
-                verkstead_render::ProfileAccount::Grok { .. } => store::AgentType::Grok,
-                verkstead_render::ProfileAccount::OpenCode { .. } => store::AgentType::OpenCode,
-                verkstead_render::ProfileAccount::Agy { .. } => store::AgentType::Agy,
-            })
+            .map(|found| crate::profiles::stored(&found.account.agent_type))
             .collect()
     }
 
@@ -2027,11 +2159,13 @@ echo {token}
     };
 
     /// What one row of a reading says.
-    fn state(machine: &Machine, dependency: Dependency) -> DependencyState {
+    fn state(machine: &Machine, dependency: impl Into<Row>) -> DependencyState {
+        let dependency = dependency.into();
+
         machine
             .rows()
             .into_iter()
-            .find(|row| row.dependency == dependency)
+            .find(|row| Row::of(&row.dependency) == dependency)
             .expect("every dependency is a row")
             .state
     }
@@ -2232,7 +2366,7 @@ echo {token}
         let machine = machine(Platform::Linux, dir.path());
 
         assert_eq!(
-            state(&machine, Dependency::Claude),
+            state(&machine, Row::CLAUDE),
             DependencyState::Present {
                 at: Some(dir.path().join("claude").to_string_lossy().into_owned()),
                 target: None,
@@ -2241,7 +2375,7 @@ echo {token}
              the row says which file that is",
         );
         assert_eq!(
-            state(&machine, Dependency::Codex),
+            state(&machine, Row::CODEX),
             DependencyState::Absent {
                 trouble: None,
                 seen: None,
@@ -2275,7 +2409,7 @@ echo {token}
         let machine = looking_in(&local, servers_home.path());
 
         assert_eq!(
-            state(&machine, Dependency::Claude),
+            state(&machine, Row::CLAUDE),
             DependencyState::Present {
                 at: Some(local.join("claude").to_string_lossy().into_owned()),
                 target: Some(version.join("claude").to_string_lossy().into_owned()),
@@ -2324,7 +2458,7 @@ echo {token}
         );
 
         assert_eq!(
-            state(&machine, Dependency::Claude),
+            state(&machine, Row::CLAUDE),
             DependencyState::Present {
                 at: Some(local.join("claude").to_string_lossy().into_owned()),
                 target: Some(version.join("claude").to_string_lossy().into_owned()),
@@ -2370,7 +2504,7 @@ echo {token}
         let machine = looking_in(&local, servers_home.path());
 
         assert_eq!(
-            state(&machine, Dependency::Claude),
+            state(&machine, Row::CLAUDE),
             DependencyState::Absent {
                 trouble: None,
                 seen: Some(Seen::Leading {
@@ -2387,7 +2521,7 @@ echo {token}
              there is to do something about",
         );
         assert_eq!(
-            state(&machine, Dependency::Codex),
+            state(&machine, Row::CODEX),
             DependencyState::Absent {
                 trouble: None,
                 seen: Some(Seen::Dangling {
@@ -2427,7 +2561,7 @@ echo {token}
         );
 
         assert_eq!(
-            state(&machine, Dependency::Claude),
+            state(&machine, Row::CLAUDE),
             DependencyState::Absent {
                 trouble: None,
                 seen: Some(Seen::Desktop {
@@ -2468,7 +2602,7 @@ echo {token}
         );
 
         assert_eq!(
-            state(&machine, Dependency::Claude),
+            state(&machine, Row::CLAUDE),
             DependencyState::Absent {
                 trouble: None,
                 seen: Some(Seen::Beyond {
@@ -2479,7 +2613,7 @@ echo {token}
              directory it is in, which is what the row has to say",
         );
         assert_eq!(
-            state(&machine, Dependency::Codex),
+            state(&machine, Row::CODEX),
             DependencyState::Absent {
                 trouble: None,
                 seen: None,
@@ -2503,7 +2637,7 @@ echo {token}
         );
 
         assert_eq!(
-            machine.probed().path,
+            machine.probed(&[]).path,
             vec![
                 dir.path().to_string_lossy().into_owned(),
                 "/usr/bin".to_owned()
@@ -2522,11 +2656,7 @@ echo {token}
     #[test]
     fn every_name_the_wizard_has_a_row_for_is_a_name_a_session_is_followed_into() {
         let mut names: Vec<&str> = std::iter::once(sandbox::GIT)
-            .chain(
-                HARNESSES
-                    .iter()
-                    .map(|(_, agent_type)| sessions::binary(*agent_type)),
-            )
+            .chain(harnesses(&[]).map(sessions::binary))
             .chain(std::iter::once(sandbox::GH))
             .collect();
 
@@ -2576,7 +2706,7 @@ echo {token}
         );
 
         assert_eq!(
-            state(&machine, Dependency::Claude),
+            state(&machine, Row::CLAUDE),
             DependencyState::Present {
                 at: Some(local.join("claude").to_string_lossy().into_owned()),
                 target: None,
@@ -2626,7 +2756,7 @@ echo {token}
         );
 
         assert_eq!(
-            state(&machine, Dependency::Claude),
+            state(&machine, Row::CLAUDE),
             DependencyState::Present {
                 at: Some(dir.path().join("claude.CMD").to_string_lossy().into_owned()),
                 target: None,
@@ -2634,7 +2764,7 @@ echo {token}
             "`claude.cmd` is what an npm install writes and what this platform runs",
         );
         assert_eq!(
-            state(&machine, Dependency::Codex),
+            state(&machine, Row::CODEX),
             DependencyState::Absent {
                 trouble: None,
                 seen: None,
@@ -3039,11 +3169,11 @@ echo {token}
         let dir = tempfile::tempdir().unwrap();
 
         for agent_type in [
-            store::AgentType::Claude,
-            store::AgentType::Codex,
-            store::AgentType::Grok,
-            store::AgentType::OpenCode,
-            store::AgentType::Agy,
+            store::AgentType::CLAUDE,
+            store::AgentType::CODEX,
+            store::AgentType::GROK,
+            store::AgentType::OPENCODE,
+            store::AgentType::AGY,
         ] {
             an_account(dir.path(), agent_type);
         }
@@ -3053,46 +3183,47 @@ echo {token}
         program(&dir.path().join("claude"), "#!/bin/sh\n");
 
         let machine = machine(Platform::Linux, dir.path());
-        let accounts = machine.probed().accounts;
+        let accounts = machine.probed(&[]).accounts;
 
         assert_eq!(
             offered(&machine),
             vec![
-                store::AgentType::Claude,
-                store::AgentType::Codex,
-                store::AgentType::Grok,
-                store::AgentType::OpenCode,
-                store::AgentType::Agy,
+                store::AgentType::CLAUDE,
+                store::AgentType::CODEX,
+                store::AgentType::GROK,
+                store::AgentType::OPENCODE,
+                store::AgentType::AGY,
             ],
             "a home holds one account per harness, and all five are here",
         );
 
         assert_eq!(
             accounts[0].account,
-            verkstead_render::ProfileAccount::Claude {
-                claude_dir: dir.path().join(".claude").to_string_lossy().into_owned(),
-                config_file: dir
-                    .path()
+            verkstead_render::ProfileAccount::claude(
+                dir.path().join(".claude").to_string_lossy().into_owned(),
+                dir.path()
                     .join(".claude.json")
                     .to_string_lossy()
-                    .into_owned(),
-            },
+                    .into_owned()
+            ),
             "Claude's is the pair, which is what a session mounts and what the \
              profile create is handed",
         );
         assert_eq!(
             accounts[3].account,
-            verkstead_render::ProfileAccount::OpenCode {
-                home: dir.path().to_string_lossy().into_owned(),
-            },
+            verkstead_render::ProfileAccount::home(
+                verkstead_render::AgentType::OPENCODE,
+                dir.path().to_string_lossy().into_owned()
+            ),
             "and opencode's is the home its XDG directories are under, which is \
              the home itself",
         );
         assert_eq!(
             accounts[4].account,
-            verkstead_render::ProfileAccount::Agy {
-                home: dir.path().join(".gemini").to_string_lossy().into_owned(),
-            },
+            verkstead_render::ProfileAccount::home(
+                verkstead_render::AgentType::AGY,
+                dir.path().join(".gemini").to_string_lossy().into_owned()
+            ),
             "and agy's is `~/.gemini`, the directory it keeps its own inside",
         );
 
@@ -3141,11 +3272,11 @@ echo {token}
     #[test]
     fn a_windows_machine_looks_in_the_user_profile() {
         let dir = tempfile::tempdir().unwrap();
-        an_account(dir.path(), store::AgentType::Codex);
+        an_account(dir.path(), store::AgentType::CODEX);
 
         assert_eq!(
             offered(&machine(Platform::Windows, dir.path())),
-            vec![store::AgentType::Codex],
+            vec![store::AgentType::CODEX],
             "the profile is where a Windows account is kept, and the shape under \
              it is the one a session mounts",
         );
@@ -3198,14 +3329,14 @@ echo {token}
     fn one_harness_meets_the_step_and_gh_never_gates() {
         let rows = |claude, gh| {
             vec![
-                row(Dependency::Sandbox, THERE),
-                row(Dependency::Git, THERE),
-                row(Dependency::Claude, claude),
-                row(Dependency::Codex, NOT_THERE),
-                row(Dependency::Grok, NOT_THERE),
-                row(Dependency::OpenCode, NOT_THERE),
-                row(Dependency::Agy, NOT_THERE),
-                row(Dependency::Gh, gh),
+                row(Row::Sandbox, THERE),
+                row(Row::Git, THERE),
+                row(Row::CLAUDE, claude),
+                row(Row::CODEX, NOT_THERE),
+                row(Row::GROK, NOT_THERE),
+                row(Row::OPENCODE, NOT_THERE),
+                row(Row::AGY, NOT_THERE),
+                row(Row::Gh, gh),
             ]
         };
 
@@ -3226,9 +3357,9 @@ echo {token}
     fn a_sandbox_row_that_is_not_there_holds_the_step() {
         let met = |sandbox| {
             dependencies_met(&[
-                row(Dependency::Sandbox, sandbox),
-                row(Dependency::Git, THERE),
-                row(Dependency::Claude, THERE),
+                row(Row::Sandbox, sandbox),
+                row(Row::Git, THERE),
+                row(Row::CLAUDE, THERE),
             ])
         };
 
@@ -3256,17 +3387,17 @@ echo {token}
                 why: "Error: (-128) User canceled.".to_owned(),
             };
 
-            Some((over(), vec![(Dependency::Sandbox, failed)]))
+            Some((over(), vec![(Row::Sandbox, failed)]))
         };
 
-        let (_, still_missing) = installing(vec![row(Dependency::Sandbox, NOT_THERE)], refused());
+        let (_, still_missing) = installing(vec![row(Row::Sandbox, NOT_THERE)], refused());
 
         assert!(
             matches!(still_missing[0].install, InstallState::Failed { .. }),
             "a row the run could not install says so while it is still missing",
         );
 
-        let (_, installed_by_hand) = installing(vec![row(Dependency::Sandbox, THERE)], refused());
+        let (_, installed_by_hand) = installing(vec![row(Row::Sandbox, THERE)], refused());
 
         assert_eq!(
             installed_by_hand[0].install,
@@ -3594,7 +3725,7 @@ echo {token}
 
         assert_eq!(
             onboarding
-                .install(&settings, vec![Dependency::Git], None)
+                .install(&settings, vec![Dependency::Git], &[], None)
                 .await,
             Err(Refusal::Over),
         );
@@ -3603,7 +3734,7 @@ echo {token}
         let (run, rows) = onboarding.installer.reading().expect("the press's run");
 
         assert_eq!(rows.len(), 1, "the WSL row alone: {rows:?}");
-        assert_eq!(rows[0].0, Dependency::Wsl);
+        assert_eq!(rows[0].0, Row::Wsl);
         assert_eq!(run.phase, verkstead_render::RunPhase::Done);
     }
 }

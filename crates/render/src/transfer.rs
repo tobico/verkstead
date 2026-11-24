@@ -135,7 +135,7 @@ pub struct Preflight {
 ///
 /// Not a viewer type: no browser draws this, and what a browser is drawn is the
 /// [`Preflight`] composed out of it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnessThere {
     pub agent_type: AgentType,
 

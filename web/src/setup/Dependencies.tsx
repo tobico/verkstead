@@ -7,7 +7,8 @@
 //!
 //! **The checkbox screen** is where the step opens. Every row the server drew is
 //! on it, in three groups — *Required*, the sandbox and `git`; *An agent*, the
-//! five harnesses as tiles; and *Optional*, `gh` and, on Windows, WSL — and a
+//! harnesses as tiles, the five built-ins and every enabled Agent plugin's; and
+//! *Optional*, `gh` and, on Windows, WSL — and a
 //! row this machine has not got carries a checkbox, with the row's name as the
 //! label. A row that is there carries a tick and an *Installed* pill instead,
 //! and nothing else: which file it found is the by-hand screen's to say. The sandbox and `git` start ticked,
@@ -94,7 +95,7 @@ import {
 import { Copy } from "../Copy";
 import { HarnessMark } from "../HarnessMark";
 import { Icon } from "../Icon";
-import { AGENT_NAME, type AgentType } from "../agents";
+import { harness, harnessName } from "../harnesses";
 import { cancelInstall, startInstall } from "../api/client";
 import type {
   Barred,
@@ -128,59 +129,69 @@ import {
 } from "./steps";
 import styles from "./Dependencies.module.css";
 
-/// What each row is called where somebody reads it.
-///
-/// The harnesses are [`AGENT_NAME`]'s, which is what they are called everywhere
-/// else in the app: a row saying *Claude* beside a Profile list saying *Claude
-/// Code* would be two names for one backend.
-export const NAMES: Record<Dependency, string> = {
+/// The four rows that are not a harness. Every other row is one, named by its
+/// id: the built-ins and every harness an enabled Agent plugin declares, which
+/// the server's harness list says the rest of — see `../harnesses.ts`.
+type Fixed = "Sandbox" | "Git" | "Gh" | "Wsl";
+
+/// What each of them is called where somebody reads it.
+const NAMES: Record<Fixed, string> = {
   Sandbox: "A sandbox",
   Git: "git",
-  Claude: AGENT_NAME.Claude,
-  Codex: AGENT_NAME.Codex,
-  Grok: AGENT_NAME.Grok,
-  OpenCode: AGENT_NAME.OpenCode,
-  Agy: AGENT_NAME.Agy,
   Gh: "gh",
   Wsl: "Linux development (WSL)",
 };
 
+/// Whether a row is a harness's.
+export function isHarness(dependency: Dependency): boolean {
+  return !Object.hasOwn(NAMES, dependency);
+}
+
+/// What a row is called where somebody reads it.
+///
+/// A harness's row is called what the harness list calls it, which is what it
+/// is called everywhere else in the app: a row saying *Claude* beside a Profile
+/// list saying *Claude Code* would be two names for one backend.
+export function named(dependency: Dependency): string {
+  return isHarness(dependency)
+    ? harnessName(dependency)
+    : NAMES[dependency as Fixed];
+}
+
 /// And what each is for, which is also which of them hold the step up.
-const WHY: Record<Dependency, string> = {
+const WHY: Record<Fixed, string> = {
   Sandbox: "Every session runs inside one.",
   Git: "Every conversation is a branch and a worktree.",
-  Claude: "One harness is enough.",
-  Codex: "One harness is enough.",
-  Grok: "One harness is enough.",
-  OpenCode: "One harness is enough.",
-  Agy: "One harness is enough.",
   Gh: "Pull requests and reviews",
   Wsl: "Sessions on Linux, on this PC",
 };
 
-/// The command a row is, in mono beside its name: what a harness tile names
-/// under the harness. The sandbox row's is its package, and only on Linux —
-/// see `Choice` — it being Apple's own on a Mac and an account on Windows; `git`
-/// and `gh` are named by their command already.
-const COMMANDS: Partial<Record<Dependency, string>> = {
-  Claude: "claude",
-  Codex: "codex",
-  Grok: "grok",
-  OpenCode: "opencode",
-  Agy: "agy",
-};
+/// What a harness's row is for, whichever harness it is.
+const ONE_HARNESS = "One harness is enough.";
 
-/// The command beside a row's name, where the name is not one already: the
-/// harnesses', and the Linux sandbox's package.
+/// What a row is for.
+function why(dependency: Dependency): string {
+  return isHarness(dependency) ? ONE_HARNESS : WHY[dependency as Fixed];
+}
+
+/// The command beside a row's name, where the name is not one already: a
+/// harness's binary, as the harness list names it, and the Linux sandbox's
+/// package — it being Apple's own on a Mac and an account on Windows. `git`
+/// and `gh` are named by their command already.
 function called(
   dependency: Dependency,
   platform: Platform,
 ): string | undefined {
-  return dependency === "Sandbox"
-    ? platform === "Linux"
-      ? "bubblewrap"
-      : undefined
-    : COMMANDS[dependency];
+  if (dependency === "Sandbox") {
+    return platform === "Linux" ? "bubblewrap" : undefined;
+  }
+
+  return isHarness(dependency) ? harness(dependency)?.binary : undefined;
+}
+
+/// The harness a row's mark is drawn for, where it is a harness's.
+function marked(dependency: Dependency): Dependency | null {
+  return isHarness(dependency) ? dependency : null;
 }
 
 /// What a row that cannot be had here says, in place of a box.
@@ -227,28 +238,15 @@ const ANSWER = "Answer it on the machine Verkstead runs on, not here.";
 /// tab says about itself instead is its own `about`, see `instructions.ts`.
 const FIRST = "What the brew commands below are run with:";
 
-/// Which rows are a harness, so that the row wears the same mark the rest of the
-/// app draws that backend with.
-const HARNESSES: Partial<Record<Dependency, AgentType>> = {
-  Claude: "Claude",
-  Codex: "Codex",
-  Grok: "Grok",
-  OpenCode: "OpenCode",
-  Agy: "Agy",
-};
-
-/// The five of them, as the objective reads them: one is enough.
-const HARNESS = Object.keys(HARNESSES) as Dependency[];
-
 /// And the two rows that start ticked: the ones a session cannot start without.
 ///
-/// A harness is needed too, and no harness is: which of the five somebody wants
+/// A harness is needed too, and no harness is: which of them somebody wants
 /// is theirs to say, and a wizard that ticked one for them would install an
 /// agent nobody asked for.
 const GATING: Dependency[] = ["Sandbox", "Git"];
 
 /// The three groups of the checkbox screen, in the order they are drawn: the
-/// two rows nothing runs without, the five a session needs one of, and the
+/// two rows nothing runs without, the harnesses a session needs one of, and the
 /// rest. A row the server drew that is in neither of the first two is the
 /// third's, which is where WSL goes on Windows — its own label already says it
 /// is optional.
@@ -267,14 +265,14 @@ const GROUPS: Array<{
   {
     label: "An agent",
     gloss: "At least one",
-    holds: (dependency) => HARNESS.includes(dependency),
+    holds: isHarness,
     tiled: true,
   },
   {
     label: "Optional",
     gloss: null,
     holds: (dependency) =>
-      !GATING.includes(dependency) && !HARNESS.includes(dependency),
+      !GATING.includes(dependency) && !isHarness(dependency),
     tiled: false,
   },
 ];
@@ -388,7 +386,13 @@ export function Dependencies(props: {
       return row !== undefined && (!absent(row.state) || ticked(row));
     };
 
-    return settled("Sandbox") && settled("Git") && HARNESS.some(settled);
+    return (
+      settled("Sandbox") &&
+      settled("Git") &&
+      props.reading.dependencies.some(
+        (row) => isHarness(row.dependency) && settled(row.dependency),
+      )
+    );
   };
 
   /// Open the by-hand screen over every row this machine is missing, ticked or
@@ -420,7 +424,13 @@ export function Dependencies(props: {
     const there = (dependency: Dependency): boolean =>
       rowFor(dependency)?.state.state === "Present";
 
-    return there("Sandbox") && there("Git") && HARNESS.some(there);
+    return (
+      there("Sandbox") &&
+      there("Git") &&
+      props.reading.dependencies.some(
+        (row) => isHarness(row.dependency) && there(row.dependency),
+      )
+    );
   };
 
   /// The rows the install screen lists: the ones the press settled as ticked,
@@ -816,12 +826,12 @@ function Choice(props: {
       </Show>
       <span class={styles.text}>
         <span class={styles.name}>
-          {NAMES[props.row.dependency]}
+          {named(props.row.dependency)}
           <Show when={command()}>
             {(command) => <code class={styles.called}>{command()}</code>}
           </Show>
         </span>
-        <span class={styles.why}>{WHY[props.row.dependency]}</span>
+        <span class={styles.why}>{why(props.row.dependency)}</span>
         <Show when={barred()}>
           {(why) => (
             <span class={styles.barred} data-barred>
@@ -839,7 +849,7 @@ function Choice(props: {
     <>
       <span class={styles.top}>
         <HarnessMark
-          of={HARNESSES[props.row.dependency] ?? null}
+          of={marked(props.row.dependency)}
           class={styles.harness}
         />
         <Show
@@ -854,7 +864,7 @@ function Choice(props: {
           {box()}
         </Show>
       </span>
-      <span class={styles.name}>{NAMES[props.row.dependency]}</span>
+      <span class={styles.name}>{named(props.row.dependency)}</span>
       <Show when={command()}>
         {(command) => <code class={styles.called}>{command()}</code>}
       </Show>
@@ -1010,10 +1020,10 @@ function Named(props: {
   return (
     <span class={styles.name}>
       <HarnessMark
-        of={HARNESSES[props.row.dependency] ?? null}
+        of={marked(props.row.dependency)}
         class={styles.harness}
       />
-      {NAMES[props.row.dependency]}
+      {named(props.row.dependency)}
       <Show when={called(props.row.dependency, props.platform)}>
         {(command) => <code class={styles.called}>{command()}</code>}
       </Show>
@@ -1229,12 +1239,12 @@ function Row(props: {
         <Mark standing={standing(state())} />
         <span class={styles.name}>
           <HarnessMark
-            of={HARNESSES[props.row.dependency] ?? null}
+            of={marked(props.row.dependency)}
             class={styles.harness}
           />
-          {NAMES[props.row.dependency]}
+          {named(props.row.dependency)}
         </span>
-        <span class={styles.why}>{WHY[props.row.dependency]}</span>
+        <span class={styles.why}>{why(props.row.dependency)}</span>
 
         <Show when={failed()}>
           <button

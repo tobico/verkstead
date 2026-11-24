@@ -33,21 +33,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   DirectoryListing,
+  HarnessEntry,
   ProfileAccount,
   ProfileEdit,
   ProfileEntry,
 } from "../src/api/types";
-import { AGENT_NAME, DEFAULT_PROFILE } from "../src/agents";
+import { DEFAULT_PROFILE } from "../src/agents";
+import { harnessName, harnesses, knowHarnesses } from "../src/harnesses";
 import { NOT_USABLE_AWAY } from "../src/broken";
-import { KNOWN_MODELS, prettify } from "../src/models";
+import { offeredFor, prettify } from "../src/models";
 // The four files a backend's brand mark is drawn out of, read as lobehub
 // published them — so that naming a mark here and drawing it in `HarnessMark`
 // are two independent statements about the same art.
-import claudeMarkFile from "../src/marks/claude-color.svg?raw";
-import codexMarkFile from "../src/marks/codex.svg?raw";
-import grokMarkFile from "../src/marks/grok.svg?raw";
-import opencodeMarkFile from "../src/marks/opencode.svg?raw";
-import antigravityMarkFile from "../src/marks/antigravity.svg?raw";
+import claudeMarkFile from "../../crates/server/src/harness/marks/claude-color.svg?raw";
+import codexMarkFile from "../../crates/server/src/harness/marks/codex.svg?raw";
+import grokMarkFile from "../../crates/server/src/harness/marks/grok.svg?raw";
+import opencodeMarkFile from "../../crates/server/src/harness/marks/opencode.svg?raw";
+import antigravityMarkFile from "../../crates/server/src/harness/marks/antigravity.svg?raw";
 import card from "../src/CardButton.module.css";
 import button from "../src/IconButton.module.css";
 import { ProfileList, ProfilePane } from "../src/profiles/ProfileList";
@@ -246,7 +248,7 @@ function marks(card: HTMLElement): Array<{ label: string; red: boolean }> {
 /// has to be shown, and a card under the backend's own mark is not one of those
 /// places.
 function reads(profile: ProfileEntry): string {
-  const harness = AGENT_NAME[profile.account.agent_type];
+  const harness = harnessName(profile.account.agent_type);
 
   return profile.name ? `${harness} · ${profile.name}` : harness;
 }
@@ -264,7 +266,10 @@ function pair(account: ProfileAccount) {
     );
   }
 
-  return account;
+  return {
+    claude_dir: account.paths.claude_dir ?? "",
+    config_file: account.paths.config_file ?? "",
+  };
 }
 
 /// And the same narrowing for the types whose whole account is one home, which
@@ -276,7 +281,7 @@ function home(account: ProfileAccount) {
     );
   }
 
-  return account;
+  return { home: account.paths.home ?? "" };
 }
 
 /// A saved profile of the second type, built from the fixture rather than served
@@ -287,7 +292,10 @@ const CODEX: ProfileEntry = {
   ...FABLE,
   id: "99999999-9999-4999-8999-999999999999",
   name: "work",
-  account: { agent_type: "Codex", home: "/srv/accounts/work/.codex" },
+  account: {
+    agent_type: "Codex",
+    paths: { home: "/srv/accounts/work/.codex" },
+  },
   models: ["gpt-5-codex"],
 };
 
@@ -315,8 +323,10 @@ const NEW: ProfileEdit = {
   memory: true,
   account: {
     agent_type: "Claude",
-    claude_dir: "/home/you/accounts/personal/.claude",
-    config_file: "/home/you/accounts/personal/.claude.json",
+    paths: {
+      claude_dir: "/home/you/accounts/personal/.claude",
+      config_file: "/home/you/accounts/personal/.claude.json",
+    },
   },
 };
 
@@ -328,7 +338,7 @@ const NEW_CODEX: ProfileEdit = {
   memory: true,
   account: {
     agent_type: "Codex",
-    home: "/home/you/accounts/work/.codex",
+    paths: { home: "/home/you/accounts/work/.codex" },
   },
 };
 
@@ -340,7 +350,7 @@ const NEW_GROK: ProfileEdit = {
   memory: true,
   account: {
     agent_type: "Grok",
-    home: "/home/you/accounts/xai/.grok",
+    paths: { home: "/home/you/accounts/xai/.grok" },
   },
 };
 
@@ -352,7 +362,7 @@ const NEW_OPENCODE: ProfileEdit = {
   memory: true,
   account: {
     agent_type: "OpenCode",
-    home: "/home/you/accounts/zen/opencode",
+    paths: { home: "/home/you/accounts/zen/opencode" },
   },
 };
 
@@ -364,7 +374,7 @@ const NEW_AGY: ProfileEdit = {
   memory: true,
   account: {
     agent_type: "Agy",
-    home: "/home/you/accounts/gemini/.gemini",
+    paths: { home: "/home/you/accounts/gemini/.gemini" },
   },
 };
 
@@ -505,7 +515,9 @@ describe("the cards", () => {
     serving(whenever("/api/ui/profiles", json([unnamed])));
     const { container } = mountCards();
 
-    await waitFor(() => screen.getByText(AGENT_NAME[FABLE.account.agent_type]));
+    await waitFor(() =>
+      screen.getByText(harnessName(FABLE.account.agent_type)),
+    );
 
     const title = container.querySelector(
       `.${styles.profile} .${styles.title}`,
@@ -671,8 +683,10 @@ describe("a member's accounts", () => {
     await waitFor(() =>
       expect(sent(fetching, `/api/ui/profiles/${MIRROR.id}/bind`)).toEqual({
         agent_type: "Claude",
-        claude_dir: "/home/you/.claude-work",
-        config_file: "/home/you/.claude-work.json",
+        paths: {
+          claude_dir: "/home/you/.claude-work",
+          config_file: "/home/you/.claude-work.json",
+        },
       }),
     );
   });
@@ -822,7 +836,7 @@ describe("a member's account that cannot be run from here", () => {
 
     await waitFor(() => screen.getByText(reads(MIRROR)));
 
-    const said = `${AGENT_NAME[MIRROR.account.agent_type]} isn't on this machine.`;
+    const said = `${harnessName(MIRROR.account.agent_type)} isn't on this machine.`;
     const card = theCard(reads(MIRROR));
 
     expect(marks(card)).toEqual([{ label: said, red: true }]);
@@ -1022,7 +1036,7 @@ describe("logging an account in", () => {
       ...FABLE,
       id: "99999999-9999-4999-8999-999999999999",
       name: "codex",
-      account: { agent_type: "Codex", home: "/home/me/.codex" },
+      account: { agent_type: "Codex", paths: { home: "/home/me/.codex" } },
     };
 
     serving(whenever("/api/ui/profiles", json([codex])));
@@ -1038,7 +1052,7 @@ describe("logging an account in", () => {
       ...FABLE,
       login: false,
       name: "gemini",
-      account: { agent_type: "Agy", home: "/home/me/.gemini" },
+      account: { agent_type: "Agy", paths: { home: "/home/me/.gemini" } },
     };
     const GOOGLE = "https://accounts.google.com/o/oauth2/auth?state=1";
 
@@ -1261,7 +1275,7 @@ describe("the pane a card opens", () => {
 
       expect(findings()).toEqual([
         {
-          said: `${AGENT_NAME[MIRROR.account.agent_type]} isn't on this machine.`,
+          said: `${harnessName(MIRROR.account.agent_type)} isn't on this machine.`,
           red: true,
         },
       ]);
@@ -1425,7 +1439,7 @@ describe("the pane a card opens", () => {
         (press) => press.textContent,
       ),
     ).toEqual(["Remove"]);
-    expect(showingAgent()).toBe(AGENT_NAME[FABLE.account.agent_type]);
+    expect(showingAgent()).toBe(harnessName(FABLE.account.agent_type));
   });
 
   /// Every backend that can launch, by its own name, and no other.
@@ -1664,7 +1678,7 @@ describe("the pane the plus opens", () => {
     expect(memorySwitch().checked).toBe(true);
 
     for (const agent of ["Codex", "Grok", "OpenCode", "Claude"] as const) {
-      pickAgent(AGENT_NAME[agent]);
+      pickAgent(harnessName(agent));
 
       await waitFor(() => expect(memorySwitch().checked).toBe(true));
     }
@@ -1721,7 +1735,7 @@ describe("the pane the plus opens", () => {
       });
       fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
-      pickAgent(AGENT_NAME[profile.account.agent_type]);
+      pickAgent(harnessName(profile.account.agent_type));
       fireEvent.input(
         await waitFor(() => screen.getByLabelText(/Home directory/)),
         { target: { value: home(profile.account).home } },
@@ -1747,7 +1761,12 @@ describe("the pane the plus opens", () => {
     ["Modelless", /at least one model/i],
     ["NameTaken", /another profile is called that already/i],
     ["DefaultTaken", /already has a profile with no name/i],
-  ])("says why %s was refused, in words", async (outcome, said) => {
+    // A plugin harness's path, by the label its manifest gave the field.
+    [{ PathNotAbsolute: "Stub directory" }, /stub directory's absolute path/i],
+    [{ PathMissing: "Stub config file" }, /nothing at the stub config file's path/i],
+    [{ PathNotADirectory: "Stub directory" }, /stub directory has to be a directory/i],
+    [{ PathNotAFile: "Stub config file" }, /stub config file has to be a file/i],
+  ] as const)("says why %o was refused, in words", async (outcome, said) => {
     theProfiles(json(outcome));
     const { done } = mountPane("new");
 
@@ -1917,13 +1936,13 @@ describe("the models a profile lists", () => {
   ///
   /// The name is the viewer's word for the model and the id is what the session
   /// is launched with, so both are on the row: one to read, one to check.
-  it("offers every model this build knows for that backend", async () => {
+  it("offers every model that backend's harness declares", async () => {
     theProfiles();
     mountPane(FABLE.id);
 
     await waitFor(() => screen.getByLabelText("Fable 5"));
 
-    const claude = KNOWN_MODELS.filter((model) => model.agent === "Claude");
+    const claude = offeredFor("Claude");
 
     for (const model of claude) {
       expect(screen.getByLabelText(model.name)).toBeTruthy();
@@ -1932,8 +1951,8 @@ describe("the models a profile lists", () => {
       claude.map((model) => `${model.name}${model.id}`),
     );
 
-    // And nothing of anybody else's: `grok-4.6` is a model this build knows the
-    // name of and a Claude Code account cannot be launched on.
+    // And nothing of anybody else's: `grok-4.6` is a model Grok Build declares
+    // and a Claude Code account cannot be launched on.
     expect(screen.queryByLabelText("Grok 4.6")).toBeNull();
   });
 
@@ -1942,7 +1961,7 @@ describe("the models a profile lists", () => {
   it("offers another backend's models on a profile of that backend", async () => {
     const grok: ProfileEntry = {
       ...FABLE,
-      account: { agent_type: "Grok", home: "/srv/accounts/grok" },
+      account: { agent_type: "Grok", paths: { home: "/srv/accounts/grok" } },
       models: ["grok-4.6"],
     };
     serving(whenever("/api/ui/profiles", json([grok])));
@@ -1951,10 +1970,64 @@ describe("the models a profile lists", () => {
     await waitFor(() => screen.getByLabelText("Grok 4.6"));
 
     expect(offered()).toEqual(
-      KNOWN_MODELS.filter((model) => model.agent === "Grok").map(
-        (model) => `${model.name}${model.id}`,
-      ),
+      offeredFor("Grok").map((model) => `${model.name}${model.id}`),
     );
+    expect(screen.queryByLabelText("Fable 5")).toBeNull();
+  });
+
+  /// A plugin harness's Profile is offered the models its manifest declares,
+  /// by the names it gives them — the form keeps no list of its own — and asks
+  /// for the paths it declares, a field apiece labelled as it labels them.
+  it("offers a plugin harness the models and the paths its manifest declares", async () => {
+    const plugged: HarnessEntry = {
+      ...harnesses()[1]!,
+      id: "3f0c9a12-7b4e-4c1d-8e2f-5a6b7c8d9e0f",
+      name: "Stub Harness",
+      paths: [
+        {
+          key: "dir",
+          label: "Stub directory",
+          purpose: "Mounted at `~/.stub`.",
+          placeholder: "/home/you/.stub",
+          file: false,
+        },
+        {
+          key: "config",
+          label: "Stub config file",
+          purpose: "",
+          placeholder: "/home/you/.stub.json",
+          file: true,
+        },
+      ],
+      models: [
+        { id: "stub-large", name: "Stub Large" },
+        { id: "stub-small", name: "Stub Small" },
+      ],
+      aliases: [],
+    };
+    knowHarnesses([...harnesses(), plugged]);
+
+    const stub: ProfileEntry = {
+      ...FABLE,
+      account: {
+        agent_type: plugged.id,
+        paths: { dir: "/srv/accounts/.stub", config: "/srv/accounts/.stub.json" },
+      },
+      models: ["stub-large"],
+    };
+    serving(whenever("/api/ui/profiles", json([stub])));
+    mountPane(stub.id);
+
+    await waitFor(() => screen.getByLabelText("Stub Large"));
+
+    expect(offered()).toEqual(["Stub Largestub-large", "Stub Smallstub-small"]);
+    expect(
+      (screen.getByLabelText(/^Stub directory/) as HTMLInputElement).value,
+    ).toBe("/srv/accounts/.stub");
+    expect(
+      (screen.getByLabelText(/^Stub config file/) as HTMLInputElement).value,
+    ).toBe("/srv/accounts/.stub.json");
+    expect(screen.queryByLabelText(/^Home directory/)).toBeNull();
     expect(screen.queryByLabelText("Fable 5")).toBeNull();
   });
 
@@ -2007,7 +2080,7 @@ describe("the models a profile lists", () => {
   it("says nothing about a model the build does not know", async () => {
     const mixed: ProfileEntry = {
       ...FABLE,
-      account: { agent_type: "Grok", home: "/srv/accounts/grok" },
+      account: { agent_type: "Grok", paths: { home: "/srv/accounts/grok" } },
       models: ["grok-4.6", "grok-5-preview"],
     };
     serving(whenever("/api/ui/profiles", json([mixed])));
@@ -2307,8 +2380,10 @@ describe("browsing for the account's paths", () => {
         memory: true,
         account: {
           agent_type: "Claude",
-          claude_dir: "/home/ada/accounts/work/.claude",
-          config_file: "/home/ada/accounts/work/.claude.json",
+          paths: {
+            claude_dir: "/home/ada/accounts/work/.claude",
+            config_file: "/home/ada/accounts/work/.claude.json",
+          },
         },
       }),
     );
@@ -2321,7 +2396,7 @@ describe("browsing for the account's paths", () => {
     theBrowse();
     mountPane("new");
 
-    pickAgent(AGENT_NAME.Codex);
+    pickAgent(harnessName("Codex"));
     await waitFor(() => screen.getByLabelText(/Home directory/));
 
     const HOME = "Home directory";

@@ -20,6 +20,17 @@
 //! the agent type, which is what makes reading it off the line the only answer
 //! that works everywhere.
 //!
+//! **And a harness a plugin declares writes in none of those shapes**, because
+//! what reaches the Transcript of one is not its own record at all: its
+//! component's `parse-transcript` reads that, and answers in the kinds the pane
+//! draws — see [`Entry`]. The server writes each answer as a line keyed on
+//! `entry`, which no backend above spells, and this reads it back. The one rule
+//! kept here rather than in the component is ADR-0006's: an entry it marks
+//! unknown folds away under the name it gives, and stands in the conversation
+//! where it gives none. And where its component could not read the record at
+//! all, the line saying so is what the reading answers as
+//! [`TranscriptView::unreadable`], in place of a conversation.
+//!
 //! **Two of the four use the same two words, and the key is what tells them
 //! apart.** opencode tags a message `user` or `assistant` — the words Claude's
 //! lines carry — and nothing hangs off them the same way: Claude puts what was
@@ -133,6 +144,73 @@ pub struct TranscriptView {
     /// after it. Opaque to whoever holds it: it is the server's own bookmark,
     /// and the shape of it is [`Cursor`]'s business alone.
     pub cursor: String,
+
+    /// Why the record couldn't be read, where a plugin harness's component
+    /// failed to read it — see [`Entry::Unreadable`]. Screen copy. `None` for
+    /// every other Transcript, and for this part of one where it is a piece.
+    pub unreadable: Option<String>,
+}
+
+/// One thing a plugin harness's `parse-transcript` answered, as the server
+/// writes it onto the Transcript: a line `{"entry": …}`, keyed on a word no
+/// backend's own record uses — see [`Entry::line`].
+///
+/// The kinds are the component's answer as `wit/plugin.wit` declares them, and
+/// one more that is the server's own: [`Entry::Unreadable`], for an answer
+/// there was none of.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Entry {
+    /// Something said, as markdown.
+    Said { voice: Voice, markdown: String },
+
+    /// A tool the agent called.
+    ToolCall {
+        name: String,
+        call: String,
+        about: String,
+        input: String,
+    },
+
+    /// What a tool answered.
+    ToolResult {
+        call: String,
+        failed: bool,
+        text: String,
+    },
+
+    /// A line of the harness's own bookkeeping, folded away under `kind`.
+    Notice { kind: String, line: String },
+
+    /// A line its parser does not know: folded away under `kind`, or standing
+    /// in the conversation where it gives none.
+    Unknown { kind: Option<String>, line: String },
+
+    /// The component couldn't read the record — it trapped, or answered
+    /// something that isn't an answer — and why, as screen copy.
+    Unreadable { why: String },
+}
+
+/// Who said an [`Entry::Said`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Voice {
+    /// The agent, in its own words.
+    Agent,
+    /// The agent, thinking.
+    Reasoning,
+    /// Whoever put a turn to the agent.
+    Put,
+}
+
+/// What an [`Entry`] is written under on the Transcript.
+const ENTRY: &str = "entry";
+
+impl Entry {
+    /// The line the server writes this as.
+    pub fn line(&self) -> String {
+        serde_json::json!({ ENTRY: self }).to_string()
+    }
 }
 
 /// How far a reading of a Transcript got.
@@ -629,6 +707,9 @@ struct Reading {
 
     turns: Vec<Turn>,
     bookkeeping: Vec<Bookkeeping>,
+
+    /// Why the record couldn't be read, where a line said so.
+    unreadable: Option<String>,
 }
 
 /// What a reading is for: the pane, which draws the turns, or the Timeline row,
@@ -668,6 +749,7 @@ impl Reading {
             reads,
             turns: Vec::new(),
             bookkeeping: Vec::new(),
+            unreadable: None,
         }
     }
 
@@ -708,6 +790,7 @@ impl Reading {
             // there is nothing for the reader to add it to.
             whole: self.from == Cursor::default(),
             cursor: at.to_string(),
+            unreadable: self.unreadable,
         }
     }
 }
@@ -763,6 +846,10 @@ fn read(line: &str, into: &mut Reading) {
         // filed the record under, and a Grok line carries the kind of update it
         // is. A line that says none of the three has no name to file it under,
         // so it is shown, the way a line that is not JSON at all is.
+        //
+        // And a line the server wrote of a plugin harness's entry carries none
+        // of the three either, and says so under its own key.
+        None if entry.get(ENTRY).is_some() => entered(&entry, into),
         None => match (
             entry[KIND].as_str(),
             entry["params"]["update"][SESSION_UPDATE].as_str(),
@@ -1716,6 +1803,62 @@ const AGY_PLANNER_RESPONSE: &str = "PLANNER_RESPONSE";
 const AGY_GENERIC: &str = "GENERIC";
 const USER_REQUEST_OPENS: &str = "<USER_REQUEST>";
 const USER_REQUEST_CLOSES: &str = "</USER_REQUEST>";
+
+/// One entry a plugin harness's component answered, put where its kind says.
+///
+/// An entry that isn't one of the kinds is shown as the JSON it is, as any
+/// line of a shape nothing here knows is.
+fn entered(line: &Value, into: &mut Reading) {
+    let reads = into.reads;
+
+    let Ok(entry) = Entry::deserialize(&line[ENTRY]) else {
+        into.take(unread(line, reads));
+        return;
+    };
+
+    match entry {
+        Entry::Said { voice, markdown } => {
+            if let Some(html) = rendered(&markdown, reads) {
+                into.take(match voice {
+                    Voice::Agent => Turn::Prose(Prose { id: UNPLACED, html }),
+                    Voice::Reasoning => Turn::Reasoning(Reasoning { id: UNPLACED, html }),
+                    Voice::Put => Turn::Put(Put { id: UNPLACED, html }),
+                });
+            }
+        }
+        Entry::ToolCall {
+            name,
+            call,
+            about,
+            input,
+        } => into.take(Turn::ToolUse(ToolUse {
+            id: UNPLACED,
+            name: text(&name, reads),
+            call: text(&call, reads),
+            about: match reads {
+                Reads::Drawing => one_line(&about),
+                _ => String::new(),
+            },
+            input: text(&input, reads),
+        })),
+        Entry::ToolResult { call, failed, text } => into.take(Turn::ToolResult(ToolResult {
+            id: UNPLACED,
+            call: self::text(&call, reads),
+            failed: reads == Reads::Drawing && failed,
+            text: self::text(&text, reads),
+        })),
+        Entry::Notice { kind, line } => into.keep(kind, text(&line, reads)),
+        Entry::Unknown {
+            kind: Some(kind),
+            line,
+        } => into.keep(kind, text(&line, reads)),
+        Entry::Unknown { kind: None, line } => into.take(Turn::Unread(Unread {
+            id: UNPLACED,
+            line: text(&line, reads),
+        })),
+        Entry::Unreadable { why } => into.unreadable = Some(why),
+    }
+}
 
 /// Whatever this is, shown as the JSON it is.
 fn unread(value: &Value, reads: Reads) -> Turn {
@@ -3335,6 +3478,148 @@ mod tests {
         assert_eq!(
             requested("<USER_REQUEST>\nThese.\n</USER_REQUEST>\nNot these."),
             "\nThese.\n"
+        );
+    }
+
+    /// What a plugin harness's component answered, one of each kind, as the
+    /// server writes it.
+    fn entered() -> Vec<String> {
+        [
+            Entry::Said {
+                voice: Voice::Put,
+                markdown: "Rename the **capture**.".to_owned(),
+            },
+            Entry::Said {
+                voice: Voice::Reasoning,
+                markdown: "The tables first.".to_owned(),
+            },
+            Entry::Said {
+                voice: Voice::Agent,
+                markdown: "I'll start with the *tables*.".to_owned(),
+            },
+            Entry::ToolCall {
+                name: "shell".to_owned(),
+                call: "c1".to_owned(),
+                about: "List the task files\nand more".to_owned(),
+                input: "ls .tasks".to_owned(),
+            },
+            Entry::ToolResult {
+                call: "c1".to_owned(),
+                failed: true,
+                text: "no such directory".to_owned(),
+            },
+            Entry::Notice {
+                kind: "mode".to_owned(),
+                line: "plan".to_owned(),
+            },
+            Entry::Unknown {
+                kind: Some("rewind".to_owned()),
+                line: "{\"to\":3}".to_owned(),
+            },
+            Entry::Unknown {
+                kind: None,
+                line: "something".to_owned(),
+            },
+        ]
+        .iter()
+        .map(Entry::line)
+        .collect()
+    }
+
+    /// A plugin harness's entries are drawn as the kinds they name, an
+    /// unknown one with a kind folds away under it, and one without stands
+    /// where it was found.
+    #[test]
+    fn a_plugin_harness_s_entries_are_drawn_as_their_kinds() {
+        let view = transcript_view(&entered());
+
+        assert_eq!(
+            view.turns,
+            vec![
+                Turn::Put(Put {
+                    id: 1,
+                    html: "<p>Rename the <strong>capture</strong>.</p>\n".to_owned(),
+                }),
+                Turn::Reasoning(Reasoning {
+                    id: 2,
+                    html: "<p>The tables first.</p>\n".to_owned(),
+                }),
+                Turn::Prose(Prose {
+                    id: 3,
+                    html: "<p>I'll start with the <em>tables</em>.</p>\n".to_owned(),
+                }),
+                Turn::ToolUse(ToolUse {
+                    id: 4,
+                    name: "shell".to_owned(),
+                    call: "c1".to_owned(),
+                    about: "List the task files".to_owned(),
+                    input: "ls .tasks".to_owned(),
+                }),
+                Turn::ToolResult(ToolResult {
+                    id: 5,
+                    call: "c1".to_owned(),
+                    failed: true,
+                    text: "no such directory".to_owned(),
+                }),
+                Turn::Unread(Unread {
+                    id: 6,
+                    line: "something".to_owned(),
+                }),
+            ]
+        );
+        assert_eq!(
+            view.bookkeeping,
+            vec![
+                Bookkeeping {
+                    id: 1,
+                    kind: "mode".to_owned(),
+                    line: "plan".to_owned(),
+                },
+                Bookkeeping {
+                    id: 2,
+                    kind: "rewind".to_owned(),
+                    line: "{\"to\":3}".to_owned(),
+                },
+            ]
+        );
+        assert_eq!(view.unreadable, None);
+    }
+
+    /// And the row's count and quote are the same reading.
+    #[test]
+    fn a_plugin_harness_s_count_and_quote_are_the_reading_the_pane_draws() {
+        assert_eq!(turns(&entered()), 6);
+        assert_eq!(statements(&entered()), ["I'll start with the *tables*."]);
+    }
+
+    /// A record its component couldn't read is no turn, and says why.
+    #[test]
+    fn a_record_that_couldn_t_be_read_says_so_in_place_of_a_conversation() {
+        let said = vec![
+            Entry::Unreadable {
+                why: "It stopped.".to_owned(),
+            }
+            .line(),
+        ];
+
+        let view = transcript_view(&said);
+
+        assert!(view.turns.is_empty() && view.bookkeeping.is_empty());
+        assert_eq!(view.unreadable.as_deref(), Some("It stopped."));
+        assert_eq!(turns(&said), 0);
+    }
+
+    /// An entry of no kind is shown as the JSON it is.
+    #[test]
+    fn an_entry_of_no_kind_is_shown_as_it_is() {
+        let view = transcript_view(&lines(&[r#"{"entry":{"sung":"la"}}"#]));
+
+        assert_eq!(
+            view.turns,
+            vec![Turn::Unread(Unread {
+                id: 1,
+                line: pretty(r#"{"entry":{"sung":"la"}}"#),
+            })]
         );
     }
 }

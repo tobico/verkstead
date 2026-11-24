@@ -88,8 +88,9 @@ use crate::store;
 /// window — or nothing, where no such wording has ever been seen.
 ///
 /// Matched without regard to case and to nothing around it. One phrase per
-/// backend is the whole of the coupling to somebody else's display, and they are
-/// here together so that a wording that moves is one edit rather than a search.
+/// backend is the whole of the coupling to somebody else's display, and each is
+/// its harness's own answer — see [`crate::harness::Harness::exhausted`] — so
+/// that a wording that moves is one edit rather than a search.
 ///
 /// **A backend may have none, and that is an answer rather than a gap.** The
 /// wording is read off an account actually running out, so a backend nobody has
@@ -100,55 +101,8 @@ use crate::store;
 /// nothing, and its account running out lands as the ordinary stall it would have
 /// been anyway (ADR-0011).
 fn exhausted_phrase(agent_type: store::AgentType) -> Option<&'static str> {
-    match agent_type {
-        store::AgentType::Claude => Some(CLAUDE_EXHAUSTED),
-        store::AgentType::Codex => Some(CODEX_EXHAUSTED),
-        store::AgentType::Grok => Some(GROK_EXHAUSTED),
-
-        // And OpenCode has none. It retries a provider's limit internally
-        // before anything reaches the screen (ADR-0011), so nobody has watched
-        // one surface and there is no wording to be read against — which is
-        // this mapping's other answer rather than a gap in it, and leaves such
-        // a stop landing as the ordinary stall it would have been anyway.
-        store::AgentType::OpenCode => None,
-
-        // Nor the Antigravity CLI, which nobody has watched run out yet.
-        store::AgentType::Agy => None,
-    }
+    crate::harness::of(agent_type).and_then(|harness| harness.exhausted())
 }
-
-/// What claude 2.1.234 opens its banner with, the rest of the line being the
-/// reset words and the key to press.
-const CLAUDE_EXHAUSTED: &str = "usage limit reached";
-
-/// And what codex 0.149.0 opens its own with.
-///
-/// The stable prefix and no more: what follows it is the plan's — an upgrade to
-/// Plus, an upgrade to Pro, credits to buy, an admin to ask — and every one of
-/// those sentences carries this one in front of it. Read off the binary rather
-/// than guessed at.
-///
-/// The apostrophe is the ASCII one codex writes, which is what keeps [`says_so`]
-/// honest about it: a line of prose quoting the phrase opens with a quotation
-/// mark, and ASCII punctuation is not decoration there.
-const CODEX_EXHAUSTED: &str = "you've hit your usage limit";
-
-/// And the title grok 1.0.13 puts on the card it draws a free account that has
-/// run out, the rest of the card being three tiers to upgrade to.
-///
-/// **The card rather than the sentence, because the card is what a session
-/// sees.** Run out of window, grok retries the refused turn, gives up, and
-/// draws a bordered panel headed by this — on the frame, which is why the frame
-/// is read: see [`Watch::found`]. The sentence `You’ve reached your free Grok
-/// Build usage limit for now.` is grok's too and is *not* this: that is what its
-/// headless mode prints, and Verkstead launches the interactive one. Both read
-/// off grok 1.0.13 driven until it drew each of them.
-///
-/// A free account's card is the one that has been seen. A paid plan's is headed
-/// `You hit your weekly limit.` in the same binary and has not been watched
-/// drawn, and one phrase per backend cannot open both, so a paid stop lands as
-/// the ordinary stall until this build holds more than one wording per backend.
-const GROK_EXHAUSTED: &str = "you hit your free usage limit";
 
 /// How much of a session's printing is held between looks.
 ///
@@ -623,7 +577,7 @@ async fn out_of_window(
 mod tests {
     use super::*;
 
-    use store::AgentType::{Claude, Codex, Grok};
+    use store::AgentType;
 
     /// One backend's reading of one piece of text, which is what a Watch on that
     /// backend does with everything its session leaves behind — see
@@ -639,7 +593,7 @@ mod tests {
         let printed = "\u{1b}[2m✻\u{1b}[0m Usage limit reached · continuing automatically at 3pm · esc to cancel\n";
 
         assert_eq!(
-            exhausted(printed, Claude).map(|found| found.said),
+            exhausted(printed, AgentType::CLAUDE).map(|found| found.said),
             Some(
                 "✻ Usage limit reached · continuing automatically at 3pm · esc to cancel"
                     .to_owned()
@@ -662,7 +616,7 @@ mod tests {
             "▌ You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro)",
         ] {
             assert!(
-                exhausted(line, Codex).is_some(),
+                exhausted(line, AgentType::CODEX).is_some(),
                 "{line:?} was not recognised",
             );
         }
@@ -681,7 +635,7 @@ mod tests {
             "  ┃  You hit your free usage limit.",
         ] {
             assert!(
-                exhausted(line, Grok).is_some(),
+                exhausted(line, AgentType::GROK).is_some(),
                 "{line:?} was not recognised",
             );
         }
@@ -701,7 +655,7 @@ mod tests {
             exhausted(
                 "You’ve reached your free Grok Build usage limit for now. Get SuperGrok for \
                  much higher limits, or try again later: https://grok.com/supergrok",
-                Grok,
+                AgentType::GROK,
             ),
             None,
         );
@@ -717,22 +671,22 @@ mod tests {
     #[test]
     fn a_session_is_read_against_its_own_backends_sentence() {
         assert_eq!(
-            exhausted("Usage limit reached · continuing shortly", Codex),
+            exhausted("Usage limit reached · continuing shortly", AgentType::CODEX),
             None,
             "claude's banner is not codex's account running out",
         );
         assert_eq!(
-            exhausted("You've hit your usage limit.", Claude),
+            exhausted("You've hit your usage limit.", AgentType::CLAUDE),
             None,
             "nor codex's sentence claude's",
         );
         assert_eq!(
-            exhausted("You've hit your usage limit.", Grok),
+            exhausted("You've hit your usage limit.", AgentType::GROK),
             None,
             "nor codex's grok's, near as the two wordings are to each other",
         );
         assert_eq!(
-            exhausted("You hit your free usage limit.", Codex),
+            exhausted("You hit your free usage limit.", AgentType::CODEX),
             None,
             "nor grok's codex's",
         );
@@ -792,7 +746,7 @@ mod tests {
 
         let mut watch = Watch {
             phrase: None,
-            ..Watch::on(1, 2, "opencode".to_owned(), Claude)
+            ..Watch::on(1, 2, "opencode".to_owned(), AgentType::CLAUDE)
         };
 
         watch.printed(banner);
@@ -801,7 +755,7 @@ mod tests {
         assert_eq!(watch.found(banner, None), None, "nothing off the frame");
         assert_eq!(watch.found("", Some(banner)), None, "nothing off the log");
 
-        let mut reading = Watch::on(1, 2, "fable".to_owned(), Claude);
+        let mut reading = Watch::on(1, 2, "fable".to_owned(), AgentType::CLAUDE);
 
         reading.printed(banner);
 
@@ -810,14 +764,14 @@ mod tests {
             "and the same terminal read against a phrase says what it always said",
         );
         assert!(
-            Watch::on(1, 2, "fable".to_owned(), Claude)
+            Watch::on(1, 2, "fable".to_owned(), AgentType::CLAUDE)
                 .found(banner, None)
                 .is_some(),
             "as do the same frame and the same log, on a Watch whose terminal has \
              said nothing",
         );
         assert!(
-            Watch::on(1, 2, "fable".to_owned(), Claude)
+            Watch::on(1, 2, "fable".to_owned(), AgentType::CLAUDE)
                 .found("", Some(banner))
                 .is_some(),
         );
@@ -861,7 +815,7 @@ mod tests {
     #[test]
     fn a_grok_card_is_found_on_the_frame_and_not_in_the_bytes_that_drew_it() {
         assert_eq!(
-            saying(GROK_CARD, exhausted_phrase(Grok)),
+            saying(GROK_CARD, exhausted_phrase(AgentType::GROK)),
             None,
             "the bytes that drew the card say nothing a line-reader can find: \
              they are one line, and it opens with the spinner grok was turning",
@@ -870,7 +824,7 @@ mod tests {
         let drawn = crate::screen::replay(GROK_CARD).drawn();
 
         assert_eq!(
-            saying(&drawn, exhausted_phrase(Grok)).map(|found| found.said),
+            saying(&drawn, exhausted_phrase(AgentType::GROK)).map(|found| found.said),
             Some("┃  You hit your free usage limit.".to_owned()),
             "and the frame those same bytes drew says it on a line of its own, \
              the card's border in front of it as decoration: {drawn:?}",
@@ -888,7 +842,7 @@ mod tests {
             "  │ USAGE LIMIT REACHED",
         ] {
             assert!(
-                exhausted(line, Claude).is_some(),
+                exhausted(line, AgentType::CLAUDE).is_some(),
                 "{line:?} was not recognised",
             );
         }
@@ -905,7 +859,11 @@ mod tests {
             "reading whether the usage limit reached the account",
             "No limit was reached.",
         ] {
-            assert_eq!(exhausted(line, Claude), None, "{line:?} stopped a run");
+            assert_eq!(
+                exhausted(line, AgentType::CLAUDE),
+                None,
+                "{line:?} stopped a run"
+            );
         }
     }
 
@@ -921,7 +879,11 @@ mod tests {
             "> You've hit your usage limit, says codex",
             "# You've hit your usage limit",
         ] {
-            assert_eq!(exhausted(line, Codex), None, "{line:?} stopped a run");
+            assert_eq!(
+                exhausted(line, AgentType::CODEX),
+                None,
+                "{line:?} stopped a run"
+            );
         }
     }
 
@@ -957,7 +919,7 @@ mod tests {
             "- You've hit your usage limit is codex's, and only that much of it",
             "- You hit your free usage limit is the card grok heads with",
         ] {
-            for agent_type in [Claude, Codex, Grok] {
+            for agent_type in [AgentType::CLAUDE, AgentType::CODEX, AgentType::GROK] {
                 assert_eq!(
                     exhausted(line, agent_type),
                     None,
@@ -971,17 +933,17 @@ mod tests {
     /// wherever the kernel put it.
     #[test]
     fn a_sentence_split_across_two_chunks_is_still_one_sentence() {
-        let mut watch = Watch::on(1, 2, "fable".to_owned(), Claude);
+        let mut watch = Watch::on(1, 2, "fable".to_owned(), AgentType::CLAUDE);
 
         watch.printed("Usage limit reac");
         assert_eq!(
-            exhausted(watch.printed.text(), Claude),
+            exhausted(watch.printed.text(), AgentType::CLAUDE),
             None,
             "half a sentence is not one"
         );
 
         watch.printed("hed · continuing shortly\n");
-        assert!(exhausted(watch.printed.text(), Claude).is_some());
+        assert!(exhausted(watch.printed.text(), AgentType::CLAUDE).is_some());
     }
 
     /// The reset is kept in the words the display drew it in. A clock time is

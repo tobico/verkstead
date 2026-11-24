@@ -100,7 +100,7 @@ base: string, };
  *
  * **And it is the whole account**, in the shape the profile form sends one:
  * the wizard saves a ticked row by handing it straight back to the profile
- * create, with no name and the models this build knows for its harness, rather
+ * create, with no name and the models its harness declares, rather
  * than by naming paths of its own.
  */
 export type AccountView = { 
@@ -385,7 +385,7 @@ profile: string | null,
 model: string | null, 
 /**
  * And which agent ran it, which is what says whose mark goes beside the
- * reading — the same four words a Profile's account is discriminated by.
+ * reading — the id a Profile names its harness by.
  *
  * Off the record beside the other two and for their reason. `null` for a
  * session started before this was written down, which the reading draws
@@ -394,18 +394,21 @@ model: string | null,
 agent_type: AgentType | null, };
 
 /**
- * Which agent a session runs, on its own rather than as an account's shape.
+ * Which agent a session runs: the id of its harness, as the server's harness
+ * list gives it — see [`HarnessEntry`].
  *
- * The same four words [`ProfileAccount`]'s discriminator is written in, so a
- * viewer narrowing on one narrows on the other: what a Profile runs and what a
- * finished session ran are the same fact about the same set of backends, and
- * two spellings of it would be two things for the viewer to keep in step.
+ * **A string rather than a closed list** (ADR-0030, *Agent*): a harness is a
+ * Plugin of the Agent Category, so the ids are whatever this server can run
+ * and whatever a Profile written elsewhere names. The five built-ins are
+ * spelled as they always were on the wire — `Claude`, `Codex`, `Grok`,
+ * `OpenCode`, `Agy` — so that a device still on an older release reads what
+ * this one sends it; a plugin harness is its plugin's uuid.
  *
- * Its own type because the account is not always there to carry it — a Timeline
- * Event says which agent ran a session and holds no account at all, the
- * Profile it was launched from being a thing that can since have gone.
+ * Its own type because the account is not always there to carry it — a
+ * Timeline Event says which agent ran a session and holds no account at all,
+ * the Profile it was launched from being a thing that can since have gone.
  */
-export type AgentType = "Claude" | "Codex" | "Grok" | "OpenCode" | "Agy";
+export type AgentType = string;
 
 /**
  * The Annex's row: how its box stands, the release it runs and the disk it
@@ -1053,7 +1056,7 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
  * a picker, and a Pairing made against one goes on reading as a Pairing — with
  * a broken Profile in it.
  */
-export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing" | "NoBoundDevice" | "HarnessMissing" | "SignedOut";
+export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing" | "NoBoundDevice" | "HarnessUnknown" | "HarnessDisabled" | "HarnessMissing" | "SignedOut";
 
 /**
  * One session's Capture, whole, as the details pane receives it.
@@ -2555,11 +2558,18 @@ author?: string, };
 /**
  * What a row is about.
  *
- * Flat rather than a harness variant carrying an [`crate::AgentType`]: the
- * step draws nine rows with an instruction apiece, and which of them are
- * harnesses is a fact about the objective rather than about the drawing.
+ * **A harness's row is the harness**, by its id: the five built-ins and every
+ * harness an enabled Agent plugin declares (ADR-0030, *Agent*), so which of
+ * them a machine is asked about is the harness list's to say rather than a
+ * closed word list's here.
+ *
+ * **One string on the wire**, the way it always was: `Sandbox`, `Git`, `Gh`,
+ * `Wsl`, or the harness's id — and a built-in's id is the word its row was
+ * called before a harness could be a plugin's, `Claude` to `Agy`, so a
+ * built-in's row reads exactly as it did. A plugin's id is its uuid, which
+ * none of the four words is.
  */
-export type Dependency = "Sandbox" | "Git" | "Claude" | "Codex" | "Grok" | "OpenCode" | "Agy" | "Gh" | "Wsl";
+export type Dependency = "Sandbox" | "Git" | "Gh" | "Wsl" | AgentType;
 
 /**
  * And whether the machine has it.
@@ -3585,6 +3595,130 @@ at: string,
  * agent markdown on this wire is.
  */
 html: string, };
+
+/**
+ * One harness this server can run a session on, as the Profile form, the
+ * cards and the pickers draw it: everything about it the viewer used to keep
+ * a table of.
+ */
+export type HarnessEntry = { 
+/**
+ * The id a Profile of it names.
+ */
+id: AgentType, 
+/**
+ * What it is called where a sentence names it: *Claude Code*.
+ */
+name: string, 
+/**
+ * Its mark, as the SVG document it ships. Drawn as an image rather than
+ * put into the page, so that nothing in it runs.
+ */
+mark: string, 
+/**
+ * The paths an account of it is made of, in the order the form draws
+ * them.
+ */
+paths: Array<HarnessPath>, 
+/**
+ * What its login calls it — *Claude*, *Antigravity* — where Verkstead
+ * runs its login, so that a Profile card offers one; `null` where it does
+ * not.
+ */
+login: string | null, 
+/**
+ * Where an account of it is kept in a home, said from `~` as the human
+ * would recognise it: what onboarding draws under an account it found.
+ */
+found_at: Array<string>, 
+/**
+ * What to run in a terminal to make an account of it.
+ */
+first_run: string, 
+/**
+ * The models a Profile of it is offered, in the order the form offers
+ * them.
+ */
+models: Array<HarnessModel>, 
+/**
+ * The short names it answers to beyond those — `opus` — each with what
+ * it reads as: recognised where a Profile holds one, never offered.
+ */
+aliases: Array<HarnessModel>, 
+/**
+ * The program a session of it is run as, looked for on a session's
+ * `PATH` by this name: what its onboarding row names under the harness.
+ */
+binary: string, 
+/**
+ * How a plugin's harness is put on a machine, as its manifest declares
+ * it for this one — or `null` for a built-in, whose instructions are
+ * the wizard's own, one per tab.
+ */
+install: HarnessInstall | null, 
+/**
+ * Whether this server offers it: `false` for a disabled Agent plugin's
+ * harness, listed only so that the Profiles that still stand on it are
+ * drawn under its name and mark (Set 1764, Q20). Never on a picker, and
+ * never a harness a new Profile is made of.
+ */
+offered: boolean, };
+
+/**
+ * How a plugin's harness is installed, as its manifest declares it for the
+ * platform this server is on.
+ */
+export type HarnessInstall = { 
+/**
+ * Where its own install instructions are.
+ */
+instructions: string | null, 
+/**
+ * The lines that install it, which the wizard's install run runs on a
+ * press and at no other time.
+ */
+commands: Array<string>, };
+
+/**
+ * One model a harness declares: what it travels as, and what a human reads
+ * instead.
+ */
+export type HarnessModel = { 
+/**
+ * The id the harness is launched with, and the string a Profile carries.
+ */
+id: string, 
+/**
+ * What it reads as.
+ */
+name: string, };
+
+/**
+ * One path an account of a harness is made of.
+ */
+export type HarnessPath = { 
+/**
+ * The key it is kept under in a [`ProfileAccount`].
+ */
+key: string, 
+/**
+ * What the form labels its field.
+ */
+label: string, 
+/**
+ * What it is for, said under the field, with what is to be read as code
+ * between backticks.
+ */
+purpose: string, 
+/**
+ * What the field shows before anything is typed into it.
+ */
+placeholder: string, 
+/**
+ * Whether it is a file rather than a directory, which is what the field's
+ * picker offers.
+ */
+file: boolean, };
 
 /**
  * What is to become of one header's value.
@@ -4833,6 +4967,33 @@ export type PluginFieldWrite = { "kind": "Text", value: string, } | { "kind": "S
 export type PluginFix = { "kind": "Install", repository: string, } | { "kind": "Update" };
 
 /**
+ * The harness an Agent plugin's row provides, as this device has it.
+ */
+export type PluginHarness = { 
+/**
+ * Its id, which the install run is pressed with.
+ */
+id: AgentType, 
+/**
+ * The program a session of it runs, looked for on a session's `PATH`.
+ */
+binary: string, 
+/**
+ * Whether a session here would find it, which is its onboarding row's
+ * answer.
+ */
+present: boolean, 
+/**
+ * Whether its manifest declares commands that install it here, which is
+ * what the row's **Install** runs.
+ */
+installable: boolean, 
+/**
+ * And what the install run has made of it, where one has been started.
+ */
+install: InstallState, };
+
+/**
  * **Install**: the directory or git URL, and the capabilities the card
  * showed, which is the grant.
  */
@@ -4939,7 +5100,19 @@ dependents: Array<string>,
  * How many settings fields its manifest declares: where any, the row
  * opens a pane drawing them.
  */
-settings: number, };
+settings: number, 
+/**
+ * How many Agent Profiles name the harness it provides, whatever the
+ * checkbox says: a disabled one's stay, offered on no picker, and while
+ * any stand **Remove** is refused.
+ */
+profiles: number, 
+/**
+ * The harness it provides, where it provides one and has loaded here:
+ * whether its binary is on this machine, and the press that installs
+ * it.
+ */
+harness: PluginHarness | null, };
 
 /**
  * A save of a Plugin's pane: the fields it changed, each by key. A field
@@ -5150,21 +5323,30 @@ export type ProcessChoice = { process: Process, };
 export type ProcessPicked = "Picked" | "NoSuchConversation" | "NotDrafting" | "NotLanded";
 
 /**
- * The account a Profile names, in the shape the agent type running it keeps
- * one.
+ * The account a Profile names: which harness runs it, and each of the paths
+ * that harness declares an account to be made of, under its key.
  *
- * Flat on the wire — `{"agent_type": "Claude", "claude_dir": "…",
- * "config_file": "…"}` — so the type is a field the viewer can read and narrow
- * on rather than a name it has to unwrap the account out of. Which is what the
- * form draws its fields off: a shape per type, and adding a backend adds a
- * variant here and the fields beside it.
+ * **One shape for every harness**, the form drawing a field per path the
+ * harness list declares — see [`HarnessPath`] — rather than a shape per type:
+ * Claude Code's pair is two declared paths, `claude_dir` and `config_file`,
+ * and every built-in after it one, `home`.
  *
  * One shape for both directions. A Profile as the viewer receives it carries
  * the resolved paths the server recorded and a Profile as the human has just
  * written it carries what they typed, but they are the same fields either way,
  * and two types for one shape would be two opinions about what an account is.
  */
-export type ProfileAccount = { "agent_type": "Claude", claude_dir: string, config_file: string, } | { "agent_type": "Codex", home: string, } | { "agent_type": "Grok", home: string, } | { "agent_type": "OpenCode", home: string, } | { "agent_type": "Agy", home: string, };
+export type ProfileAccount = { 
+/**
+ * Which harness runs it.
+ */
+agent_type: AgentType, 
+/**
+ * Each path under the key its harness declares it by. Optional per key
+ * to the viewer, which reads them by the keys a harness declares and may
+ * hold an account of a harness that declares others.
+ */
+paths: { [key in string]?: string }, };
 
 /**
  * Which Profile and model a Conversation is pairing for one of its roles.
@@ -5220,10 +5402,10 @@ bound: ProfileAccount | null, };
 /**
  * A Profile as the human has just written it, for saving or for rewriting.
  *
- * The account says which type it is, because the fields beside it are that
- * type's. The form picks one from the types whose stage has landed — a type
- * that cannot launch the real binary yet would be a lie in a picker — so a
- * type this knows about may still be one nothing arrives as.
+ * The account says which harness it is, because the paths beside it are the
+ * ones that harness declares. The form picks one from the harnesses the server
+ * lists, and a harness it has not got is refused as
+ * [`ProfileSaved::NoSuchHarness`].
  */
 export type ProfileEdit = { 
 /**
@@ -5232,7 +5414,8 @@ export type ProfileEdit = {
  */
 name: string | null, 
 /**
- * The absolute paths this Profile's account is, in its type's shape.
+ * The absolute paths this Profile's account is, under the keys its
+ * harness declares.
  */
 account: ProfileAccount, 
 /**
@@ -5338,7 +5521,7 @@ devices: Array<ProfileDevice>, };
  * is a courtesy, and every request reaching the endpoint is decided there
  * whether or not a form was involved.
  */
-export type ProfileSaved = "Saved" | "NoSuchProfile" | "Modelless" | "NameTaken" | "DefaultTaken" | "DirNotAbsolute" | "DirMissing" | "NotADirectory" | "ConfigNotAbsolute" | "ConfigMissing" | "NotAFile" | "HomeNotAbsolute" | "HomeMissing" | "HomeNotADirectory";
+export type ProfileSaved = "Saved" | "NoSuchProfile" | "Modelless" | "NameTaken" | "DefaultTaken" | "DirNotAbsolute" | "DirMissing" | "NotADirectory" | "ConfigNotAbsolute" | "ConfigMissing" | "NotAFile" | "HomeNotAbsolute" | "HomeMissing" | "HomeNotADirectory" | { "PathNotAbsolute": string } | { "PathMissing": string } | { "PathNotADirectory": string } | { "PathNotAFile": string } | "NoSuchHarness" | { "MemberBehind": string };
 
 /**
  * Why a press that would have started a session was refused over a Profile:
@@ -7033,7 +7216,15 @@ commits: Array<SharedCommit>,
  * reader is owed the date of the thing in their hands, and sharing again
  * makes another one rather than freshening this.
  */
-exported_at: string, };
+exported_at: string, 
+/**
+ * Every harness the server that took it could run, for the names and the
+ * marks the record draws its runs under.
+ *
+ * Carried for the reason the sheets are: the workbench reads the list off
+ * its server, and a share has none to read it off.
+ */
+harnesses: Array<HarnessEntry>, };
 
 /**
  * And putting that switch where the human has just put it.
@@ -7760,7 +7951,8 @@ branch: string, };
  */
 export type StepsView = { 
 /**
- * A sandbox, `git`, and at least one of the five harnesses.
+ * A sandbox, `git`, and at least one harness: a built-in, or one an
+ * enabled Agent plugin declares.
  */
 dependencies: boolean, 
 /**
@@ -8211,7 +8403,13 @@ whole: boolean,
  * after it. Opaque to whoever holds it: it is the server's own bookmark,
  * and the shape of it is [`Cursor`]'s business alone.
  */
-cursor: string, };
+cursor: string, 
+/**
+ * Why the record couldn't be read, where a plugin harness's component
+ * failed to read it — see [`Entry::Unreadable`]. Screen copy. `None` for
+ * every other Transcript, and for this part of one where it is a piece.
+ */
+unreadable: string | null, };
 
 /**
  * Which copy of a transferred Conversation is the live one: the device holding

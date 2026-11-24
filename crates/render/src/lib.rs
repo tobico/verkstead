@@ -97,16 +97,17 @@ pub use onboarding::{
 };
 pub use plugins::{
     PluginAt, PluginCapability, PluginConsent, PluginEnabled, PluginField, PluginFieldEdit,
-    PluginFieldRefused, PluginFieldValue, PluginFieldWrite, PluginFix, PluginInstall,
-    PluginLanguageCache, PluginNeed, PluginRow, PluginSecretValues, PluginSettingsSave,
-    PluginSettingsSaved, PluginSettingsView, PluginSource, PluginUpdate, PluginUpdated,
-    PluginsView,
+    PluginFieldRefused, PluginFieldValue, PluginFieldWrite, PluginFix, PluginHarness,
+    PluginInstall, PluginLanguageCache, PluginNeed, PluginRow, PluginSecretValues,
+    PluginSettingsSave, PluginSettingsSaved, PluginSettingsView, PluginSource, PluginUpdate,
+    PluginUpdated, PluginsView,
 };
 pub use profiles::{
-    AccountFile, AccountLogin, AccountLoginTaken, AccountSignedOut, AgentType, Broken, LoginOver,
-    MemoryFile, MemoryLeft, MemoryWanted, PairingView, PickedView, ProfileAccount, ProfileChoice,
-    ProfileChosen, ProfileDeleted, ProfileDevice, ProfileEdit, ProfileEntry, ProfileSaved,
-    ProfileTrouble, RepoPairingsView, RoleChoice,
+    AccountFile, AccountLogin, AccountLoginTaken, AccountSignedOut, AgentType, Broken,
+    HarnessEntry, HarnessInstall, HarnessModel, HarnessPath, LoginOver, MemoryFile, MemoryLeft,
+    MemoryWanted, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,
+    ProfileDeleted, ProfileDevice, ProfileEdit, ProfileEntry, ProfileSaved, ProfileTrouble,
+    RepoPairingsView, RoleChoice,
 };
 pub use push::{PushKey, RelayedNews, Subscribed, Subscription, Unsubscribe};
 pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};
@@ -129,8 +130,9 @@ pub use sharing::{
     SharedConversation, itemized, shared, shared_commit,
 };
 pub use transcript::{
-    Bookkeeping, Cursor, Prose, Put, Reasoning, ToolResult, ToolUse, TranscriptView, Turn, Unread,
-    rollout_cwd, rollout_session, statements, transcript_after, transcript_view, turns,
+    Bookkeeping, Cursor, Entry, Prose, Put, Reasoning, ToolResult, ToolUse, TranscriptView, Turn,
+    Unread, Voice, rollout_cwd, rollout_session, statements, transcript_after, transcript_view,
+    turns,
 };
 pub use transfer::{
     Arrived, BirthKey, CameFrom, ChainLink, CheckoutAcross, CompanionCheckoutAcross,

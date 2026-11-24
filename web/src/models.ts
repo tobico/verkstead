@@ -8,117 +8,47 @@
 //! viewer's own layer over that: the ids somebody would have to type, offered as
 //! picks, and the pretty name each of them reads as.
 //!
-//! **The list goes stale.** It goes stale the week another model ships, which is
-//! the reason there was no list here for so long — so nothing is built on the
-//! list being complete. An id the list has not learned yet is picked up by hand
-//! wherever models are chosen, and [`prettify`] hands back an unknown id
-//! unchanged rather than refusing it or drawing a blank: an unknown model reads
-//! as `claude-opus-7` on the button, which is legible, where the alternatives
-//! read as nothing at all.
+//! **Each harness declares its own** (ADR-0030, *Agent*): the list a Profile of
+//! it is offered, and the short names it answers to, come with it on the
+//! harness list the server gives — see [`./harnesses.ts`](./harnesses.ts) — so
+//! a plugin harness's models are offered as a built-in's are, and nothing here
+//! is keyed by a closed list of harnesses.
 //!
-//! **Each entry says whose model it is**, which is the one thing a flat list of
-//! ids cannot be read without now that there is more than one backend: the
-//! profile form offers a Claude Code account the Claude models and no others,
-//! and the reading in [`./agents.ts`](./agents.ts) drops a backend's name from
-//! a model whose own name has already said it.
+//! **The list goes stale.** It goes stale the week another model ships, so
+//! nothing is built on the list being complete. An id the list has not learned
+//! yet is picked up by hand wherever models are chosen, and [`prettify`] hands
+//! back an unknown id unchanged rather than refusing it or drawing a blank: an
+//! unknown model reads as `claude-opus-7` on the button, which is legible,
+//! where the alternatives read as nothing at all.
 //!
 //! **And an id is not only ever a pick.** A harness answers to short names of
 //! its own — `opus`, `fable` — and to a suffix on either spelling asking for the
 //! long context, so a profile filled in by hand holds ids no list of picks would
-//! have offered. Two readings stand beside the entries for that: the aliases
-//! below, which are recognised and never offered, and the `[1m]` rule, which
-//! reads a variant off whatever its base reads as. Both recognise rather than
-//! guess — an id neither of them knows still degrades to itself.
+//! have offered. Two readings stand beside the entries for that: the aliases a
+//! harness declares, which are recognised and never offered, and the `[1m]`
+//! rule, which reads a variant off whatever its base reads as. Both recognise
+//! rather than guess — an id neither of them knows still degrades to itself.
 
-import type { AgentType } from "./agents";
+import type { AgentType, HarnessModel } from "./api/types";
+import { harness, harnesses } from "./harnesses";
 
-/// One model this build knows: what it travels as, what it reads as, and whose
-/// it is.
-export type KnownModel = {
-  /// The id the agent is launched with, and the string a profile carries.
-  id: string;
-  /// What a human reads instead of it.
-  name: string;
-  /// And the backend that launches it. One apiece: the same model reachable
-  /// through two of them is two entries, because the id each is launched with
-  /// is that backend's own spelling of it — which is what `minimax/minimax-m2.1`
-  /// is and `grok-4.6` is not.
-  agent: AgentType;
-};
+/// The models a Profile of `agent` is offered, in the order its harness
+/// declares them — none, for a harness this server has not got.
+export function offeredFor(agent: AgentType): HarnessModel[] {
+  return harness(agent)?.models ?? [];
+}
 
-/// The models Verkstead knows, in the order they are offered.
-///
-/// Grouped by backend, because the form offers one backend's at a time — and
-/// ordinary first within each group, because a picker is read from the top and
-/// these are the ones a profile is likely to list.
-export const KNOWN_MODELS: KnownModel[] = [
-  { id: "claude-opus-5", name: "Opus 5", agent: "Claude" },
-  { id: "claude-fable-5", name: "Fable 5", agent: "Claude" },
-  { id: "claude-sonnet-5", name: "Sonnet 5", agent: "Claude" },
-  { id: "claude-haiku-4-5-20251001", name: "Haiku 4.5", agent: "Claude" },
-  // The two the long context is worth a row of its own for. Not every Claude
-  // model in a second spelling: this list is what a profile is ordinarily
-  // filled in from, and one that offered each model twice would be twice as
-  // long to read for the sake of the two rows anybody asks for.
-  //
-  // Spelled out in full, like every other entry and for the entry's own reason:
-  // a pick says exactly which model was meant. `opus[1m]` reads the same and is
-  // the harness's to answer for — see the aliases below, which is what that
-  // spelling is one of, and which is why it is not what a pick sends.
-  { id: "claude-opus-5[1m]", name: "Opus 5 (1M context)", agent: "Claude" },
-  { id: "claude-sonnet-5[1m]", name: "Sonnet 5 (1M context)", agent: "Claude" },
-  { id: "gpt-5-codex", name: "GPT-5 Codex", agent: "Codex" },
-  { id: "grok-4.6", name: "Grok 4.6", agent: "Grok" },
-  { id: "grok-4.5", name: "Grok 4.5", agent: "Grok" },
-  { id: "minimax/minimax-m2.1", name: "Minimax M2.1", agent: "OpenCode" },
-  { id: "opencode/gpt-5.1-codex", name: "GPT-5.1 Codex", agent: "OpenCode" },
-  // What `agy models` lists to a signed-in account on agy 1.4.12, each named
-  // as agy names it. The Flash tiers first, the two the server's pairing
-  // defaults name among them; the other vendors' models agy serves after.
-  {
-    id: "gemini-3.8-flash-high",
-    name: "Gemini 3.8 Flash (High)",
-    agent: "Agy",
-  },
-  {
-    id: "gemini-3.8-flash-medium",
-    name: "Gemini 3.8 Flash (Medium)",
-    agent: "Agy",
-  },
-  { id: "gemini-3.8-flash-low", name: "Gemini 3.8 Flash (Low)", agent: "Agy" },
-  {
-    id: "claude-opus-4-6-thinking",
-    name: "Claude Opus 4.6 (Thinking)",
-    agent: "Agy",
-  },
-  {
-    id: "claude-sonnet-4-6",
-    name: "Claude Sonnet 4.6 (Thinking)",
-    agent: "Agy",
-  },
-  { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)", agent: "Agy" },
-];
-
-/// What each known id reads as, by id.
-const NAMES: Map<string, string> = new Map(
-  KNOWN_MODELS.map((model) => [model.id, model.name]),
-);
-
-/// The short names a harness answers to, and what each of them is short for.
-///
-/// Recognised and never offered, which is the whole of why they are here rather
-/// than among the entries: that list is what a profile form is filled in from,
-/// and a pick that sent `opus` would be sending the name of whichever model the
-/// harness calls Opus this month, where every other pick says exactly which one
-/// was meant. A profile that already holds one is the other matter entirely —
-/// somebody typed it, the sessions run under it, and what the viewer owes it is
-/// a legible reading rather than an argument.
-const ALIASES: Map<string, string> = new Map([
-  ["opus", "Opus 5"],
-  ["fable", "Fable 5"],
-  ["sonnet", "Sonnet 5"],
-  ["haiku", "Haiku 4.5"],
-]);
+/// What each id any harness here declares reads as — its models and its
+/// aliases alike — by id.
+function names(): Map<string, string> {
+  return new Map(
+    harnesses().flatMap((entry) =>
+      [...entry.models, ...entry.aliases].map(
+        (model) => [model.id, model.name] as const,
+      ),
+    ),
+  );
+}
 
 /// The suffix a long-context variant is spelled with, and the words it adds.
 ///
@@ -129,9 +59,9 @@ const WIDE = "[1m]";
 const WIDER = " (1M context)";
 
 /// What one id reads as, or nothing where none of the three ways of knowing it
-/// answers: the entries, the aliases, and the `[1m]` of either.
+/// answers: the models, the aliases, and the `[1m]` of either.
 function reads(id: string): string | undefined {
-  const straight = NAMES.get(id) ?? ALIASES.get(id);
+  const straight = names().get(id);
 
   if (straight !== undefined) {
     return straight;

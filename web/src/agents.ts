@@ -19,7 +19,8 @@
 //! is a profile name, a model id and an agent type, and it is read exactly as a
 //! Pairing is.
 //!
-//! Two shared vocabularies feed it: the names above, and the models in
+//! Two shared vocabularies feed it: the harnesses' names, as the server says
+//! them in [`./harnesses.ts`](./harnesses.ts), and the models in
 //! [`./models.ts`](./models.ts), each of which now says whose model it is.
 
 import type {
@@ -27,33 +28,16 @@ import type {
   ProfileAccount,
   ProfileEntry,
 } from "./api/types";
+import { harnessName } from "./harnesses";
 import { known, prettify } from "./models";
 
-/// Which agent a Profile runs, which is the discriminator its account is shaped
-/// by.
+/// Which agent a Profile runs: the id of its harness, as the server's harness
+/// list gives it — see [`./harnesses.ts`](./harnesses.ts), which is where what
+/// each is called is read.
 ///
-/// Read off the account rather than spelled out again, and read off it here
-/// rather than in whichever module happened to need it first: what a Profile
-/// runs and what a finished session ran are one fact about one set of backends,
-/// and the wire's own `AgentType` — which a Timeline Event carries, having no
-/// account to be shaped by — is written in the same four words on purpose.
-///
-/// So a fifth backend arrives in this type by being added to the record, and
-/// [`AGENT_NAME`] below is what will not compile until it has been given a name
-/// to read as.
+/// The same id a finished session's record carries, the wire's own `AgentType`,
+/// because what a Profile runs and what a finished session ran are one fact.
 export type AgentType = ProfileAccount["agent_type"];
-
-/// What each agent type is called wherever a human reads it.
-///
-/// The backend's own name rather than the discriminator, which is the word the
-/// record is written in and not one anybody would recognise their account by.
-export const AGENT_NAME: Record<AgentType, string> = {
-  Claude: "Claude Code",
-  Codex: "Codex",
-  Grok: "Grok Build",
-  OpenCode: "OpenCode",
-  Agy: "Antigravity CLI",
-};
 
 /// What one session was, or would be, run under: the three recorded facts the
 /// reading is made of.
@@ -105,7 +89,7 @@ export const DEFAULT_PROFILE = "Default";
 /// after its model, and a list that has not been read yet says the name, because
 /// saying it is never wrong and dropping it can misattribute a run.
 export function reading(said: Said, saved: ProfileEntry[] | undefined): string {
-  const harness = said.agent === null ? null : AGENT_NAME[said.agent];
+  const harness = said.agent === null ? null : harnessName(said.agent);
   const model = said.model ? prettify(said.model) : null;
 
   // Joined rather than appended, so that a record holding nothing but a profile
@@ -152,8 +136,15 @@ function words(
 /// model and says so, while "GPT-5.1 Codex" is an OpenCode one and does not.
 /// A whole word rather than a substring, so that a "Codex" anywhere in a name
 /// counts and a "codexed" would not.
+///
+/// **The word is matched as it is spelled**, every character of it literal: a
+/// harness's name is its plugin's to choose, and a "C++ Coder" read as a
+/// pattern would be no pattern at all. Bounded by what is not a word character
+/// rather than by `\b`, which a brand ending in `+` never meets.
 function brands(harness: string, model: string): boolean {
-  return new RegExp(`\\b${harness.split(" ")[0]!}\\b`, "i").test(model);
+  const brand = harness.split(" ")[0]!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  return new RegExp(`(?<!\\w)${brand}(?!\\w)`, "i").test(model);
 }
 
 /// The Profile's half of the reading: its name where the name is what tells
@@ -212,7 +203,7 @@ export function briefly(said: Said, saved: ProfileEntry[] | undefined): string {
     // before a model was paired beside it has nothing else to be read by, and a
     // reading of the account's name alone would say less than the control it
     // replaced.
-    model ?? (said.agent === null ? "" : AGENT_NAME[said.agent]),
+    model ?? (said.agent === null ? "" : harnessName(said.agent)),
     named(said, saved),
   ]
     .filter((part) => part !== "")

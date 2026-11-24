@@ -292,12 +292,10 @@ pub async fn take_up_the_conversation(
     };
 
     // Read back into the type rather than handed on as the word, which is the
-    // reading [`super::session_pairings`] makes of the same column: a word
-    // nothing here wrote is heard about where it is read rather than reaching a
-    // launch as a harness no arm has a case for.
-    let agent_type = AgentType::read(&agent_type).with_context(|| {
-        format!("reading which harness Conversation {conversation_id} carries on from")
-    })?;
+    // reading [`super::session_pairings`] makes of the same column. An id no
+    // harness here has is still read: whether there is a harness to carry on
+    // with is the server's to say.
+    let agent_type = AgentType::read(&agent_type);
 
     Ok(Some(Continued {
         session_id,
@@ -373,9 +371,7 @@ pub async fn the_last_session(
         return Ok(None);
     };
 
-    let agent_type = AgentType::read(&agent_type).with_context(|| {
-        format!("reading which harness the newest session of Conversation {conversation_id} ran")
-    })?;
+    let agent_type = AgentType::read(&agent_type);
 
     Ok(Some(Continued {
         session_id,

@@ -335,10 +335,7 @@ async fn standing() -> Standing {
         &pool,
         &store::ProfileFacts {
             name: Some("work".to_owned()),
-            account: store::Account::Claude {
-                claude_dir,
-                config_file,
-            },
+            account: store::Account::claude(claude_dir, config_file),
             models: vec!["claude-opus-5".to_owned()],
             memory: true,
         },
@@ -351,9 +348,7 @@ async fn standing() -> Standing {
         &pool,
         &store::ProfileFacts {
             name: Some("grok".to_owned()),
-            account: store::Account::Grok {
-                home: home.path().join(".grok"),
-            },
+            account: store::Account::home(store::AgentType::GROK, home.path().join(".grok")),
             models: vec!["grok-4.6".to_owned()],
             memory: true,
         },

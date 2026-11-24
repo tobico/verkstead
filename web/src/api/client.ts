@@ -14,6 +14,7 @@
 //! place a path learns about it, so that no caller anywhere composes one.
 
 import type {
+  HarnessEntry,
   AbandonedRepo,
   AdditionMade,
   AdditionRemoved,
@@ -1989,6 +1990,11 @@ export function forceStopConversation(
   );
 }
 
+/// The harnesses this server can run a session on — see `../harnesses.ts`.
+export function listHarnesses(): Promise<HarnessEntry[]> {
+  return get<HarnessEntry[]>("/api/ui/harnesses");
+}
+
 /// The Agent Profiles a session can be run under, by name.
 ///
 /// Each says whether its pair is still where it was left, which the server
@@ -2211,6 +2217,12 @@ export function enablePlugin(
 /// while installed plugins depend on it.
 export function removePlugin(uuid: string): Promise<PluginsView> {
   return post<PluginsView>(`/api/ui/plugins/${uuid}/remove`);
+}
+
+/// **Install** on an Agent plugin's row: the wizard's install run, started for
+/// the binary of the harness it provides.
+export function installPluginHarness(uuid: string): Promise<PluginsView> {
+  return post<PluginsView>(`/api/ui/plugins/${uuid}/harness`);
 }
 
 /// A plugin's settings pane: the fields its manifest declares, each with the

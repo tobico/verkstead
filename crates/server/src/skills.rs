@@ -1500,13 +1500,15 @@ pub(crate) fn served(prompt: &str, servers: &[String], agent: store::AgentType) 
         return prompt.to_owned();
     }
 
-    let naming = tools_named(agent);
+    let naming = tools_named(agent)
+        .map(|naming| format!(" Their tools are named `{naming}`."))
+        .unwrap_or_default();
 
     let listed: Vec<String> = servers.iter().map(|name| format!("- `{name}`")).collect();
 
     format!(
         "{}\n\n# MCP servers\n\nThis session was launched with the MCP servers the human \
-         attached to this Conversation. Their tools are named `{naming}`.\n\n{}\n",
+         attached to this Conversation.{naming}\n\n{}\n",
         prompt.trim_end(),
         listed.join("\n"),
     )
@@ -1555,31 +1557,13 @@ pub(crate) fn packed(prompt: &str, packs: &[LoadedPack], skills: &Skills) -> Str
     )
 }
 
-/// What a harness puts in front of an MCP server's tool names.
-///
-/// Each read off a real run against a server that recorded what it was asked,
-/// rather than off anybody's documentation — the harness's own version in
-/// brackets:
-///
-/// - Claude Code (2.1.268) and Codex (0.155.1) both name a tool
-///   `mcp__<server>__<tool>`. Codex reaches it through a namespace of that
-///   first half rather than a flat name, which comes to the same thing from
-///   inside the session.
-/// - Grok Build (1.0.34) drops the prefix: `<server>__<tool>`, which is the
-///   name its `use_tool` takes.
-/// - OpenCode (1.18.31) joins the two with one underscore: `<server>_<tool>`.
-/// - The Antigravity CLI (1.4.12) names no tool after its server at all: every
-///   server's tools are reached through one tool of agy's own,
-///   `call_mcp_tool`, which takes the two names as its `ServerName` and
-///   `ToolName` arguments. agy files each tool's schema under
-///   `antigravity-cli/mcp/<server>/<tool>.json` for the model to read first.
-pub(crate) fn tools_named(agent: store::AgentType) -> &'static str {
-    match agent {
-        store::AgentType::Claude | store::AgentType::Codex => "mcp__<server>__<tool>",
-        store::AgentType::Grok => "<server>__<tool>",
-        store::AgentType::OpenCode => "<server>_<tool>",
-        store::AgentType::Agy => r#"call_mcp_tool(ServerName: "<server>", ToolName: "<tool>")"#,
-    }
+/// What a harness puts in front of an MCP server's tool names — see
+/// [`crate::harness::Harness::tools_named`], where each harness's is and what
+/// it was read off.
+/// `None` for a harness this server has not got, whose sessions it never
+/// launches.
+pub(crate) fn tools_named(agent: store::AgentType) -> Option<&'static str> {
+    crate::harness::of(agent).map(|harness| harness.tools_named())
 }
 
 /// What an origin is called where its files are listed under it.
@@ -6144,7 +6128,7 @@ mod tests {
         let prompt = served(
             &next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
             &["docs".to_owned(), "tickets".to_owned()],
-            store::AgentType::Claude,
+            store::AgentType::CLAUDE,
         );
 
         assert!(
@@ -6175,7 +6159,7 @@ mod tests {
             grilling(&mounted(), "# Rate limiting\n"),
             reviewing(&mounted(), "# Rate limiting\n", None, None, None),
         ] {
-            let prompt = served(&built, &["docs".to_owned()], store::AgentType::Claude);
+            let prompt = served(&built, &["docs".to_owned()], store::AgentType::CLAUDE);
 
             assert!(
                 prompt.contains("- `docs`"),
@@ -6192,10 +6176,10 @@ mod tests {
         let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
 
         for agent in [
-            store::AgentType::Claude,
-            store::AgentType::Codex,
-            store::AgentType::Grok,
-            store::AgentType::OpenCode,
+            store::AgentType::CLAUDE,
+            store::AgentType::CODEX,
+            store::AgentType::GROK,
+            store::AgentType::OPENCODE,
         ] {
             assert_eq!(served(&prompt, &[], agent), prompt);
         }
@@ -6209,10 +6193,10 @@ mod tests {
         let prompt = next_task(&mounted(), "# Rate limiting\n", None);
 
         for (agent, naming) in [
-            (store::AgentType::Claude, "`mcp__<server>__<tool>`"),
-            (store::AgentType::Codex, "`mcp__<server>__<tool>`"),
-            (store::AgentType::Grok, "`<server>__<tool>`"),
-            (store::AgentType::OpenCode, "`<server>_<tool>`"),
+            (store::AgentType::CLAUDE, "`mcp__<server>__<tool>`"),
+            (store::AgentType::CODEX, "`mcp__<server>__<tool>`"),
+            (store::AgentType::GROK, "`<server>__<tool>`"),
+            (store::AgentType::OPENCODE, "`<server>_<tool>`"),
         ] {
             let said = served(&prompt, &["docs".to_owned()], agent);
 
@@ -6233,14 +6217,14 @@ mod tests {
     /// shorter.
     #[test]
     fn the_shorter_naming_is_not_the_longer_one_read_loosely() {
-        let prompt = served("", &["docs".to_owned()], store::AgentType::Grok);
+        let prompt = served("", &["docs".to_owned()], store::AgentType::GROK);
 
         assert!(
             !prompt.contains("mcp__"),
             "grok's tools carry no `mcp__` in front of them: {prompt:?}"
         );
 
-        let prompt = served("", &["docs".to_owned()], store::AgentType::OpenCode);
+        let prompt = served("", &["docs".to_owned()], store::AgentType::OPENCODE);
 
         assert!(
             !prompt.contains("__"),
@@ -6253,7 +6237,7 @@ mod tests {
     /// use for it, and the Brief is what says what that is.
     #[test]
     fn the_servers_listing_tells_a_session_nothing_about_what_to_do_with_them() {
-        let prompt = served("", &["docs".to_owned()], store::AgentType::Claude);
+        let prompt = served("", &["docs".to_owned()], store::AgentType::CLAUDE);
 
         for instructed in ["you should", "use it", "make sure", "read the", "call it"] {
             assert!(

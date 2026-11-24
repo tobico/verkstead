@@ -149,7 +149,7 @@ impl Grilling {
                 &pool,
                 &store::ProfileFacts {
                     name: Some("codex".to_owned()),
-                    account: store::Account::Codex { home },
+                    account: store::Account::home(store::AgentType::CODEX, home),
                     models: vec!["gpt-5-codex".to_owned()],
                     memory: true,
                 },
@@ -289,10 +289,7 @@ fn grilling() -> Grilling {
             &pool,
             &store::ProfileFacts {
                 name: Some("work".to_owned()),
-                account: store::Account::Claude {
-                    claude_dir,
-                    config_file,
-                },
+                account: store::Account::claude(claude_dir, config_file),
                 models: vec!["claude-opus-5".to_owned()],
                 memory: true,
             },

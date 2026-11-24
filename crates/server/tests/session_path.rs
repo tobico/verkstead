@@ -34,7 +34,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
-use verkstead_render::{Dependency, DependencyState, OnboardingView};
+use verkstead_render::{AgentType, Dependency, DependencyState, OnboardingView};
 use verkstead_server::platform::Platform;
 use verkstead_server::settings::Settings;
 use verkstead_server::{open_database, router_keeping, sandbox};
@@ -122,7 +122,7 @@ async fn what_verkstead_installed_is_on_a_sessions_path_and_grows_within_the_run
     let app = router_keeping(pool, data.path().to_owned());
 
     assert_eq!(
-        row(&reading(&app).await, Dependency::Claude),
+        row(&reading(&app).await, Dependency::Harness(AgentType::CLAUDE)),
         DependencyState::Present {
             at: Some(local.join("claude").to_string_lossy().into_owned()),
             target: None,
@@ -152,7 +152,7 @@ async fn what_verkstead_installed_is_on_a_sessions_path_and_grows_within_the_run
     };
 
     assert_ne!(
-        row(&reading(&app).await, Dependency::Grok),
+        row(&reading(&app).await, Dependency::Harness(AgentType::GROK)),
         installed,
         "which nothing has said yet: the directory it landed in is on no list, \
          so this is not the file a session would find — whatever else of the \
@@ -162,7 +162,7 @@ async fn what_verkstead_installed_is_on_a_sessions_path_and_grows_within_the_run
     sandbox::installed_into(&settings, &grok).unwrap();
 
     assert_eq!(
-        row(&reading(&app).await, Dependency::Grok),
+        row(&reading(&app).await, Dependency::Harness(AgentType::GROK)),
         installed,
         "the next probe is composed with it — the same server, the same router \
          and nothing restarted",

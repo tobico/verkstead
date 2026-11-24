@@ -3,27 +3,85 @@
 //! the promise that the CLI contract it quotes is the one this binary has.
 
 use std::process::{Command, Output};
+use std::sync::LazyLock;
 
 use verkstead_schema::{Question, QuestionSet};
 
+use crate::support::server::Server;
+
 /// Which backend a Guide is being printed for, as the sandbox says it.
 const AGENT_TYPE: &str = "VERKSTEAD_AGENT";
+
+/// And the server it asks for that backend's half, as the sandbox says it.
+const SERVER: &str = "VERKSTEAD_SERVER";
+
+/// A server where nothing listens: the port is never bound by anything.
+const NOBODY: &str = "http://127.0.0.1:1/conversations/1";
+
+/// The plugin harness the Guide is asked for by its uuid — see
+/// [`crate::plugin::AGENT`] — and the *Running the ask* section its manifest
+/// wrote.
+const PLUGGED: &str = "3f0c9a12-7b4e-4c1d-8e2f-5a6b7c8d9e0f";
+const PLUGGED_RUNNING: &str = "Run `verkstead ask` and wait for it.";
+
+/// The one server every tailored Guide here is asked of, with the stub
+/// harness plugin installed on it the way the Plugins section installs one.
+///
+/// Shared rather than one apiece, because a Guide is a read and every test
+/// here asks the same question of it. Never dropped: its directory is left
+/// behind with the process.
+static ASKED: LazyLock<Server> = LazyLock::new(|| {
+    let dir = tempfile::tempdir().unwrap().keep();
+    let server = Server::keeping(dir.join("verkstead.db"));
+
+    let plugin =
+        crate::plugin::agent(crate::plugin::AGENT, &crate::plugin::exporting_an_agent()).keep();
+    let source = plugin.to_str().unwrap();
+
+    let consent = pressing(
+        &server,
+        "/api/ui/plugins/read",
+        serde_json::json!({ "source": source }),
+    );
+    pressing(
+        &server,
+        "/api/ui/plugins",
+        serde_json::json!({ "source": source, "granted": consent["capabilities"] }),
+    );
+
+    server
+});
+
+/// One press on the viewer's namespace of `server`, insisting it was taken.
+fn pressing(server: &Server, path: &str, body: serde_json::Value) -> serde_json::Value {
+    let said = ureq::post(format!("{}{path}", server.base()))
+        .header("Content-Type", "application/json")
+        .send(body.to_string())
+        .unwrap_or_else(|error| panic!("{path} should be taken: {error}"))
+        .into_body()
+        .read_to_string()
+        .unwrap();
+    serde_json::from_str(&said).unwrap()
+}
 
 /// Run the binary with `args` and insist it had something to say.
 ///
 /// With no agent type set, whatever the environment running the suite happens
 /// to hold: every assertion here that is not about tailoring is about the
-/// blocking Guide, which is what nothing set means — and a suite run from
-/// inside a sandbox would otherwise be asking those questions of whichever
-/// backend it happened to be running on.
+/// core Guide, which is what nothing set means — and a suite run from inside a
+/// sandbox would otherwise be asking those questions of whichever backend it
+/// happened to be running on.
 fn run(args: &[&str]) -> Output {
     running(args).env_remove(AGENT_TYPE).output()
 }
 
-/// And the same as a session of `agent_type` runs it, which is the whole of
-/// what tailors the Guide.
+/// And the same as a session of `agent_type` runs it, against the server that
+/// says what its half is — which is the whole of what tailors the Guide.
 fn run_as(agent_type: &str, args: &[&str]) -> Output {
-    running(args).env(AGENT_TYPE, agent_type).output()
+    running(args)
+        .env(AGENT_TYPE, agent_type)
+        .env(SERVER, &ASKED.url())
+        .output()
 }
 
 /// One run, however the environment is set — see the two above.
@@ -779,19 +837,29 @@ fn a_store_and_nudge_backend_reads_its_own_channel() {
     );
 }
 
-/// And a Claude session reads what it always read. Claude Code holds the ask
-/// open in a background shell call its harness wakes it from, which is the
-/// whole of how it asks — and is Claude Code's own rather than every blocking
-/// backend's, which is what the test below this one is about.
+/// And a Claude session reads what it always read: the core with the
+/// blocking kinds, and Claude Code's own way of running the ask spliced in
+/// where it goes. Claude Code holds the ask open in a background shell call
+/// its harness wakes it from, which is the whole of how it asks — and is
+/// Claude Code's own rather than every blocking backend's, which is what the
+/// test below this one is about.
 #[test]
 fn a_blocking_backend_reads_the_guide_it_always_read() {
     let claude = stdout(&run_as("claude", &["guide"]));
+    let core = stdout(&run(&["guide"]));
 
     assert_eq!(
         claude,
-        stdout(&run(&["guide"])),
-        "Claude's is what nothing set prints, so a Claude session and a human \
-         at a terminal read the same document"
+        core.replacen(
+            "## Running the ask\n\n",
+            &format!(
+                "## Running the ask\n\n{}\n\n",
+                include_str!("../../../server/src/harness/running/claude.md").trim_end()
+            ),
+            1
+        ),
+        "Claude's is the core with its section in, so a Claude session reads \
+         the document it always read"
     );
 
     let running = section(&claude, "## Running the ask");
@@ -817,6 +885,69 @@ fn a_blocking_backend_reads_the_guide_it_always_read() {
         "and says not to put the same Questions a second time, which is what a \
          session with no Response and no instruction otherwise will do, \
          got:\n{running}"
+    );
+}
+
+/// Outside a sandbox, nothing says which backend is reading, and the Guide is
+/// the core alone: the blocking kinds, which are what a human at a terminal
+/// has, and no backend's way of running the ask.
+#[test]
+fn outside_a_sandbox_the_guide_is_the_core_alone() {
+    let output = run(&["guide"]);
+    let core = stdout(&output);
+
+    assert!(output.status.success());
+    assert!(
+        !core.contains("<!--"),
+        "every marker is filled or taken out, got:\n{core}"
+    );
+    assert!(section(&core, "## Two kinds of ask").contains("Block only on Questions"));
+
+    let running = section(&core, "## Running the ask");
+    assert!(
+        running.starts_with("\n\nThere is no health probe"),
+        "the section is the core's own closing paragraphs and no backend's, \
+         got:\n{running}"
+    );
+}
+
+/// And where the server a session names cannot be reached, the same: the core
+/// alone, exiting 0, rather than nothing — a Guide is worth reading whether or
+/// not the ask it describes would get through.
+#[test]
+fn with_the_server_unreachable_the_guide_is_the_core_alone() {
+    let output = running(&["guide"])
+        .env(AGENT_TYPE, "codex")
+        .env(SERVER, NOBODY)
+        .output();
+
+    assert!(output.status.success(), "the Guide is printed all the same");
+    assert_eq!(stdout(&output), stdout(&run(&["guide"])));
+}
+
+/// A plugin harness's session reads the *Running the ask* section its manifest
+/// wrote, fetched from the server that installed it (ADR-0030, *Agent*).
+#[test]
+fn a_plugin_harness_reads_the_section_its_manifest_wrote() {
+    let output = run_as(PLUGGED, &["guide"]);
+    let guide = stdout(&output);
+
+    assert!(output.status.success());
+
+    let running = section(&guide, "## Running the ask");
+    assert!(
+        running.starts_with(&format!(
+            "\n\n{PLUGGED_RUNNING}\n\nThere is no health probe"
+        )),
+        "the manifest's section, where every backend's goes, got:\n{running}"
+    );
+    assert_eq!(
+        section(&guide, "## Two kinds of ask"),
+        section(
+            &stdout(&run_as("claude", &["guide"])),
+            "## Two kinds of ask"
+        ),
+        "and the kinds of the channel it declares, which blocks",
     );
 }
 
@@ -1008,19 +1139,19 @@ fn nothing_in_a_store_and_nudge_guide_says_the_ask_blocks() {
     }
 }
 
-/// A word this binary has not got is refused by name.
+/// A harness the server has not got is refused by name.
 ///
-/// Read past as blocking, a Guide would hand the hold-the-ask advice to a
-/// backend that cannot hold one — which is a session wedged for hours rather
-/// than an error anybody sees. The variable is Verkstead's own to set, so
-/// anything else in it is a mistake worth stopping on.
+/// Printed past as the core, a Guide would leave a backend with no way of
+/// running its ask — which is a session wedged rather than an error anybody
+/// sees. The variable is Verkstead's own to set, so anything else in it is a
+/// mistake worth stopping on.
 #[test]
-fn an_agent_type_this_binary_has_not_got_is_refused_by_name() {
+fn an_agent_type_the_server_has_not_got_is_refused_by_name() {
     let output = run_as("nonesuch", &["guide"]);
 
     assert!(
         !output.status.success(),
-        "a Guide printed for a backend this binary does not know should fail"
+        "a Guide printed for a backend the server does not know should fail"
     );
     assert_eq!(
         stdout(&output),

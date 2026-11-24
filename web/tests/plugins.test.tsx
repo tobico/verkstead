@@ -215,6 +215,80 @@ describe("the Built-in group", () => {
   });
 });
 
+describe("an Agent plugin's row", () => {
+  /// GitLab, as an Agent plugin whose harness two profiles use and whose
+  /// binary isn't on this machine.
+  const AGENT: PluginsView = {
+    ...PLUGINS,
+    installed: [
+      {
+        ...PLUGINS.installed[0]!,
+        profiles: 2,
+        harness: {
+          id: PLUGINS.installed[0]!.uuid,
+          binary: "stub-harness",
+          present: false,
+          installable: true,
+          install: { install: "Idle" },
+        },
+      },
+    ],
+  };
+
+  it("counts the profiles that use its harness", async () => {
+    serving(whenever("/api/ui/plugins", json(AGENT)));
+    pane();
+
+    const row = await theRow("GitLab");
+    expect(row.querySelector("[data-profiles]")?.textContent).toBe(
+      "2 agent profiles use it.",
+    );
+  });
+
+  it("says they aren't offered while it's disabled", async () => {
+    serving(
+      whenever(
+        "/api/ui/plugins",
+        json({
+          ...AGENT,
+          installed: [{ ...AGENT.installed[0]!, enabled: false, harness: null }],
+        }),
+      ),
+    );
+    pane();
+
+    const row = await theRow("GitLab");
+    expect(row.querySelector("[data-profiles]")?.textContent).toBe(
+      "2 agent profiles use it. They aren't offered while it's disabled.",
+    );
+  });
+
+  it("installs its missing binary on the press", async () => {
+    const uuid = AGENT.installed[0]!.uuid;
+    const fetching = serving(
+      whenever("/api/ui/plugins", json(AGENT)),
+      whenever(`/api/ui/plugins/${uuid}/harness`, json(AGENT), "POST"),
+    );
+    pane();
+
+    const row = await theRow("GitLab");
+    expect(row.textContent).toContain("stub-harness isn't on this machine.");
+
+    const install = [...row.querySelectorAll("button")].find(
+      (button) => button.textContent === "Install",
+    )!;
+    fireEvent.click(install);
+
+    await waitFor(() =>
+      expect(
+        fetching.mock.calls.some(([asked]) =>
+          String(asked).endsWith(`/plugins/${uuid}/harness`),
+        ),
+      ).toBe(true),
+    );
+  });
+});
+
 describe("a row's settings", () => {
   it("opens its pane from the row where its manifest declares fields", async () => {
     serving(whenever("/api/ui/plugins", json(PLUGINS)));

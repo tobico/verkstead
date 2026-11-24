@@ -253,3 +253,151 @@ fn a_language_entry_setting_a_sandbox_variable_is_refused_naming_it() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("`provides[0].env.PATH`"), "{stderr}");
 }
+
+/// A harness declared in full, as `docs/plugins.md` writes one, its component
+/// `agent.wasm` and its mark `mark.svg`.
+pub(crate) const AGENT: &str = r#"
+uuid: 3f0c9a12-7b4e-4c1d-8e2f-5a6b7c8d9e0f
+name: Stub harness
+author:
+  name: Ada Lovelace
+  email: ada@example.com
+version: 0.1.0
+interface: 1
+mark: mark.svg
+component: agent.wasm
+provides:
+  - category: agent
+    binary: stub
+    name: Stub
+    launch:
+      model: [--model, "{model}"]
+      prompt: ["{prompt}"]
+      session: [--session-id, "{session}"]
+      resume:
+        flag: [--resume, "{session}"]
+      tail: [--yes]
+    account:
+      - key: dir
+        label: Directory
+        kind: directory
+        mounted: .stub
+      - key: file
+        label: Settings file
+        kind: file
+        mounted: .stub.json
+    idle: silence
+    ask:
+      channel: blocking
+      guide: Run `verkstead ask` and wait for it.
+    models:
+      - id: stub-large
+        name: Stub Large
+        default: true
+    tools: mcp__<server>__<tool>
+    instructions: STUB.md
+"#;
+
+/// A component exporting the server's `agent` world, made from its WIT by
+/// wit-component, each export a trap nothing here calls.
+pub(crate) fn exporting_an_agent() -> Vec<u8> {
+    let mut resolve = wit_parser::Resolve::default();
+    let (package, _) = resolve
+        .push_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../server/wit"))
+        .expect("the plugin WIT should parse");
+    let world = resolve
+        .select_world(&[package], Some("agent"))
+        .expect("the agent world should be there");
+
+    let mut module =
+        wit_component::dummy_module(&resolve, world, wit_parser::ManglingAndAbi::Standard32);
+    wit_component::embed_component_metadata(
+        &mut module,
+        &resolve,
+        world,
+        wit_component::StringEncoding::UTF8,
+        false,
+    )
+    .expect("the agent world should embed");
+
+    wit_component::ComponentEncoder::default()
+        .module(&module)
+        .expect("the dummy should be a module wit-component reads")
+        .validate(true)
+        .encode()
+        .expect("the dummy should encode as a component")
+}
+
+/// A plugin of `manifest` providing an agent, with `component` as its
+/// component.
+pub(crate) fn agent(manifest: &str, component: &[u8]) -> tempfile::TempDir {
+    let dir = plugin(manifest);
+    std::fs::write(
+        dir.path().join("mark.svg"),
+        "<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("agent.wasm"), component).unwrap();
+    dir
+}
+
+#[test]
+fn a_complete_agent_passes() {
+    let dir = agent(AGENT, &exporting_an_agent());
+
+    let output = check(dir.path());
+
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("providing agent"), "{stdout}");
+}
+
+#[test]
+fn an_agent_missing_a_piece_is_refused_naming_it() {
+    let dir = agent(
+        &AGENT.replace("        label: Settings file\n", ""),
+        &exporting_an_agent(),
+    );
+
+    let output = check(dir.path());
+
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`provides[0].account[1].label` is missing."),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("(read for"), "{stderr}");
+}
+
+#[test]
+fn an_agent_refused_on_one_platform_says_which() {
+    let dir = agent(
+        &format!("{AGENT}    windows:\n      idle: never\n"),
+        &exporting_an_agent(),
+    );
+
+    let output = check(dir.path());
+
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("`provides[0].idle`"), "{stderr}");
+    assert!(stderr.contains("(read for windows)"), "{stderr}");
+}
+
+#[test]
+fn an_agent_whose_component_exports_nothing_is_refused() {
+    let dir = agent(
+        AGENT,
+        &wat::parse_str("(component)").expect("the fixture should assemble"),
+    );
+
+    let output = check(dir.path());
+
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("The component provides an agent and doesn't export what one needs"),
+        "{stderr}"
+    );
+}

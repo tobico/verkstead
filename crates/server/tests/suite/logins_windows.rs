@@ -221,8 +221,10 @@ impl Workbench {
                     "name": name,
                     "account": {
                         "agent_type": "Claude",
-                        "claude_dir": claude_dir,
-                        "config_file": config_file,
+                        "paths": {
+                            "claude_dir": claude_dir,
+                            "config_file": config_file,
+                        },
                     },
                     "models": ["claude-opus-5"],
                 }),

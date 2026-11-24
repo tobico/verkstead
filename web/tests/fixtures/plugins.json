@@ -5,9 +5,11 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "harness": null,
       "languages": [],
       "name": "Verkstead",
       "needs": [],
+      "profiles": 0,
       "provides": [
         "skills"
       ],
@@ -24,11 +26,13 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "harness": null,
       "languages": [
         ".NET"
       ],
       "name": ".NET",
       "needs": [],
+      "profiles": 0,
       "provides": [
         "language"
       ],
@@ -45,11 +49,13 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "harness": null,
       "languages": [
         "Go"
       ],
       "name": "Go",
       "needs": [],
+      "profiles": 0,
       "provides": [
         "language"
       ],
@@ -66,11 +72,13 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "harness": null,
       "languages": [
         "JVM"
       ],
       "name": "JVM",
       "needs": [],
+      "profiles": 0,
       "provides": [
         "language"
       ],
@@ -87,11 +95,13 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "harness": null,
       "languages": [
         "Node"
       ],
       "name": "Node",
       "needs": [],
+      "profiles": 0,
       "provides": [
         "language"
       ],
@@ -108,11 +118,13 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "harness": null,
       "languages": [
         "Python"
       ],
       "name": "Python",
       "needs": [],
+      "profiles": 0,
       "provides": [
         "language"
       ],
@@ -129,12 +141,14 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "harness": null,
       "languages": [
         "Rust",
         "C/C++"
       ],
       "name": "Rust & C/C++",
       "needs": [],
+      "profiles": 0,
       "provides": [
         "language"
       ],
@@ -153,9 +167,11 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "harness": null,
       "languages": [],
       "name": "GitLab",
       "needs": [],
+      "profiles": 0,
       "provides": [
         "forge",
         "activity"
@@ -174,9 +190,11 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "harness": null,
       "languages": [],
       "name": "Broken",
       "needs": [],
+      "profiles": 0,
       "provides": [
         "forge",
         "activity"
@@ -195,9 +213,11 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "harness": null,
       "languages": [],
       "name": "Shared skills",
       "needs": [],
+      "profiles": 0,
       "provides": [
         "forge",
         "activity"
@@ -217,6 +237,7 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "harness": null,
       "languages": [],
       "name": "Dependent",
       "needs": [
@@ -229,6 +250,7 @@
           "uuid": "8e7d6c5b-4a39-4281-9f0e-1d2c3b4a5968"
         }
       ],
+      "profiles": 0,
       "provides": [
         "forge",
         "activity"
@@ -247,11 +269,13 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "harness": null,
       "languages": [
         "Zig"
       ],
       "name": "Zig",
       "needs": [],
+      "profiles": 0,
       "provides": [
         "language"
       ],

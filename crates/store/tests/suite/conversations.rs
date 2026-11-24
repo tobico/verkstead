@@ -52,10 +52,10 @@ const MODEL: &str = "claude-opus-5";
 fn profile_facts(name: &str) -> ProfileFacts {
     ProfileFacts {
         name: Some(name.to_owned()),
-        account: Account::Claude {
-            claude_dir: PathBuf::from(format!("/watched/accounts/{name}/.claude")),
-            config_file: PathBuf::from(format!("/watched/accounts/{name}/.claude.json")),
-        },
+        account: Account::claude(
+            PathBuf::from(format!("/watched/accounts/{name}/.claude")),
+            PathBuf::from(format!("/watched/accounts/{name}/.claude.json")),
+        ),
         models: vec![MODEL.to_owned()],
         memory: true,
     }

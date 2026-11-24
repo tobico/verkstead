@@ -24,6 +24,11 @@
 //! `plugins/<name>/` names its `[lib]` `<name>` (a `-` written `_`, as cargo
 //! would), which is the file cargo writes, and the manifest's `component:` is
 //! `<name>.wasm`.
+//!
+//! **The workspace also holds components that are no built-in's**, under
+//! `plugins/tests/`, which the server's suites install as plugins of their
+//! own: they are built with the rest and embedded nowhere, and each one's
+//! path is handed to the tests in a variable — see `TESTS` below.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -110,6 +115,21 @@ fn main() {
     list.push(']');
 
     fs::write(out.join("built_ins.rs"), list).expect("OUT_DIR is writable");
+
+    // And the components the suites install as plugins of their own, each a
+    // workspace of its own and embedded nowhere: each test is handed the
+    // file's path instead. **None where its source is not there**, which is the
+    // packaged build's — see `nix/verkstead-source.nix` — and which compiles no
+    // test that would ask.
+    for (variable, directory, lib) in TESTS {
+        let source = plugins.join("tests").join(directory);
+        let wasm = match plugins.join("dist").join(lib) {
+            artefact if artefact.is_file() => artefact,
+            _ if !source.join("Cargo.toml").is_file() => continue,
+            _ => build(&source, &out.join(directory)).join(lib),
+        };
+        println!("cargo::rustc-env={variable}={}", path(&wasm));
+    }
 }
 
 /// Every file under `dir` but its manifest, relative to the built-in's
@@ -134,7 +154,17 @@ fn walked(dir: &Path, at: &Path, crate_: bool, found: &mut Vec<PathBuf>) {
     }
 }
 
-/// Build every component under `plugins/` for `wasm32-wasip2`, returning the
+/// The components under `plugins/tests/` the suites install, each by the
+/// variable a test reads its path from, its directory there, and the file
+/// cargo writes.
+const TESTS: &[(&str, &str, &str)] = &[(
+    "VERKSTEAD_STUB_HARNESS_WASM",
+    "stub-harness",
+    "stub_harness.wasm",
+)];
+
+/// Build every component of the workspace at `plugins` — the built-ins' under
+/// `plugins/`, or a test component's own — for `wasm32-wasip2`, returning the
 /// directory the `.wasm` files are in.
 fn build(plugins: &Path, out: &Path) -> PathBuf {
     let target_dir = out.join("plugins-target");
@@ -165,6 +195,8 @@ fn build(plugins: &Path, out: &Path) -> PathBuf {
              (the dev shell's has it).\n\
              Or build them once and leave them where this looks first:\n\n    \
              cargo build --release --target {TARGET} --manifest-path plugins/Cargo.toml\n    \
+             cargo build --release --target {TARGET} --target-dir plugins/target \
+             --manifest-path plugins/tests/stub-harness/Cargo.toml\n    \
              mkdir -p plugins/dist && cp plugins/target/{TARGET}/release/*.wasm plugins/dist/\n\n\
              What cargo said:\n{}",
             String::from_utf8_lossy(&output.stderr)

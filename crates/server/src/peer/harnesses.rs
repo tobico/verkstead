@@ -25,7 +25,7 @@
 
 use axum::Json;
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -41,18 +41,39 @@ use crate::AppState;
 /// take.
 pub const HARNESSES: &str = "/api/peer/v1/harnesses";
 
+/// What an asker adds to [`HARNESSES`] to be told about plugin harnesses too.
+///
+/// **Asked for rather than always said**, because a release older than this
+/// one reads every row of the answer as one of the five words it knows, and
+/// one row it cannot read fails the whole answer — which it takes for the
+/// device being unreachable, refusing every move onto it, a Claude-only one
+/// included. A release that reads plugin ids asks with this; one that does not
+/// is answered about the built-ins alone, which is all it could run anyway.
+pub const PLUGGED: &str = "plugged=true";
+
+/// The query [`here`] reads — see [`PLUGGED`].
+#[derive(Debug, Default, serde::Deserialize)]
+pub(crate) struct Asked {
+    #[serde(default)]
+    plugged: bool,
+}
+
 /// `GET /api/peer/v1/harnesses` — every harness, and whether a session of that
 /// type could be launched on this machine.
 ///
 /// The `PATH` walks go in one blocking task rather than one apiece: they are
 /// four lookups against a directory list, and a preflight is asked for once
 /// before a move rather than on every page.
-pub(crate) async fn here(State(state): State<AppState>) -> Response {
+pub(crate) async fn here(State(state): State<AppState>, Query(asked): Query<Asked>) -> Response {
     let machine = state.onboarding.machine().clone();
+    let plugged = match asked.plugged {
+        true => state.plugins.harnesses(),
+        false => Vec::new(),
+    };
 
     let answered = tokio::task::spawn_blocking(move || {
         machine
-            .harnesses()
+            .harnesses(&plugged)
             .into_iter()
             .map(|(agent_type, there)| HarnessThere {
                 agent_type: crate::profiles::agent_type(agent_type),
@@ -102,6 +123,19 @@ mod tests {
         assert_ne!(HARNESSES, super::super::IDENTITY);
         assert_ne!(HARNESSES, super::super::joining::JOIN);
         assert_ne!(HARNESSES, super::super::exchange::SETTLED);
+    }
+
+    /// An asker saying nothing is an older release, told about the built-ins
+    /// alone; one adding [`PLUGGED`] is told about plugin harnesses too.
+    #[test]
+    fn plugin_harnesses_are_said_only_to_an_asker_that_reads_them() {
+        let read = |query: &str| {
+            let uri: axum::http::Uri = format!("{HARNESSES}?{query}").parse().unwrap();
+            Query::<Asked>::try_from_uri(&uri).unwrap().0.plugged
+        };
+
+        assert!(!read(""));
+        assert!(read(PLUGGED));
     }
 
     /// And it names no device: a device asks for the whole list and picks out

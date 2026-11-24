@@ -496,6 +496,21 @@ async fn a_uuid_installed_or_built_in_is_refused() {
     assert_eq!(status, StatusCode::CONFLICT, "{said}");
     assert!(said.contains("built-in"), "{said}");
 
+    // And a built-in harness's, which an id is read as ignoring case.
+    let claude = plugin(
+        dir.path(),
+        "claude",
+        &manifest("985E669B-5CF2-4AEE-BBF2-6074626949F4", "Claude", &[]),
+    );
+    let (status, said) = pressing(
+        &app,
+        PLUGINS,
+        serde_json::json!({ "source": claude, "granted": [] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{said}");
+    assert!(said.contains("Claude Code's, which is built in"), "{said}");
+
     assert_eq!(page(&app).await.installed.len(), 1);
 }
 
@@ -2299,4 +2314,96 @@ mod packs {
             ["rust-review"]
         );
     }
+}
+
+/// An Agent plugin installed from a directory puts its harness on the list the
+/// Profile form and the pickers draw — under its plugin's uuid, its own name
+/// and the mark it ships, with a field apiece for the paths it declares — and
+/// a Profile of it saved through that form is bound here and runnable.
+#[tokio::test]
+async fn an_agent_plugin_installed_from_a_directory_is_a_harness_a_profile_is_saved_under() {
+    use crate::stub_harness::{self, StubHarness};
+    use verkstead_render::{HarnessEntry, ProfileEntry, ProfileSaved};
+
+    let (app, dir) = kept().await;
+    let harness = StubHarness::Silent;
+
+    harness
+        .installed(&app, dir.path(), ["stub-large", "stub-grilling"])
+        .await;
+
+    let listed: Vec<HarnessEntry> = got(&app, "/api/ui/harnesses").await;
+    let entry = listed
+        .iter()
+        .find(|entry| entry.id.as_str() == harness.uuid())
+        .unwrap_or_else(|| panic!("the stub harness is on the list: {listed:?}"));
+
+    assert_eq!(entry.name, "Stub Harness");
+    assert_eq!(
+        entry.mark,
+        stub_harness::MARK,
+        "drawn with the mark it ships"
+    );
+    assert_eq!(
+        entry
+            .paths
+            .iter()
+            .map(|path| (path.key.as_str(), path.label.as_str(), path.file))
+            .collect::<Vec<_>>(),
+        [
+            ("dir", "Stub directory", false),
+            ("config", "Stub config file", true)
+        ],
+        "a field apiece for the paths it declares, labelled as it labels them"
+    );
+    assert_eq!(
+        listed.first().map(|entry| entry.id.as_str()),
+        Some("Claude"),
+        "after the built-ins, which keep their places"
+    );
+
+    let (status, said) = pressing(
+        &app,
+        "/api/ui/profiles",
+        serde_json::json!({
+            "name": "Stubbed",
+            "account": {
+                "agent_type": harness.uuid(),
+                "paths": stub_harness::account(&dir.path().join("account")),
+            },
+            "models": ["stub-large"],
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert_eq!(
+        serde_json::from_str::<ProfileSaved>(&said).unwrap(),
+        ProfileSaved::Saved
+    );
+
+    let profiles: Vec<ProfileEntry> = got(&app, "/api/ui/profiles").await;
+    let profile = profiles
+        .iter()
+        .find(|profile| profile.name.as_deref() == Some("Stubbed"))
+        .expect("the Profile is on the list");
+
+    assert_eq!(profile.account.agent_type.as_str(), harness.uuid());
+    assert_eq!(
+        profile.account.paths.keys().collect::<Vec<_>>(),
+        ["config", "dir"],
+        "both declared paths are kept"
+    );
+    assert!(profile.bound, "bound on this device, which saved it");
+    assert_eq!(profile.broken, None, "and nothing in the way of running it");
+}
+
+async fn got<T: serde::de::DeserializeOwned>(app: &Router, path: &str) -> T {
+    let answered = app
+        .clone()
+        .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(answered.status(), StatusCode::OK);
+    let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&bytes).unwrap()
 }

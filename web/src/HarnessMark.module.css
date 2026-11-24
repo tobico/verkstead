@@ -1,20 +1,31 @@
 /* One harness's brand mark — see `HarnessMark.tsx`.
 
-   Almost nothing, because the drawing arrived sized: lobehub's files are `1em`
-   square and painted in `currentColor` already, so a mark follows the size and
-   the ink of whatever line it was put beside without either being said here.
-   What is left is the wrapper the file is drawn inside.
-
-   Where a mark stands in its line is the caller's, as an `Icon`'s is. */
+   A box the size of a glyph, with the mark — `--mark`, set on the element —
+   drawn into it as a picture, or as a mask over the ink around it: either way
+   it follows the size of the line it was put beside. Where a mark stands in its
+   line is the caller's, as an `Icon`'s is. */
 .mark {
-  /* The wrapper is the drawing and nothing more: `inline-flex` so it takes the
-     `svg`'s own box rather than a line box with descender space under it, and
-     `flex: none` for the three lines that are flex rows, where a mark must not
-     be the thing that gives way when the words run long. */
-  display: inline-flex;
+  /* `inline-block` so it takes the box below rather than a line box with
+     descender space under it, and `flex: none` for the three lines that are
+     flex rows, where a mark must not be the thing that gives way when the
+     words run long. */
+  display: inline-block;
   flex: none;
-  /* A glyph sits on the baseline and an `svg` sits under it, which puts a mark
-     a couple of pixels low beside the words it belongs to. The same nudge
+  width: 1em;
+  height: 1em;
+  /* A glyph sits on the baseline and a box sits under it, which puts a mark a
+     couple of pixels low beside the words it belongs to. The same nudge
      `Icon.module.css` makes, for the same reason. */
   vertical-align: -0.125em;
+}
+
+/* A mark painted in `currentColor`: the line's own ink, cut to its shape. */
+.inked {
+  background-color: currentColor;
+  mask: var(--mark) center / contain no-repeat;
+}
+
+/* A mark that names its own colours, drawn as the picture it is. */
+.coloured {
+  background: var(--mark) center / contain no-repeat;
 }

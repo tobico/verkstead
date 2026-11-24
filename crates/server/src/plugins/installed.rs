@@ -59,15 +59,16 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use verkstead_render::{
-    PluginAt, PluginCapability, PluginConsent, PluginEnabled, PluginFix, PluginInstall, PluginNeed,
-    PluginRow, PluginSource, PluginUpdate, PluginUpdated, PluginsView,
+    DependencyState, InstallState, PluginAt, PluginCapability, PluginConsent, PluginEnabled,
+    PluginFix, PluginHarness, PluginInstall, PluginNeed, PluginRow, PluginSource, PluginUpdate,
+    PluginUpdated, PluginsView,
 };
 use verkstead_schema::{ApiError, Nudge};
 
 use super::built_in::{self, BUILT_INS, FIXTURE};
 use super::component;
 use super::git::{self, Staged};
-use super::manifest::{Access, Capability, Dependency, Files, Manifest};
+use super::manifest::{Access, Capability, Dependency, Files, Manifest, Mark};
 use crate::AppState;
 use crate::github::Credential;
 use crate::platform::Platform;
@@ -95,6 +96,11 @@ pub(crate) struct Installed {
     /// handed, held here too because a server with no agents still draws the
     /// composer.
     packs: Arc<Mutex<Vec<crate::skills::LoadedPack>>>,
+
+    /// The harnesses the Agent plugins that loaded here declare, in the order
+    /// they were installed: what this server offers beside its built-ins —
+    /// see [`crate::harness::plugged`].
+    harnesses: Arc<Mutex<Vec<crate::store::AgentType>>>,
 }
 
 impl Installed {
@@ -123,6 +129,14 @@ impl Installed {
         self.packs
             .lock()
             .expect("nothing panics holding the packs")
+            .clone()
+    }
+
+    /// The harnesses the Agent plugins that loaded here declare.
+    pub(crate) fn harnesses(&self) -> Vec<crate::store::AgentType> {
+        self.harnesses
+            .lock()
+            .expect("nothing panics holding the harnesses")
             .clone()
     }
 
@@ -196,6 +210,7 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
     let mut troubles = BTreeMap::new();
     let mut manifests = BTreeMap::new();
     let mut dirs = BTreeMap::new();
+    let mut components = BTreeMap::new();
     for record in &records {
         // A built-in is read out of the binary, at the start — see
         // [`super::built_in`] — and its record is only its switch; and an
@@ -212,19 +227,22 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
 
         let read = loaded(state, record, home.as_deref(), &credential)
             .await
-            .and_then(|(manifest, dir)| {
-                unclaimed(&claimed, &languages, &manifest).map(|()| (manifest, dir))
+            .and_then(|(manifest, dir, component)| {
+                unclaimed(&claimed, &languages, &manifest).map(|()| (manifest, dir, component))
             });
         match read {
-            Ok((manifest, dir)) => {
+            Ok((manifest, dir, component)) => {
                 for pack in &manifest.packs {
                     claimed.insert(pack.name.clone(), manifest.name.clone());
                 }
                 for provided in built_in::languages(&manifest) {
                     languages.insert(provided.name.clone(), manifest.name.clone());
                 }
-                dirs.insert(record.uuid.clone(), dir);
+                dirs.insert(record.uuid.clone(), dir.clone());
                 manifests.insert(record.uuid.clone(), manifest);
+                if let Some(component) = component {
+                    components.insert(record.uuid.clone(), (dir, component));
+                }
             }
             Err(why) => {
                 tracing::warn!(
@@ -292,6 +310,27 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
         .lock()
         .expect("nothing panics holding the packs") = packs;
 
+    // Every Agent plugin that loaded and is in no trouble stands its harness
+    // up, in the order the plugins were installed.
+    let harnesses: Vec<crate::store::AgentType> = records
+        .iter()
+        .filter_map(|record| {
+            let manifest = manifests.get(&record.uuid)?;
+            let (dir, component) = components.remove(&record.uuid)?;
+            harness(manifest, &dir, component)
+        })
+        .collect();
+    let offered = {
+        let mut held = state
+            .plugins
+            .harnesses
+            .lock()
+            .expect("nothing panics holding the harnesses");
+        let offered = *held != harnesses;
+        *held = harnesses;
+        offered
+    };
+
     let moved = {
         let mut held = state
             .plugins
@@ -303,8 +342,13 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
         moved
     };
 
-    if moved {
+    // A harness offered or taken away moves the harness list the viewer
+    // reads with the Plugins, and which Profiles are runnable.
+    if moved || offered {
         state.nudges.announce_here(Nudge::Plugins);
+    }
+    if offered {
+        state.nudges.announce_here(Nudge::Profiles);
     }
 
     // And the languages the installed Language plugins that loaded provide,
@@ -323,6 +367,26 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
     // session — an installer's language this device has only now read taken
     // up first.
     crate::replicating::plugins::taken_up(&state.pool, &state.settings, &state.device).await
+}
+
+/// The harness `manifest` declares, stood up with its mark read out of `dir`
+/// and its component `loaded` — or none, for a plugin providing no agent.
+fn harness(
+    manifest: &Manifest,
+    dir: &FsPath,
+    loaded: component::Loaded,
+) -> Option<crate::store::AgentType> {
+    let agent = manifest
+        .provides
+        .iter()
+        .find_map(|provision| provision.agent())?;
+
+    let mark = match agent.mark.as_ref().or(manifest.mark.as_ref())? {
+        Mark::Inline(svg) => svg.clone(),
+        Mark::File(path) => String::from_utf8(Files::Dir(dir).read(path)?).ok()?,
+    };
+
+    Some(crate::harness::plugged(&manifest.uuid, agent, mark, loaded))
 }
 
 /// This device's clones of the git plugins `removed` deleted, where it still
@@ -569,7 +633,7 @@ async fn loaded(
     record: &Record<Fields>,
     home: Option<&FsPath>,
     credential: &Credential,
-) -> Result<(Manifest, PathBuf), String> {
+) -> Result<(Manifest, PathBuf, Option<component::Loaded>), String> {
     let dir = match &record.fields.source {
         Source::Local { path, .. } => PathBuf::from(path),
         Source::Git { url, revision } => {
@@ -601,7 +665,7 @@ async fn loaded(
 
     component::load(Files::Dir(&dir), &manifest, home)
         .await
-        .map(|_| (manifest, dir))
+        .map(|component| (manifest, dir, component))
         .map_err(|trouble| trouble.why)
 }
 
@@ -849,6 +913,8 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
     let records = replicated::live_records::<Plugins>(&state.pool).await?;
     let config = state.settings.config();
     let loaded = crate::languages::configured(&config);
+    let profiles = profiles(state).await?;
+    let harnesses = harnesses(state).await?;
     let going: BTreeMap<String, Vec<String>> = records
         .iter()
         .map(|record| (record.uuid.clone(), going_with(&records, &record.uuid)))
@@ -888,6 +954,8 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
                 author: fields.author,
                 provides: fields.provides,
                 enabled,
+                profiles: 0,
+                harness: None,
             }
         })
         .collect();
@@ -947,6 +1015,8 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
                 source,
                 dependents: going.get(&record.uuid).cloned().unwrap_or_default(),
                 settings: u32::try_from(record.fields.declared.len()).unwrap_or(u32::MAX),
+                profiles: profiles.get(&record.uuid).copied().unwrap_or(0),
+                harness: harnesses.get(&record.uuid).cloned(),
                 uuid: record.uuid,
                 name: record.fields.name,
                 version: record.fields.version,
@@ -1012,6 +1082,8 @@ fn built_ins(
                 elsewhere: None,
                 dependents: going_with(records, &manifest.uuid),
                 settings: u32::try_from(manifest.settings.len()).unwrap_or(u32::MAX),
+                profiles: 0,
+                harness: None,
             }),
             Err(refusal) => Some(PluginRow {
                 uuid: built_in.directory.to_owned(),
@@ -1027,11 +1099,68 @@ fn built_ins(
                 elsewhere: None,
                 dependents: Vec::new(),
                 settings: 0,
+                profiles: 0,
+                harness: None,
             }),
         })
         .collect();
     rows.sort_by_key(|row| row.uuid != built_in::VERKSTEAD);
     rows
+}
+
+/// How many Agent Profiles name each plugin's harness, by the plugin's uuid —
+/// which is the harness's id.
+async fn profiles(state: &AppState) -> Result<BTreeMap<String, u32>> {
+    let mut counted: BTreeMap<String, u32> = BTreeMap::new();
+
+    for profile in crate::store::profiles(&state.pool).await? {
+        let harness = profile.agent_type();
+        if harness.built_in().is_none() {
+            *counted.entry(harness.word().to_owned()).or_default() += 1;
+        }
+    }
+
+    Ok(counted)
+}
+
+/// The harness each Agent plugin that loaded here provides, by the plugin's
+/// uuid: its binary probed the way its onboarding row is, and what the install
+/// run has made of it.
+async fn harnesses(state: &AppState) -> Result<BTreeMap<String, PluginHarness>> {
+    let machine = state.onboarding.machine().clone();
+    let offered = state.plugins.harnesses();
+    let installing: Vec<InstallState> = offered
+        .iter()
+        .map(|agent_type| state.onboarding.installing(*agent_type))
+        .collect();
+
+    // Off the runtime: a `PATH` walk apiece.
+    Ok(tokio::task::spawn_blocking(move || {
+        offered
+            .into_iter()
+            .zip(installing)
+            .filter_map(|(agent_type, install)| {
+                let harness = crate::harness::of(agent_type)?;
+
+                Some((
+                    agent_type.word().to_owned(),
+                    PluginHarness {
+                        id: crate::profiles::agent_type(agent_type),
+                        binary: harness.binary().to_owned(),
+                        present: matches!(
+                            machine.harness_row(agent_type),
+                            DependencyState::Present { .. }
+                        ),
+                        installable: harness
+                            .install()
+                            .is_some_and(|install| !install.commands.is_empty()),
+                        install,
+                    },
+                ))
+            })
+            .collect()
+    })
+    .await?)
 }
 
 /// The routes the section reads and presses — mounted beside the rest of the
@@ -1045,6 +1174,9 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/api/ui/plugins/{uuid}/update", post(update))
         .route("/api/ui/plugins/{uuid}/enabled", post(enable))
         .route("/api/ui/plugins/{uuid}/remove", post(remove))
+        // **Install** on an Agent plugin's row: the wizard's run, for its
+        // harness's binary.
+        .route("/api/ui/plugins/{uuid}/harness", post(install_harness))
         // Its pane: the settings fields its manifest declares, and a save.
         .route(
             "/api/ui/plugins/{uuid}/settings",
@@ -1142,6 +1274,24 @@ async fn readable(state: &AppState, asked: &str) -> Result<(Manifest, Reading), 
             StatusCode::CONFLICT,
             ApiError::new(format!(
                 "Its uuid `{}` is a built-in plugin's. Give it a uuid of its own.",
+                manifest.uuid
+            )),
+        ));
+    }
+
+    // And a built-in harness's, which an id is read as ignoring case — see
+    // [`crate::store::AgentType::read`]: a plugin under one would be read as
+    // that built-in, its harness shadowed and its Profiles run as the
+    // built-in's.
+    let harness = crate::store::BUILT_IN
+        .iter()
+        .find(|built_in| built_in.uuid.eq_ignore_ascii_case(&manifest.uuid));
+    if let Some(harness) = harness {
+        let named = crate::harness::of(harness.agent_type).map_or("", |harness| harness.named());
+        return Err(refused(
+            StatusCode::CONFLICT,
+            ApiError::new(format!(
+                "Its uuid `{}` is {named}'s, which is built in. Give it a uuid of its own.",
                 manifest.uuid
             )),
         ));
@@ -1638,17 +1788,23 @@ fn going_with(records: &[Record<Fields>], uuid: &str) -> Vec<String> {
 }
 
 /// Something open that stands on a plugin, and keeps it from being removed
-/// (ADR-0030). Only another installed plugin depending on it, so far: the
-/// later stages add what stands on the Categories they bring.
+/// (ADR-0030): another installed plugin depending on it, or the Agent
+/// Profiles naming the harness it provides. The later stages add what stands
+/// on the Categories they bring.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Standing {
     /// An installed plugin, ticked or not, whose manifest depends on it.
     Dependent { name: String },
+
+    /// This many Agent Profiles, whatever the checkbox says: removing the
+    /// plugin would leave each naming a harness nothing here has.
+    Profiles { count: u32 },
 }
 
-/// Everything standing on the plugin `uuid`, among the installed `records`.
-fn standing(records: &[Record<Fields>], uuid: &str) -> Vec<Standing> {
-    records
+/// Everything standing on the plugin `uuid`, among the installed `records`
+/// and the `profiles` counted on each.
+fn standing(records: &[Record<Fields>], uuid: &str, profiles: u32) -> Vec<Standing> {
+    let mut standing: Vec<Standing> = records
         .iter()
         .filter(|record| record.uuid != uuid)
         .filter(|record| {
@@ -1661,26 +1817,62 @@ fn standing(records: &[Record<Fields>], uuid: &str) -> Vec<Standing> {
         .map(|record| Standing::Dependent {
             name: record.fields.name.clone(),
         })
-        .collect()
+        .collect();
+
+    // The Profiles lead: they are the ones the human made by hand, and the
+    // ones a removal would leave broken.
+    if profiles > 0 {
+        standing.insert(0, Standing::Profiles { count: profiles });
+    }
+
+    standing
 }
 
 /// The refusal of a Remove over what `standing` counts: how many, and which.
 fn stood_on(name: &str, standing: &[Standing]) -> String {
     let dependents: Vec<&str> = standing
         .iter()
-        .map(|standing| match standing {
-            Standing::Dependent { name } => name.as_str(),
+        .filter_map(|standing| match standing {
+            Standing::Dependent { name } => Some(name.as_str()),
+            Standing::Profiles { .. } => None,
         })
         .collect();
+    let profiles = standing.iter().find_map(|standing| match standing {
+        Standing::Profiles { count } => Some(*count),
+        Standing::Dependent { .. } => None,
+    });
 
-    let (count, them) = match dependents.len() {
-        1 => ("1 plugin depends".to_owned(), "it"),
-        n => (format!("{n} plugins depend"), "them"),
-    };
-    format!(
-        "{name} can't be removed while {count} on it: {}. Remove {them} first.",
-        listed(&dependents)
-    )
+    let mut said: Vec<String> = Vec::new();
+
+    if let Some(count) = profiles {
+        said.push(match count {
+            1 => format!(
+                "{name} can't be removed while 1 agent profile uses it. Delete the profile first."
+            ),
+            n => format!(
+                "{name} can't be removed while {n} agent profiles use it. Delete them first."
+            ),
+        });
+    }
+
+    if !dependents.is_empty() {
+        let (count, them) = match dependents.len() {
+            1 => ("1 plugin depends".to_owned(), "it"),
+            n => (format!("{n} plugins depend"), "them"),
+        };
+        said.push(match profiles {
+            None => format!(
+                "{name} can't be removed while {count} on it: {}. Remove {them} first.",
+                listed(&dependents)
+            ),
+            Some(_) => format!(
+                "And {count} on it: {}. Remove {them} first.",
+                listed(&dependents)
+            ),
+        });
+    }
+
+    said.join(" ")
 }
 
 /// `names` as a sentence lists them, with the serial comma.
@@ -1722,7 +1914,11 @@ async fn remove(State(state): State<AppState>, Path(uuid): Path<String>) -> Resp
         return config_refused("taken out");
     }
 
-    let standing = standing(&records, &uuid);
+    let profiles = match profiles(&state).await {
+        Ok(profiles) => profiles.get(&uuid).copied().unwrap_or(0),
+        Err(error) => return failed(error),
+    };
+    let standing = standing(&records, &uuid, profiles);
     if !standing.is_empty() {
         return refused(
             StatusCode::CONFLICT,
@@ -1738,6 +1934,30 @@ async fn remove(State(state): State<AppState>, Path(uuid): Path<String>) -> Resp
     match moved(&state).await {
         Ok(plugins) => Json(plugins).into_response(),
         Err(refusal) => refusal,
+    }
+}
+
+/// `POST /api/ui/plugins/{uuid}/harness` — **Install** on an Agent plugin's
+/// row: the wizard's install run started for its harness alone, which runs the
+/// commands its manifest declares for this platform (Set 1764, Q19). Refused
+/// where the plugin provides no harness that loaded here, and while a run is
+/// going.
+async fn install_harness(State(state): State<AppState>, Path(uuid): Path<String>) -> Response {
+    let agent_type = crate::store::AgentType::read(&uuid);
+
+    if !state.plugins.harnesses().contains(&agent_type) {
+        return refused(
+            StatusCode::NOT_FOUND,
+            ApiError::new("That plugin provides no harness that's loaded here."),
+        );
+    }
+
+    match state.onboarding.harness(&state.settings, agent_type).await {
+        Ok(()) => answered(&state).await,
+        Err(_) => refused(
+            StatusCode::CONFLICT,
+            ApiError::new("An install is already running."),
+        ),
     }
 }
 
@@ -1762,6 +1982,27 @@ mod tests {
             ),
             "Base can't be removed while 3 plugins depend on it: One, Two, and Top. Remove \
              them first.",
+        );
+    }
+
+    #[test]
+    fn a_refusal_counts_the_profiles_first() {
+        assert_eq!(
+            stood_on("Stub", &[Standing::Profiles { count: 2 }]),
+            "Stub can't be removed while 2 agent profiles use it. Delete them first.",
+        );
+        assert_eq!(
+            stood_on(
+                "Stub",
+                &[
+                    Standing::Profiles { count: 1 },
+                    Standing::Dependent {
+                        name: "One".to_owned()
+                    }
+                ]
+            ),
+            "Stub can't be removed while 1 agent profile uses it. Delete the profile first. And \
+             1 plugin depends on it: One. Remove it first.",
         );
     }
 }
