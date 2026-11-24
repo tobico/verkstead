@@ -1,0 +1,14 @@
+# The fixture: a built-in that provides nothing, with a wasm component that
+# exports nothing. It proves the path every built-in's wasm component takes into
+# the binary — built once for `wasm32-wasip2`, embedded on every platform,
+# loaded at start — and is not listed on the Plugins page (Set 1772, Q4).
+uuid: 613e2a43-80ee-4307-8623-28969e05330f
+name: Fixture
+author:
+  name: Tobias Cohen
+  email: tobi@tobico.net
+version: 0.1.0
+interface: 1
+description: Proves that a built-in plugin's wasm component loads. It provides nothing.
+provides: []
+component: fixture.wasm

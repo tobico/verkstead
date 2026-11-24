@@ -869,6 +869,10 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/devices/members/{device}/unlink",
             post(unlink_device),
         )
+        // And the Plugins section: the installed list, the consent card read
+        // off a path, Install, Update and the checkbox — see
+        // [`crate::plugins::installed`].
+        .merge(crate::plugins::installed::routes())
 }
 
 /// `GET /api/ui/sets/{id}` — one Set, rendered, with where it stands.

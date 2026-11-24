@@ -28,7 +28,7 @@
 #
 # Pinned throughout, as `ci.yml` is: actions to released versions, runners to
 # images rather than `-latest`, and Rust to the patch version the flake's
-# nixpkgs carries.
+# `rustToolchain` pins.
 name: Release
 
 # By hand and by hand only. Nothing here is triggered by a push: a tag used to
@@ -318,11 +318,48 @@ jobs:
           path: web/dist
           if-no-files-found: error
 
+  # The wasm components of the Plugins Verkstead ships, built once, for the
+  # reason the viewer is: a component is platform-neutral bytes, so every leg
+  # below embeds this one build of them rather than compiling its own — the
+  # two musl legs, both Mac legs the desktop job lipo-merges, and Windows all
+  # carry the same files (ADR-0030). `crates/server/build.rs` reads them out of
+  # `plugins/dist/`, and only builds them itself where nothing is there.
+  built-in-plugins:
+    name: Built-in plugins
+    needs: prepare
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          # The bump commit, as every leg does — see the `viewer` job.
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      # The same pin as the legs, with the one target this job is for.
+      - name: Install Rust 1.97.1
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: wasm32-wasip2
+
+      - name: Build
+        run: |
+          cargo build --release --locked --target wasm32-wasip2 \
+            --manifest-path plugins/Cargo.toml
+          mkdir -p plugins/dist
+          cp plugins/target/wasm32-wasip2/release/*.wasm plugins/dist/
+          ls -l plugins/dist
+
+      - name: Upload the components
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: built-in-plugins
+          path: plugins/dist
+          if-no-files-found: error
+
   # One leg per asset, each on a runner of its own architecture: nothing is
   # cross-compiled, and so every leg can run the binary it just built.
   build:
     name: ${{ matrix.asset }}
-    needs: [prepare, viewer]
+    needs: [prepare, viewer, built-in-plugins]
     runs-on: ${{ matrix.runner }}
     strategy:
       # A broken leg does not cancel its siblings. Which targets are broken is
@@ -379,6 +416,15 @@ jobs:
           name: viewer
           path: web/dist
 
+      # And where `crates/server/build.rs` looks for the built-in plugins'
+      # wasm components — see the `built-in-plugins` job. Gitignored, as
+      # `web/dist` is, so this is the whole of what the build will embed.
+      - name: Fetch the built-in plugins
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: built-in-plugins
+          path: plugins/dist
+
       # musl-tools for the C in the dependency tree: `libsqlite3-sys` bundles
       # SQLite's own source and `ring` compiles C of its own, and both are built
       # by cc-rs rather than by rustc. The `CC_<target>` line is what points
@@ -395,11 +441,11 @@ jobs:
           sudo apt-get install -y musl-tools
           echo "CC_${TARGET//-/_}=musl-gcc" >> "$GITHUB_ENV"
 
-      # The version branch _is_ the pin, as in `ci.yml`: 1.95.0 is what the
-      # flake's nixpkgs carries, so a release binary is compiled by the rustc
-      # the dev shell and CI both use.
-      - name: Install Rust 1.95.0
-        uses: dtolnay/rust-toolchain@1.95.0
+      # The version branch _is_ the pin, as in `ci.yml`: 1.97.1 is what the
+      # flake's `rustToolchain` pins, so a release binary is compiled by the
+      # rustc the dev shell and CI both use.
+      - name: Install Rust 1.97.1
+        uses: dtolnay/rust-toolchain@1.97.1
         with:
           targets: ${{ matrix.target }}
 
@@ -534,6 +580,30 @@ jobs:
             *)
               echo "::error::The binary served a document with no bundle in it."
               printf '%s\n' "$document"
+              exit 1
+              ;;
+          esac
+
+      # And it loaded the built-in plugins it embedded, each wasm component
+      # instantiated by this leg's own wasmtime: the startup line above counts
+      # what loaded, and one that did not is a warning naming it. Read with
+      # the colouring taken out, which the server writes whether or not
+      # anything is a terminal.
+      - name: The built-in plugins load
+        run: |
+          logged=$(sed 's/\x1b\[[0-9;]*m//g' server.log)
+          case "$logged" in
+            *"built-in plugin didn't load"*)
+              echo "::error::A built-in plugin didn't load."
+              exit 1
+              ;;
+            *built_in_plugins=0*)
+              echo "::error::The binary loaded no built-in plugins."
+              exit 1
+              ;;
+            *built_in_plugins=*) ;;
+            *)
+              echo "::error::The startup line doesn't count the built-in plugins."
               exit 1
               ;;
           esac

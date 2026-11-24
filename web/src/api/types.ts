@@ -4362,7 +4362,7 @@ name: string | null, };
  * the behaviour every kind used to get — so a new kind is safe to add and an
  * old page stays correct against a newer server.
  */
-export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "instructions" } | { "kind": "mcp_servers" } | { "kind": "heirs" } | { "kind": "login", profile: string, } | { "kind": "logged_in", profile: string, } | { "kind": "everything" };
+export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "instructions" } | { "kind": "mcp_servers" } | { "kind": "heirs" } | { "kind": "plugins" } | { "kind": "login", profile: string, } | { "kind": "logged_in", profile: string, } | { "kind": "everything" };
 
 /**
  * One Nudge as it goes down a stream: what moved, and **whose news it is**.
@@ -4387,7 +4387,7 @@ export type Nudged = {
  * Device Id — absent for this device's own, which is every Nudge a
  * workbench has ever sent about its own work.
  */
-device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "instructions" } | { "kind": "mcp_servers" } | { "kind": "heirs" } | { "kind": "login", profile: string, } | { "kind": "logged_in", profile: string, } | { "kind": "everything" });
+device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "instructions" } | { "kind": "mcp_servers" } | { "kind": "heirs" } | { "kind": "plugins" } | { "kind": "login", profile: string, } | { "kind": "logged_in", profile: string, } | { "kind": "everything" });
 
 /**
  * And the same of every Conversation at once: what a member offers the device
@@ -4814,6 +4814,183 @@ export type PinnedEvent = { "AgentOutput": AgentOutputEvent } | { "TaskList": Ta
  * being Apple's own on either.
  */
 export type Platform = "Linux" | "MacOs" | "Windows";
+
+/**
+ * Where to read a manifest for the consent card: a directory's absolute path,
+ * or a git URL.
+ */
+export type PluginAt = { source: string, };
+
+/**
+ * One capability a plugin's wasm component asks for.
+ */
+export type PluginCapability = { "kind": "Filesystem", path: string, writable: boolean, } | { "kind": "Outbound", host: string, } | { "kind": "Environment", name: string, };
+
+/**
+ * The consent card: who the plugin is, what it provides, and every
+ * capability it asks for.
+ */
+export type PluginConsent = { uuid: string, name: string, version: string, author: string, email: string, description: string | null, provides: Array<string>, capabilities: Array<PluginCapability>, };
+
+/**
+ * The checkbox.
+ */
+export type PluginEnabled = { enabled: boolean, };
+
+/**
+ * One settings field, as its manifest declares it.
+ */
+export type PluginField = { 
+/**
+ * What the value is kept under, unique among the plugin's fields.
+ */
+key: string, label: string, description: string | null, value: PluginFieldValue, };
+
+/**
+ * One field's new value.
+ */
+export type PluginFieldEdit = { key: string, value: PluginFieldWrite, };
+
+/**
+ * One field a save was refused over, and why, to be drawn at the field.
+ */
+export type PluginFieldRefused = { key: string, why: string, };
+
+/**
+ * A field's kind and what the cluster holds for it. A secret's value never
+ * comes back: only whether one is set.
+ */
+export type PluginFieldValue = { "kind": "Text", value: string, } | { "kind": "Size", value: string, } | { "kind": "List", values: Array<string>, } | { "kind": "Secret", set: boolean, };
+
+/**
+ * What a field is to hold. Empty text, an empty size and an empty list each
+ * clear it.
+ */
+export type PluginFieldWrite = { "kind": "Text", value: string, } | { "kind": "Size", value: string, } | { "kind": "List", values: Array<string>, } | { "kind": "Secret", value: string, } | { "kind": "SecretCleared" };
+
+/**
+ * What puts a dependency right. A disabled one is put right by ticking its
+ * own row, which the trouble says, and needs no press of its own here.
+ */
+export type PluginFix = { "kind": "Install", repository: string, } | { "kind": "Update" };
+
+/**
+ * **Install**: the directory or git URL, and the capabilities the card
+ * showed, which is the grant.
+ */
+export type PluginInstall = { source: string, granted: Array<PluginCapability>, };
+
+/**
+ * A dependency a row's plugin is in trouble over, with the press that would
+ * put it right from that row.
+ */
+export type PluginNeed = { 
+/**
+ * The dependency's uuid, which an **Update** names.
+ */
+uuid: string, 
+/**
+ * Its display name, as the dependent's manifest writes it.
+ */
+name: string, fix: PluginFix, };
+
+/**
+ * One Plugin's row.
+ */
+export type PluginRow = { 
+/**
+ * Its identity, which every press names it by.
+ */
+uuid: string, name: string, version: string, 
+/**
+ * The author's name.
+ */
+author: string, 
+/**
+ * The Category of each thing it provides, as the manifest writes it, once
+ * each.
+ */
+provides: Array<string>, source: PluginSource, 
+/**
+ * Its checkbox: whether the cluster has it on.
+ */
+enabled: boolean, 
+/**
+ * Why it didn't load here, where it didn't. A plugin with trouble counts
+ * as disabled.
+ */
+trouble: string | null, 
+/**
+ * The press that would put right a dependency its trouble names, where
+ * there is one: one per dependency, in the order the manifest lists them.
+ */
+needs: Array<PluginNeed>, 
+/**
+ * The device it is on, by name, where it is a local plugin on another
+ * device: drawn greyed, and not loaded here.
+ */
+elsewhere: string | null, 
+/**
+ * The names of the ticked plugins that go with it when it is unticked,
+ * depending on it or on one of those: what the checkbox says first.
+ */
+dependents: Array<string>, 
+/**
+ * How many settings fields its manifest declares: where any, the row
+ * opens a pane drawing them.
+ */
+settings: number, };
+
+/**
+ * A save of a Plugin's pane: the fields it changed, each by key. A field
+ * left out is left as it is, which is how a secret nobody typed is kept.
+ */
+export type PluginSettingsSave = { fields: Array<PluginFieldEdit>, };
+
+/**
+ * What a save of a Plugin's pane came to: the pane read again, and the
+ * fields it was refused over, where any — in which case nothing was written.
+ */
+export type PluginSettingsSaved = { settings: PluginSettingsView, refused: Array<PluginFieldRefused>, };
+
+/**
+ * A Plugin's settings pane: the fields its manifest declares, each with the
+ * cluster's value, drawn whether or not the plugin loaded here, so that a
+ * setting it needs can be put right from the pane.
+ */
+export type PluginSettingsView = { uuid: string, name: string, 
+/**
+ * Why it didn't load here, where it didn't: the row's own trouble.
+ */
+trouble: string | null, fields: Array<PluginField>, };
+
+/**
+ * Where a Plugin came from.
+ */
+export type PluginSource = { "kind": "Local", path: string, } | { "kind": "Git", url: string, revision: string, };
+
+/**
+ * **Update**: nothing the first time, and the capabilities the card showed
+ * where the manifest asked for more and the card was confirmed.
+ */
+export type PluginUpdate = { granted: Array<PluginCapability> | null, };
+
+/**
+ * What an **Update** came to: the page read again, or the consent card where
+ * the manifest now asks for more than was granted.
+ */
+export type PluginUpdated = { "kind": "Updated", plugins: PluginsView, } | { "kind": "Consent", consent: PluginConsent, };
+
+/**
+ * The Plugins page: the installed above the built-in.
+ */
+export type PluginsView = { installed: Array<PluginRow>, 
+/**
+ * The ones this binary ships and lists. None yet: the fixture that proves
+ * the path is not listed, and the group is drawn only once it has a row.
+ * A built-in has no **Remove**.
+ */
+built_in: Array<PluginRow>, };
 
 /**
  * A Repo an Author's removal found pointing at it, named with its device.

@@ -43,7 +43,7 @@ harness's login runs under — the brief says to re-verify there by hand.
 
 ## Stages
 
-- [ ] 01: The framework and the Plugins page — [brief](01-the-framework.md) — no dependencies
+- [x] 01: The framework and the Plugins page — [brief](01-the-framework.md) — no dependencies
 - [ ] 02: Languages as plugins — [brief](02-languages.md) — after 01
 - [ ] 03: The Agent interface — [brief](03-the-agent-interface.md) — after 01
 - [ ] 04: Codex across — [brief](04-codex-across.md) — after 03

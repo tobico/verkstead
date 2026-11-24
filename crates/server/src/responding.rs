@@ -155,10 +155,10 @@ async fn over(
     // leaves a Set with nobody to read what the human writes into it, so the
     // questions go off and the run stops rather than waiting on an answer
     // nothing would ever act on.
-    if let Some(set_id) = proposed(state, conversation_id).await {
-        if crate::review::unanswered(state, set_id).await {
-            return abandoned(state, conversation_id, set_id, Some(batch), ended_badly).await;
-        }
+    if let Some(set_id) = proposed(state, conversation_id).await
+        && crate::review::unanswered(state, set_id).await
+    {
+        return abandoned(state, conversation_id, set_id, Some(batch), ended_badly).await;
     }
 
     if let Some((how, writing)) = ended_badly {

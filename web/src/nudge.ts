@@ -505,6 +505,11 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
     // its own, so there is nothing here to read again.
     case "heirs":
       return [];
+    // The installed Plugins moved: one installed, updated or ticked on this
+    // device, a record of one pulled off a member, or what loading them here
+    // came to. The Plugins section draws them, and nothing else does yet.
+    case "plugins":
+      return [keyOf(device, "plugins")];
 
     // Where a Profile's login has got to moved — which is what shows a second
     // device's modal the address the first one's login printed. This device's

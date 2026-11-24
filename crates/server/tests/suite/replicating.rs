@@ -29,7 +29,8 @@ use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    AuthorEntry, AuthorRemoved, ConversationView, DevicesView, PointingRepo, Registered, RepoEntry,
+    AuthorEntry, AuthorRemoved, ConversationView, DevicesView, PluginFieldValue,
+    PluginSettingsView, PluginSource, PluginsView, PointingRepo, Registered, RepoEntry,
     ServerAttached, Started, UnrepointedRepo, Unrepointing,
 };
 use verkstead_schema::Nudge;
@@ -804,6 +805,67 @@ impl Verkstead {
         .await;
 
         waited.unwrap_or_else(|_| panic!("the Authors never said it: {last:#?}"))
+    }
+
+    /// The Plugins page, read until `what` holds of it.
+    async fn plugins_saying(&self, what: impl Fn(&PluginsView) -> bool) -> PluginsView {
+        let mut last = None;
+
+        let waited = tokio::time::timeout(WAITING, async {
+            loop {
+                let view: PluginsView = reading(&self.workbench, "/api/ui/plugins").await;
+
+                if what(&view) {
+                    return view;
+                }
+
+                last = Some(view);
+                tokio::time::sleep(LOOKING).await;
+            }
+        })
+        .await;
+
+        waited.unwrap_or_else(|_| panic!("the Plugins page never said it: {last:#?}"))
+    }
+
+    /// A plugin written into this device's Data Directory, read through the
+    /// consent card and installed with the grant it showed.
+    async fn installs_plugin(&self, uuid: &str, name: &str) -> String {
+        let at = self.dir.path().join("plugin");
+        std::fs::create_dir_all(&at).unwrap();
+        std::fs::write(
+            at.join("plugin.yaml"),
+            format!(
+                "uuid: {uuid}\nname: {name}\nauthor:\n  name: Ada Lovelace\n  email: \
+                 ada@example.com\nversion: 1.4.0\ninterface: 1\nprovides:\n  - category: \
+                 forge\n"
+            ),
+        )
+        .unwrap();
+        let path = at.to_str().unwrap().to_owned();
+
+        self.installs_plugin_from(&path).await;
+        path
+    }
+
+    /// The plugin at a directory or git URL, read through the consent card and
+    /// installed with the grant it showed.
+    async fn installs_plugin_from(&self, source: &str) {
+        let (status, said) = pressing(
+            &self.workbench,
+            "/api/ui/plugins/read",
+            Some(&serde_json::json!({ "source": source }).to_string()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+
+        let (status, said) = pressing(
+            &self.workbench,
+            "/api/ui/plugins",
+            Some(&serde_json::json!({ "source": source, "granted": [] }).to_string()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{said}");
     }
 
     /// The stamps this device holds for the Author `id`: `updated_at` and the
@@ -2075,4 +2137,248 @@ async fn the_values_route_answers_from_whoever_holds_them() {
     assert!(asked(id("tracker")).await.unwrap().is_empty(), "none held");
     let refused = asked("no-such-uuid".to_owned()).await.unwrap_err();
     assert!(refused.saying.contains("404"), "{}", refused.saying);
+}
+
+const PLUGIN: &str = "0b6f6b7e-5c3a-4d0e-9a51-2f7d8c1e4a90";
+
+/// A plugin installed from a directory on A is listed on B greyed, naming A,
+/// and loaded on neither but A; unticked on B, it reads disabled on A.
+#[tokio::test]
+async fn a_local_plugin_is_listed_on_another_device_as_the_ones_it_is_on() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let _a_holding = a.holding();
+    let _b_holding = b.holding();
+
+    let path = a.installs_plugin(PLUGIN, "GitLab").await;
+
+    let on_a = a.plugins_saying(|view| !view.installed.is_empty()).await;
+    assert_eq!(on_a.installed[0].elsewhere, None);
+
+    let on_b = b
+        .plugins_saying(|view| view.installed.iter().any(|row| row.uuid == PLUGIN))
+        .await;
+    let row = &on_b.installed[0];
+    assert_eq!(row.name, "GitLab");
+    assert_eq!(row.version, "1.4.0");
+    assert_eq!(row.provides, ["forge"]);
+    assert_eq!(row.source, PluginSource::Local { path });
+    assert_eq!(row.elsewhere.as_deref(), Some(A_MACHINE));
+    assert_eq!(row.trouble, None, "nothing of it is loaded on B");
+
+    let (status, said) = pressing(
+        &b.workbench,
+        &format!("/api/ui/plugins/{PLUGIN}/enabled"),
+        Some(&serde_json::json!({ "enabled": false }).to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    a.plugins_saying(|view| view.installed.iter().any(|row| !row.enabled))
+        .await;
+}
+
+/// One git command in `dir`, answering what it printed.
+fn git_in(dir: &Path, args: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=Ada Lovelace",
+            "-c",
+            "user.email=ada@example.com",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("git should be on the PATH for these tests");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed in {}: {}",
+        dir.display(),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+/// A plugin installed from git on A is listed on B, and B clones it for itself
+/// at the revision A pinned: loaded on both, and greyed on neither. Removed on
+/// A, it goes from B too, and B deletes its clone; installed on A again, it
+/// comes back on B, which clones it afresh.
+#[tokio::test]
+async fn a_git_plugin_is_cloned_by_another_device_at_the_pinned_revision() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let _a_holding = a.holding();
+    let _b_holding = b.holding();
+
+    let sources = tempfile::tempdir().unwrap();
+    let origin = sources.path().join("gitlab");
+    std::fs::create_dir_all(&origin).unwrap();
+    std::fs::write(
+        origin.join("plugin.yaml"),
+        format!(
+            "uuid: {PLUGIN}\nname: GitLab\nauthor:\n  name: Ada Lovelace\n  email: \
+             ada@example.com\nversion: 1.4.0\ninterface: 1\nprovides:\n  - category: forge\n"
+        ),
+    )
+    .unwrap();
+    git_in(&origin, &["init", "--quiet"]);
+    git_in(&origin, &["add", "plugin.yaml"]);
+    git_in(&origin, &["commit", "--quiet", "-m", "the manifest"]);
+    let revision = git_in(&origin, &["rev-parse", "HEAD"]);
+    let path = origin.to_string_lossy().replace('\\', "/");
+    let url = match path.starts_with('/') {
+        true => format!("file://{path}"),
+        false => format!("file:///{path}"),
+    };
+
+    a.installs_plugin_from(&url).await;
+
+    let on_b = b
+        .plugins_saying(|view| view.installed.iter().any(|row| row.uuid == PLUGIN))
+        .await;
+    let row = &on_b.installed[0];
+    assert_eq!(row.name, "GitLab");
+    assert_eq!(
+        row.source,
+        PluginSource::Git {
+            url: url.clone(),
+            revision: revision.clone()
+        }
+    );
+    assert_eq!(row.elsewhere, None, "a git plugin is every device's");
+
+    let checkout = b.dir.path().join("plugins").join(PLUGIN);
+    let cloned = tokio::time::timeout(WAITING, async {
+        loop {
+            if checkout.join("plugin.yaml").is_file() {
+                return git_in(&checkout, &["rev-parse", "HEAD"]);
+            }
+            tokio::time::sleep(LOOKING).await;
+        }
+    })
+    .await
+    .expect("B cloned the plugin");
+    assert_eq!(cloned, revision);
+
+    let on_b = b
+        .plugins_saying(|view| view.installed.iter().all(|row| row.trouble.is_none()))
+        .await;
+    assert!(on_b.installed[0].enabled);
+
+    // Removed on A, it goes from B's page, and B deletes its own clone.
+    let (status, said) = pressing(
+        &a.workbench,
+        &format!("/api/ui/plugins/{PLUGIN}/remove"),
+        Some("{}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert!(!a.dir.path().join("plugins").join(PLUGIN).exists());
+
+    b.plugins_saying(|view| view.installed.is_empty()).await;
+    tokio::time::timeout(WAITING, async {
+        while checkout.exists() {
+            tokio::time::sleep(LOOKING).await;
+        }
+    })
+    .await
+    .expect("B deleted its clone");
+
+    // Installed on A again under the same uuid, it is B's again too.
+    a.installs_plugin_from(&url).await;
+
+    b.plugins_saying(|view| view.installed.iter().any(|row| row.uuid == PLUGIN))
+        .await;
+    tokio::time::timeout(WAITING, async {
+        while !checkout.join("plugin.yaml").is_file() {
+            tokio::time::sleep(LOOKING).await;
+        }
+    })
+    .await
+    .expect("B cloned it again");
+}
+
+/// A plugin's settings saved in its pane on A are read in its pane on B: a
+/// text field off the record, and a secret through the digest-and-fetch path
+/// into B's own `secrets.yaml`, which B's pane says is set without saying it.
+#[tokio::test]
+async fn a_plugins_settings_saved_on_one_device_are_read_on_the_other() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let _a_holding = a.holding();
+    let _b_holding = b.holding();
+
+    let at = a.dir.path().join("plugin");
+    std::fs::create_dir_all(&at).unwrap();
+    std::fs::write(
+        at.join("plugin.yaml"),
+        format!(
+            "uuid: {PLUGIN}\nname: GitLab\nauthor:\n  name: Ada Lovelace\n  email: \
+             ada@example.com\nversion: 1.4.0\ninterface: 1\nsettings:\n  - key: host\n    \
+             label: Host\n    kind: text\n  - key: token\n    label: Token\n    kind: secret\n"
+        ),
+    )
+    .unwrap();
+    a.installs_plugin_from(at.to_str().unwrap()).await;
+
+    let settings = format!("/api/ui/plugins/{PLUGIN}/settings");
+    let (status, said) = pressing(
+        &a.workbench,
+        &settings,
+        Some(
+            &serde_json::json!({ "fields": [
+                { "key": "host", "value": { "kind": "Text", "value": "gitlab.example.com" } },
+                { "key": "token", "value": { "kind": "Secret", "value": "glpat-seton-a" } },
+            ] })
+            .to_string(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    b.plugins_saying(|view| view.installed.iter().any(|row| row.uuid == PLUGIN))
+        .await;
+    let read = tokio::time::timeout(WAITING, async {
+        loop {
+            let pane: PluginSettingsView = reading(&b.workbench, &settings).await;
+            let host = pane.fields.iter().any(|field| {
+                field.value
+                    == PluginFieldValue::Text {
+                        value: "gitlab.example.com".to_owned(),
+                    }
+            });
+            let token = pane
+                .fields
+                .iter()
+                .any(|field| field.value == PluginFieldValue::Secret { set: true });
+            if host && token {
+                return pane;
+            }
+            tokio::time::sleep(LOOKING).await;
+        }
+    })
+    .await
+    .expect("B's pane reads what A saved");
+    assert!(!format!("{read:?}").contains("glpat-seton-a"));
+
+    tokio::time::timeout(WAITING, async {
+        loop {
+            let copy = b
+                .settings()
+                .secrets()
+                .plugin_secrets_of(PLUGIN)
+                .and_then(|secrets| secrets.get("token").cloned());
+            if copy.as_deref() == Some("glpat-seton-a") {
+                return;
+            }
+            tokio::time::sleep(LOOKING).await;
+        }
+    })
+    .await
+    .expect("B fetched its own copy of the secret");
 }

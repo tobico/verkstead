@@ -56,6 +56,7 @@ mod package_stores;
 mod peer;
 mod pictures;
 mod pipe_windows;
+mod plugins;
 mod ports;
 mod preflight;
 mod probing;

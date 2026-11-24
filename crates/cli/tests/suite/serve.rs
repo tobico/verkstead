@@ -432,6 +432,17 @@ fn serving_with_no_flags_at_all_starts_and_registers_anywhere() {
         "the startup line should say nothing about a boundary that no longer \
          exists, got:\n{logged}"
     );
+
+    // And it came up with the Plugins it ships loaded out of the binary, the
+    // fixture's wasm component among them, and none of them in trouble.
+    assert!(
+        logged.contains("built_in_plugins=") && !logged.contains("built_in_plugins=0"),
+        "the startup line should count the built-in plugins it loaded, got:\n{logged}"
+    );
+    assert!(
+        !logged.contains("built-in plugin didn't load"),
+        "every built-in plugin this binary carries should load, got:\n{logged}"
+    );
 }
 
 /// `logged` with the terminal colouring taken out.
