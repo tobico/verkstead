@@ -99,6 +99,38 @@ async fn the_database_is_opened_in_write_ahead_logging() {
     );
 }
 
+/// And a write held up by another is waited out for longer than the five
+/// seconds sqlx would have given it.
+///
+/// The busy timeout is what covers the ordinary wait `BEGIN IMMEDIATE` turns a
+/// promotion into — see [`writes_that_arrive_at_once_all_land`] below. Five
+/// seconds of it was sqlx's own default rather than a decision made here, and a
+/// CI leg running ten ways at once went straight past it: a press on a member's
+/// Allow answered 500, saying *recording a member: database is locked*, on a
+/// machine that had done nothing worse than stall.
+///
+/// It is only ever waited out while another connection holds the write lock, and
+/// every transaction in this store is short and ends in a write — so on a
+/// machine that is keeping up there is nothing here to wait for at all. What the
+/// length buys is the other end: a write that waits is a slow press, and a write
+/// that is refused is a record that is not there, which is what the failure at
+/// the head of this file cost.
+#[tokio::test]
+async fn a_held_database_is_waited_out_rather_than_the_write_refused() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let waiting: i64 = sqlx::query("PRAGMA busy_timeout")
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+
+    assert_eq!(
+        waiting, 30_000,
+        "a write the database is held against waits thirty seconds for it, rather \n         than being refused after sqlx's own five",
+    );
+}
+
 /// Writes that arrive at once all land, rather than one of them being refused
 /// for the other holding the database.
 ///
