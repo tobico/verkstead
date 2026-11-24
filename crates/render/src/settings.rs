@@ -332,112 +332,36 @@ pub enum PathResolution {
     Unresolved { why: String },
 }
 
-/// One language as the settings page draws it: what to call it, whether
-/// sessions get it, and how big its store may grow.
-///
-/// **Every key of an entry that a save writes is here, the size included.**
-/// One request writes the whole of `config.yaml`, so a page that only knew the
-/// sizes it drew a field for would be a save that emptied the rest — see
-/// [`LanguageEdit`], which is those same two keys going the other way.
+/// One language as the settings page is told it: what it is called, whether
+/// sessions get it, and whether its compiling is cached — which is all the
+/// **Build caches** part reads, for its line saying there is no sccache.
+/// Everything else about a language is its Language plugin's, drawn on the
+/// Plugins page and in that plugin's pane — see [`crate::PluginLanguageCache`].
 ///
 /// The switch is never null. Nothing configured is on, so what comes back is
-/// where the switch *sits* rather than whether anybody has touched it — a page
-/// that drew a third state would be asking the human to understand a
-/// distinction the server does not make.
+/// where the switch *sits* rather than whether anybody has touched it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct LanguageView {
-    /// The name `config.yaml` keys it by — `rust` — which is what a save names
-    /// it back and what nothing on the page ever shows.
+    /// The name `config.yaml` keys it by — `rust`.
     pub name: String,
 
     /// And what to call it where somebody reads it: the descriptor's `label`,
-    /// or the name above where the file gave none. Always a word to draw, so
-    /// the page never has to decide what an unlabelled language is called.
+    /// or the name above where the file gave none.
     pub label: String,
 
     /// Whether sessions get it at all.
     pub enabled: bool,
 
-    /// How big its store may grow, in sccache's own words — `30G`, `500M`:
-    /// what is written down where somebody wrote one, and the default where
-    /// nobody did. Always a value, so the page always has a word to draw.
-    ///
-    /// **As written, even where it is not a size** — which only a hand-edit of
-    /// `config.yaml` can make it, and which `size_unread` below then says. It
-    /// is what a save puts back, and a save about a checkbox has no business
-    /// rewriting a word somebody typed into the file.
-    ///
-    /// **Every language's, not only the ones with a field for it.** It is a key
-    /// of that language's entry whoever wrote it, and the page sends both keys
-    /// of every entry back; what decides whether there is a field is `store`
-    /// below.
-    pub size: String,
-
-    /// Whether that size is one somebody typed, rather than the default being
-    /// shown. What says which of the two a save is putting back.
-    pub size_configured: bool,
-
-    /// And the default itself: what the store is held to where nobody has
-    /// said, and where what they said is not a size. `30G` for Rust, `10G` for
-    /// everything else. What a field draws as its placeholder — a value nobody
-    /// chose should not look like a choice.
-    pub default_size: String,
-
-    /// Why the size written down is not the one in force, where it is not: a
-    /// clause following the word, the same one a save sending it would have
-    /// been refused in. The store is held to `default_size` meanwhile.
-    pub size_unread: Option<String>,
-
-    /// Whether the language has a store of its own, which is what says there is
-    /// a size field to draw under its box. False for C/C++, whose whole
-    /// descriptor is the Compile Server's launchers: that server's store is
-    /// sized by the first language naming it, which says so under its own box.
-    pub store: bool,
-
-    /// And how much its store holds on disk, beside the size above — measured
-    /// in the background and handed over as it was last measured, so a read of
-    /// this page never waits on a walk of a store.
-    pub disk_use: DiskUse,
-
-    /// And each directory of that store, with how it is kept under the size
-    /// above — in the order the descriptor names them, and empty for a
-    /// language naming none.
-    pub stores: Vec<StoreView>,
-
-    /// And when those of its stores the sweep keeps under the size were last
-    /// swept, RFC 3339 — null where they have not been since the server
-    /// started, which is also every language whose stores the sweep never
-    /// touches.
-    ///
-    /// A sweep runs only while no session or terminal does, so a machine that
-    /// is never idle is never swept, and this is where that is seen.
-    pub swept: Option<String>,
-
     /// Whether this language compiles through the Compile Server, and where it
     /// does, whether that compiling is really being cached — null for a
     /// language whose descriptor names no such capability.
     ///
-    /// Hung off the language rather than standing beside the list, because it
-    /// is the language's: the server runs one Compile Server, sized by
-    /// whichever switched-on language asks for it.
-    ///
-    /// Read-only, and the one fact here nobody can set from a page: it is the
-    /// server's own environment and its own platform. Anything but
-    /// [`CompileCaching::Cached`] means a session's downloads are still shared
-    /// and its dependencies are compiled every time, which is a slow build
-    /// rather than a broken one.
+    /// Read-only: it is the server's own environment and its own platform.
+    /// Anything but [`CompileCaching::Cached`] means a session's downloads are
+    /// still shared and its dependencies are compiled every time, which is a
+    /// slow build rather than a broken one.
     pub compiling: Option<CompileCaching>,
-
-    /// And why this language's entry in `config.yaml` was not used, where it
-    /// was not — null for the ordinary case, which is every language on a
-    /// machine whose file reads.
-    ///
-    /// Read-only, the way `compiling` above is: what it reports is the file
-    /// rather than a setting, and the fix is in the file. Which is
-    /// what makes it the one thing on this page that turns a language's
-    /// controls off — see [`UnreadEntry`].
-    pub unread: Option<UnreadEntry>,
 }
 
 /// How much a language's store holds on disk, as the server last measured it.
@@ -498,50 +422,6 @@ pub enum Eviction {
     /// Nothing: its descriptor names no unit, so it is never swept and grows
     /// as its tool fills it.
     NotSwept,
-}
-
-/// What became of a language whose entry in `config.yaml` could not be read.
-///
-/// **Both halves are drawn**, because they are two different things to do. The
-/// reason is what there is to fix — and where a variable is what was refused it
-/// names the variable, that being the whole of the fix. What it is running on
-/// meanwhile is whether anything is broken right now: a language that fell back
-/// to the descriptor Verkstead ships is one whose cache is working exactly as it
-/// did before the entry was written, and a language with nothing to fall back to
-/// is off until somebody goes and looks.
-///
-/// And while it is here the page draws that language's controls disabled. The
-/// two keys they write go into the entry this reports on, and an entry nothing
-/// could read is one nothing can be written into: a box that sprang back the
-/// moment it was ticked would be a worse answer than a box that says why it
-/// cannot be.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct UnreadEntry {
-    /// Why, as a clause the page puts the words *its entry in `config.yaml`* in
-    /// front of — `sets PATH, which is a variable the Sandbox sets itself`, or
-    /// `could not be read: …` in the reader's own words.
-    ///
-    /// The server's sentence rather than a code the page turns into one: what
-    /// goes wrong in a file somebody hand-wrote is open-ended, and a viewer
-    /// holding the vocabulary would be a release that could not add a reason.
-    pub why: String,
-
-    /// And what the language is running on meanwhile.
-    pub running_on: RunningOn,
-}
-
-/// Which of the two happened to a language whose entry would not load.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum RunningOn {
-    /// The descriptor Verkstead ships, which is what this language had before
-    /// that entry was written. Nothing is broken; the entry is.
-    BuiltIn,
-
-    /// Nothing — there is no built-in of that name — so the language is off
-    /// until the entry is fixed.
-    Nothing,
 }
 
 /// Whether a session's compiling is cached, and where it is not, what would
@@ -928,16 +808,6 @@ pub struct SettingsEdit {
     /// the one it names, or the one a `null` uuid makes.
     pub github_token: TokenEdit,
 
-    /// The languages as the page has just left them, as values rather than as
-    /// an action: there is nothing secret about a switch or a size, so a save
-    /// says where each of them is to stand and the server writes it down.
-    ///
-    /// One entry per language the page was given, carrying the two keys it
-    /// draws and no others — see [`LanguageEdit`]. The rest of a descriptor is
-    /// an installer's and is never sent, so a save from this page cannot take a
-    /// language off the machine.
-    pub languages: Vec<LanguageEdit>,
-
     /// And what the Cleanup is to do after an archiving, as values for that
     /// reason again: two switches and two durations, and a save says where each
     /// of them is to stand.
@@ -1024,33 +894,6 @@ pub enum InstructionsEdit {
     Set { text: String },
 }
 
-/// One language as the human has just left it: the two keys of its entry the
-/// settings page writes, and nothing else.
-///
-/// The size is a string because it is sccache's own word for one, and an empty
-/// one is *no size configured* rather than a size of nothing — which is what
-/// clearing the field means and what puts the default back.
-///
-/// **Sent for every language, whether the page drew a field for it or not.**
-/// It draws one only where something reads a size, and a save built out of the
-/// fields alone would write the file with every other language's size gone —
-/// see [`LanguageView::size`], which is where this comes back from.
-///
-/// Whether compiling is cached is not here. It is the server's own
-/// circumstance rather than anything a page can decide, so it travels one way
-/// only — see [`LanguageView::compiling`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct LanguageEdit {
-    /// Which language this is about, by the name `config.yaml` keys it by — a
-    /// name the server has never heard of is an entry written into that file
-    /// under it, which is how an installer's own language is saved.
-    pub name: String,
-
-    pub enabled: bool,
-    pub size: String,
-}
-
 /// What is to become of the configured token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
@@ -1108,17 +951,6 @@ pub struct SettingsSaved {
     /// what this says and what `refused` says are both drawn over what the human
     /// still has in front of them.
     pub refused_servers: Vec<ServerRefused>,
-
-    /// And the store sizes that would not be written down, or empty where the
-    /// save landed. A refusal here is the whole request refused, like the two
-    /// lists above: neither file is touched.
-    ///
-    /// Only a size that was *changed* is refused. One a hand-edit wrote into
-    /// `config.yaml` that is not a size goes back as it was on a save about
-    /// something else, so a tick is never turned down over a field the human
-    /// did not touch — see `LanguageView::size_unread`, which is how the page
-    /// says that one.
-    pub refused_sizes: Vec<SizeRefused>,
 
     /// And what came of speaking to each declaration that *was* written down,
     /// in the order they were declared — empty on every save that said nothing
@@ -1373,21 +1205,6 @@ pub struct ServerRefused {
     pub field: ServerField,
 
     /// Why, in words to put on the row.
-    pub why: String,
-}
-
-/// One store size a save was turned down over.
-///
-/// By the language's name rather than by position: there is one size per
-/// language and one field per size, so the name is the field.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct SizeRefused {
-    /// The language whose size it is, as `config.yaml` keys it.
-    pub language: String,
-
-    /// Why, as a clause following the word that was sent — see
-    /// `crate::languages::bytes` on the server.
     pub why: String,
 }
 

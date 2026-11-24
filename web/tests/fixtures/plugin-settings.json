@@ -4,6 +4,7 @@
       "description": "The GitLab instance, where it isn't gitlab.com.",
       "key": "host",
       "label": "Host",
+      "placeholder": null,
       "value": {
         "kind": "Text",
         "value": "gitlab.example.com"
@@ -13,6 +14,7 @@
       "description": null,
       "key": "cache",
       "label": "Cache size",
+      "placeholder": null,
       "value": {
         "kind": "Size",
         "value": ""
@@ -22,6 +24,7 @@
       "description": null,
       "key": "groups",
       "label": "Groups",
+      "placeholder": null,
       "value": {
         "kind": "List",
         "values": [
@@ -34,13 +37,19 @@
       "description": null,
       "key": "token",
       "label": "Token",
+      "placeholder": null,
       "value": {
         "kind": "Secret",
         "set": true
       }
     }
   ],
+  "languages": [],
   "name": "GitLab",
+  "running": {
+    "sessions": 0,
+    "terminals": 0
+  },
   "trouble": null,
   "uuid": "0b6f6b7e-5c3a-4d0e-9a51-2f7d8c1e4a90"
 }

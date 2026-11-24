@@ -164,11 +164,6 @@ function AddServer(props: {
           .filter((one) => one.server !== at)
           .map((one) => one.why),
         ...saved.refused.map((one) => one.why),
-        // A size's reason is a clause following the size it was about, so it
-        // is said after the language's name rather than on its own.
-        ...saved.refused_sizes.map(
-          (one) => `The ${one.language} store size ${one.why}.`,
-        ),
       ];
 
       if (mine.length > 0 || other.length > 0) {

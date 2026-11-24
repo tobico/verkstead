@@ -3729,54 +3729,23 @@ profile: string | null, agent_type: AgentType, } };
 export type LanguageCleared = { "Cleared": { settings: SettingsView, } } | { "Running": Running } | "NoSuchLanguage";
 
 /**
- * One language as the human has just left it: the two keys of its entry the
- * settings page writes, and nothing else.
- *
- * The size is a string because it is sccache's own word for one, and an empty
- * one is *no size configured* rather than a size of nothing — which is what
- * clearing the field means and what puts the default back.
- *
- * **Sent for every language, whether the page drew a field for it or not.**
- * It draws one only where something reads a size, and a save built out of the
- * fields alone would write the file with every other language's size gone —
- * see [`LanguageView::size`], which is where this comes back from.
- *
- * Whether compiling is cached is not here. It is the server's own
- * circumstance rather than anything a page can decide, so it travels one way
- * only — see [`LanguageView::compiling`].
- */
-export type LanguageEdit = { 
-/**
- * Which language this is about, by the name `config.yaml` keys it by — a
- * name the server has never heard of is an entry written into that file
- * under it, which is how an installer's own language is saved.
- */
-name: string, enabled: boolean, size: string, };
-
-/**
- * One language as the settings page draws it: what to call it, whether
- * sessions get it, and how big its store may grow.
- *
- * **Every key of an entry that a save writes is here, the size included.**
- * One request writes the whole of `config.yaml`, so a page that only knew the
- * sizes it drew a field for would be a save that emptied the rest — see
- * [`LanguageEdit`], which is those same two keys going the other way.
+ * One language as the settings page is told it: what it is called, whether
+ * sessions get it, and whether its compiling is cached — which is all the
+ * **Build caches** part reads, for its line saying there is no sccache.
+ * Everything else about a language is its Language plugin's, drawn on the
+ * Plugins page and in that plugin's pane — see [`crate::PluginLanguageCache`].
  *
  * The switch is never null. Nothing configured is on, so what comes back is
- * where the switch *sits* rather than whether anybody has touched it — a page
- * that drew a third state would be asking the human to understand a
- * distinction the server does not make.
+ * where the switch *sits* rather than whether anybody has touched it.
  */
 export type LanguageView = { 
 /**
- * The name `config.yaml` keys it by — `rust` — which is what a save names
- * it back and what nothing on the page ever shows.
+ * The name `config.yaml` keys it by — `rust`.
  */
 name: string, 
 /**
  * And what to call it where somebody reads it: the descriptor's `label`,
- * or the name above where the file gave none. Always a word to draw, so
- * the page never has to decide what an unlabelled language is called.
+ * or the name above where the file gave none.
  */
 label: string, 
 /**
@@ -3784,95 +3753,16 @@ label: string,
  */
 enabled: boolean, 
 /**
- * How big its store may grow, in sccache's own words — `30G`, `500M`:
- * what is written down where somebody wrote one, and the default where
- * nobody did. Always a value, so the page always has a word to draw.
- *
- * **As written, even where it is not a size** — which only a hand-edit of
- * `config.yaml` can make it, and which `size_unread` below then says. It
- * is what a save puts back, and a save about a checkbox has no business
- * rewriting a word somebody typed into the file.
- *
- * **Every language's, not only the ones with a field for it.** It is a key
- * of that language's entry whoever wrote it, and the page sends both keys
- * of every entry back; what decides whether there is a field is `store`
- * below.
- */
-size: string, 
-/**
- * Whether that size is one somebody typed, rather than the default being
- * shown. What says which of the two a save is putting back.
- */
-size_configured: boolean, 
-/**
- * And the default itself: what the store is held to where nobody has
- * said, and where what they said is not a size. `30G` for Rust, `10G` for
- * everything else. What a field draws as its placeholder — a value nobody
- * chose should not look like a choice.
- */
-default_size: string, 
-/**
- * Why the size written down is not the one in force, where it is not: a
- * clause following the word, the same one a save sending it would have
- * been refused in. The store is held to `default_size` meanwhile.
- */
-size_unread: string | null, 
-/**
- * Whether the language has a store of its own, which is what says there is
- * a size field to draw under its box. False for C/C++, whose whole
- * descriptor is the Compile Server's launchers: that server's store is
- * sized by the first language naming it, which says so under its own box.
- */
-store: boolean, 
-/**
- * And how much its store holds on disk, beside the size above — measured
- * in the background and handed over as it was last measured, so a read of
- * this page never waits on a walk of a store.
- */
-disk_use: DiskUse, 
-/**
- * And each directory of that store, with how it is kept under the size
- * above — in the order the descriptor names them, and empty for a
- * language naming none.
- */
-stores: Array<StoreView>, 
-/**
- * And when those of its stores the sweep keeps under the size were last
- * swept, RFC 3339 — null where they have not been since the server
- * started, which is also every language whose stores the sweep never
- * touches.
- *
- * A sweep runs only while no session or terminal does, so a machine that
- * is never idle is never swept, and this is where that is seen.
- */
-swept: string | null, 
-/**
  * Whether this language compiles through the Compile Server, and where it
  * does, whether that compiling is really being cached — null for a
  * language whose descriptor names no such capability.
  *
- * Hung off the language rather than standing beside the list, because it
- * is the language's: the server runs one Compile Server, sized by
- * whichever switched-on language asks for it.
- *
- * Read-only, and the one fact here nobody can set from a page: it is the
- * server's own environment and its own platform. Anything but
- * [`CompileCaching::Cached`] means a session's downloads are still shared
- * and its dependencies are compiled every time, which is a slow build
- * rather than a broken one.
+ * Read-only: it is the server's own environment and its own platform.
+ * Anything but [`CompileCaching::Cached`] means a session's downloads are
+ * still shared and its dependencies are compiled every time, which is a
+ * slow build rather than a broken one.
  */
-compiling: CompileCaching | null, 
-/**
- * And why this language's entry in `config.yaml` was not used, where it
- * was not — null for the ordinary case, which is every language on a
- * machine whose file reads.
- *
- * Read-only, the way `compiling` above is: what it reports is the file
- * rather than a setting, and the fix is in the file. Which is
- * what makes it the one thing on this page that turns a language's
- * controls off — see [`UnreadEntry`].
- */
-unread: UnreadEntry | null, };
+compiling: CompileCaching | null, };
 
 /**
  * Where a Conversation has got to.
@@ -4907,7 +4797,12 @@ export type PluginField = {
 /**
  * What the value is kept under, unique among the plugin's fields.
  */
-key: string, label: string, description: string | null, value: PluginFieldValue, };
+key: string, label: string, description: string | null, 
+/**
+ * What an empty box shows: the value in force where none is set, where
+ * there is one — a Language plugin's default size.
+ */
+placeholder: string | null, value: PluginFieldValue, };
 
 /**
  * One field's new value.
@@ -4944,6 +4839,43 @@ export type PluginFix = { "kind": "Install", repository: string, } | { "kind": "
 export type PluginInstall = { source: string, granted: Array<PluginCapability>, };
 
 /**
+ * One language of a Language plugin, as its pane draws its cache.
+ */
+export type PluginLanguageCache = { 
+/**
+ * The name `config.yaml` keys it by, which a Clear names.
+ */
+name: string, label: string, 
+/**
+ * The size its store is held to now: the plugin's `size` where it is
+ * one, and the default otherwise.
+ */
+size: string, 
+/**
+ * What its store holds, as last measured.
+ */
+disk_use: DiskUse, 
+/**
+ * Each directory of its store, and how it is kept under the size.
+ */
+stores: Array<StoreView>, 
+/**
+ * When its swept stores were last swept, RFC 3339, or null where they
+ * have not been since the server started.
+ */
+swept: string | null, 
+/**
+ * Whether it compiles through the Compile Server, and whether that is
+ * cached — null where it names no such capability.
+ */
+compiling: CompileCaching | null, 
+/**
+ * The label of the language whose store its compiles are kept in, where
+ * that is another's: C/C++, compiling through Rust's.
+ */
+through: string | null, };
+
+/**
  * A dependency a row's plugin is in trouble over, with the press that would
  * put it right from that row.
  */
@@ -4973,7 +4905,12 @@ author: string,
  * The Category of each thing it provides, as the manifest writes it, once
  * each.
  */
-provides: Array<string>, source: PluginSource, 
+provides: Array<string>, 
+/**
+ * The languages it provides, by label — `Rust`, `C/C++` — in the order
+ * its manifest lists them. Empty for one providing none.
+ */
+languages: Array<string>, source: PluginSource, 
 /**
  * Its checkbox: whether the cluster has it on.
  */
@@ -5025,12 +4962,23 @@ export type PluginSettingsView = { uuid: string, name: string,
 /**
  * Why it didn't load here, where it didn't: the row's own trouble.
  */
-trouble: string | null, fields: Array<PluginField>, };
+trouble: string | null, fields: Array<PluginField>, 
+/**
+ * What a Language plugin's pane draws under its fields: each language it
+ * provides, with what its store holds and its Clear. Empty for a plugin
+ * providing none. Drawn whether or not the plugin is ticked, because an
+ * off language still holds what it fetched.
+ */
+languages: Array<PluginLanguageCache>, 
+/**
+ * What is running as this was drawn, which a Clear is refused over.
+ */
+running: Running, };
 
 /**
  * Where a Plugin came from.
  */
-export type PluginSource = { "kind": "Local", path: string, } | { "kind": "Git", url: string, revision: string, } | { "kind": "BuiltIn" };
+export type PluginSource = { "kind": "Local", path: string, } | { "kind": "Git", url: string, revision: string, } | { "kind": "BuiltIn" } | { "kind": "Config" };
 
 /**
  * **Update**: nothing the first time, and the capabilities the card showed
@@ -5051,8 +4999,9 @@ export type PluginsView = { installed: Array<PluginRow>,
 /**
  * The ones this binary ships and lists, the Skill Pack `verkstead` first;
  * the fixture that proves the path is not listed, and the group is drawn
- * only once it has a row. A built-in has no **Remove** and no checkbox:
- * it is always on.
+ * only once it has a row. A built-in has no **Remove** and no **Update**,
+ * and is always on but for a Language plugin, which is on until it is
+ * unticked.
  */
 built_in: Array<PluginRow>, };
 
@@ -6348,11 +6297,6 @@ cancelling: boolean, };
 export type Running = { sessions: number, terminals: number, };
 
 /**
- * Which of the two happened to a language whose entry would not load.
- */
-export type RunningOn = "BuiltIn" | "Nothing";
-
-/**
  * One session's Screen: the grid its Capture leaves on a terminal.
  *
  * Not the bytes and not a picture of them — the escape sequences that would
@@ -6707,17 +6651,6 @@ export type SettingsEdit = { git_author: Author,
  */
 github_token: TokenEdit, 
 /**
- * The languages as the page has just left them, as values rather than as
- * an action: there is nothing secret about a switch or a size, so a save
- * says where each of them is to stand and the server writes it down.
- *
- * One entry per language the page was given, carrying the two keys it
- * draws and no others — see [`LanguageEdit`]. The rest of a descriptor is
- * an installer's and is never sent, so a save from this page cannot take a
- * language off the machine.
- */
-languages: Array<LanguageEdit>, 
-/**
  * And what the Cleanup is to do after an archiving, as values for that
  * reason again: two switches and two durations, and a save says where each
  * of them is to stand.
@@ -6841,18 +6774,6 @@ refused: Array<RuleRefused>,
  * still has in front of them.
  */
 refused_servers: Array<ServerRefused>, 
-/**
- * And the store sizes that would not be written down, or empty where the
- * save landed. A refusal here is the whole request refused, like the two
- * lists above: neither file is touched.
- *
- * Only a size that was *changed* is refused. One a hand-edit wrote into
- * `config.yaml` that is not a size goes back as it was on a save about
- * something else, so a tick is never turned down over a field the human
- * did not touch — see `LanguageView::size_unread`, which is how the page
- * says that one.
- */
-refused_sizes: Array<SizeRefused>, 
 /**
  * And what came of speaking to each declaration that *was* written down,
  * in the order they were declared — empty on every save that said nothing
@@ -7186,23 +7107,6 @@ export type Shown = { "Painted": Screen } | { "Printed": string };
  * the latest one is the size the Screen and the session's own terminal are.
  */
 export type Size = { columns: number, rows: number, };
-
-/**
- * One store size a save was turned down over.
- *
- * By the language's name rather than by position: there is one size per
- * language and one field per size, so the name is the field.
- */
-export type SizeRefused = { 
-/**
- * The language whose size it is, as `config.yaml` keys it.
- */
-language: string, 
-/**
- * Why, as a clause following the word that was sent — see
- * `crate::languages::bytes` on the server.
- */
-why: string, };
 
 /**
  * And where a prefill came from.
@@ -8402,39 +8306,6 @@ export type Unread = {
  * The turn's place in the conversation, counted from 1.
  */
 id: number, line: string, };
-
-/**
- * What became of a language whose entry in `config.yaml` could not be read.
- *
- * **Both halves are drawn**, because they are two different things to do. The
- * reason is what there is to fix — and where a variable is what was refused it
- * names the variable, that being the whole of the fix. What it is running on
- * meanwhile is whether anything is broken right now: a language that fell back
- * to the descriptor Verkstead ships is one whose cache is working exactly as it
- * did before the entry was written, and a language with nothing to fall back to
- * is off until somebody goes and looks.
- *
- * And while it is here the page draws that language's controls disabled. The
- * two keys they write go into the entry this reports on, and an entry nothing
- * could read is one nothing can be written into: a box that sprang back the
- * moment it was ticked would be a worse answer than a box that says why it
- * cannot be.
- */
-export type UnreadEntry = { 
-/**
- * Why, as a clause the page puts the words *its entry in `config.yaml`* in
- * front of — `sets PATH, which is a variable the Sandbox sets itself`, or
- * `could not be read: …` in the reader's own words.
- *
- * The server's sentence rather than a code the page turns into one: what
- * goes wrong in a file somebody hand-wrote is open-ended, and a viewer
- * holding the vocabulary would be a release that could not add a reason.
- */
-why: string, 
-/**
- * And what the language is running on meanwhile.
- */
-running_on: RunningOn, };
 
 /**
  * A stored Set this build cannot deserialize, as the browser receives it: the

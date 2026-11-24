@@ -5,6 +5,7 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "languages": [],
       "name": "Verkstead",
       "needs": [],
       "provides": [
@@ -17,6 +18,133 @@
       "trouble": null,
       "uuid": "15447a8d-f28d-4573-8b8b-a7226d477755",
       "version": "0.1.0"
+    },
+    {
+      "author": "Tobias Cohen",
+      "dependents": [],
+      "elsewhere": null,
+      "enabled": true,
+      "languages": [
+        ".NET"
+      ],
+      "name": ".NET",
+      "needs": [],
+      "provides": [
+        "language"
+      ],
+      "settings": 1,
+      "source": {
+        "kind": "BuiltIn"
+      },
+      "trouble": null,
+      "uuid": "4447ae00-3e89-4ccc-bd80-4a7e1fb1da25",
+      "version": "0.1.0"
+    },
+    {
+      "author": "Tobias Cohen",
+      "dependents": [],
+      "elsewhere": null,
+      "enabled": true,
+      "languages": [
+        "Go"
+      ],
+      "name": "Go",
+      "needs": [],
+      "provides": [
+        "language"
+      ],
+      "settings": 1,
+      "source": {
+        "kind": "BuiltIn"
+      },
+      "trouble": null,
+      "uuid": "01b5328a-3524-457d-ab88-1af1c65079ea",
+      "version": "0.1.0"
+    },
+    {
+      "author": "Tobias Cohen",
+      "dependents": [],
+      "elsewhere": null,
+      "enabled": true,
+      "languages": [
+        "JVM"
+      ],
+      "name": "JVM",
+      "needs": [],
+      "provides": [
+        "language"
+      ],
+      "settings": 1,
+      "source": {
+        "kind": "BuiltIn"
+      },
+      "trouble": null,
+      "uuid": "4f815023-0bb7-481d-975d-5609e829fb8f",
+      "version": "0.1.0"
+    },
+    {
+      "author": "Tobias Cohen",
+      "dependents": [],
+      "elsewhere": null,
+      "enabled": true,
+      "languages": [
+        "Node"
+      ],
+      "name": "Node",
+      "needs": [],
+      "provides": [
+        "language"
+      ],
+      "settings": 1,
+      "source": {
+        "kind": "BuiltIn"
+      },
+      "trouble": null,
+      "uuid": "c5afa04c-6946-40e0-8933-2ae1570aa8d8",
+      "version": "0.1.0"
+    },
+    {
+      "author": "Tobias Cohen",
+      "dependents": [],
+      "elsewhere": null,
+      "enabled": true,
+      "languages": [
+        "Python"
+      ],
+      "name": "Python",
+      "needs": [],
+      "provides": [
+        "language"
+      ],
+      "settings": 1,
+      "source": {
+        "kind": "BuiltIn"
+      },
+      "trouble": null,
+      "uuid": "1afdba16-24b2-4e2d-9a79-80edac364c7a",
+      "version": "0.1.0"
+    },
+    {
+      "author": "Tobias Cohen",
+      "dependents": [],
+      "elsewhere": null,
+      "enabled": true,
+      "languages": [
+        "Rust",
+        "C/C++"
+      ],
+      "name": "Rust & C/C++",
+      "needs": [],
+      "provides": [
+        "language"
+      ],
+      "settings": 1,
+      "source": {
+        "kind": "BuiltIn"
+      },
+      "trouble": null,
+      "uuid": "795515ae-96cd-4d7c-8071-e6753b3f4624",
+      "version": "0.1.0"
     }
   ],
   "installed": [
@@ -25,6 +153,7 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "languages": [],
       "name": "GitLab",
       "needs": [],
       "provides": [
@@ -45,6 +174,7 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "languages": [],
       "name": "Broken",
       "needs": [],
       "provides": [
@@ -65,6 +195,7 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "languages": [],
       "name": "Shared skills",
       "needs": [],
       "provides": [
@@ -86,6 +217,7 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "languages": [],
       "name": "Dependent",
       "needs": [
         {
@@ -109,6 +241,27 @@
       "trouble": "It needs Base, which isn't installed.",
       "uuid": "3b2a1f0e-9d8c-4b7a-8f6e-5d4c3b2a1f0e",
       "version": "1.4.0"
+    },
+    {
+      "author": "",
+      "dependents": [],
+      "elsewhere": null,
+      "enabled": true,
+      "languages": [
+        "Zig"
+      ],
+      "name": "Zig",
+      "needs": [],
+      "provides": [
+        "language"
+      ],
+      "settings": 1,
+      "source": {
+        "kind": "Config"
+      },
+      "trouble": null,
+      "uuid": "6f3e7cf1-6d73-837a-86b6-d13f2f603f3a",
+      "version": ""
     }
   ]
 }

@@ -1,0 +1,271 @@
+# Node, as a Language plugin: data, and no component, since a language runs
+# nothing. The grammar of a `language` entry is `docs/plugins.md`'s *Language*.
+uuid: c5afa04c-6946-40e0-8933-2ae1570aa8d8
+name: Node
+author:
+  name: Tobias Cohen
+  email: tobi@tobico.net
+version: 0.1.0
+interface: 1
+description: Shares the stores of npm, pnpm, both yarns, deno and bun between sessions.
+# The stores' size, in sccache's grammar (`30G`), and the cluster's: what the
+# sweep holds every store below to, and what `{size}` reads, for every language
+# here. Empty is the default, which the pane shows as its placeholder.
+settings:
+  - key: size
+    label: Store size limit
+    kind: size
+    description: The package managers' stores are held to this size, oldest first.
+provides:
+  - category: language
+    language: node
+    # The JavaScript ecosystem, and the second of the package stores. One entry
+    # for every tool that installs from the npm registry rather than one each —
+    # npm, pnpm, both yarns, deno and bun: switching Node off switches the lot
+    # off, which is what one box on the settings page for an ecosystem means
+    # (ADR-0021). deno and bun are not runtimes with entries of their own for
+    # the same reason Berry is not: what they share is the npm registry's
+    # packages, and a box per tool would be five boxes saying one thing.
+    label: Node
+
+    # The manifest every one of them reads, at the root of a checkout — for the
+    # setup card's warning and nothing else, exactly as Rust's and Go's are.
+    detect:
+      - package.json
+
+    # Six tools and seven variables between them, and **not one name shared**.
+    # Each was read out of the tool that reads it as this entry was written —
+    # `<tool> config get`, `bun pm cache`, `deno info`, against the releases the
+    # dev shell and the CI job pin — rather than taken from a variable that
+    # looks like it ought to work:
+    #
+    #   NPM_CONFIG_CACHE          npm's `cache`, which holds the packages it has
+    #                             downloaded (`_cacache`) and what `--offline`
+    #                             installs out of. npm's own `npm_config_`
+    #                             prefix in its documented upper-case spelling,
+    #                             which is one of the two forms npm reads.
+    #
+    #   PNPM_CONFIG_STORE_DIR     pnpm's `store-dir`: the content-addressable
+    #                             store, **not** `PNPM_HOME`, which is where
+    #                             pnpm puts global binaries and holds no
+    #                             packages at all. `PNPM_CONFIG_` is pnpm's own
+    #                             prefix — pnpm 11 reads neither `store-dir`
+    #                             out of an `.npmrc` nor `npm_config_store_dir`
+    #                             out of the environment.
+    #
+    #   PNPM_CONFIG_CACHE_DIR     and pnpm's `cache-dir`, which is the registry
+    #                             metadata beside that store. Both halves, for
+    #                             the reason Go gets both of its: an offline
+    #                             install that has the packages and not the
+    #                             metadata fails, `ERR_PNPM_NO_OFFLINE_META`.
+    #
+    #   YARN_CACHE_FOLDER         Yarn Classic's `cache-folder`. Classic is
+    #                             yarn 1.x, still what `yarn` is on most
+    #                             machines, and this is the only one of its
+    #                             settings that moves the download.
+    #
+    #   YARN_GLOBAL_FOLDER        Yarn Berry's `globalFolder`, which is yarn 2
+    #                             and up, and where Berry's cache is *by
+    #                             default*. **Berry does not read
+    #                             `YARN_CACHE_FOLDER` there**:
+    #                             `enableGlobalCache` is on by default in Yarn
+    #                             4, and Berry then disregards `cacheFolder`
+    #                             and keeps the cache in `globalFolder/cache`.
+    #                             So the two yarns are two variables naming two
+    #                             directories, which is also what keeps
+    #                             Classic's `v6` layout out of Berry's zips.
+    #
+    #                             A Repo that writes `enableGlobalCache: false`
+    #                             sends Berry back to `cacheFolder`, which is
+    #                             the directory above — shared, and shared with
+    #                             Classic. That Repo does not get the
+    #                             project-local cache it would have had without
+    #                             Verkstead, which is the one thing a session
+    #                             takes away from it. `YARN_ENABLE_GLOBAL_CACHE`
+    #                             would settle it either way and is deliberately
+    #                             not set: moving a store is this descriptor's
+    #                             business and overriding a Repo's policy switch
+    #                             is not.
+    #
+    #   DENO_DIR                  deno's cache, which `deno --help` lists under
+    #                             exactly that description — "set the cache
+    #                             directory" — and `deno info` takes apart into
+    #                             the remote modules, the npm packages, the
+    #                             emitted ones and the language server's
+    #                             registries. **And the origin storage**, which
+    #                             is the one thing under any of these seven
+    #                             directories that is not a download; see below.
+    #                             deno has one variable for the lot rather than
+    #                             a store and a metadata directory the way pnpm
+    #                             does.
+    #
+    #   BUN_INSTALL_CACHE_DIR     bun's cache, which `bun pm cache` prints.
+    #                             **Not `BUN_INSTALL`**, which is bun's install
+    #                             root: its `bin` is where a global install puts
+    #                             a program, and its `install/cache` is only the
+    #                             default this variable moves — a session given
+    #                             the root instead would be sharing a `bin` on
+    #                             its `PATH` between Conversations. Nor
+    #                             `BUN_INSTALL_GLOBAL_DIR`, which is the global
+    #                             packages themselves and holds nothing a
+    #                             project installs out of.
+    #
+    # **Three of the seven are under `{stores}`** — pnpm's store, deno's cache
+    # and bun's — because each of those three tools hardlinks a package out of
+    # its store into the project rather than copying it, and a link does not
+    # cross a filesystem. pnpm was the first built-in to name that placeholder.
+    #
+    # **deno was expected to be one of the others and is not**, which is a
+    # measurement rather than a reading: after `deno install`, the `index.js`
+    # under `node_modules/.deno/` and the one under `DENO_DIR/npm/` are the same
+    # inode. So deno is where pnpm and bun are, for the reason they are.
+    #
+    # **And on Linux all three copy anyway**, which this stage found rather than
+    # assumed. A Worktree and this directory are two separate **bind mounts** in
+    # a session's sandbox, and `link(2)` answers `EXDEV` across two mounts even
+    # where both are the same filesystem — so the fall-back these tools document
+    # for two filesystems is what a session gets whatever disk these are on. The
+    # store still works: a copy out of it fetches nothing, which is the whole of
+    # what the install proofs assert. What is gone is the disk space a hardlink
+    # would have saved. Closing it means one mount holding both the Worktree and
+    # the store, which is the sandbox's business rather than a descriptor's — so
+    # it is written down here, proved in `tests/suite/package_stores.rs`, and left to
+    # whoever changes what a session may reach. `{stores}` stays because it is
+    # still the right side of that line, and because it is where the fix would
+    # land.
+    #
+    # **And only pnpm says so.** pnpm prints that packages were copied from the
+    # store; deno and bun fall back without a word and exit zero, so the link
+    # count on a file in the project is the whole of the evidence for those two.
+    #
+    # The other three copy out of their store, or in Berry's case read the zip
+    # where it lies, so none of this costs them anything.
+    #
+    # Five of the six are safe for two installs at once — npm's `_cacache`,
+    # pnpm's store and deno's npm cache are content-addressed or keyed by
+    # version, and Berry writes each zip under a temporary name and renames it
+    # into place — which is the other half of what a shared store has to be, and
+    # what two Sandboxes installing at the same time is there to say.
+    #
+    # **Yarn Classic is the sixth, and it is not.** It was written here as
+    # renaming into place like Berry, and the two-at-once proof disproved it:
+    # Classic makes the cache entry at the entry's *final* path and fills it
+    # afterwards, so an install that arrives in between finds the directory,
+    # takes the entry for complete, and opens a `.yarn-tarball.tgz` that is not
+    # written yet. `ENOENT`, and that install stops — about one run in four under
+    # this suite.
+    #
+    # **The cache is shared anyway, and that is a decision rather than an
+    # oversight.** What a collision damages is the install that hit it and not
+    # the store: measured, in `tests/suite/package_stores.rs`, a third install with
+    # the registry gone still installs out of what is there and still runs what
+    # it installed, whichever of the two lost. So what sharing costs Classic is
+    # an install that fails and is run again, and what it buys is the download
+    # every other Conversation then does not make. A human sees it as a yarn
+    # error naming a file in the cache.
+    #
+    # And none of them holds a secret of a session's own. A registry login is
+    # `.npmrc`'s `_authToken` or Berry's `npmAuthToken`, both in a file nothing
+    # here moves, and deno's is `DENO_AUTH_TOKENS`, which is an environment
+    # variable rather than anything on disk. What npm keeps under its cache
+    # besides the packages is `_logs`, which is its own account of a failed
+    # install rather than a secret; Berry's `globalFolder` holds the cache, the
+    # metadata and an empty hardlink index and nothing else; and bun's cache
+    # holds tarballs and manifests, its global binaries being under `BUN_INSTALL`
+    # instead.
+    #
+    # **`DENO_DIR` is the one that holds more than downloads.** `deno info`
+    # names it *origin storage*: `localStorage` for a `--location`, and the
+    # database `Deno.openKv()` opens where it was given no path. That is a
+    # program's own state rather than a session's secret, and sharing it is the
+    # same bargain as sharing a store — two Conversations running one Repo's
+    # program see one `localStorage`. `DENO_KV_DEFAULT_PATH` would move half of
+    # it and is deliberately not set, for the reason `YARN_ENABLE_GLOBAL_CACHE`
+    # is not: a descriptor moves stores, and deciding where a Repo's program
+    # keeps its data is not that.
+    #
+    # **A Repo's own config does not win over these**, and it is worth knowing
+    # which way round that is: the four tools with a config key for it put the
+    # command line above the environment and the environment above their rc
+    # files, so a session's variable beats an `.npmrc`, a `pnpm-workspace.yaml`
+    # or a `.yarnrc`, and a Repo that must have its own store passes `--cache`,
+    # `--store-dir` or `--cache-folder` where it installs. Nothing a descriptor
+    # can do changes that: the grammar sets variables, and there is no rung
+    # below the environment to set one on. Both halves are asserted in
+    # `tests/suite/package_stores.rs`, because a silent loss is the worse of the two.
+    # bun reads its cache out of `bunfig.toml`'s `install.cache.dir` and puts
+    # the environment above that too; deno documents no config key for
+    # `DENO_DIR` at all, so there is nothing for a Repo to lose.
+    env:
+      NPM_CONFIG_CACHE: "{cache}/npm"
+      PNPM_CONFIG_STORE_DIR: "{stores}/pnpm"
+      PNPM_CONFIG_CACHE_DIR: "{cache}/pnpm/metadata"
+      YARN_CACHE_FOLDER: "{cache}/yarn/cache"
+      YARN_GLOBAL_FOLDER: "{cache}/yarn/global"
+      DENO_DIR: "{stores}/deno"
+      BUN_INSTALL_CACHE_DIR: "{stores}/bun"
+    # And the seven directories those name, one store apiece.
+    #
+    # **npm's and pnpm's stores are content-addressed**, so a blob is the unit:
+    # neither keeps a package in one place, a pnpm shard holding a slice of
+    # every package there is. Each checks a blob as it reads it, and an index
+    # entry whose blob has gone is a miss fetched again rather than a broken
+    # install. pnpm's metadata is a file per package.
+    #
+    # **The rest keep a package in one place, and a partial one is worse than
+    # none**: Yarn Classic, deno and bun all install a half-removed package
+    # without a word. So their unit is the package whole — Classic's entry
+    # directory, Berry's zip, deno's directory of a package's versions beside
+    # its `registry.json`, and bun's `<name>@<version>` directory, a scoped one
+    # a level further down. bun's link beside each of those is passed over,
+    # being a link, which leaves it pointing at nothing once its version has
+    # gone. deno's remote modules are a file apiece.
+    #
+    # What is not named here is never swept: npm's index and logs, pnpm's
+    # index and its links into the Worktrees, and deno's origin storage, which
+    # is a program's own state rather than a download.
+    stores:
+      npm:
+        dir: "{cache}/npm"
+        units:
+          - under: _cacache/content-v2
+            depth: 4
+      pnpm:
+        dir: "{stores}/pnpm"
+        units:
+          - under: v11/files
+            depth: 2
+      pnpm-metadata:
+        dir: "{cache}/pnpm/metadata"
+        units:
+          - under: v11/metadata
+            named: ["*.jsonl"]
+      yarn:
+        dir: "{cache}/yarn/cache"
+        units:
+          - under: v6
+            depth: 1
+            named: ["npm-*"]
+      yarn-berry:
+        dir: "{cache}/yarn/global"
+        units:
+          - under: cache
+            depth: 1
+            named: ["*.zip"]
+      deno:
+        dir: "{stores}/deno"
+        units:
+          - under: npm
+            holding: ["registry.json"]
+          - under: remote
+            depth: 3
+      bun:
+        dir: "{stores}/bun"
+        units:
+          - named: ["*@*@@@*"]
+          # And what an install that lost a race to another left behind: bun
+          # extracts into `.tmp` and renames into place, and the loser's copy
+          # stays where it was. Nothing reads it again, and the sweep runs
+          # only while no session is, so it goes whole like a package.
+          - under: .tmp
+            depth: 1

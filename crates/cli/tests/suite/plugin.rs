@@ -223,3 +223,33 @@ fn a_pack_named_verkstead_is_refused() {
         "{stderr}"
     );
 }
+
+/// The built-in Language plugins are directories an author could have written,
+/// and pass the check as they stand in the repository.
+#[test]
+fn a_built_in_language_plugin_passes_naming_its_languages() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/rust-cpp");
+
+    let output = check(&dir);
+
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("providing language rust, language cpp"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn a_language_entry_setting_a_sandbox_variable_is_refused_naming_it() {
+    let dir = plugin(&MINIMAL.replace(
+        "provides: []",
+        "provides:\n  - category: language\n    language: rust\n    env:\n      PATH: /bin\n",
+    ));
+
+    let output = check(dir.path());
+
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("`provides[0].env.PATH`"), "{stderr}");
+}

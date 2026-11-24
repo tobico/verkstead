@@ -164,16 +164,17 @@ fn packing(dir: &Path, uuid: &str, name: &str, pack: &str) -> String {
     at
 }
 
-/// The skills Verkstead ships are the Built-in group's row: providing skills,
-/// always on, and with no Remove — and the fixture is not listed.
+/// The skills Verkstead ships are the Built-in group's first row: providing
+/// skills, always on with no tick, and with no Remove — and the fixture is not
+/// listed.
 #[tokio::test]
 async fn the_verkstead_pack_is_a_built_in_row() {
     let (app, _dir) = kept().await;
 
     let view = page(&app).await;
 
-    let [row] = view.built_in.as_slice() else {
-        panic!("one built-in is listed: {view:?}");
+    let Some(row) = view.built_in.first() else {
+        panic!("a built-in is listed: {view:?}");
     };
     assert_eq!(row.uuid, VERKSTEAD);
     assert_eq!(row.name, "Verkstead");
@@ -183,13 +184,25 @@ async fn the_verkstead_pack_is_a_built_in_row() {
     assert_eq!(row.trouble, None);
     assert!(view.installed.iter().all(|row| row.uuid != FIXTURE));
 
-    let (status, _) = pressing(
+    let (status, said) = pressing(
         &app,
         &format!("/api/ui/plugins/{VERKSTEAD}/remove"),
         serde_json::json!({}),
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "a built-in has no Remove");
+    assert_eq!(status, StatusCode::CONFLICT, "a built-in has no Remove");
+    assert!(said.contains("built in"), "{said}");
+    assert!(!said.contains("Untick"), "it has no tick: {said}");
+
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{VERKSTEAD}/enabled"),
+        serde_json::json!({ "enabled": false }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{said}");
+    assert!(said.contains("always on"), "{said}");
+    assert!(page(&app).await.built_in[0].enabled);
 }
 
 /// An enabled plugin's pack is written out under its name, and taken away
@@ -484,6 +497,462 @@ async fn a_uuid_installed_or_built_in_is_refused() {
     assert!(said.contains("built-in"), "{said}");
 
     assert_eq!(page(&app).await.installed.len(), 1);
+}
+
+const GO_PLUGIN: &str = "01b5328a-3524-457d-ab88-1af1c65079ea";
+const RUST_CPP: &str = "795515ae-96cd-4d7c-8071-e6753b3f4624";
+
+fn built_in<'a>(view: &'a PluginsView, name: &str) -> &'a PluginRow {
+    view.built_in
+        .iter()
+        .find(|row| row.name == name)
+        .unwrap_or_else(|| panic!("{name} is listed under Built-in in {view:?}"))
+}
+
+/// The six Language plugins are listed under Built-in, each saying the
+/// languages it provides, on with nothing written; the fixture isn't listed,
+/// and a built-in has no Remove or Update.
+#[tokio::test]
+async fn the_language_plugins_are_listed_under_built_in() {
+    let (app, _dir) = kept().await;
+    let view = page(&app).await;
+
+    assert!(view.installed.is_empty());
+    let names: Vec<&str> = view.built_in.iter().map(|row| row.name.as_str()).collect();
+    assert_eq!(names.len(), 7, "the pack and six languages: {names:?}");
+    assert!(!view.built_in.iter().any(|row| row.uuid == FIXTURE));
+
+    let rust = built_in(&view, "Rust & C/C++");
+    assert_eq!(rust.languages, ["Rust", "C/C++"]);
+    assert_eq!(rust.provides, ["language"]);
+    assert_eq!(rust.source, PluginSource::BuiltIn);
+    assert!(rust.enabled);
+    for (name, language) in [
+        ("Go", "Go"),
+        ("Node", "Node"),
+        ("Python", "Python"),
+        (".NET", ".NET"),
+        ("JVM", "JVM"),
+    ] {
+        let row = built_in(&view, name);
+        assert_eq!(row.languages, [language], "{name}");
+        assert!(row.enabled, "{name}");
+    }
+
+    let go = &built_in(&view, "Go").uuid;
+    for press in ["remove", "update"] {
+        let (status, said) = pressing(
+            &app,
+            &format!("/api/ui/plugins/{go}/{press}"),
+            serde_json::json!({ "granted": null }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{press}: {said}");
+        assert!(said.contains("built in"), "{said}");
+    }
+}
+
+/// Unticking Go is what the next session reads: its languages have Go off,
+/// and none of Go's variables are given — and ticking it again gives them
+/// back. Everything else stays on.
+#[tokio::test]
+async fn the_tick_on_a_built_in_is_whether_sessions_get_its_language() {
+    use verkstead_server::languages::{self, GO, Machine, RUST};
+
+    let (app, dir) = kept().await;
+    let settings = Settings::in_data_dir(dir.path());
+    let machine = Machine::of(&dir.path().join("cache"), dir.path(), None);
+    let given = |settings: &Settings| {
+        languages::configured(&settings.config())
+            .given(&machine)
+            .env()
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>()
+    };
+    assert!(given(&settings).contains(&"GOMODCACHE".to_owned()));
+
+    let enabled = format!("/api/ui/plugins/{GO_PLUGIN}/enabled");
+    let press =
+        |enabled_: bool| pressing(&app, &enabled, serde_json::json!({ "enabled": enabled_ }));
+
+    let (status, said) = press(false).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    let view: PluginsView = serde_json::from_str(&said).unwrap();
+    assert!(!built_in(&view, "Go").enabled);
+    assert!(built_in(&view, "Rust & C/C++").enabled);
+
+    let languages = languages::configured(&settings.config());
+    assert!(!languages.get(GO).unwrap().enabled());
+    assert!(languages.get(RUST).unwrap().enabled());
+    assert!(!given(&settings).contains(&"GOMODCACHE".to_owned()));
+    assert!(given(&settings).contains(&"CARGO_HOME".to_owned()));
+
+    let (status, said) = press(true).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert!(built_in(&page(&app).await, "Go").enabled);
+    assert!(given(&settings).contains(&"GOMODCACHE".to_owned()));
+}
+
+/// A Language plugin's size is a field on its pane, drawn before anything was
+/// written to it with its default as the placeholder. A size that is not one
+/// is refused and nothing is written; one saved is what the next session's
+/// `SCCACHE_CACHE_SIZE` reads and what Rust's stores are held to — and Go's
+/// own, saved on its own pane, what Go's are.
+#[tokio::test]
+async fn a_size_saved_on_a_language_plugins_pane_is_what_sessions_read() {
+    use verkstead_server::languages::{self, CPP, GO, Machine, RUST, SCCACHE};
+
+    let (app, dir) = kept().await;
+    let settings = Settings::in_data_dir(dir.path());
+    let machine = Machine::of(
+        &dir.path().join("cache"),
+        dir.path(),
+        Some(dir.path().join("sccache")),
+    );
+    let sccache_size = |settings: &Settings| {
+        languages::configured(&settings.config())
+            .given(&machine)
+            .env()
+            .iter()
+            .find(|(name, _)| name == "SCCACHE_CACHE_SIZE")
+            .map(|(_, value)| value.clone())
+    };
+    assert_eq!(sccache_size(&settings).as_deref(), Some("30G"));
+
+    let at = |uuid: &str| format!("{PLUGINS}/{uuid}/settings");
+    let read = |uuid: &str| {
+        let app = app.clone();
+        let uri = at(uuid);
+        async move {
+            let answered = app
+                .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(answered.status(), StatusCode::OK);
+            let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+            serde_json::from_slice::<PluginSettingsView>(&bytes).unwrap()
+        }
+    };
+    let sized = |size: &str| {
+        serde_json::json!({ "fields": [
+        { "key": "size", "value": { "kind": "Size", "value": size } },
+    ] })
+    };
+
+    // Drawn before anything is written to it, empty with its default under.
+    let view = read(RUST_CPP).await;
+    let field = &view.fields[0];
+    assert_eq!(field.key, "size");
+    assert_eq!(field.placeholder.as_deref(), Some("30G"));
+    assert_eq!(
+        field.value,
+        PluginFieldValue::Size {
+            value: String::new()
+        }
+    );
+    assert_eq!(
+        read(GO_PLUGIN).await.fields[0].placeholder.as_deref(),
+        Some("10G")
+    );
+
+    // Not a size: refused with the reason, and nothing written.
+    let (status, said) = pressing(&app, &at(RUST_CPP), sized("1.5g")).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    let saved: PluginSettingsSaved = serde_json::from_str(&said).unwrap();
+    assert_eq!(
+        saved.refused,
+        [PluginFieldRefused {
+            key: "size".to_owned(),
+            why: "1.5g isn't a size. Write a whole number with K, M, G or T after it, such as \
+                  30G."
+                .to_owned(),
+        }],
+    );
+    assert_eq!(
+        read(RUST_CPP).await.fields[0].value,
+        PluginFieldValue::Size {
+            value: String::new()
+        }
+    );
+    assert_eq!(sccache_size(&settings).as_deref(), Some("30G"));
+
+    // A size: what the next session reads, for both of its languages, and
+    // the plugin still on.
+    let (status, said) = pressing(&app, &at(RUST_CPP), sized("12G")).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert_eq!(
+        read(RUST_CPP).await.fields[0].value,
+        PluginFieldValue::Size {
+            value: "12G".to_owned()
+        }
+    );
+    assert_eq!(sccache_size(&settings).as_deref(), Some("12G"));
+    let configured = languages::configured(&settings.config());
+    assert_eq!(configured.get(RUST).unwrap().size(RUST), "12G");
+    assert_eq!(configured.get(CPP).unwrap().size(CPP), "12G");
+    assert_eq!(configured.wanting(SCCACHE), Some("12G"));
+    assert!(built_in(&page(&app).await, "Rust & C/C++").enabled);
+    assert_eq!(configured.get(GO).unwrap().size(GO), "10G");
+
+    // Go's own, on Go's pane.
+    let (status, said) = pressing(&app, &at(GO_PLUGIN), sized("3G")).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    let configured = languages::configured(&settings.config());
+    assert_eq!(configured.get(GO).unwrap().size(GO), "3G");
+    assert_eq!(configured.get(RUST).unwrap().size(RUST), "12G");
+
+    // And cleared, the default again.
+    let (status, said) = pressing(&app, &at(RUST_CPP), sized("")).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert_eq!(sccache_size(&settings).as_deref(), Some("30G"));
+}
+
+/// What one session on `dir`'s Data Directory is given: each variable by
+/// name, with its value.
+fn given_to_a_session(settings: &Settings, dir: &Path) -> Vec<(String, String)> {
+    let machine = verkstead_server::languages::Machine::of(&dir.join("cache"), dir, None);
+    verkstead_server::languages::configured(&settings.config())
+        .given(&machine)
+        .env()
+        .to_vec()
+}
+
+/// A `languages:` entry naming a language no plugin provides is a row of its
+/// own under Installed, from `config.yaml`: a session gets its variable, and
+/// unticking the row drops it from the next. It has no Remove or Update; its
+/// pane has the size field, saved and read like a built-in's.
+#[tokio::test]
+async fn an_installers_own_language_is_a_row_of_its_own() {
+    let (app, dir) = kept().await;
+    let settings = Settings::in_data_dir(dir.path());
+    std::fs::write(
+        settings.config_path(),
+        "languages:\n  zig:\n    env:\n      ZIG_GLOBAL_CACHE_DIR: \"{cache}/zig\"\n",
+    )
+    .unwrap();
+    let named = |settings: &Settings| {
+        given_to_a_session(settings, dir.path())
+            .iter()
+            .any(|(name, _)| name == "ZIG_GLOBAL_CACHE_DIR")
+    };
+    assert!(named(&settings));
+
+    let view = page(&app).await;
+    let zig = view
+        .installed
+        .iter()
+        .find(|row| row.source == PluginSource::Config)
+        .unwrap_or_else(|| panic!("an eighth row, under Installed: {view:#?}"))
+        .clone();
+    assert_eq!(zig.name, "zig", "named by its entry, there being no label");
+    assert_eq!(zig.languages, ["zig"]);
+    assert_eq!(zig.provides, ["language"]);
+    assert!(zig.enabled);
+    assert_eq!(zig.trouble, None);
+    assert_eq!(zig.settings, 1, "its store is under the Build Cache");
+    assert!(view.built_in.iter().all(|row| row.uuid != zig.uuid));
+
+    let enabled = format!("{PLUGINS}/{}/enabled", zig.uuid);
+    let (status, said) = pressing(&app, &enabled, serde_json::json!({ "enabled": false })).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    let view: PluginsView = serde_json::from_str(&said).unwrap();
+    assert!(!row(&view, &zig.uuid).enabled);
+    assert!(!named(&settings), "the next session gets no zig");
+
+    let (status, said) = pressing(&app, &enabled, serde_json::json!({ "enabled": true })).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert!(named(&settings));
+
+    for press in ["remove", "update"] {
+        let (status, said) = pressing(
+            &app,
+            &format!("{PLUGINS}/{}/{press}", zig.uuid),
+            serde_json::json!({ "granted": null }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{press}: {said}");
+        assert!(said.contains("config.yaml"), "{said}");
+    }
+
+    // Its pane: the size, its default under it, and its cache.
+    let at = format!("{PLUGINS}/{}/settings", zig.uuid);
+    let answered = app
+        .clone()
+        .oneshot(Request::builder().uri(&at).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(answered.status(), StatusCode::OK);
+    let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+    let pane: PluginSettingsView = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(pane.fields[0].key, "size");
+    assert_eq!(pane.fields[0].placeholder.as_deref(), Some("10G"));
+    assert_eq!(pane.languages.len(), 1);
+    assert_eq!(pane.languages[0].name, "zig");
+
+    let (status, said) = pressing(
+        &app,
+        &at,
+        serde_json::json!({ "fields": [
+            { "key": "size", "value": { "kind": "Size", "value": "4G" } },
+        ] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    let configured = verkstead_server::languages::configured(&settings.config());
+    assert_eq!(configured.get("zig").unwrap().size("zig"), "4G");
+}
+
+/// A plugin under `dir/<name>`, called `name`, providing the one language
+/// `language` with the variable `ZIG_GLOBAL_CACHE_DIR` and a store, and a
+/// `size` setting.
+fn languaging(dir: &Path, uuid: &str, name: &str, language: &str) -> String {
+    let text = manifest(uuid, name, &[]).replace(
+        "provides:\n  - category: forge\n  - category: activity\n  - category: forge\n",
+        &format!(
+            "settings:\n  - key: size\n    label: Store size limit\n    kind: size\n\
+             provides:\n  - category: language\n    language: {language}\n    label: Zig\n    \
+             env:\n      ZIG_GLOBAL_CACHE_DIR: \"{{cache}}/zig\"\n    \
+             stores:\n      zig:\n        dir: \"{{cache}}/zig\"\n"
+        ),
+    );
+    plugin(dir, name, &text)
+}
+
+/// A Language plugin installed from a directory is a language every session
+/// gets: its row says which, its tick is the switch, and its pane's size is
+/// what `{size}` reads. One providing a language another plugin already
+/// provides loads in trouble, and leaves that language as it was.
+#[tokio::test]
+async fn an_installed_language_plugin_reaches_sessions() {
+    let (app, dir) = kept().await;
+    let settings = Settings::in_data_dir(dir.path());
+    let named = |settings: &Settings| {
+        given_to_a_session(settings, dir.path())
+            .iter()
+            .any(|(name, _)| name == "ZIG_GLOBAL_CACHE_DIR")
+    };
+    assert!(!named(&settings));
+
+    let view = installs(&app, &languaging(dir.path(), PLUGIN, "Zig support", "zig")).await;
+    assert_eq!(row(&view, PLUGIN).trouble, None);
+    assert_eq!(row(&view, PLUGIN).languages, ["Zig"]);
+    assert!(
+        view.installed
+            .iter()
+            .all(|row| row.source != PluginSource::Config),
+        "no row of its own from config.yaml: {view:#?}",
+    );
+    assert!(named(&settings), "the next session gets zig");
+
+    // Its pane: the size, the default under it, and its cache.
+    let at = format!("{PLUGINS}/{PLUGIN}/settings");
+    let answered = app
+        .clone()
+        .oneshot(Request::builder().uri(&at).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+    let pane: PluginSettingsView = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(pane.fields[0].placeholder.as_deref(), Some("10G"));
+    assert_eq!(pane.languages.len(), 1);
+    assert_eq!(pane.languages[0].name, "zig");
+
+    let (status, said) = pressing(
+        &app,
+        &at,
+        serde_json::json!({ "fields": [
+            { "key": "size", "value": { "kind": "Size", "value": "4G" } },
+        ] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    let configured = verkstead_server::languages::configured(&settings.config());
+    assert_eq!(configured.get("zig").unwrap().size("zig"), "4G");
+
+    // An override in config.yaml merges over it, as over a built-in.
+    std::fs::write(
+        settings.config_path(),
+        "languages:\n  zig:\n    env:\n      ZIG_LOCAL_CACHE_DIR: /elsewhere\n",
+    )
+    .unwrap();
+    assert!(
+        given_to_a_session(&settings, dir.path())
+            .iter()
+            .any(|(name, value)| name == "ZIG_LOCAL_CACHE_DIR" && value == "/elsewhere")
+    );
+    assert!(named(&settings));
+
+    let (status, said) = pressing(
+        &app,
+        &format!("{PLUGINS}/{PLUGIN}/enabled"),
+        serde_json::json!({ "enabled": false }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert!(!named(&settings), "unticked, the next session gets no zig");
+
+    // One providing Go, which a built-in already does.
+    let view = installs(&app, &languaging(dir.path(), ANOTHER, "Other Go", "go")).await;
+    assert_eq!(
+        row(&view, ANOTHER).trouble.as_deref(),
+        Some("It provides the language `go`, and so does Go. Give it a name of its own."),
+    );
+    assert!(
+        !given_to_a_session(&settings, dir.path())
+            .iter()
+            .any(|(name, _)| name == "ZIG_GLOBAL_CACHE_DIR"),
+        "and Go is Go's",
+    );
+}
+
+/// An override of a built-in that won't load — a mistyped `detct` in Go's —
+/// is trouble on Go's row, and Go's sessions get the variables Verkstead
+/// ships; an override that loads, beside it, still wins.
+#[tokio::test]
+async fn an_override_that_will_not_load_is_trouble_on_its_plugins_row() {
+    let (app, dir) = kept().await;
+    let settings = Settings::in_data_dir(dir.path());
+    std::fs::write(
+        settings.config_path(),
+        "languages:\n  go:\n    detct:\n      - go.mod\n    env:\n      \
+         GOMODCACHE: \"{cache}/mine\"\n  rust:\n    env:\n      \
+         CARGO_HOME: \"{cache}/cargo-mine\"\n",
+    )
+    .unwrap();
+
+    let view = page(&app).await;
+    let trouble = built_in(&view, "Go")
+        .trouble
+        .clone()
+        .unwrap_or_else(|| panic!("Go's row says why: {view:#?}"));
+    assert!(
+        trouble.starts_with("The go entry in config.yaml"),
+        "{trouble}"
+    );
+    assert!(trouble.contains("detct"), "{trouble}");
+    assert!(trouble.ends_with("Go runs on what Verkstead ships until the entry is fixed."));
+    assert_eq!(built_in(&view, "Rust & C/C++").trouble, None);
+    assert!(view.installed.is_empty(), "no row of its own: {view:#?}");
+
+    let given = given_to_a_session(&settings, dir.path());
+    let value = |name: &str| {
+        given
+            .iter()
+            .find(|(named, _)| named == name)
+            .map(|(_, value)| value.clone())
+            .unwrap_or_else(|| panic!("{name} is given: {given:?}"))
+    };
+    assert!(
+        Path::new(&value("GOMODCACHE")).ends_with("go/mod"),
+        "{}",
+        value("GOMODCACHE")
+    );
+    assert!(
+        value("CARGO_HOME").ends_with("cargo-mine"),
+        "{}",
+        value("CARGO_HOME")
+    );
 }
 
 /// A directory with no manifest is refused with the reader's own sentence.
@@ -1338,7 +1807,7 @@ async fn a_plugin_in_trouble_still_draws_its_fields() {
 
 /// Leave the viewer's tests the page and the consent card as the server writes
 /// them: a plugin that loaded, one in trouble, one from git, one whose
-/// dependency isn't installed, the card for one asking for a host, and the
+/// dependency isn't installed, an installer's own language, the card for one asking for a host, and the
 /// first one's settings pane with a text, a list and a secret set. The
 /// directories are written as `/home/you/src`, so that a fixture is not
 /// rewritten by where a test happened to run.
@@ -1407,6 +1876,15 @@ async fn the_page_and_the_card_are_written_for_the_viewer() {
         std::fs::create_dir_all(&fixtures).unwrap();
         std::fs::write(fixtures.join(name), pretty).unwrap();
     };
+
+    // And an installer's own language, which is a row under Installed from
+    // this device's `config.yaml`.
+    std::fs::write(
+        Settings::in_data_dir(dir.path()).config_path(),
+        "languages:\n  zig:\n    label: Zig\n    env:\n      \
+         ZIG_GLOBAL_CACHE_DIR: \"{cache}/zig\"\n",
+    )
+    .unwrap();
 
     written(
         "plugins.json",

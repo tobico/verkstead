@@ -6,9 +6,12 @@
 //! language and the wrong one for seven. The people this is for install
 //! Verkstead themselves and build in languages its maintainer does not, so
 //! adding one has to be a file rather than a build. The descriptors Verkstead
-//! ships are therefore a YAML file embedded in the binary, in the grammar an
-//! installer writes — `crates/server/languages.yaml`, which is this module's
-//! documentation as well as its data.
+//! ships are therefore data in the grammar an installer writes: since the
+//! plugins roadmap, the `language` entries of six built-in **Language plugins**
+//! under the repository's `plugins/` — Rust and C/C++ one plugin, because they
+//! share the Compile Server — embedded in the binary like every built-in (see
+//! [`built_in`]). The grammar is `docs/plugins.md`'s *Language*, and the
+//! plugins' own comments say why each variable is what it is.
 //!
 //! **And what an installer writes is merged over them, key by key.** The map
 //! under `languages:` in `config.yaml` is read as a [`Languages`] of its own
@@ -18,16 +21,20 @@
 //! a built-in whole, so that changing one variable still gets every later fix
 //! to the rest; a variable set to `null` is taken out; and an entry naming a
 //! language nothing here has ever heard of is a descriptor in its own right,
-//! on by default, with its variables in the next session and its checkbox on
-//! the settings page.
+//! on by default, with its variables in the next session and a row of its own
+//! on the Plugins page — see [`crate::plugins::installed::installers`].
 //!
 //! **`enabled` and `size` are keys of the same entry**, beside the ones only a
-//! file ever holds, and they are the only two the settings page writes — which
-//! is what lets one request write the whole of `config.yaml` without a save
-//! taking an installer's descriptor away. `rust_build_cache`, which is where
+//! file ever holds; the settings page writes no key of any entry, so a save of
+//! it never takes an installer's descriptor away. `rust_build_cache`, which is where
 //! Rust's switch and size used to be said, is still read as Rust's two, and
 //! the map wins where both are written: see
 //! [`crate::settings::Config::languages`], where the two are put together.
+//! **A language's `enabled` is its plugin's tick now, and its `size` its
+//! plugin's `size` setting**, cluster-wide — an installer's own language's
+//! too, it being drawn as a plugin of its own: the file's were taken up into
+//! the plugin's record once and are not read again — see [`configured`] and
+//! [`crate::replicating::plugins::taken_up`].
 //!
 //! **A descriptor cannot say a command to run.** It says a label, the manifests
 //! that detect the language in a Repo, the variables a session is given, and
@@ -44,8 +51,8 @@
 //! setup card's warning alone — see
 //! [`crate::build_cache::repo_builds_through_sccache`], which is its one caller.
 //!
-//! **Placeholders are what only the server knows** — see [`Machine`], and the
-//! embedded file, which is where each of the four is spelled out. A
+//! **Placeholders are what only the server knows** — see [`Machine`], and
+//! `docs/plugins.md`, which is where each of the four is spelled out. A
 //! placeholder's directory is granted to a session only where a loaded
 //! descriptor names it: the one beside the Worktrees is where pnpm's, deno's,
 //! bun's and uv's stores are, and an installation with every language that
@@ -69,9 +76,9 @@
 //! **What was written stays written.** The entry is kept exactly as the file
 //! had it — see [`Raw`] — because a save from the settings page writes the
 //! whole of `config.yaml`, and an entry nothing could read is still text the
-//! installer typed and is about to fix. It goes back the way the descriptor
-//! keys the page never drew do. And the page says why: [`Descriptor::unread`]
-//! is the reason, in the words it is logged in.
+//! installer typed and is about to fix. And its plugin's row says why, as its
+//! trouble: [`Descriptor::unread`] is the reason, in the words it is logged
+//! in.
 
 use std::fmt;
 use std::marker::PhantomData;
@@ -82,12 +89,8 @@ use serde::de::{MapAccess, Visitor};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 
-/// The descriptors Verkstead ships, as an installer would have written them.
-///
-/// Embedded rather than read off the disk, for the reason the Guide is: what
-/// runs is exactly what was reviewed, and one grammar means the built-ins are
-/// the documentation's worked examples rather than a second shape nobody sees.
-const BUILT_IN_YAML: &str = include_str!("../languages.yaml");
+use crate::platform::Platform;
+use crate::plugins::manifest::{Files, Manifest, Refusal, platform_key};
 
 /// Rust, whose name `rust_build_cache` is still read as the settings of.
 pub const RUST: &str = "rust";
@@ -103,7 +106,7 @@ pub const GO: &str = "go";
 pub const NODE: &str = "node";
 
 /// And Python, which is one entry for pip and uv — and for poetry and pipenv
-/// after them, an ecosystem being one box on the settings page. uv is the
+/// after them, an ecosystem being one plugin's tick. uv is the
 /// fourth store beside the Worktrees, and the second tool to say out loud that
 /// it could not link out of one.
 pub const PYTHON: &str = "python";
@@ -156,7 +159,7 @@ const ASIDE: &str = ".verkstead-swept";
 /// language but Rust — an installer's own included.
 ///
 /// A release's rather than a machine's, which is why it is a constant here and
-/// not a key of the embedded file: a key there would be one more an installer
+/// not a key of a plugin's `language` entry: a key there would be one more an installer
 /// could write, meaning nothing a `size` does not already say. Rust's is
 /// [`crate::build_cache::SIZE`], which its sccache has always been started at
 /// — see [`default_size`].
@@ -214,34 +217,193 @@ pub fn bytes(size: &str) -> Result<u64, String> {
 /// [`SCCACHE`] capability's own.
 const SCCACHE_AT: &str = "{sccache}";
 
-/// The descriptors Verkstead ships, parsed once.
+/// The descriptors Verkstead ships: every `language` entry of the built-in
+/// plugins, in the order they have always had — see [`ORDER`].
 ///
-/// A panic because the file is embedded: it cannot vary between machines, so a
-/// file that will not parse is a build that should never have shipped, and the
-/// suite reads it — see `the_built_ins_are_in_the_grammar_an_installer_writes`.
-///
-/// **Both halves of that are checked here**, because only one of them is an
-/// error: an entry of an installer's that will not load is a language falling
-/// back to its built-in, and an entry *of the built-ins* that will not load has
-/// nothing behind it to fall back to. So the leniency [`Languages::read`] gives
-/// `config.yaml` is spent here on a clearer panic rather than on shipping a
+/// A panic because they are embedded: they cannot vary between machines, so a
+/// manifest that will not read is a build that should never have shipped, and
+/// the suite reads every one — see `every_built_in_is_a_plugin_the_check_passes`.
+/// The leniency [`Languages::read`] gives `config.yaml` has nothing to fall
+/// back to here, so it is spent on a clearer panic rather than on shipping a
 /// language that quietly does nothing.
 pub fn built_in() -> &'static Languages {
     static BUILT_IN: LazyLock<Languages> = LazyLock::new(|| {
-        let languages = Languages::read(BUILT_IN_YAML)
-            .expect("the descriptors embedded in this binary are in the grammar the loader reads");
+        let mut languages = Vec::new();
 
-        if let Some((name, why)) = languages
-            .iter()
-            .find_map(|(name, descriptor)| Some((name, descriptor.unread()?)))
-        {
-            panic!("the descriptor embedded for {name} {why}");
+        for plugin in crate::plugins::built_in::BUILT_INS {
+            let manifest = Manifest::parse(
+                plugin.manifest,
+                Files::Embedded(plugin.files),
+                Platform::HERE,
+            )
+            .unwrap_or_else(|refusal| {
+                panic!(
+                    "the built-in plugin {} is in the grammar the loader reads, and {refusal}",
+                    plugin.directory
+                )
+            });
+
+            languages.extend(
+                manifest
+                    .provides
+                    .into_iter()
+                    .filter_map(|provision| provision.language)
+                    .map(|provided| (provided.name, provided.descriptor)),
+            );
         }
 
-        languages
+        // In the order the built-ins have always had, whichever plugin each is
+        // in, which is the order a session's environment is set in and the
+        // settings page lists them. Rust before C/C++ keeps the first naming
+        // the Compile Server the one that sizes it — see [`Languages::wanting`].
+        languages.sort_by_key(|(name, _)| {
+            ORDER
+                .iter()
+                .position(|ordered| ordered == name)
+                .unwrap_or(ORDER.len())
+        });
+
+        Languages(Ordered(languages))
     });
 
     &BUILT_IN
+}
+
+/// The built-in languages in the order they were written before they were
+/// plugins.
+const ORDER: [&str; 7] = [RUST, GO, NODE, PYTHON, DOTNET, CPP, JVM];
+
+/// One language a plugin provides: the `language` entry of its `provides:`
+/// list, read.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Provided {
+    /// What `languages:` in `config.yaml` keys its entry by.
+    pub name: String,
+    pub descriptor: Descriptor,
+}
+
+/// The keys of a `language` entry: the descriptor's own, beside the
+/// `category` and the name every entry of a plugin's list has. Not `enabled`
+/// or `size`, which are an installation's rather than a release's.
+const BLOCK: &[&str] = &[
+    "category",
+    "language",
+    "label",
+    "detect",
+    "env",
+    "capabilities",
+    "stores",
+];
+
+/// The entries of a manifest's `provides:` list as `platform` reads it, in the
+/// order each was written: a platform's own list where its block has one, the
+/// common list where not. Nothing where the text is not a manifest at all,
+/// which the reader has already refused.
+pub(crate) fn blocks(text: &str, platform: Platform) -> Vec<Raw> {
+    let Ok(Raw::Mapping(manifest)) = serde_saphyr::from_str::<Raw>(text) else {
+        return Vec::new();
+    };
+
+    let provides = match manifest.get(platform_key(platform)) {
+        Some(Raw::Mapping(block)) if block.get("provides").is_some() => block.get("provides"),
+        _ => manifest.get("provides"),
+    };
+
+    match provides {
+        Some(Raw::List(entries)) => entries.clone(),
+        _ => Vec::new(),
+    }
+}
+
+/// A `language` entry of a plugin's `provides:` list, at `field`, read in the
+/// descriptor grammar — or refused at the first field that is wrong, naming it,
+/// the way the rest of `plugin.yaml` is.
+///
+/// **Stricter than an entry of `config.yaml`**, which falls back to the
+/// built-in of its name rather than being refused — see [`Descriptor::read`].
+/// A plugin has its author at `verkstead plugin check` to tell, and an
+/// installer's file has nobody but the human it is about to fail on.
+pub(crate) fn provided(block: Option<&Raw>, field: &str) -> Result<Provided, Refusal> {
+    let Some(Raw::Mapping(entry)) = block else {
+        return Err(Refusal::of(field, format!("`{field}` should be a map.")));
+    };
+
+    known(block, field, BLOCK)?;
+
+    if let Some(Raw::Mapping(capabilities)) = entry.get("capabilities") {
+        for (name, capability) in capabilities.iter() {
+            known(
+                Some(capability),
+                &format!("{field}.capabilities.{name}"),
+                &["env"],
+            )?;
+        }
+    }
+
+    if let Some(Raw::Mapping(stores)) = entry.get("stores") {
+        for (name, store) in stores.iter() {
+            let at = format!("{field}.stores.{name}");
+            known(Some(store), &at, &["dir", "evicted", "units"])?;
+
+            if let Raw::Mapping(store) = store
+                && let Some(Raw::List(units)) = store.get("units")
+            {
+                for (index, unit) in units.iter().enumerate() {
+                    known(
+                        Some(unit),
+                        &format!("{at}.units[{index}]"),
+                        &["under", "depth", "named", "holding"],
+                    )?;
+                }
+            }
+        }
+    }
+
+    let name = match entry.get("language") {
+        Some(Raw::Text(name)) => name.clone(),
+        _ => {
+            let field = format!("{field}.language");
+            return Err(Refusal::of(&field, format!("`{field}` should be text.")));
+        }
+    };
+
+    let descriptor = Raw::Mapping(Ordered(
+        entry
+            .iter()
+            .filter(|(key, _)| !matches!(*key, "category" | "language"))
+            .map(|(key, value)| (key.to_owned(), value.clone()))
+            .collect(),
+    ));
+    let descriptor = Descriptor::parsed(&descriptor)
+        .map_err(|why| Refusal::of(field, format!("`{field}` {why}.")))?;
+
+    if let Some(at) = descriptor.refused_at() {
+        let at = format!("{field}.{at}");
+        return Err(Refusal::of(
+            &at,
+            format!("`{at}` is a variable the sandbox sets itself, so a language can't set it."),
+        ));
+    }
+
+    if let Some((store, why)) = descriptor.misplaced_store() {
+        let at = format!("{field}.stores.{store}");
+        return Err(Refusal::of(&at, format!("`{at}`: {name} {why}.")));
+    }
+
+    Ok(Provided { name, descriptor })
+}
+
+/// Refused where `value` is a map holding a key not `allowed`, naming it; a
+/// value of any other shape is the grammar's to refuse.
+fn known(value: Option<&Raw>, field: &str, allowed: &[&str]) -> Result<(), Refusal> {
+    let Some(Raw::Mapping(map)) = value else {
+        return Ok(());
+    };
+
+    match map.iter().find(|(key, _)| !allowed.contains(key)) {
+        Some((key, _)) => Err(Refusal::unknown_to_a_language(&format!("{field}.{key}"))),
+        None => Ok(()),
+    }
 }
 
 /// The descriptors this installation has: the ones Verkstead ships, with what
@@ -252,14 +414,79 @@ pub fn built_in() -> &'static Languages {
 /// [`crate::settings::Config::languages`]. A language switched off from a phone
 /// applies to the next session, and so does a descriptor a hand-edit added an
 /// hour ago.
+///
+/// **A built-in language's switch is its plugin's tick, and its size its
+/// plugin's `size` setting**, once the plugins' records are held, whatever
+/// `enabled` and `size` the file still says: unticked, none of its variables,
+/// stores or grants reach a session, and the Compile Server is not wanted for
+/// it; and `{size}`, the Compile Server's start and the trimming all read the
+/// record's size, or the default where it holds none. A language no plugin
+/// provides — an installer's own — is switched and sized the same way by the
+/// record of the plugin it is drawn as, once it has one, and by its entry
+/// until then.
+///
+/// **An installed Language plugin's languages come after the built-ins'**, in
+/// the order the plugins were installed, once a load here has read them —
+/// see [`Held::installed`] — and are switched and sized by its record the way
+/// a built-in's are. `config.yaml` merges over them as over a built-in.
 pub fn configured(config: &crate::settings::Config) -> Languages {
-    built_in().merged(&config.languages())
+    let Some(held) = config.plugin_languages() else {
+        return built_in().merged(&config.languages());
+    };
+
+    built_in()
+        .with_installed(&held.installed)
+        .merged(&config.languages())
+        .held(held)
+}
+
+/// Whether a plugin provides `name` on this installation: a built-in, or an
+/// installed Language plugin loaded here. An entry of `config.yaml` naming
+/// any other language is an installer's own.
+pub fn provided_by_a_plugin(config: &crate::settings::Config, name: &str) -> bool {
+    built_in().get(name).is_some()
+        || config
+            .plugin_languages()
+            .is_some_and(|held| held.provides(name))
+}
+
+/// The key of the settings field a Language plugin declares for its store's
+/// size, of kind `size`: what `{size}` reads for every language it provides.
+pub const SIZE_SETTING: &str = "size";
+
+/// What the Language plugins' records say of their languages, held for every
+/// session to read — see [`crate::replicating::plugins::held`].
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Held {
+    /// The languages the installed Language plugins loaded here provide, each
+    /// beside its plugin's uuid, in the order the plugins were installed — see
+    /// [`crate::plugins::installed`]'s load. A plugin unticked, in trouble or
+    /// on another device is not loaded here, and its languages are not here.
+    pub installed: Vec<(String, Provided)>,
+    /// The installer's own languages that have a record: switched and sized
+    /// by it, as a built-in is, rather than by their entry. One with none yet
+    /// is still its entry's.
+    pub recorded: std::collections::BTreeSet<String>,
+    /// The languages whose plugin is unticked.
+    pub off: std::collections::BTreeSet<String>,
+    /// The size each language's plugin has saved, by language. A language
+    /// whose plugin holds none is not here, and runs at its default.
+    pub sizes: std::collections::BTreeMap<String, String>,
+}
+
+impl Held {
+    /// Whether an installed Language plugin loaded here provides `name`.
+    pub fn provides(&self, name: &str) -> bool {
+        self.installed
+            .iter()
+            .any(|(_, provided)| provided.name == name)
+    }
 }
 
 /// A map of descriptors keyed by language, in the order they were written.
 ///
-/// One type for both halves of the grammar — the file embedded in the binary
-/// and the map under `languages:` in `config.yaml` — because they are one
+/// One type for both halves of the grammar — the built-in plugins' `language`
+/// entries and the map under `languages:` in `config.yaml` — because they are one
 /// grammar: what an installer writes is what Verkstead ships, and a second
 /// shape for the overrides would be a second thing to document and a second
 /// thing to keep in step.
@@ -275,11 +502,9 @@ pub fn configured(config: &crate::settings::Config) -> Languages {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Languages(Ordered<Descriptor>);
 
-/// A whole descriptor file: the map under its one `languages:` key.
-///
-/// The embedded file is written with that key so that it is the fragment of
-/// `config.yaml` an installer would paste, rather than a shape of its own —
-/// see [`Languages::read`], which is the only thing that goes through this.
+/// A whole descriptor file: the map under its one `languages:` key, which is
+/// the fragment of `config.yaml` an installer writes — see
+/// [`Languages::read`], which is the only thing that goes through this.
 #[derive(Debug, Deserialize)]
 struct File {
     #[serde(default)]
@@ -312,34 +537,6 @@ impl Languages {
         )]))
     }
 
-    /// And the entries the settings page has just written: the two keys it
-    /// draws, per language it was given.
-    ///
-    /// Written over the file rather than replacing it — see
-    /// [`Languages::under_the_page`], which is what a save goes through — so
-    /// what an installer wrote beside those two keys survives a save. A size
-    /// that is blank is *nothing configured* rather than a size of nothing,
-    /// which is what clearing the field on the page means and what puts the
-    /// default back; a language with no size field at all sends that same
-    /// blank, there being no size to send.
-    pub fn of_page(written: impl IntoIterator<Item = (String, bool, String)>) -> Languages {
-        Languages(Ordered(
-            written
-                .into_iter()
-                .map(|(name, enabled, size)| {
-                    (
-                        name,
-                        Descriptor {
-                            enabled: Some(enabled),
-                            size: crate::settings::blank_is_nothing(size),
-                            ..Descriptor::default()
-                        },
-                    )
-                })
-                .collect(),
-        ))
-    }
-
     /// Whether there is nothing here at all, which is what a `config.yaml`
     /// nobody has written a descriptor in says.
     pub fn is_empty(&self) -> bool {
@@ -368,33 +565,53 @@ impl Languages {
         )
     }
 
-    /// And this with what the settings page has just sent written over it.
+    /// This with every built-in language's switch and size as its plugin's
+    /// record says, and every installer's own language's that has a record:
+    /// off where it is among `held.off`, and on otherwise; sized as its plugin
+    /// saved, and at its default where it saved nothing.
     ///
-    /// Not [`Languages::merged`], which is one grammar's entries over
-    /// another's. That one keeps a key the override does not give, because a
-    /// key an installer did not write is a key they said nothing about — and
-    /// the page is the other way round: it draws `enabled` and `size` every
-    /// time it saves, so a key it did not send is one somebody **cleared**.
-    /// Clearing the size field is how the default is asked for back, and a
-    /// merge that kept the old value would be a field that could not be
-    /// emptied.
-    ///
-    /// Everything else in an entry is kept from this one, which is what a save
-    /// from a page with no descriptor editor on it must not be able to touch —
-    /// see [`crate::settings::Config::keeping_what_the_page_never_drew`], the
-    /// one caller. An entry the page never sent stays as it stands, and one
-    /// naming a language this file has never heard of is taken on as written,
-    /// which is what saves an installer's own.
-    ///
-    /// An entry nothing could read keeps its text here like any other key the
-    /// page never drew, and goes back into the file as it was written: it is
-    /// still what the installer typed and is about to fix — see [`Languages`]'s
-    /// own serialisation, which is where that is done.
-    pub fn under_the_page(&self, page: &Languages) -> Languages {
-        Languages(
+    /// Except an installer's own whose entry would not load, which stays off
+    /// whatever its tick says — see [`Descriptor::alone`]: there is nothing
+    /// behind it to turn on. An installed plugin's language is a built-in's
+    /// here: an override of it that would not load falls back to the plugin's.
+    fn held(self, held: &Held) -> Languages {
+        Languages(Ordered(
             self.0
-                .merged(&page.0, Descriptor::with_the_pages_keys, Descriptor::clone),
-        )
+                .0
+                .into_iter()
+                .map(|(name, descriptor)| {
+                    let provided = built_in().get(&name).is_some() || held.provides(&name);
+                    let descriptor = match provided || held.recorded.contains(&name) {
+                        true => Descriptor {
+                            enabled: Some(
+                                !held.off.contains(&name)
+                                    && (provided || descriptor.unread.is_none()),
+                            ),
+                            size: held.sizes.get(&name).cloned(),
+                            ..descriptor
+                        },
+                        false => descriptor,
+                    };
+                    (name, descriptor)
+                })
+                .collect(),
+        ))
+    }
+
+    /// This with the installed Language plugins' languages on the end, in
+    /// the order given — each one a built-in does not already provide, which
+    /// a load has already refused.
+    fn with_installed(&self, installed: &[(String, Provided)]) -> Languages {
+        let mut languages = self.clone();
+        for (_, provided) in installed {
+            if languages.get(&provided.name).is_none() {
+                languages
+                    .0
+                    .0
+                    .push((provided.name.clone(), provided.descriptor.clone()));
+            }
+        }
+        languages
     }
 
     /// The descriptor of `name`, where there is one.
@@ -411,8 +628,8 @@ impl Languages {
     /// the directories that have to be open for them to mean anything.
     ///
     /// The switch and the size are the descriptor's own — `enabled` and `size`,
-    /// which are the two keys of an entry the settings page writes and the only
-    /// two it ever does. They are read at every session spawn rather than held
+    /// which its Language plugin's record lays over it — see [`configured`].
+    /// They are read at every session spawn rather than held
     /// from startup, like everything else a session is built from, so a switch
     /// flipped on a phone applies to the next session.
     pub fn given(&self, machine: &Machine) -> Given {
@@ -517,8 +734,8 @@ impl Languages {
 /// descriptor is two variables, one that is nothing but a capability.
 ///
 /// **`enabled` and `size` are keys of this same entry**, beside the ones only
-/// a file ever holds, and they are the only two the settings page ever writes.
-/// One entry per language rather than a switch in one place and a descriptor in
+/// a file ever holds — read once into a Language plugin's record, which
+/// switches and sizes the language from then on. One entry per language rather than a switch in one place and a descriptor in
 /// another, because a human reading `config.yaml` should find everything it
 /// says about a language in the one block under its name.
 ///
@@ -693,18 +910,41 @@ impl Descriptor {
     /// for the same reason: a unit that would match anything is a sweep taking
     /// the store apart a file at a time — see [`Store::unbounded`].
     fn misplaced(&self) -> Option<String> {
+        self.misplaced_store().map(|(_, why)| why)
+    }
+
+    /// And the store that is not one, by its name, with that clause.
+    fn misplaced_store(&self) -> Option<(&str, String)> {
         self.stores.iter().find_map(|(name, store)| {
             let store = store.as_ref()?;
 
             if let Some(why) = store.unbounded() {
-                return Some(format!("names its store {name} {why}"));
+                return Some((name, format!("names its store {name} {why}")));
             }
 
             let dir = store.dir.as_deref()?;
 
             placed(dir)
                 .err()
-                .map(|why| format!("names {dir} as its store {name}, {why}"))
+                .map(|why| (name, format!("names {dir} as its store {name}, {why}")))
+        })
+    }
+
+    /// Where in the entry the variable [`Descriptor::refuses`] names is
+    /// written, as the path a plugin's refusal names it by:
+    /// `env.PATH`, or `capabilities.sccache.env.PATH`.
+    fn refused_at(&self) -> Option<String> {
+        let name = self.refuses()?;
+
+        if self.env.get(name).is_some() {
+            return Some(format!("env.{name}"));
+        }
+
+        self.capabilities.iter().find_map(|(capability, entry)| {
+            entry
+                .env
+                .get(name)
+                .map(|_| format!("capabilities.{capability}.env.{name}"))
         })
     }
 
@@ -720,16 +960,22 @@ impl Descriptor {
     ///
     /// Except where nothing could read it, and then it is a language **off**:
     /// what a descriptor saying nothing comes to with nothing underneath it is
-    /// a name with no variables, and a box on the settings page that turns on a
+    /// a name with no variables, and a tick on the Plugins page that turns on a
     /// language that does not exist would be worse than the language being
     /// plainly off until the entry is fixed.
-    fn alone(&self) -> Descriptor {
-        match self.unread.is_some() {
+    ///
+    /// Asked of a built-in's name too, where an entry is merged over something
+    /// that is not the built-ins — `rust_build_cache`'s Rust, in
+    /// [`crate::settings::Config::languages`] — and a built-in's is never off
+    /// for it: the built-in is still underneath, merged in later.
+    fn alone(name: &str, descriptor: &Descriptor) -> Descriptor {
+        let unbacked = built_in().get(name).is_none();
+        match unbacked && descriptor.unread.is_some() {
             true => Descriptor {
                 enabled: Some(false),
-                ..self.clone()
+                ..descriptor.clone()
             },
-            false => self.clone(),
+            false => descriptor.clone(),
         }
     }
 
@@ -886,14 +1132,14 @@ impl Descriptor {
             // variable no session is given.
             env: self
                 .env
-                .merged(&over.env, |_, over| over.clone(), Clone::clone),
+                .merged(&over.env, |_, over| over.clone(), |_, alone| alone.clone()),
             // And a capability in both is merged in its turn rather than
             // replaced, so that overriding one of the sccache's three variables
             // keeps the other two.
             capabilities: self.capabilities.merged(
                 &over.capabilities,
                 Capability::merged,
-                Capability::clone,
+                |_, alone| alone.clone(),
             ),
             // And a store in both merged in its turn, a `null` taking it out —
             // the variables' rule, one level further down.
@@ -903,24 +1149,13 @@ impl Descriptor {
                     (Some(held), Some(over)) => Some(held.merged(over)),
                     (_, over) => over.clone(),
                 },
-                Clone::clone,
+                |_, alone| alone.clone(),
             ),
             // And why the override said nothing, where it said nothing because
             // it would not load. Carried rather than merged into: what it is
             // about is the entry in the file, and the built-in underneath it is
             // exactly what it is falling back *to*.
             unread: over.unread.clone().or_else(|| self.unread.clone()),
-        }
-    }
-
-    /// This with the two keys the settings page draws taken from `page`,
-    /// absence included, and every other key left exactly as it is — see
-    /// [`Languages::under_the_page`], which says why that is not a merge.
-    fn with_the_pages_keys(&self, page: &Descriptor) -> Descriptor {
-        Descriptor {
-            enabled: page.enabled,
-            size: page.size.clone(),
-            ..self.clone()
         }
     }
 
@@ -963,7 +1198,7 @@ impl Capability {
         Capability {
             env: self
                 .env
-                .merged(&over.env, |_, over| over.clone(), Clone::clone),
+                .merged(&over.env, |_, over| over.clone(), |_, alone| alone.clone()),
         }
     }
 }
@@ -1347,7 +1582,7 @@ impl Machine {
     ///
     /// Safe to say of the whole of what the file wrote, because naming one of
     /// the two directories is what makes a value a path: the grammar has no
-    /// other reason to reach for one — see the embedded file, where each
+    /// other reason to reach for one — see `docs/plugins.md`, where each
     /// placeholder says what it stands for. A flag with a path in it comes out
     /// right for the same reason, its only separators being that path's.
     fn filled(&self, value: &str, size: &str, used: &mut Used) -> Option<String> {
@@ -1556,20 +1791,20 @@ impl<V: Clone> Ordered<V> {
     /// [`Descriptor::alone`].
     ///
     /// The order is this one's, with whatever `over` adds on the end — which is
-    /// what keeps a session's environment in the built-in file's order however
+    /// what keeps a session's environment in the built-ins' order however
     /// an installer's own entries are written.
     fn merged(
         &self,
         over: &Ordered<V>,
         merging: impl Fn(&V, &V) -> V,
-        alone: impl Fn(&V) -> V,
+        alone: impl Fn(&str, &V) -> V,
     ) -> Ordered<V> {
         let mut merged = self.0.clone();
 
         for (key, value) in over.iter() {
             match merged.iter_mut().find(|(name, _)| name == key) {
                 Some((_, held)) => *held = merging(held, value),
-                None => merged.push((key.to_owned(), alone(value))),
+                None => merged.push((key.to_owned(), alone(key, value))),
             }
         }
 
@@ -1704,7 +1939,7 @@ impl<'de> Visitor<'de> for Entries {
 /// nothing here is `Eq`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
-enum Raw {
+pub(crate) enum Raw {
     /// A `null`, a `~`, and a key with nothing under it.
     Nothing,
     Yes(bool),
@@ -1969,14 +2204,110 @@ mod tests {
         );
     }
 
+    /// The built-ins are six plugins under the repository's `plugins/`, each
+    /// one a directory `verkstead plugin check` passes, providing the seven
+    /// languages between them — and the Compile Server is named by the one
+    /// plugin whose two languages share it, once per language, and by no
+    /// other.
+    #[test]
+    fn every_built_in_is_a_plugin_the_check_passes() {
+        let plugins = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins");
+        let mut providing = Vec::new();
+
+        // The fixture's component is built rather than checked in, so it is
+        // not in its directory to be checked.
+        for plugin in crate::plugins::built_in::BUILT_INS
+            .iter()
+            .filter(|plugin| plugin.directory != "fixture")
+        {
+            let manifest = Manifest::check(&plugins.join(plugin.directory))
+                .unwrap_or_else(|refusals| panic!("{}: {refusals:?}", plugin.directory));
+
+            let languages: Vec<Provided> = manifest
+                .provides
+                .into_iter()
+                .filter_map(|provision| provision.language)
+                .collect();
+            if languages.is_empty() {
+                continue;
+            }
+
+            assert!(
+                manifest.component.is_none() && manifest.capabilities.is_empty(),
+                "{}: a language runs nothing, so it has no component to grant anything to",
+                plugin.directory,
+            );
+
+            let naming: Vec<String> = languages
+                .iter()
+                .filter(|provided| provided.descriptor.names(SCCACHE))
+                .map(|provided| provided.name.clone())
+                .collect();
+            providing.push((
+                plugin.directory,
+                languages
+                    .into_iter()
+                    .map(|provided| provided.name)
+                    .collect::<Vec<_>>(),
+                naming,
+            ));
+        }
+
+        let providing: Vec<(&str, Vec<&str>, Vec<&str>)> = providing
+            .iter()
+            .map(|(directory, languages, naming)| {
+                (
+                    *directory,
+                    languages.iter().map(String::as_str).collect(),
+                    naming.iter().map(String::as_str).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            providing,
+            [
+                ("dotnet", vec![DOTNET], vec![]),
+                ("go", vec![GO], vec![]),
+                ("jvm", vec![JVM], vec![]),
+                ("node", vec![NODE], vec![]),
+                ("python", vec![PYTHON], vec![]),
+                ("rust-cpp", vec![RUST, CPP], vec![RUST, CPP]),
+            ],
+        );
+    }
+
+    /// An installer's `languages:` entry still merges over the built-in of
+    /// its name key by key: a variable it sets wins, one it sets to `null` is
+    /// taken out, and the rest are the plugin's.
+    #[test]
+    fn an_installers_variable_wins_and_a_null_takes_one_out() {
+        let loaded = built_in().merged(&written(
+            "languages:\n  go:\n    env:\n      GOCACHE: /elsewhere\n      GOMODCACHE: null\n",
+        ));
+        let given = loaded.given(&machine(true));
+        let go: Vec<_> = given
+            .env()
+            .iter()
+            .filter(|(name, _)| name.starts_with("GO"))
+            .cloned()
+            .collect();
+
+        assert_eq!(go, [(String::from("GOCACHE"), String::from("/elsewhere"))]);
+        assert_eq!(
+            given.env().len(),
+            built_in().given(&machine(true)).env().len() - 1,
+        );
+    }
+
     /// A session of a machine with an sccache: Rust's four variables, in the
     /// order it has always had them, then Go's two, Node's seven, Python's
     /// six, .NET's three, C/C++'s two launchers and the JVM's three, and the
     /// two directories they name open underneath.
     ///
     /// Rust's four lead and are unchanged, which is the promise the descriptors
-    /// landed on: a language added to the file is variables after the ones a
-    /// session already had rather than a different environment.
+    /// landed on — and which their becoming plugins keeps: a language added is
+    /// variables after the ones a session already had rather than a different
+    /// environment.
     #[test]
     fn a_session_is_given_what_the_built_ins_say() {
         let given = built_in().given(&machine(true));
@@ -2118,10 +2449,12 @@ mod tests {
         ));
         let given = off.given(&machine(true));
 
-        assert_eq!(
-            given.env().first(),
-            Some(&(String::from("GOMODCACHE"), cached("go/mod"))),
-            "nothing of Rust's is left, and the languages beside it are untouched",
+        assert!(
+            !given
+                .env()
+                .iter()
+                .any(|(name, _)| name == "CARGO_HOME" || name.starts_with("CMAKE_")),
+            "nothing of Rust's or C/C++'s is left",
         );
         assert_eq!(
             given.env().len(),
@@ -2235,8 +2568,13 @@ mod tests {
         let given = both.given(&machine(true));
 
         assert_eq!(both.wanting(SCCACHE), Some("5G"));
+        let rust = given
+            .env()
+            .iter()
+            .position(|(name, _)| name == "CARGO_HOME")
+            .expect("Rust is on");
         assert_eq!(
-            given.env()[..4],
+            given.env()[rust..rust + 4],
             [
                 (String::from("CARGO_HOME"), cached("cargo")),
                 (

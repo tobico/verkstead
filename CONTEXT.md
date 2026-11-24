@@ -1296,11 +1296,11 @@ What a language *is* to Verkstead: **data**, in one grammar, saying a label for
 the settings page, the manifests that detect it in a Repo, the variables a
 session is given, and the **capabilities** it names. Seven ship — Rust and
 C/C++, which compile, the four **package stores**, Go, Node, Python and
-.NET, and the JVM, whose one entry is Maven and Gradle — and there is nothing special about any of them: the built-ins are a YAML file embedded in the
-binary, written the way an installer writes one, so they are the grammar's own
-worked examples rather than a second shape nobody ever sees. **One entry per
+.NET, and the JVM, whose one entry is Maven and Gradle — and there is nothing special about any of them: the built-ins are the `language` entries of six
+built-in **Plugins**, written the way an installer writes one, so they are the
+grammar's own worked examples rather than a second shape nobody ever sees. **One entry per
 ecosystem rather than per tool**, which is what makes Node six tools, Python
-four and the JVM two: what one box on the settings page turns off is every tool that installs
+four and the JVM two: what one plugin's tick turns off is every tool that installs
 from one registry.
 **Data rather than behaviour.** A descriptor cannot say a command to run: a
 settings file that started programs would be one whose sandbox somebody then
@@ -1320,11 +1320,12 @@ in `config.yaml` is that same grammar again, and each entry goes into the
 built-in of its name one key at a time — so changing one variable still gets
 every later fix to the rest, and a variable set to `null` is taken **out**. An
 entry naming a language Verkstead has never heard of is a descriptor in its own
-right: on by default, with its variables in the next session and its box on the
-settings page, and no release needed to put it there. **The file only**, there
-being no descriptor editor: `enabled` and `size` are keys of the same entry and
-the only two the settings page ever writes, which is what lets one save write
-the whole of `config.yaml` without taking an installer's own keys away. Absent
+right: on by default, with its variables in the next session and a row of its
+own on the Plugins page, and no release needed to put it there. **The file
+only**, there being no descriptor editor: `enabled` and `size` are keys of the
+same entry, read once into a Language plugin's record, and the settings page
+writes no key of any entry, so a save of it never takes an installer's own
+keys away. Absent
 `enabled` is on and absent `size` is 10G — 30G for Rust, whose sccache has
 always been started at that — so a language nobody has said anything about is
 one that works and one whose stores are held to something. `rust_build_cache`, where Rust's two used to
@@ -1368,15 +1369,21 @@ working build cache to one mistyped variable is the worse experience for not
 having checked. What was written stays written, exactly as it was typed,
 because a save from the settings page writes the whole file and an entry
 nothing could read is still text somebody is about to fix — and while it is
-there the **Build caches** part of the Sandbox pane draws that language's box off with the
-reason under it, naming the variable where a variable is what was
-refused, and saying which of the two became of it.
-**From the plugins roadmap on a descriptor is a Language Plugin's**: the
-`language` block of its `provides:` list, in the grammar above, the seven
-shipping as six built-in Plugins with Rust and C/C++ sharing one for their
-Compile Server, and an installer's `languages:` entry still merging over the
-Plugin of its name. The Plugins page's tick replaces the Build caches box, and
-`size` becomes the Plugin's declared setting. See ADR-0030.
+there that language's plugin's row carries the reason as its trouble, naming
+the variable where a variable is what was refused, and saying which of the two
+became of it.
+**A descriptor is a Language Plugin's**: the `language` entry of its
+`provides:` list, in the grammar above (`docs/plugins.md`'s *Language*), the
+seven shipping as six built-in Plugins with Rust and C/C++ sharing one for
+their Compile Server, and an installer's `languages:` entry merging over the
+language of its name. A plugin's entry is refused by field where an
+installer's falls back, and cannot hold `enabled` or `size`, which are the
+installation's. A Language plugin's tick on the Plugins page is its
+languages' switch, cluster-wide, in place of a Build caches box, and its
+declared `size` setting, drawn in its pane, their size — an installer's own
+language's included, drawn as a plugin of its own from `config.yaml`, under a
+uuid derived from its name, on every device whose file has the entry. See
+ADR-0030.
 _Avoid_: language definition, toolchain, language config
 
 **Build Cache**:
@@ -1406,10 +1413,10 @@ and `%LOCALAPPDATA%\Verkstead\Cache` on Windows, the local rather than the
 roaming application data because a compiled crate follows nobody between
 machines. The packaged unit says `/var/cache/verkstead`); which languages a
 Sandbox gets at all, and how big each one's stores may grow, is the human's, in
-the workbench settings — a row per descriptor under **Build caches**: its
-box, and on every one that has a store of its own a link saying what the store
-holds against its size, which opens the size, a Clear and the rest (C/C++'s
-link saying instead that its objects are Rust's sccache's). It is kept under those sizes
+the workbench settings — each language's Language plugin, cluster-wide: its
+tick on the Plugins page, and in its pane the size and, for every language
+with a store of its own, what the store holds against it, its directories and
+a Clear (C/C++'s saying instead that its objects are Rust's sccache's). It is kept under those sizes
 by sccache for the compiled half and by the **Sweep** for the rest. The one control
 there that only ever *closes* a hole — the **Sandbox
 Configuration** beside it opens them, and does so only for what somebody typed.

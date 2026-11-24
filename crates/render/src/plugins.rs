@@ -13,6 +13,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::{CompileCaching, DiskUse, Running, StoreView};
+
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
@@ -24,8 +26,9 @@ pub struct PluginsView {
 
     /// The ones this binary ships and lists, the Skill Pack `verkstead` first;
     /// the fixture that proves the path is not listed, and the group is drawn
-    /// only once it has a row. A built-in has no **Remove** and no checkbox:
-    /// it is always on.
+    /// only once it has a row. A built-in has no **Remove** and no **Update**,
+    /// and is always on but for a Language plugin, which is on until it is
+    /// unticked.
     pub built_in: Vec<PluginRow>,
 }
 
@@ -42,6 +45,9 @@ pub struct PluginRow {
     /// The Category of each thing it provides, as the manifest writes it, once
     /// each.
     pub provides: Vec<String>,
+    /// The languages it provides, by label — `Rust`, `C/C++` — in the order
+    /// its manifest lists them. Empty for one providing none.
+    pub languages: Vec<String>,
     pub source: PluginSource,
     /// Its checkbox: whether the cluster has it on.
     pub enabled: bool,
@@ -100,6 +106,10 @@ pub enum PluginSource {
     Git { url: String, revision: String },
     /// Inside this binary: a built-in.
     BuiltIn,
+    /// An installer's own language: an entry of this device's `config.yaml`
+    /// naming a language no plugin provides. Drawn only on a device whose file
+    /// has the entry, and with no Remove or Update — the entry is the file's.
+    Config,
 }
 
 /// Where to read a manifest for the consent card: a directory's absolute path,
@@ -183,6 +193,38 @@ pub struct PluginSettingsView {
     /// Why it didn't load here, where it didn't: the row's own trouble.
     pub trouble: Option<String>,
     pub fields: Vec<PluginField>,
+    /// What a Language plugin's pane draws under its fields: each language it
+    /// provides, with what its store holds and its Clear. Empty for a plugin
+    /// providing none. Drawn whether or not the plugin is ticked, because an
+    /// off language still holds what it fetched.
+    pub languages: Vec<PluginLanguageCache>,
+    /// What is running as this was drawn, which a Clear is refused over.
+    pub running: Running,
+}
+
+/// One language of a Language plugin, as its pane draws its cache.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PluginLanguageCache {
+    /// The name `config.yaml` keys it by, which a Clear names.
+    pub name: String,
+    pub label: String,
+    /// The size its store is held to now: the plugin's `size` where it is
+    /// one, and the default otherwise.
+    pub size: String,
+    /// What its store holds, as last measured.
+    pub disk_use: DiskUse,
+    /// Each directory of its store, and how it is kept under the size.
+    pub stores: Vec<StoreView>,
+    /// When its swept stores were last swept, RFC 3339, or null where they
+    /// have not been since the server started.
+    pub swept: Option<String>,
+    /// Whether it compiles through the Compile Server, and whether that is
+    /// cached — null where it names no such capability.
+    pub compiling: Option<CompileCaching>,
+    /// The label of the language whose store its compiles are kept in, where
+    /// that is another's: C/C++, compiling through Rust's.
+    pub through: Option<String>,
 }
 
 /// One settings field, as its manifest declares it.
@@ -193,6 +235,9 @@ pub struct PluginField {
     pub key: String,
     pub label: String,
     pub description: Option<String>,
+    /// What an empty box shows: the value in force where none is set, where
+    /// there is one — a Language plugin's default size.
+    pub placeholder: Option<String>,
     pub value: PluginFieldValue,
 }
 

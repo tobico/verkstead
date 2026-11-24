@@ -3,8 +3,13 @@
 //!
 //! **Two groups, Installed above Built-in**, one row per Plugin whatever it
 //! provides. The Built-in group is drawn only once it has a row (Set 1772, Q4):
-//! the Skill Pack `verkstead` is its first. A built-in is always on, so its row
-//! has no checkbox, and it has no Remove.
+//! the Skill Pack `verkstead` first, then the six Language plugins, each saying
+//! the languages it provides. A built-in has no Remove, and is always on, so
+//! its row has no checkbox — but for a Language plugin, whose tick is whether
+//! sessions get its languages. An installer's own language — a `languages:`
+//! entry of this device's `config.yaml` that no plugin provides — is a row
+//! under Installed, saying where it comes from, with no Update or Remove: the
+//! entry is the file's.
 //!
 //! **A row** reads the plugin's name, version and author, the Category of what
 //! it provides, where it came from, its checkbox, and its trouble where it
@@ -268,10 +273,17 @@ export function PluginsPane(props: {
                           flip={(enabled) =>
                             enable.mutate({ uuid: row.uuid, enabled })
                           }
-                          update={() =>
-                            update.mutate({ uuid: row.uuid, granted: null })
+                          update={
+                            row.source.kind === "Config"
+                              ? undefined
+                              : () =>
+                                  update.mutate({ uuid: row.uuid, granted: null })
                           }
-                          remove={() => removing.mutate(row.uuid)}
+                          remove={
+                            row.source.kind === "Config"
+                              ? undefined
+                              : () => removing.mutate(row.uuid)
+                          }
                           fix={(need) => fix(row.uuid, need)}
                           open={() => props.open(row.uuid)}
                           refused={
@@ -341,6 +353,12 @@ export function PluginsPane(props: {
                         <Row
                           of={row}
                           pressing={enable.isPending}
+                          flip={
+                            row.languages.length > 0
+                              ? (enabled) =>
+                                  enable.mutate({ uuid: row.uuid, enabled })
+                              : undefined
+                          }
                           open={() => props.open(row.uuid)}
                           refused={
                             refused()?.uuid === row.uuid
@@ -367,8 +385,8 @@ export function PluginsPane(props: {
 function Row(props: {
   of: PluginRow;
   pressing: boolean;
-  /// Its checkbox, where it has one: every installed plugin, and no built-in,
-  /// which is always on.
+  /// Its checkbox, where it has one: every installed plugin, and a built-in
+  /// only where it is a Language plugin — the rest are always on.
   flip?: (enabled: boolean) => void;
   /// **Update**, where the row has one: a git plugin, or a local plugin on
   /// this device.
@@ -386,8 +404,12 @@ function Row(props: {
   /// or one for a dependency it offered to install.
   children?: JSX.Element;
 }): JSX.Element {
-  /// The version and the author, as one quiet line beside the name.
-  const facts = (): string => `${props.of.version} · ${props.of.author}`;
+  /// The version and the author, as one quiet line beside the name — none
+  /// for an installer's own language, which has neither.
+  const facts = (): string =>
+    props.of.source.kind === "Config"
+      ? ""
+      : `${props.of.version} · ${props.of.author}`;
 
   /// The press waiting on its confirmation: an untick that takes ticked
   /// dependents with it, or **Remove**.
@@ -413,7 +435,9 @@ function Row(props: {
           fallback={
             <span>
               <span class={styles.name}>{props.of.name}</span>
-              <span class={styles.facts}>{facts()}</span>
+              <Show when={facts()}>
+                <span class={styles.facts}>{facts()}</span>
+              </Show>
             </span>
           }
         >
@@ -421,7 +445,9 @@ function Row(props: {
             label={
               <>
                 <span class={styles.name}>{props.of.name}</span>
-                <span class={styles.facts}>{facts()}</span>
+                <Show when={facts()}>
+                  <span class={styles.facts}>{facts()}</span>
+                </Show>
               </>
             }
             on={props.of.enabled}
@@ -497,8 +523,19 @@ function Row(props: {
         />
       </Show>
 
-      <Show when={props.of.provides.length > 0}>
-        <p class={styles.provides}>Provides {props.of.provides.join(", ")}.</p>
+      <Show
+        when={props.of.languages.length > 0}
+        fallback={
+          <Show when={props.of.provides.length > 0}>
+            <p class={styles.provides}>
+              Provides {props.of.provides.join(", ")}.
+            </p>
+          </Show>
+        }
+      >
+        <p class={styles.provides}>
+          Provides {listed(props.of.languages)}.
+        </p>
       </Show>
 
       <Show when={source(props.of)}>
@@ -575,15 +612,17 @@ function listed(names: string[]): string {
   return `${names.slice(0, -1).join(", ")}, and ${names.at(-1)}`;
 }
 
-/// Where a row's plugin came from: its directory, or its repository and the
-/// revision this cluster is pinned to. Nothing for a built-in, whose group
-/// already says so.
+/// Where a row's plugin came from: its directory, its repository and the
+/// revision this cluster is pinned to, or this device's `config.yaml`. Nothing
+/// for a built-in, whose group says it.
 function source(row: PluginRow): string | null {
   switch (row.source.kind) {
     case "Local":
       return row.source.path;
     case "Git":
       return `${row.source.url} at ${row.source.revision.slice(0, 7)}`;
+    case "Config":
+      return "From this device's config.yaml.";
     case "BuiltIn":
       return null;
   }

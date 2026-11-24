@@ -18,41 +18,209 @@
 //! **Only the server decides what a value may be.** A size it cannot read is
 //! refused with the reason at the field, and a save refused over any field
 //! writes none of them.
+//!
+//! **A built-in's pane is its embedded manifest's**, record or none: the
+//! fields are the ones this binary declares, and the values the record's where
+//! one has been written. A save is what makes the record of a built-in nobody
+//! has touched, the way its first tick does. A Language plugin's `size` is
+//! what `{size}` reads for each language it provides — see
+//! [`crate::languages::configured`] — and its placeholder is that language's
+//! default.
+//!
+//! **And so is an installer's own language's**, drawn as a plugin of its own:
+//! its fields are the size field where its entry names a store, read off the
+//! entry rather than any record, and its first save makes its record — see
+//! [`super::installed::installer_fields`].
 
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Response};
 use verkstead_render::{
     PluginField, PluginFieldEdit, PluginFieldRefused, PluginFieldValue, PluginFieldWrite,
-    PluginSettingsSave, PluginSettingsSaved, PluginSettingsView,
+    PluginLanguageCache, PluginSettingsSave, PluginSettingsSaved, PluginSettingsView,
 };
 use verkstead_schema::Nudge;
 
-use super::installed::{failed, held, on_this_device};
+use super::built_in;
+use super::installed::{
+    built_in_fields, failed, held, installer_fields, installer_uuid, installers, on_this_device,
+};
 use super::manifest::SettingKind;
 use crate::AppState;
+use crate::languages::SIZE_SETTING;
 use crate::replicating::authors::writing_held;
 use crate::replicating::plugins::{Declared, Fields, Plugins, SettingValue, digests};
-use crate::store::replicated::{self, Record, Written};
+use crate::store::replicated::{self, Written};
 
-/// The pane as this device reads `record`.
-fn view(state: &AppState, record: &Record<Fields>) -> PluginSettingsView {
-    let loads = record.fields.enabled && on_this_device(state, &record.fields);
+/// The plugin a pane is of: its uuid and its record's fields, a built-in's
+/// read off its embedded manifest — see [`held_or_built_in`].
+struct Held {
+    uuid: String,
+    fields: Fields,
+    /// Whether there is a record yet: a built-in nobody has written to has
+    /// none.
+    recorded: bool,
+}
+
+/// The pane's plugin under `uuid`: a built-in's fields as its embedded
+/// manifest declares them, with its record's switch and values where it has
+/// one and on with none set where it has not; any other plugin's record, or
+/// the refusal naming it as not installed.
+async fn held_or_built_in(state: &AppState, uuid: &str) -> Result<Held, Response> {
+    let manifest = built_in::listed()
+        .iter()
+        .find(|manifest| manifest.uuid == uuid);
+    let config = state.settings.config();
+    let installer = installers(&config)
+        .into_iter()
+        .find(|(language, _)| installer_uuid(language) == uuid);
+
+    if manifest.is_none() && installer.is_none() {
+        return held(state, uuid).await.map(|record| Held {
+            uuid: record.uuid,
+            fields: record.fields,
+            recorded: true,
+        });
+    }
+
+    let kept = match replicated::live_records::<Plugins>(&state.pool).await {
+        Ok(records) => records.into_iter().find(|record| record.uuid == uuid),
+        Err(error) => return Err(failed(error)),
+    };
+    let kept = kept.as_ref().map(|record| &record.fields);
+
+    let fields = match (manifest, installer) {
+        (Some(manifest), _) => {
+            built_in_fields(manifest, kept.is_none_or(|kept| kept.enabled), kept)
+        }
+        (None, Some((language, descriptor))) => {
+            let enabled = match kept {
+                Some(kept) => kept.enabled,
+                None => config
+                    .languages()
+                    .get(&language)
+                    .is_none_or(crate::languages::Descriptor::enabled),
+            };
+            installer_fields(&language, &descriptor, enabled, kept)
+        }
+        (None, None) => unreachable!("one or the other, checked above"),
+    };
+
+    Ok(Held {
+        uuid: uuid.to_owned(),
+        fields,
+        recorded: kept.is_some(),
+    })
+}
+
+/// The languages the Language plugin `uuid` provides on this device, by the
+/// name `config.yaml` keys each by, in the order its manifest lists them: a
+/// built-in's, an installed plugin's that loaded here, or the one an
+/// installer's own is drawn for where this device's file has it. Nothing for
+/// any other plugin.
+fn provided(state: &AppState, uuid: &str) -> Vec<String> {
+    if let Some(manifest) = built_in::listed()
+        .iter()
+        .find(|manifest| manifest.uuid == uuid)
+    {
+        return built_in::languages(manifest)
+            .map(|provided| provided.name.clone())
+            .collect();
+    }
+
+    let installed: Vec<String> = state
+        .settings
+        .installed_languages()
+        .into_iter()
+        .filter(|(of, _)| of == uuid)
+        .map(|(_, provided)| provided.name)
+        .collect();
+    if !installed.is_empty() {
+        return installed;
+    }
+
+    installers(&state.settings.config())
+        .into_iter()
+        .map(|(language, _)| language)
+        .filter(|language| installer_uuid(language) == uuid)
+        .collect()
+}
+
+/// The pane as this device reads `held`.
+fn view(state: &AppState, held: &Held) -> PluginSettingsView {
+    let loads = held.fields.enabled && on_this_device(state, &held.fields);
 
     PluginSettingsView {
-        uuid: record.uuid.clone(),
-        name: record.fields.name.clone(),
-        trouble: loads.then(|| state.plugins.trouble(&record.uuid)).flatten(),
-        fields: record
+        uuid: held.uuid.clone(),
+        name: held.fields.name.clone(),
+        trouble: loads.then(|| state.plugins.trouble(&held.uuid)).flatten(),
+        fields: held
             .fields
             .declared
             .iter()
-            .map(|declared| field(&record.fields, declared))
+            .map(|declared| field(state, &held.uuid, &held.fields, declared))
             .collect(),
+        languages: caches(state, &held.uuid),
+        running: crate::ui::running(state),
     }
 }
 
-fn field(fields: &Fields, declared: &Declared) -> PluginField {
+/// What a Language plugin's pane draws under its fields: each language it
+/// provides as this device's stores hold it, ticked or not, in the order its
+/// manifest lists them — see [`provided`]. Empty for any other plugin.
+fn caches(state: &AppState, uuid: &str) -> Vec<PluginLanguageCache> {
+    let provided = provided(state, uuid);
+    if provided.is_empty() {
+        return Vec::new();
+    }
+
+    let loaded = crate::languages::configured(&state.settings.config());
+    let caches_compiles = state.sessions.caches_compiles();
+    // The language whose store the one Compile Server keeps its compiles in:
+    // the first naming it, as `Languages::wanting` sizes it.
+    let sizer = loaded
+        .iter()
+        .find(|(_, descriptor)| descriptor.names(crate::languages::SCCACHE));
+
+    provided
+        .iter()
+        .filter_map(|name| {
+            let name = name.as_str();
+            let descriptor = loaded.get(name)?;
+            let label = |name: &str, descriptor: &crate::languages::Descriptor| {
+                descriptor.label().unwrap_or(name).to_owned()
+            };
+            let compiling = descriptor.names(crate::languages::SCCACHE);
+
+            Some(PluginLanguageCache {
+                name: name.to_owned(),
+                label: label(name, descriptor),
+                size: descriptor.size(name).to_owned(),
+                disk_use: crate::ui::disk_use_of(name, descriptor, &state.disk_use),
+                stores: crate::ui::stores_of(descriptor),
+                swept: crate::ui::swept_of(name, &state.sweeps),
+                compiling: compiling.then(|| crate::ui::compile_caching(caches_compiles)),
+                through: sizer
+                    .filter(|(sizer, _)| compiling && *sizer != name)
+                    .map(|(sizer, descriptor)| label(sizer, descriptor)),
+            })
+        })
+        .collect()
+}
+
+/// What a field of the plugin `uuid` shows while nothing is set: a Language
+/// plugin's size is its first language's default — `30G` for Rust & C/C++,
+/// whose sccache has always been started at it, and `10G` for the rest.
+fn placeholder(state: &AppState, uuid: &str, declared: &Declared) -> Option<String> {
+    if declared.kind != SettingKind::Size || declared.key != SIZE_SETTING {
+        return None;
+    }
+
+    let first = provided(state, uuid).into_iter().next()?;
+    Some(crate::languages::default_size(&first).to_owned())
+}
+
+fn field(state: &AppState, uuid: &str, fields: &Fields, declared: &Declared) -> PluginField {
     let line = || match fields.values.get(&declared.key) {
         Some(SettingValue::Line(line)) => line.clone(),
         _ => String::new(),
@@ -62,6 +230,7 @@ fn field(fields: &Fields, declared: &Declared) -> PluginField {
         key: declared.key.clone(),
         label: declared.label.clone(),
         description: declared.description.clone(),
+        placeholder: placeholder(state, uuid, declared),
         value: match declared.kind {
             SettingKind::Text => PluginFieldValue::Text { value: line() },
             SettingKind::Size => PluginFieldValue::Size { value: line() },
@@ -80,8 +249,8 @@ fn field(fields: &Fields, declared: &Declared) -> PluginField {
 
 /// `GET /api/ui/plugins/{uuid}/settings` — the pane.
 pub(crate) async fn pane(State(state): State<AppState>, Path(uuid): Path<String>) -> Response {
-    match held(&state, &uuid).await {
-        Ok(record) => Json(view(&state, &record)).into_response(),
+    match held_or_built_in(&state, &uuid).await {
+        Ok(held) => Json(view(&state, &held)).into_response(),
         Err(refusal) => refusal,
     }
 }
@@ -148,8 +317,8 @@ pub(crate) async fn save(
     Path(uuid): Path<String>,
     Json(press): Json<PluginSettingsSave>,
 ) -> Response {
-    let record = match held(&state, &uuid).await {
-        Ok(record) => record,
+    let record = match held_or_built_in(&state, &uuid).await {
+        Ok(held) => held,
         Err(refusal) => return refusal,
     };
 
@@ -182,8 +351,8 @@ pub(crate) async fn save(
 
     // Read again under the lock, so a merge since the pane was read isn't
     // written over.
-    let record = match held(&state, &uuid).await {
-        Ok(record) => record,
+    let record = match held_or_built_in(&state, &uuid).await {
+        Ok(held) => held,
         Err(refusal) => return refusal,
     };
 
@@ -236,15 +405,30 @@ pub(crate) async fn save(
         secrets: digested,
         ..record.fields.clone()
     };
-    match replicated::rewrite::<Plugins>(&state.pool, &state.device, &uuid, &fields).await {
-        Ok(Written::Written) => state.nudges.announce(Nudge::Plugins),
+    // A built-in nobody has written to is made by this save, as by its first
+    // tick; any other plugin's record is only ever edited here.
+    let written = match record.recorded {
+        true => replicated::rewrite::<Plugins>(&state.pool, &state.device, &uuid, &fields).await,
+        false => replicated::write::<Plugins>(&state.pool, &state.device, &uuid, &fields).await,
+    };
+    match written {
+        Ok(Written::Written) => {
+            // And a Language plugin's size is in the next session's
+            // variables, held again here rather than on the Nudge's return.
+            if let Err(error) =
+                crate::replicating::plugins::held(&state.pool, &state.settings).await
+            {
+                return failed(error);
+            }
+            state.nudges.announce(Nudge::Plugins);
+        }
         Ok(_) => {}
         Err(error) => return failed(error),
     }
 
-    match held(&state, &uuid).await {
-        Ok(record) => Json(PluginSettingsSaved {
-            settings: view(&state, &record),
+    match held_or_built_in(&state, &uuid).await {
+        Ok(held) => Json(PluginSettingsSaved {
+            settings: view(&state, &held),
             refused: Vec::new(),
         })
         .into_response(),

@@ -1,0 +1,49 @@
+/* What a Language plugin's pane draws under its fields — see
+   `LanguageCache.tsx`. A heading, then a block a language, each a column of
+   readings with its Clear at the foot. */
+
+.caches {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.heading {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.language {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.named {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+/* A reading rather than a control — what the store holds, which directories,
+   when it was last trimmed — so in the quiet a field's label is in. */
+.note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+/* A Clear and what it does, or what it waits on. */
+.clearing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: baseline;
+}
+
+.clearing button {
+  flex: none;
+}

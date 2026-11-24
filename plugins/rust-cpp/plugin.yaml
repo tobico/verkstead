@@ -1,0 +1,143 @@
+# Rust and C/C++, one plugin because they share one mechanism: both name the
+# `sccache` capability, which is the Compile Server — one sccache server for the
+# machine, one store and one size — and one mechanism is one thing to switch
+# (Set 1762, Q11b). Nothing else names it. The grammar of a `language` entry is
+# `docs/plugins.md`'s *Language*.
+uuid: 795515ae-96cd-4d7c-8071-e6753b3f4624
+name: "Rust & C/C++"
+author:
+  name: Tobias Cohen
+  email: tobi@tobico.net
+version: 0.1.0
+interface: 1
+description: Shares Cargo's downloads between sessions, and compiles Rust and C/C++ through one sccache Compile Server for the machine.
+# The stores' size, in sccache's grammar (`30G`), and the cluster's: what the
+# sweep holds every store below to, and what `{size}` reads, for every language
+# here. Empty is the default, which the pane shows as its placeholder.
+settings:
+  - key: size
+    label: Store size limit
+    kind: size
+    description: Cargo's downloads and the compile cache are each held to this size, oldest first.
+provides:
+  - category: language
+    language: rust
+    # What the settings page calls it.
+    label: Rust
+
+    # What says a Repo builds this language, looked for at the root of a
+    # checkout. **For the setup card's warning and nothing else**: the variables
+    # below are every session's whatever the Repo holds, because a manifest is
+    # often not at the root and a variable nothing reads costs nothing.
+    detect:
+      - Cargo.toml
+
+    # The registry index, the `.crate` files downloaded into it and the sources
+    # unpacked from them. This is the half of the cache that works with no
+    # sccache anywhere, and what stops two Conversations downloading one crate
+    # twice.
+    env:
+      CARGO_HOME: "{cache}/cargo"
+
+    # And the capabilities this descriptor switches on. `sccache` is the Compile
+    # Server: one sccache server for the machine, in a sandbox of its own,
+    # started wherever a language naming this is enabled and there is an sccache
+    # to run. A capability's variables are set only where the server can offer
+    # it, so a machine with no sccache installed gets the downloads above and
+    # none of these.
+    capabilities:
+      sccache:
+        env:
+          RUSTC_WRAPPER: "{sccache}"
+          SCCACHE_DIR: "{cache}/sccache"
+          SCCACHE_CACHE_SIZE: "{size}"
+    # The two halves above, as the directories they are: the downloads and
+    # the Compile Server's objects.
+    #
+    # **Each is held to Rust's size on its own**, so a Rust machine holds up to
+    # twice it: sccache trims its objects for itself, and the sweep takes whole
+    # crates out of the downloads. A crate is two units — the `.crate` as
+    # downloaded and the source unpacked out of it — and a git dependency two
+    # more, the database fetched and a checkout of one revision of it. The
+    # index is left alone: it is small, and a crate missing from it is fetched
+    # again rather than broken.
+    stores:
+      cargo:
+        dir: "{cache}/cargo"
+        units:
+          - under: registry/src
+            depth: 2
+          - under: registry/cache
+            depth: 2
+          - under: git/db
+            depth: 1
+          - under: git/checkouts
+            depth: 2
+      sccache:
+        dir: "{cache}/sccache"
+        evicted: by-its-tool
+
+  - category: language
+    language: cpp
+    # C and C++, and the second descriptor naming the Compile Server (ADR-0021).
+    # Not a second server: one sccache for the machine, one store and one size,
+    # which is why this entry names the capability Rust's does and sets no
+    # store of its own. The first language naming it is the one that sizes it
+    # — Rust, whether or not Rust is on, so switching Rust off does not shrink
+    # the store to this entry's size — and the settings page draws the size
+    # field on that one alone.
+    label: C/C++
+
+    # C++ has no one manifest, so this is the build files a checkout ordinarily
+    # has one of: CMake's at the root, or under `native/` or `cpp/` beside the
+    # rest of a project, and Meson's. For the setup card's warning and nothing
+    # else, exactly as every other descriptor's `detect` is. A relative path is
+    # joined onto the Repo's root, so the two under a directory are plain data.
+    #
+    # Meson is here although nothing below covers it: it finds an sccache on the
+    # `PATH` for itself, and with none on the server it is as uncached as CMake
+    # is, which is what the warning says.
+    detect:
+      - CMakeLists.txt
+      - native/CMakeLists.txt
+      - cpp/CMakeLists.txt
+      - meson.build
+
+    # CMake's two compiler-launcher variables, and nothing else. CMake 3.17 and
+    # later reads them out of the environment — with the Makefile and Ninja
+    # generators only, and only when a build directory is first configured, so
+    # a build directory configured before this was set goes on compiling
+    # without it until it is configured afresh.
+    #
+    # **Not `CC` and `CXX`.** Those two reach every build that compiles C, not
+    # only a C++ project's: a Rust crate's build script, a Python or Node native
+    # extension, Go with cgo. And beside a launcher they can wrap one compile
+    # twice. The launchers are read by CMake alone, so they change nothing that
+    # is not a CMake project.
+    #
+    # **And not `SCCACHE_DIR` or `SCCACHE_CACHE_SIZE`**, which are Rust's. A
+    # variable two languages set is pushed onto a session twice, and nothing
+    # here would decide between them. The client in a session never reads
+    # either while Verkstead's Compile Server is up: the server reads them, and
+    # it is given its own — see `build_cache.rs`.
+    #
+    # With no sccache on the server this capability is left out whole, so a
+    # session is given neither launcher rather than one naming nothing.
+    #
+    # **What gets nothing**: plain Makefiles and Bazel, and CMake's Visual
+    # Studio and Xcode generators, which ignore the launchers — Visual Studio
+    # being CMake's default on Windows, a Repo there is cached only where it
+    # configures with Ninja. MSVC's `/Zi` debug info is not something sccache
+    # caches either; `/Z7` is.
+    #
+    # **A second Conversation hits** because the Compile Server is told every
+    # Worktree as `SCCACHE_BASEDIRS`, sccache hashing a C/C++ compile with its
+    # absolute paths — sccache 0.14.0 and later; see `build_cache.rs`. And the
+    # server writes each object where the compile names it, so a build
+    # directory outside the Worktree fails rather than missing. The whole of
+    # that is the design doc's, under *Execution and sandboxing*.
+    capabilities:
+      sccache:
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: "{sccache}"
+          CMAKE_CXX_COMPILER_LAUNCHER: "{sccache}"

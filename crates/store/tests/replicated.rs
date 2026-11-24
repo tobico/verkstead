@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use verkstead_store::open_database;
 use verkstead_store::replicated::{
     Kind, Record, Written, live_records, merge, records, remove, rewrite, take_up,
-    take_up_as_the_oldest, taken_up, write,
+    take_up_as_the_oldest, take_up_as_the_oldest_as, taken_up, taken_up_as, write,
 };
 
 /// A kind of no consequence, standing in for Authors.
@@ -524,5 +524,95 @@ async fn a_take_up_as_the_oldest_loses_to_any_write_and_ties_by_device() {
     assert_eq!(
         records::<Notes>(&fresh).await.unwrap()[0].fields,
         note("edited")
+    );
+}
+
+/// A kind whose taken-up records are put together rather than picked between:
+/// a switch that is on wherever any device had it on.
+struct Switches;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct Switch {
+    on: bool,
+    by: String,
+}
+
+impl Kind for Switches {
+    const NAME: &'static str = "switches";
+    type Fields = Switch;
+
+    fn taken_up_together(winner: &Switch, loser: &Switch) -> Option<Switch> {
+        Some(Switch {
+            on: winner.on || loser.on,
+            ..winner.clone()
+        })
+    }
+}
+
+fn switch(on: bool, by: &str) -> Switch {
+    Switch {
+        on,
+        by: by.to_owned(),
+    }
+}
+
+/// Two devices' taken-up records of a kind that puts them together come to
+/// one record, whichever arrives where: the Device Id's pick, with what the
+/// kind keeps of the other — and any write since still wins over both.
+#[tokio::test]
+async fn taken_up_records_a_kind_puts_together_come_to_one() {
+    let taken = |on: bool, by: &str| Record {
+        uuid: "one".to_owned(),
+        updated_at: 0,
+        deleted_at: None,
+        written_by: by.to_owned(),
+        fields: switch(on, by),
+    };
+
+    for (here, there) in [
+        (taken(true, "a"), taken(false, "b")),
+        (taken(false, "b"), taken(true, "a")),
+    ] {
+        let (_dir, pool) = fresh_pool().await;
+
+        take_up_as_the_oldest_as::<Switches>(
+            &pool,
+            &here.written_by,
+            "switches.taken",
+            &[("one".to_owned(), here.fields.clone())],
+        )
+        .await
+        .unwrap();
+        assert!(taken_up_as(&pool, "switches.taken").await.unwrap());
+        assert!(!taken_up::<Switches>(&pool).await.unwrap());
+
+        assert!(
+            merge::<Switches>(&pool, std::slice::from_ref(&there))
+                .await
+                .unwrap()
+        );
+        let held = records::<Switches>(&pool).await.unwrap();
+        assert_eq!(held.len(), 1);
+        assert_eq!(
+            (
+                held[0].updated_at,
+                held[0].written_by.as_str(),
+                &held[0].fields
+            ),
+            (0, "b", &switch(true, "b")),
+        );
+
+        // The same merged again moves nothing.
+        assert!(!merge::<Switches>(&pool, &[there]).await.unwrap());
+    }
+
+    let (_dir, pool) = fresh_pool().await;
+    write::<Switches>(&pool, "c", "one", &switch(false, "c"))
+        .await
+        .unwrap();
+    assert!(!merge::<Switches>(&pool, &[taken(true, "z")]).await.unwrap());
+    assert_eq!(
+        records::<Switches>(&pool).await.unwrap()[0].fields,
+        switch(false, "c")
     );
 }
