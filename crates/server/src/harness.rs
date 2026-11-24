@@ -20,20 +20,22 @@
 //! mounting, the strip-and-never-write-back of ADR-0011 and the merging back
 //! are [`crate::sandbox`]'s, whichever harness it is.
 //!
-//! **Five implementations, the built-ins**, a module apiece: [`claude`],
-//! [`codex`], [`grok`], [`opencode`] and [`agy`]. Each holds everything
+//! **Four implementations in process, the built-ins**, a module apiece:
+//! [`claude`], [`grok`], [`opencode`] and [`agy`]. Each holds everything
 //! about its harness that used to be an arm of somebody else's `match`, and the
 //! wording in each is the harness's own and will move — so it is kept in one
-//! place, and moving it costs one edit there. **And a sixth**, [`plugged`]:
+//! place, and moving it costs one edit there. **And a fifth**, [`plugged`]:
 //! a harness a plugin declares, answering out of its manifest and its
-//! component, which is the only one a third-party harness is. [`of`] is the
-//! one place a type is turned into its harness.
+//! component, which is what a third-party harness is and what a built-in
+//! plugin's is too — embedded in the binary and stood up the first
+//! time it is asked for (see [`EMBEDDED`]). [`of`] is the one place a type is
+//! turned into its harness.
 
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::RwLock;
+use std::sync::{LazyLock, RwLock};
 use std::time::SystemTime;
 
 use crate::logins::Speaking;
@@ -46,7 +48,6 @@ use crate::transcript::{Carried, Search};
 
 mod agy;
 mod claude;
-mod codex;
 mod grok;
 mod opencode;
 pub(crate) mod plugged;
@@ -112,11 +113,12 @@ pub(crate) trait Harness: Send + Sync {
     /// stopped to ask for approval would be asking it in front of nobody, with the
     /// whole backlog behind it waiting on an answer that is not coming. What stops
     /// a session doing harm is the Sandbox, which this does not touch and which is
-    /// still the boundary — and codex's own sandbox is off rather than nested,
-    /// because it will not start inside bwrap and bwrap is already the boundary.
+    /// still the boundary — and a harness's own sandbox is off rather than
+    /// nested, since one may not start inside bwrap and bwrap is already the
+    /// boundary.
     ///
-    /// Codex and grok both draw a full-screen TUI, and `--no-alt-screen` keeps each
-    /// drawing inline instead: the Capture and the Screen are the record of what a
+    /// A harness that draws a full-screen TUI is kept drawing inline instead —
+    /// grok by `--no-alt-screen`: the Capture and the Screen are the record of what a
     /// session did, and an alternate screen is a record that is thrown away as the
     /// program leaves it.
     fn line(&self, worktree: Option<&Path>, companions: &[PathBuf]) -> Line;
@@ -310,11 +312,11 @@ pub(crate) trait Harness: Send + Sync {
     ///
     /// - **Claude** — the two entries a root already names, one for the Repo and
     ///   one for the Worktree.
-    /// - **Codex** — the memory files whole, and out of the one flat directory
-    ///   of rollouts the ones this Conversation's sessions wrote, which is what
-    ///   `worktree` picks out: the store is filed by date and holds every
-    ///   repository the human has ever worked in, and none of the rest of it is
-    ///   this Repo's anything.
+    /// - **A plugin harness** — what its manifest's `memory` declares: a
+    ///   directory whole, or out of one flat store of logs the ones this
+    ///   Conversation's sessions wrote, which is what `worktree` picks out: a
+    ///   store filed by date holds every repository the human has ever worked
+    ///   in, and none of the rest of it is this Repo's anything.
     /// - **Grok Build** — the same, its sessions picked out by the ids Verkstead
     ///   named them with, which is what its store files a session's directory
     ///   under. Not `session_search.sqlite` at the top of it, which is the
@@ -434,6 +436,16 @@ pub(crate) struct Install<'a> {
 
     /// The lines that install it, each one shell line of this platform's.
     pub(crate) commands: &'a [String],
+
+    /// The packages it is, where a package manager the wizard already drives
+    /// carries it — see [`crate::onboarding`]'s install run, which installs
+    /// these the way it installs a built-in's.
+    pub(crate) npm: Option<&'a str>,
+    pub(crate) brew: Option<&'a str>,
+    pub(crate) cask: Option<&'a str>,
+
+    /// And the nixpkgs attribute, which only the by-hand screen says.
+    pub(crate) nix: Option<&'a str>,
 }
 
 /// The *Running the ask* section of the harness `agent_type`, with how its
@@ -453,11 +465,16 @@ pub(crate) type Carrying<'a> = Pin<Box<dyn Future<Output = Option<Carried>> + Se
 ///
 /// The one place an id is turned into its harness.
 pub(crate) fn of(agent_type: store::AgentType) -> Option<&'static dyn Harness> {
-    BUILT_IN
+    IN_PROCESS
         .iter()
-        .zip(store::BUILT_IN)
-        .find(|(_, built_in)| built_in.agent_type == agent_type)
-        .map(|(harness, _)| *harness)
+        .find(|(built_in, _)| *built_in == agent_type)
+        .map(|(_, harness)| *harness)
+        .or_else(|| {
+            EMBEDDED
+                .iter()
+                .find(|(built_in, _)| *built_in == agent_type)
+                .map(|(_, plugged)| *plugged as &'static dyn Harness)
+        })
         .or_else(|| {
             PLUGGED
                 .read()
@@ -509,13 +526,14 @@ pub(crate) fn plugged(
     id
 }
 
-/// Every harness this server can run, each with its id, in the order the
-/// pickers offer them.
+/// Every harness built in, each with its id, in the order the pickers offer
+/// them: [`store::BUILT_IN`]'s, whichever of them is in process and whichever
+/// is a built-in plugin's. One whose plugin didn't load is left out, as a
+/// harness this server has not got.
 pub(crate) fn every() -> impl Iterator<Item = (store::AgentType, &'static dyn Harness)> {
     store::BUILT_IN
         .iter()
-        .zip(BUILT_IN)
-        .map(|(built_in, harness)| (built_in.agent_type, harness))
+        .filter_map(|built_in| Some((built_in.agent_type, of(built_in.agent_type)?)))
 }
 
 /// How a session of `agent_type` puts a Question Set to the human — see
@@ -524,9 +542,9 @@ pub(crate) fn channel(agent_type: store::AgentType) -> store::Channel {
     of(agent_type).map_or(store::Channel::Blocking, |harness| harness.channel())
 }
 
-/// The program every harness a plugin has declared in this process is run as,
-/// for the sandbox to follow into its install as it follows the built-ins' —
-/// see [`crate::sandbox::installs`].
+/// The program every harness an installed plugin has declared in this process
+/// is run as, for the sandbox to follow into its install as it follows the
+/// built-ins' — see [`crate::sandbox::installs`].
 ///
 /// Every one this process has stood up rather than the ones this server
 /// offers: what is granted is the directories a link of that name leads
@@ -541,24 +559,71 @@ pub(crate) fn plugged_binaries() -> Vec<&'static str> {
         .collect()
 }
 
-/// Every harness built into this binary.
-pub(crate) static BUILT_IN: [&dyn Harness; 5] = [
-    &claude::Claude,
-    &codex::Codex,
-    &grok::Grok,
-    &opencode::OpenCode,
-    &agy::Agy,
+/// The harnesses written here rather than declared by a plugin, each with its
+/// id in [`store::BUILT_IN`].
+static IN_PROCESS: [(store::AgentType, &dyn Harness); 4] = [
+    (store::AgentType::CLAUDE, &claude::Claude),
+    (store::AgentType::GROK, &grok::Grok),
+    (store::AgentType::OPENCODE, &opencode::OpenCode),
+    (store::AgentType::AGY, &agy::Agy),
 ];
 
-/// The programs those are run as, in that order, for the one list of names a
-/// session is followed into — see [`crate::sandbox::PROGRAMS`].
-pub(crate) const BINARIES: [&str; 5] = [
-    claude::BINARY,
-    codex::BINARY,
-    grok::BINARY,
-    opencode::BINARY,
-    agy::BINARY,
-];
+/// The harnesses the built-in plugins declare, each under its plugin's uuid —
+/// which, for one built in before it was a plugin, is the uuid
+/// [`store::BUILT_IN`] reads its stored word as.
+///
+/// **Stood up the first time any harness is asked for**, rather than as the
+/// server starts, because a harness is asked for wherever a Profile is read —
+/// and in more places than a start reaches before them, a test of one piece
+/// among them. What it costs is the component compiled once per process, which
+/// the start does anyway.
+///
+/// **Held apart from [`PLUGGED`]**, which is what this device's installed
+/// plugins stand up and stand down: a built-in plugin is in the binary, the
+/// same for every server in the process, and its tick is a switch on what is
+/// offered rather than on whether it is here — see [`crate::profiles`]. One
+/// that does not load is not here at all, said in the log as the start says
+/// it (Set 1762, Q15).
+static EMBEDDED: LazyLock<Vec<(store::AgentType, &'static plugged::Plugged)>> =
+    LazyLock::new(|| {
+        // On a thread of its own, with a runtime of its own: this is asked
+        // for from synchronous code, inside the server's runtime and outside
+        // any, and loading a component is asynchronous.
+        std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("a runtime to load the built-in plugins in")
+                        .block_on(crate::plugins::built_in::agents(Platform::HERE))
+                })
+                .join()
+                .expect("loading the built-in plugins does not panic")
+        })
+        .into_iter()
+        .map(|plugged| {
+            let leaked: &'static plugged::Plugged = Box::leak(Box::new(plugged));
+            (leaked.id(), leaked)
+        })
+        .collect()
+    });
+
+/// The harness the built-in plugin `agent_type` declares, as itself.
+#[cfg(test)]
+pub(crate) fn embedded(agent_type: store::AgentType) -> Option<&'static plugged::Plugged> {
+    EMBEDDED
+        .iter()
+        .find(|(built_in, _)| *built_in == agent_type)
+        .map(|(_, plugged)| *plugged)
+}
+
+/// The programs the built-in harnesses are run as, in their order, for the
+/// one list of names a session is followed into — see
+/// [`crate::sandbox::programs`].
+pub(crate) fn binaries() -> Vec<&'static str> {
+    every().map(|(_, harness)| harness.binary()).collect()
+}
 
 /// One path an account of a harness is made of — see [`Harness::paths`].
 pub(crate) struct Declared<'a> {
@@ -693,7 +758,7 @@ pub(crate) const SETTINGS_FILE: &str = "verkstead-settings.json";
 /// readily as one written here.
 pub struct Line {
     /// How the model is said, holding [`MODEL`]. `--model` reads as claude's
-    /// own; codex takes `-m`.
+    /// own; another may take `-m`.
     pub(crate) model: Vec<String>,
 
     /// How the Brief is given, holding [`PROMPT`]: a flag and it, or it alone
@@ -722,7 +787,7 @@ pub struct Line {
     /// conversation carried on keeps the id it already had, so there is
     /// nothing left to name it.
     ///
-    /// And it is not always a flag — see [`Resume`]: codex's is a subcommand, and
+    /// And it is not always a flag — see [`Resume`]: it may be a subcommand, and
     /// what a subcommand changes is the shape of the whole line rather than what
     /// is on the end of it.
     ///
@@ -740,15 +805,24 @@ pub struct Line {
     /// Owned rather than borrowed, because the trust pre-seed below names the
     /// Worktree this session is being launched in.
     pub(crate) tail: Vec<String>,
+
+    /// And how the Worktree is said, holding [`WORKTREE`], where the session
+    /// has one: written after the tail, and left off whole where it has none —
+    /// a flag with nothing after it would be a line that says something else.
+    ///
+    /// Empty for every built-in, which say their Worktree, where they say it,
+    /// in [`Harness::line`] from the Worktree it is handed. A plugin's manifest
+    /// is data, and this is how data says the same.
+    pub(crate) worktree: Vec<String>,
 }
 
 /// How a backend is told to carry a conversation on rather than open one — see
 /// [`Line::resume`].
 ///
 /// **Two shapes rather than one spelling**, because the backends do not agree on
-/// what a resume *is*. For four of the five it is another option on the same line,
-/// and the id goes where the id would have gone. For codex it is a subcommand:
-/// the line is `codex resume <session-id> <prompt>`, so the word comes ahead of
+/// what a resume *is*. For every built-in it is another option on the same line,
+/// and the id goes where the id would have gone. For a plugin's it may be a
+/// subcommand: the line is `<binary> resume <session-id> <prompt>`, so the word comes ahead of
 /// everything the ordinary line says and the id is a positional in front of the
 /// prompt rather than a value after a flag.
 ///
@@ -767,8 +841,8 @@ pub enum Resume {
     ///
     /// Where they hold [`SESSION`], the id is said there, which is the shape a
     /// plugin's manifest writes. Where they do not, the id is a positional in
-    /// front of the prompt, after the model — codex's, whose words are
-    /// `resume` alone.
+    /// front of the prompt, after the model, where the words are `resume`
+    /// alone.
     Subcommand {
         /// The words themselves.
         words: Vec<String>,

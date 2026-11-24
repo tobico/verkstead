@@ -65,7 +65,7 @@ use verkstead_render::{
 };
 use verkstead_schema::{ApiError, Nudge};
 
-use super::built_in::{self, BUILT_INS, FIXTURE};
+use super::built_in::{self, BUILT_INS};
 use super::component;
 use super::git::{self, Staged};
 use super::manifest::{Access, Capability, Dependency, Files, Manifest, Mark};
@@ -1142,7 +1142,7 @@ fn built_ins(
     let mut rows: Vec<PluginRow> = BUILT_INS
         .iter()
         .filter_map(|built_in| match built_in.manifest(Platform::HERE) {
-            Ok(manifest) if manifest.uuid == FIXTURE => None,
+            Ok(manifest) if built_in::unlisted(&manifest.uuid) => None,
             Ok(manifest) => Some(PluginRow {
                 uuid: manifest.uuid.clone(),
                 name: manifest.name.clone(),

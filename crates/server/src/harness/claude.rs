@@ -103,6 +103,7 @@ impl Harness for Claude {
             session: Some(said(&["--session-id", SESSION])),
             resume: Some(Resume::Flag(said(&["--resume", SESSION]))),
             tail: said(&["--dangerously-skip-permissions"]),
+            worktree: Vec::new(),
         }
     }
 
@@ -308,12 +309,12 @@ impl Harness for Claude {
 
         vec![
             Part {
-                label: root::REPO,
+                label: root::REPO.into(),
                 inside: Path::new(root::PROJECTS).join(&place.repo),
                 whose: Whose::Everything,
             },
             Part {
-                label: root::WORKTREE,
+                label: root::WORKTREE.into(),
                 inside: Path::new(root::PROJECTS).join(&place.worktree),
                 whose: Whose::Everything,
             },

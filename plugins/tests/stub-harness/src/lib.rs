@@ -15,6 +15,11 @@
 //!   traps on a line `{"trap":true}`, so a suite can see what a component that
 //!   stops does to a Transcript — and sleeps on a line `{"sleep":true}`, so
 //!   one can see what a component waiting on the host for ever does to it.
+//!   Handed no session, it finds the record as a Codex rollout is found: the
+//!   newest written since the launch whose opening line
+//!   `{"session": <id>, "cwd": <dir>}` names the Worktree — and answers with
+//!   that id. Its cursor is how many bytes it has read, and it reads from
+//!   there, whole lines only.
 //! - **`login`** reads what a stub logging in writes — see [`LOGIN`] — and
 //!   answers each thing it recognises as the step it is, in its own words.
 
@@ -23,19 +28,51 @@ wit_bindgen::generate!({
     world: "agent",
 });
 
+use std::io::{Read, Seek};
+
 struct Stub;
 
 impl Guest for Stub {
-    fn parse_transcript(account: String, session: String) -> Option<Vec<Entry>> {
-        let record = std::fs::read_to_string(format!("{account}/memory/{session}.jsonl")).ok()?;
+    fn parse_transcript(account: String, looking: Looking) -> Option<Transcript> {
+        let memory = format!("{account}/memory");
+        let (session, record) = match looking.session {
+            Some(session) => {
+                let record = format!("{memory}/{session}.jsonl");
+                (Some(session), record)
+            }
+            None => {
+                let (session, record) =
+                    found(&memory, looking.worktree.as_deref()?, looking.launched)?;
+                (Some(session), record)
+            }
+        };
 
-        Some(
-            record
-                .lines()
-                .filter_map(|line| serde_json::from_str(line).ok())
-                .map(|line: serde_json::Value| entry(&line))
-                .collect(),
-        )
+        let read: u64 = looking
+            .cursor
+            .and_then(|cursor| cursor.parse().ok())
+            .unwrap_or(0);
+        let mut file = std::fs::File::open(record).ok()?;
+        file.seek(std::io::SeekFrom::Start(read)).ok()?;
+        let mut arrived = Vec::new();
+        file.read_to_end(&mut arrived).ok()?;
+
+        // Whole lines only: the rest is a line still being written.
+        let whole = arrived
+            .iter()
+            .rposition(|byte| *byte == b'\n')
+            .map_or(0, |at| at + 1);
+        let entries = String::from_utf8_lossy(&arrived[..whole])
+            .lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .filter(|line: &serde_json::Value| line.get("cwd").is_none())
+            .map(|line| entry(&line))
+            .collect();
+
+        Some(Transcript {
+            session,
+            entries,
+            cursor: (read + whole as u64).to_string(),
+        })
     }
 
     fn write_configuration(found: Vec<Found>, servers: Vec<Server>) -> Configuration {
@@ -105,6 +142,46 @@ impl Guest for Stub {
     }
 }
 
+/// The record under `memory` whose opening line names `worktree`, written
+/// since `launched` (milliseconds since the epoch, taken to the second the
+/// coarsest filesystem keeps), the newest where there are more — and the
+/// session id that line gives.
+fn found(memory: &str, worktree: &str, launched: u64) -> Option<(String, String)> {
+    let since = std::time::UNIX_EPOCH + std::time::Duration::from_secs(launched / 1000);
+    let mut newest: Option<(std::time::SystemTime, String, String)> = None;
+
+    for record in std::fs::read_dir(memory).ok()?.flatten() {
+        let Some(written) = record
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .ok()
+            .filter(|written| *written >= since)
+        else {
+            continue;
+        };
+        if newest.as_ref().is_some_and(|(at, _, _)| *at >= written) {
+            continue;
+        }
+
+        let path = record.path().to_string_lossy().into_owned();
+        let Some(opening) = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(text.lines().next()?).ok())
+        else {
+            continue;
+        };
+        if opening["cwd"].as_str() != Some(worktree) {
+            continue;
+        }
+        let Some(session) = opening["session"].as_str() else {
+            continue;
+        };
+        newest = Some((written, session.to_owned(), path));
+    }
+
+    newest.map(|(_, session, path)| (session, path))
+}
+
 /// What a stub logging in has written and `login` has not answered yet. The
 /// instance is the one login's, so this is too.
 static WRITTEN: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
@@ -139,6 +216,11 @@ const LOGIN: &[(&str, Step)] = &[
 /// - `{"trap": true}`, which stops the component where it stands.
 /// - `{"sleep": true}`, which waits an hour on the host's clock, running no
 ///   code of its own all the while.
+///
+/// And a line naming a `cwd` is none of them: it is a record opening by
+/// saying which session it is and where — see [`found`] — and stands for no
+/// entry. A record found that way is `<session>.jsonl`, as every other is, so
+/// that it is read by its id once it has given one.
 fn entry(line: &serde_json::Value) -> Entry {
     let text = |key: &str| line[key].as_str().unwrap_or_default().to_owned();
 

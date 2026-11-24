@@ -41,7 +41,7 @@ const EXHAUSTED: &str = "you hit your free usage limit";
 /// there when it is waiting for a human — see [`crate::sessions::Signature::AtWork`].
 ///
 /// Read off grok 1.0.13 driven on a hundred-column terminal rather than guessed
-/// at, and it comes out where codex came out: the frame grok leaves when its
+/// at, and it comes out where the others came out: the frame grok leaves when its
 /// turn is over and the frame it draws mid-turn are the same screen but for the
 /// live status line — `⠧ Responding… 5.7s … [stop]` — and this hint on the row
 /// under the composer. The composer itself, its `❯`, the `grok-4.6 ·
@@ -60,9 +60,8 @@ const EXHAUSTED: &str = "you hit your free usage limit";
 /// bg` beside it, and the hints at rest change with what the composer is
 /// offering.
 ///
-/// Named for the same reason [`super::codex::AT_WORK`] is, and it is the same bargain
-/// the usage-limit phrase makes: the wording is grok's and it will move, and
-/// moving it costs one edit here.
+/// Named for the bargain the usage-limit phrase makes: the wording is grok's
+/// and it will move, and moving it costs one edit here.
 const AT_WORK: &str = "Esc:cancel";
 
 /// Grok Build.
@@ -115,8 +114,9 @@ impl Harness for Grok {
     /// UUID and it refuses one it already has a session for — all three of which
     /// Verkstead's own names satisfy, being version-4 UUIDs drawn fresh per session.
     /// So its log is named at launch rather than found afterwards, which is
-    /// Claude's shape and the opposite of Codex's. Its own sandbox is off for the
-    /// reason codex's is, and nothing about its account is said on the line: grok
+    /// Claude's shape and the opposite of a harness that names itself. Its own
+    /// sandbox is off rather than nested inside the one that is already the
+    /// boundary, and nothing about its account is said on the line: grok
     /// reads its whole configuration out of the home the Profile named.
     fn line(&self, _worktree: Option<&Path>, _companions: &[PathBuf]) -> Line {
         Line {
@@ -125,6 +125,7 @@ impl Harness for Grok {
             session: Some(said(&["--session-id", SESSION])),
             resume: Some(Resume::Flag(said(&["--resume", SESSION]))),
             tail: said(&["--always-approve", "--sandbox", "off", "--no-alt-screen"]),
+            worktree: Vec::new(),
         }
     }
 
@@ -224,12 +225,12 @@ impl Harness for Grok {
     ) -> Vec<Part> {
         vec![
             Part {
-                label: root::MEMORY,
+                label: root::MEMORY.into(),
                 inside: PathBuf::from(root::GROK_MEMORY[1]),
                 whose: Whose::Everything,
             },
             Part {
-                label: root::SESSIONS_PART,
+                label: root::SESSIONS_PART.into(),
                 inside: PathBuf::from(root::SESSIONS),
                 whose: Whose::Called(sessions.to_vec()),
             },
@@ -290,7 +291,8 @@ impl Harness for Grok {
         vec![("grok-4.6", "Grok 4.6"), ("grok-4.5", "Grok 4.5")]
     }
 
-    /// Codex's, the other that stores and nudges.
+    /// The store-and-nudge section, which a plugin harness declaring that
+    /// channel writes into its manifest.
     fn running(&self) -> &str {
         include_str!("running/store-and-nudge.md")
     }

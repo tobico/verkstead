@@ -31,8 +31,8 @@
 //! **Recognition is one sentence per backend, said once.** [`exhausted_phrase`]
 //! is the whole of what is matched, because the wording is the backend's and will
 //! move: claude 2.1.234 draws it as `Usage limit reached · continuing
-//! automatically at 3pm · esc to cancel`, codex 0.149.0 opens with `You've hit
-//! your usage limit` and decorates what follows by plan, and grok 1.0.13 heads a
+//! automatically at 3pm · esc to cancel`, a plugin harness's manifest declares
+//! its own under `phrases.exhausted`, and grok 1.0.13 heads a
 //! card with `You hit your free usage limit.` and offers three tiers under it.
 //! Every part of any of them but the phrase itself is decoration this build has
 //! no business depending on. It is read off what the session leaves behind rather

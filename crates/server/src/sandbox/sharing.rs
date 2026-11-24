@@ -25,8 +25,8 @@
 //! **One register entry per Conversation and root**, rather than per
 //! Conversation. A Conversation's grilling session and its terminal can run
 //! under Profiles of two harnesses — a Claude session with a terminal under a
-//! Codex account beside it — and each is given a root of its own, `.claude` and
-//! `.codex`, side by side in the Conversation's directory. A launch into one is
+//! plugin harness's account beside it — and each is given a root of its own,
+//! `.claude` and the plugin's mounted directory, side by side in the Conversation's directory. A launch into one is
 //! nothing to the other.
 //!
 //! **And the HOME the roots are in is one Conversation's**, which is why a
@@ -58,7 +58,7 @@ pub(crate) type Baseline = Arc<Mutex<Vec<u8>>>;
 pub(crate) struct Sharing(Arc<Mutex<HashMap<Root, Running>>>);
 
 /// Which root: the Conversation's id, and what the root is called in its
-/// directory — `.claude` or `.codex`.
+/// directory — `.claude`, or a plugin harness's mounted directory.
 type Root = (PathBuf, &'static str);
 
 #[derive(Debug, Default)]

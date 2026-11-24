@@ -597,6 +597,7 @@ provides:
       resume:
         flag: [--resume, "{session}"]
       tail: [--yes, --settings, "{settings}", --add-dir, "{worktree}"]
+      worktree: [--trust, "{worktree}"]    # optional: left off with no Worktree
       settings:
         autoUpdates: false
     account:
@@ -608,7 +609,9 @@ provides:
         mounted: .stub
         allowlist: [settings.json, config.toml]
         credentials: [auth.json]
-        memory: [memory]
+        memory:
+          - path: memory
+            synced: everything          # or a path alone, kept on its device
     idle:
       signature: esc to interrupt
     phrases:
@@ -655,16 +658,25 @@ is written as it is and its `{worktree}` still filled.
 - **`prompt`** — required, holding `{prompt}`: how the Brief is given, a flag
   and it or it alone.
 - **`session`** — optional, holding `{session}`: how the session id Verkstead
-  picked is named. A harness that takes none leaves it out, and its transcript
-  is then found rather than named.
-- **`resume`** — optional, and only beside a `session`: how a conversation is
-  carried on, under the id the session that was having it was named at launch.
-  Either a **`flag`** holding `{session}`, written where `session` would have
-  been, or a **`subcommand`** holding `{session}`, written straight after the
-  binary, with **`also`** the words a resume needs on the end that a launch
-  does not. Without one, a resumed Conversation opens a session of its own.
+  picked is named. A harness that takes none leaves it out: it **names
+  itself**, its transcript is found by the Worktree and the launch rather than
+  named, and the id `parse-transcript` answers with is what it is called from
+  then on.
+- **`resume`** — optional: how a conversation is carried on, under the id the
+  session that was having it was named at launch, or named itself. Either a
+  **`flag`** holding `{session}`, written where `session` would have been, or
+  a **`subcommand`**, written straight after the binary, with **`also`** the
+  words a resume needs on the end that a launch does not. A subcommand
+  holding no `{session}` — `[resume]`, as codex's is — has the id written as
+  a word of its own after the model, in front of the prompt. Without a
+  `resume`, a resumed Conversation opens a session of its own.
 - **`tail`** — optional: what goes last. `{worktree}` is the Worktree the
   session works in.
+- **`worktree`** — optional, holding `{worktree}`: words about the Worktree
+  that are written after the `tail` only where the session has one, and are
+  left off whole where it has none — a flag and the value it takes, such as
+  codex's `[-c, 'projects={"{worktree}"={trust_level="trusted"}}']`, rather
+  than a flag left with nothing after it.
 - **`settings`** — optional: settings for this session alone, as a map, which
   the host writes as JSON to a file and names on the line as `{settings}`, in
   whichever part the harness takes it, the resume's among them. One without
@@ -694,7 +706,10 @@ made empty of the session's own where it does not, and its `allowlist` copied
 in as found with the account's own MCP servers taken out. `write-configuration`
 composes the first path's configuration alone. A Profile launched on a device
 that holds no binding of it is given the first path's files, which are what its
-mirror carries.
+mirror carries: the login as it is, and each configuration file as
+`write-configuration` answers it handed the account's and no servers — what a
+root built from the mirror would hold, and nothing more of how the human works.
+Its memory is synced, a directory at a time, as the next list says.
 
 - **`key`** — what the Profile holds the path under, unique in the list.
 - **`label`** — what the form labels the field. **`purpose`**, optional, is
@@ -711,6 +726,38 @@ mirror carries.
   directories that are the memory store. Nothing else of the directory reaches
   a session: with no `allowlist`, the export is handed no configuration and
   writes what it will from nothing.
+
+  **A `memory` entry is a path, or a map of its `path` and how it is
+  `synced`.** A path alone is memory that stays on the device it was written
+  on: a session away from where the Profile is bound starts it empty. The
+  first path's memory may say instead which of its files a session on another
+  device is given, and sends back when it ends — one of the host's own rules:
+
+  - `everything` — every file under it.
+  - `worktree` — the codex-shaped rollouts under it, `rollout-*.jsonl` opening
+    with a `session_meta` line, whose session worked in a Worktree of this
+    Conversation's name.
+  - `sessions` — the directories in it, or one level down, called by one of
+    the Conversation's session ids.
+  - `database` — the SQLite file named by **`database`**, directly in it, with
+    its `-wal` and `-shm` beside it, and nothing else there.
+
+  ```yaml
+  memory:
+    - path: sessions
+      synced: worktree
+    - path: memories
+      synced: everything
+  ```
+
+  A word that is none of these is refused naming the field, and so is
+  `synced` on a later path: what crosses is said from the account's directory.
+  Nothing crosses where the Profile's memory switch is off.
+
+  What crosses is carried under the directory's path. A synced entry may name
+  that word itself with **`part`** — one word, no `/` — where a device on an
+  older release sends it under another: Codex's `memories` is carried as
+  `memory`, which is what the in-process Codex called it.
 
 Every path written relatively here, and `instructions` below, is refused where
 it would climb out of where it is said from.
@@ -750,6 +797,18 @@ model, with `<server>` and `<tool>` where the two names go.
 install instructions, an `http://` or `https://` address; **`commands`** are
 lines that install its binary, run only when the human presses for it. Write a
 platform's own under that platform's block.
+
+Or name the package a package manager Verkstead already drives carries it as,
+and it is installed the way a built-in harness is: **`npm`**, joined onto the
+one raised package batch on Linux — with node in front where the machine has no
+npm — and raised behind winget's node on Windows; **`brew`** or **`cask`**, a
+Homebrew formula or cask, behind the Homebrew the wizard installs first on a Mac
+that has none; and **`nix`**, the nixpkgs attribute NixOS's by-hand line names.
+Each is one package name. Where this platform's block names one of them for the
+machine, the `commands` are not run. An Intel Mac has no Homebrew, so a harness
+whose macOS install is a `brew` or a `cask` is a row for the by-hand screen
+there, saying to put its binary in `~/.local/bin` and linking its
+`instructions`. Codex's manifest, `plugins/codex/plugin.yaml`, is one.
 
 While the plugin is enabled, its harness is a row of the setup wizard's first
 step, after the built-ins: present once `binary` is on a session's PATH, the
@@ -808,14 +867,20 @@ The component of a plugin providing an agent is written against the `agent`
 world of `crates/server/wit/plugin.wit`, and is refused at load where it does
 not export all three of:
 
-- **`parse-transcript(account, session)`** — the record of a session, found
-  under the account's directory by the session's id and read into what the
-  Transcript pane draws: something said, a tool call, its result, a notice of
-  the harness's own bookkeeping, and a line it does not know, which folds away
-  under its own name. None where there is no record of it yet. `account` is
-  always `/account`: the account's directory, granted read-only under that
-  name on every platform whatever its path on the host, so the record is found
-  by joining `/`-separated paths onto it.
+- **`parse-transcript(account, looking)`** — the record of a session, found
+  under the account's directory and read into what the Transcript pane draws:
+  something said, a tool call, its result, a notice of the harness's own
+  bookkeeping, and a line it does not know, which folds away under its own
+  name. None where there is no record of it yet. `account` is always
+  `/account`: the account's directory, granted read-only under that name on
+  every platform whatever its path on the host, so the record is found by
+  joining `/`-separated paths onto it. `looking` holds the session's id where
+  there is one, the Worktree it runs in and when it was launched, and the
+  cursor the last answer gave. The answer holds only what is past that cursor,
+  a cursor to carry on from — the export's own, which the host hands back and
+  never reads — and the id the record was found under. A harness that names
+  itself is handed no id until an answer gives one: the host writes it down as
+  the session's name, asks by it from then on, and a resume names it.
 - **`write-configuration(found, servers)`** — what a session's root holds of
   the account's configuration, given each configuration file as the account
   holds it, with the account's own MCP servers already taken out, and the

@@ -73,10 +73,90 @@ pub const BUILT_INS: &[BuiltIn] = include!(concat!(env!("OUT_DIR"), "/built_ins.
 /// the path above works on every platform a release is built for.
 pub const FIXTURE: &str = "613e2a43-80ee-4307-8623-28969e05330f";
 
+/// Codex's uuid, which is its built-in harness's in [`crate::store::BUILT_IN`]
+/// so that a Profile stored as `codex` reads as its plugin.
+pub const CODEX: &str = "49ea40c6-298c-412a-95b5-c89b9f539616";
+
+/// Whether the Plugins page leaves the built-in `uuid` out: the fixture,
+/// which is listed nowhere.
+pub fn unlisted(uuid: &str) -> bool {
+    uuid == FIXTURE
+}
+
 /// The uuid of the built-in that is the Skill Pack `verkstead`: the skills
 /// every session Verkstead runs is told to read, and the one plugin that pack
 /// name is reserved for. The first row of the Plugins page's Built-in group.
 pub const VERKSTEAD: &str = "15447a8d-f28d-4573-8b8b-a7226d477755";
+
+/// The built-in that is Codex.
+#[cfg(test)]
+pub(crate) fn codex() -> BuiltIn {
+    *BUILT_INS
+        .iter()
+        .find(|built_in| built_in.directory == "codex")
+        .expect("build.rs embeds every directory under plugins/, and plugins/codex is one")
+}
+
+/// The harness each built-in providing an agent declares, stood up out of its
+/// manifest as `platform` reads it and its component — see
+/// [`crate::harness::of`], which is what asks. One that doesn't load is left
+/// out, said in the log.
+pub(crate) async fn agents(platform: Platform) -> Vec<crate::harness::plugged::Plugged> {
+    let mut agents = Vec::new();
+    for built_in in BUILT_INS {
+        match agent(*built_in, platform).await {
+            Ok(Some(plugged)) => agents.push(plugged),
+            Ok(None) => {}
+            Err(trouble) => tracing::warn!(
+                plugin = built_in.directory,
+                %trouble,
+                "a built-in plugin's harness didn't load, and is left out",
+            ),
+        }
+    }
+    agents
+}
+
+/// The harness `built_in` declares, or none where it provides no agent.
+async fn agent(
+    built_in: BuiltIn,
+    platform: Platform,
+) -> Result<Option<crate::harness::plugged::Plugged>, Trouble> {
+    let manifest = built_in
+        .manifest(platform)
+        .map_err(|refusal| Trouble { why: refusal.why })?;
+    let Some(agent) = manifest
+        .provides
+        .iter()
+        .find_map(|provision| provision.agent())
+    else {
+        return Ok(None);
+    };
+
+    let mark = match agent.mark.as_ref().or(manifest.mark.as_ref()) {
+        Some(super::manifest::Mark::Inline(svg)) => svg.clone(),
+        Some(super::manifest::Mark::File(path)) => built_in
+            .files()
+            .read(path)
+            .and_then(|svg| String::from_utf8(svg).ok())
+            .ok_or_else(|| Trouble {
+                why: format!("Its mark `{}` couldn't be read.", path.display()),
+            })?,
+        None => String::new(),
+    };
+    let Some(loaded) = component::load(built_in.files(), &manifest, None).await? else {
+        return Err(Trouble {
+            why: "It provides an agent and has no component.".to_owned(),
+        });
+    };
+
+    Ok(Some(crate::harness::plugged::Plugged::new(
+        crate::store::AgentType::read(&manifest.uuid),
+        agent.clone(),
+        mark,
+        loaded,
+    )))
+}
 
 /// The built-in the Skill Pack `verkstead` is.
 pub fn verkstead() -> BuiltIn {
@@ -87,8 +167,8 @@ pub fn verkstead() -> BuiltIn {
 }
 
 /// The built-ins the Plugins page lists, their manifests as this platform
-/// reads them, in the order `build.rs` embedded them: every one but the
-/// fixture.
+/// reads them, in the order `build.rs` embedded them: every one but those
+/// [`unlisted`].
 ///
 /// A manifest that will not read is left out rather than listed, which only a
 /// build that should never have shipped can make so — the start says why, and
@@ -98,11 +178,44 @@ pub fn listed() -> &'static [Manifest] {
         BUILT_INS
             .iter()
             .filter_map(|built_in| built_in.manifest(Platform::HERE).ok())
-            .filter(|manifest| manifest.uuid != FIXTURE)
+            .filter(|manifest| !unlisted(&manifest.uuid))
             .collect()
     });
 
     &LISTED
+}
+
+/// What the built-in plugin `uuid`'s harness declares to install it, as
+/// `platform` reads its manifest — None where no built-in is `uuid`, or it
+/// provides no agent.
+///
+/// **Read for `platform` rather than off its harness**, which this process
+/// stood up as [`Platform::HERE`] reads it: the wizard's install plan is a
+/// function of the machine it is planned for, and a suite plans every
+/// platform's from one. Each platform's manifests are read once.
+pub(crate) fn agent_install(
+    uuid: &str,
+    platform: Platform,
+) -> Option<&'static super::manifest::agent::Install> {
+    static READ: LazyLock<[(Platform, Vec<Manifest>); 3]> = LazyLock::new(|| {
+        [Platform::Linux, Platform::MacOs, Platform::Windows].map(|platform| {
+            let read = BUILT_INS
+                .iter()
+                .filter_map(|built_in| built_in.manifest(platform).ok())
+                .collect();
+            (platform, read)
+        })
+    });
+
+    READ.iter()
+        .find(|(read_for, _)| *read_for == platform)?
+        .1
+        .iter()
+        .find(|manifest| manifest.uuid == uuid)?
+        .provides
+        .iter()
+        .find_map(|provision| provision.agent())
+        .map(|agent| &agent.install)
 }
 
 /// The listed built-in that provides the language `name`, where one does:
@@ -114,9 +227,14 @@ pub fn providing(name: &str) -> Option<&'static Manifest> {
 }
 
 /// Whether `manifest`'s built-in has a tick: a Language plugin's is whether
-/// sessions get its languages, and every other built-in is always on.
+/// sessions get its languages, an Agent plugin's whether its harness is
+/// offered, and every other built-in is always on.
 pub fn switched(manifest: &Manifest) -> bool {
     languages(manifest).next().is_some()
+        || manifest
+            .provides
+            .iter()
+            .any(|provision| provision.agent().is_some())
 }
 
 /// The languages `manifest` provides, by the name `config.yaml` keys each by,
@@ -274,6 +392,34 @@ mod tests {
                 |(name, bytes)| *name == "follow-up-rounds.wasm" && bytes.starts_with(b"\0asm")
             ),
             "the block's component is embedded beside the manifest",
+        );
+    }
+
+    /// Codex's plugin is what `verkstead plugin check` would accept, on every
+    /// platform — its manifest read for each, and its component started and
+    /// exporting the three things an agent is — under Codex's built-in uuid,
+    /// which the store reads as the word `codex`.
+    #[tokio::test]
+    async fn codex_is_a_built_in_every_platform_loads() {
+        let codex = codex();
+
+        for platform in [Platform::Linux, Platform::MacOs, Platform::Windows] {
+            let started = start(codex, platform, None).await;
+            assert_eq!(started.trouble, None, "{platform:?}");
+            let manifest = started.manifest.expect("the manifest reads");
+            assert_eq!(manifest.name, "Codex");
+            assert_eq!(manifest.uuid, CODEX);
+            assert_eq!(
+                crate::store::AgentType::read(&manifest.uuid),
+                crate::store::AgentType::CODEX
+            );
+        }
+        assert!(
+            codex
+                .files
+                .iter()
+                .any(|(name, bytes)| *name == "codex.wasm" && bytes.starts_with(b"\0asm")),
+            "Codex carries its wasm component",
         );
     }
 

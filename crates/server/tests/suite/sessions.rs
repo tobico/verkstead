@@ -5771,6 +5771,59 @@ sleep 300
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
+/// A plugin harness told no session id on its line names itself, as Codex
+/// does: its record is the one naming this session's Worktree, written since
+/// it was launched — here beside another Worktree's written at the same
+/// moment, which would be followed instead were the finder wrong — and the id
+/// that record gives is what Verkstead writes down as the session's name.
+#[tokio::test]
+async fn a_plugin_harness_that_names_itself_is_found_by_its_worktree_and_named_by_its_record() {
+    let fixture = grilling_on_a_plugin(
+        StubHarness::Naming,
+        r#"
+memory=$HOME/.stub/memory
+mkdir -p "$memory"
+printf 'args=%s\n' "$*"
+
+printf '%s\n' '{"session":"7e57ab1e-theirs","cwd":"/srv/worktrees/tables"}' \
+    '{"said":"agent","markdown":"Not this one."}' > "$memory/7e57ab1e-theirs.jsonl"
+log=$memory/c0ffee00-chosen.jsonl
+printf '{"session":"c0ffee00-chosen","cwd":"%s"}\n' "$(pwd)" > "$log"
+printf '%s\n' '{"said":"agent","markdown":"Reading the brief."}' >> "$log"
+
+sleep 300
+"#,
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    let spoken = fixture.spoken(event, 1).await;
+
+    assert_eq!(
+        spoken.turns,
+        vec![Turn::Prose(verkstead_render::Prose {
+            id: 1,
+            html: "<p>Reading the brief.</p>\n".to_owned(),
+        })],
+        "the record naming this session's own Worktree is the one followed"
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    assert_eq!(
+        verkstead_store::session_id(&pool, event).await.unwrap(),
+        Some("c0ffee00-chosen".to_owned()),
+        "and the id it chose is the one written down beside the session's Event"
+    );
+
+    let said = fixture.capture(event).await;
+    assert!(
+        said.contains("args=") && !said.contains("--session-id"),
+        "it was told no id on its line: {said}"
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
 /// A Codex session's log is found rather than named: codex takes no session id,
 /// so what says a rollout is this session's is the Worktree its own first line
 /// names and its having appeared after this session was launched.
@@ -5831,16 +5884,24 @@ async fn a_codex_session_follows_the_rollout_that_names_its_own_worktree() {
         .find_map(|line| line.strip_prefix("where="))
         .expect("the session says where it ran");
 
+    // Drawn, rather than kept as codex wrote them: since Codex became a
+    // plugin, what is stored is what its component read each line as (Set
+    // 1836, Q3b).
+    let drawn = verkstead_render::transcript_view(&transcript);
     assert_eq!(
-        transcript,
-        vec![
-            format!(r#"{{"type":"session_meta","payload":{{"cwd":"{worktree}"}}}}"#),
-            r#"{"type":"response_item","payload":{"type":"message","role":"assistant"}}"#
-                .to_owned(),
-        ],
-        "the rollout naming this session's own Worktree is the one followed, and its \
-         lines should be kept exactly as codex wrote them — a line caught half-written \
-         waiting for the rest of itself"
+        drawn
+            .bookkeeping
+            .iter()
+            .map(|kept| kept.kind.as_str())
+            .collect::<Vec<_>>(),
+        ["session_meta", "response_item"],
+        "the rollout naming this session's own Worktree is the one followed, its \
+         lines drawn in order — a line caught half-written waiting for the rest of \
+         itself"
+    );
+    assert!(
+        drawn.bookkeeping[0].line.contains(worktree),
+        "and its opening line is this Worktree's: {drawn:?}"
     );
 
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
@@ -5878,12 +5939,13 @@ async fn a_codex_sessions_rollout_is_followed_out_of_its_root_where_memory_is_of
         .find_map(|line| line.strip_prefix("where="))
         .expect("the session says where it ran");
 
-    assert_eq!(
-        transcript,
-        vec![format!(
-            r#"{{"type":"session_meta","payload":{{"cwd":"{worktree}"}}}}"#
-        )],
-        "the rollout in the root is followed onto the Transcript"
+    // Drawn, rather than kept as codex wrote it (Set 1836, Q3b).
+    let drawn = verkstead_render::transcript_view(&transcript);
+    assert!(
+        drawn.bookkeeping.len() == 1
+            && drawn.bookkeeping[0].kind == "session_meta"
+            && drawn.bookkeeping[0].line.contains(worktree),
+        "the rollout in the root is followed onto the Transcript: {drawn:?}"
     );
 
     let rollouts = |sessions: PathBuf| {

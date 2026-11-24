@@ -71,6 +71,12 @@ pub(crate) enum StubHarness {
     /// `PATH`.
     /// The only one declaring an install.
     Installing,
+
+    /// As [`StubHarness::Silent`], told no session id on its line: it names
+    /// itself, its record found by its Worktree and its launch, and is resumed
+    /// by the id that record gave, through a `resume` subcommand with the id in
+    /// front of the prompt — Codex's shape.
+    Naming,
 }
 
 /// The script an installing stub harness's install command runs, said from
@@ -87,6 +93,7 @@ impl StubHarness {
             StubHarness::LoggingIn => "8e3f4d5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a",
             StubHarness::Offering => "9f4a5e6b-7c8d-4e9f-8a1b-2c3d4e5f6a7b",
             StubHarness::Installing => "a05b6f7c-8d9e-4fa0-9b1c-3d4e5f6a7b8c",
+            StubHarness::Naming => "b16c7a8d-9eaf-4ab1-8c2d-4e5f6a7b8c9d",
         }
     }
 
@@ -95,7 +102,8 @@ impl StubHarness {
             StubHarness::Silent
             | StubHarness::LoggingIn
             | StubHarness::Offering
-            | StubHarness::Installing => "    idle: silence\n".to_owned(),
+            | StubHarness::Installing
+            | StubHarness::Naming => "    idle: silence\n".to_owned(),
             StubHarness::Drawing | StubHarness::DrawingBlocking => {
                 format!("    idle:\n      signature: \"{AT_WORK}\"\n")
             }
@@ -109,7 +117,8 @@ impl StubHarness {
             | StubHarness::DrawingBlocking
             | StubHarness::LoggingIn
             | StubHarness::Offering
-            | StubHarness::Installing => "blocking",
+            | StubHarness::Installing
+            | StubHarness::Naming => "blocking",
         }
     }
 
@@ -122,7 +131,8 @@ impl StubHarness {
             | StubHarness::Drawing
             | StubHarness::DrawingBlocking
             | StubHarness::Offering
-            | StubHarness::Installing => "",
+            | StubHarness::Installing
+            | StubHarness::Naming => "",
         }
     }
 
@@ -136,7 +146,37 @@ impl StubHarness {
             | StubHarness::Drawing
             | StubHarness::DrawingBlocking
             | StubHarness::LoggingIn
-            | StubHarness::Offering => String::new(),
+            | StubHarness::Offering
+            | StubHarness::Naming => String::new(),
+        }
+    }
+
+    /// How its line names the session Verkstead picked: not at all, for the
+    /// one that names itself.
+    fn session(self) -> &'static str {
+        match self {
+            StubHarness::Naming => "",
+            StubHarness::Silent
+            | StubHarness::Drawing
+            | StubHarness::DrawingBlocking
+            | StubHarness::LoggingIn
+            | StubHarness::Offering
+            | StubHarness::Installing => "      session: [--session-id, \"{session}\"]\n",
+        }
+    }
+
+    /// How its line carries a conversation on: by a flag naming the session,
+    /// or — for the one that names itself — as Codex does, a `resume`
+    /// subcommand with the id it chose in front of the prompt.
+    fn resume(self) -> &'static str {
+        match self {
+            StubHarness::Naming => "      resume:\n        subcommand: [resume]\n",
+            StubHarness::Silent
+            | StubHarness::Drawing
+            | StubHarness::DrawingBlocking
+            | StubHarness::LoggingIn
+            | StubHarness::Offering
+            | StubHarness::Installing => "      resume:\n        flag: [--resume, \"{session}\"]\n",
         }
     }
 
@@ -162,10 +202,7 @@ provides:
     launch:
       model: [--model, "{{model}}"]
       prompt: ["{{prompt}}"]
-      session: [--session-id, "{{session}}"]
-      resume:
-        flag: [--resume, "{{session}}"]
-      tail: [--yes, --worktree, "{{worktree}}", --settings, "{{settings}}"]
+{session}{resume}      tail: [--yes, --worktree, "{{worktree}}", --settings, "{{settings}}"]
       settings:
         quiet: true
     account:
@@ -177,7 +214,9 @@ provides:
         mounted: .stub
         allowlist: [settings.json]
         credentials: [auth.json]
-        memory: [memory]
+        memory:
+          - path: memory
+            synced: everything
       - key: config
         label: Stub config file
         kind: file
@@ -203,6 +242,8 @@ provides:
             variant = self,
             idle = self.idle(),
             channel = self.channel(),
+            session = self.session(),
+            resume = self.resume(),
             install = self.install(),
             login = self.login(),
             says = SAYS.0,

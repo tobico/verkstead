@@ -1,0 +1,23 @@
+[package]
+name = "verkstead-plugin-codex"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# The wasm file is named after this, and the directory the plugin is in: what
+# `crates/server/build.rs` looks for is `<directory>.wasm`.
+[lib]
+name = "codex"
+crate-type = ["cdylib"]
+
+# The first built-in with dependencies, which the packaged build vendors from
+# this workspace's own lockfile beside the server's — see `nix/verkstead.nix`.
+#
+# `toml` at the server's own version, and the lockfile holding its
+# dependencies at the server's too: the `config.toml` a root is written is the
+# bytes the in-process Codex wrote, and the formatting is the crate's.
+[dependencies]
+wit-bindgen = "0.51"
+serde_json = "1"
+toml = "=0.8.2"

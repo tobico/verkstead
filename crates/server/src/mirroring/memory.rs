@@ -80,8 +80,8 @@ pub(crate) const MOST_A_STORE_IS: usize = 64 * 1024 * 1024;
 
 /// How much of a rollout is read to say whose session wrote it.
 ///
-/// Generous against the eighteen kilobytes codex 0.149.0 opens one with — the
-/// session's whole system prompt is in there — and small against a log that runs
+/// Generous against the eighteen kilobytes a rollout has been seen to open with —
+/// the session's whole system prompt is in there — and small against a log that runs
 /// to megabytes. [`crate::transcript`]'s own bound, for its reason.
 const FIRST_LINE: u64 = 256 * 1024;
 
@@ -517,7 +517,7 @@ pub(crate) fn here(
 pub(crate) fn carried(parts: Vec<Part>, repo: bool, worktree: bool) -> Vec<Part> {
     parts
         .into_iter()
-        .filter(|part| match part.label {
+        .filter(|part| match part.label.as_ref() {
             root::REPO => repo,
             root::WORKTREE => worktree,
             _ => true,
@@ -574,7 +574,7 @@ pub(crate) fn gathered(account: &Path, parts: &[Part]) -> io::Result<Vec<MemoryF
         let under = account.join(&part.inside);
 
         match &part.whose {
-            Whose::Everything => walked(&under, &under, part.label, None, &mut files, &mut held)?,
+            Whose::Everything => walked(&under, &under, &part.label, None, &mut files, &mut held)?,
 
             // Directly under the store, and one level down: grok keeps a
             // directory per working directory and the session's inside it, and
@@ -584,13 +584,13 @@ pub(crate) fn gathered(account: &Path, parts: &[Part]) -> io::Result<Vec<MemoryF
             Whose::Called(ids) => {
                 for child in directories_in(&under)? {
                     if called(&child, ids) {
-                        walked(&under, &child, part.label, None, &mut files, &mut held)?;
+                        walked(&under, &child, &part.label, None, &mut files, &mut held)?;
                         continue;
                     }
 
                     for inside in directories_in(&child)? {
                         if called(&inside, ids) {
-                            walked(&under, &inside, part.label, None, &mut files, &mut held)?;
+                            walked(&under, &inside, &part.label, None, &mut files, &mut held)?;
                         }
                     }
                 }
@@ -599,7 +599,7 @@ pub(crate) fn gathered(account: &Path, parts: &[Part]) -> io::Result<Vec<MemoryF
             Whose::Naming(stem) => walked(
                 &under,
                 &under,
-                part.label,
+                &part.label,
                 Some(stem),
                 &mut files,
                 &mut held,
@@ -618,7 +618,7 @@ pub(crate) fn gathered(account: &Path, parts: &[Part]) -> io::Result<Vec<MemoryF
                     taken(
                         &under,
                         &under.join(beside),
-                        part.label,
+                        &part.label,
                         &mut files,
                         &mut held,
                     )?;
@@ -637,7 +637,7 @@ pub(crate) fn gathered(account: &Path, parts: &[Part]) -> io::Result<Vec<MemoryF
                         taken(
                             &under,
                             &under.join(beside),
-                            part.label,
+                            &part.label,
                             &mut files,
                             &mut held,
                         )?;
@@ -739,7 +739,7 @@ pub(crate) fn written_down(
         beside(&path, &bytes)?;
 
         came_down.insert(
-            (part.label.to_owned(), plainly(&inside)),
+            (part.label.to_string(), plainly(&inside)),
             fingerprint(file.bytes.as_bytes()),
         );
     }
@@ -758,7 +758,7 @@ pub(crate) fn written_down(
 fn walked(
     root: &Path,
     at: &Path,
-    label: &'static str,
+    label: &str,
     naming: Option<&str>,
     files: &mut Vec<MemoryFile>,
     held: &mut usize,
@@ -812,7 +812,7 @@ fn walked(
 fn taken(
     root: &Path,
     path: &Path,
-    label: &'static str,
+    label: &str,
     files: &mut Vec<MemoryFile>,
     held: &mut usize,
 ) -> io::Result<()> {
@@ -856,9 +856,9 @@ fn taken(
 ///
 /// One line rather than the file, which is [`crate::transcript`]'s reading of the
 /// same thing: a rollout opens with the session's own metadata, and in it is the
-/// directory codex was launched in. Anything that is not a rollout at all is not
-/// this Conversation's — codex compresses its older logs and keeps an index
-/// beside them, and neither is something to carry a piece of.
+/// directory the harness was launched in. Anything that is not a rollout at all is
+/// not this Conversation's — a harness may compress its older logs and keep an
+/// index beside them, and neither is something to carry a piece of.
 ///
 /// Blocking.
 fn wrote_in(log: &Path, stem: &str) -> bool {
@@ -1338,7 +1338,10 @@ mod tests {
         );
 
         assert_eq!(
-            parts.iter().map(|part| part.label).collect::<Vec<_>>(),
+            parts
+                .iter()
+                .map(|part| part.label.as_ref())
+                .collect::<Vec<_>>(),
             [root::WORKTREE],
         );
     }

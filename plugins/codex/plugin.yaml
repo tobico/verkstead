@@ -1,0 +1,147 @@
+# Codex, as the plugin a user would write: what about it is data is here, and
+# the two things about it that are code — finding and reading its rollouts, and
+# writing its `config.toml` — are the component built from the crate beside this
+# (`src/lib.rs`). The grammar of an `agent` entry is `docs/plugins.md`'s *Agent*.
+#
+# Carried over from the in-process harness rather than re-decided: ADR-0011's
+# *As built for Codex* and the agent-backends roadmap's stage 03 say why each
+# piece is what it is.
+#
+# The uuid is Codex's built-in one (`store::BUILT_IN`), so a Profile stored as
+# the word `codex` reads as this plugin's.
+uuid: 49ea40c6-298c-412a-95b5-c89b9f539616
+name: Codex
+author:
+  name: Tobias Cohen
+  email: tobi@tobico.net
+version: 0.1.0
+interface: 1
+description: OpenAI's coding agent, run in the terminal.
+mark: marks/codex.svg
+component: codex.wasm
+provides:
+  - category: agent
+    binary: codex
+    name: Codex
+    launch:
+      model: [-m, "{model}"]
+      prompt: ["{prompt}"]
+      # No `session`: codex takes no id at launch. It names itself, in its
+      # rollout's opening line, and `resume` is a subcommand that takes that id
+      # as a positional in front of the prompt.
+      #
+      # `tui.resume_cwd` is which directory a resumed session works in: a
+      # carried rollout records the sending device's Worktree, and codex
+      # 0.155.1 stops to ask which of the two to use. This one's is where the
+      # work now is.
+      resume:
+        subcommand: [resume]
+        also: [-c, 'tui.resume_cwd="current"']
+      # The approval bypass, the inline screen the at-work line is read off,
+      # and the credential store a file: there is no keyring in the sandbox.
+      tail:
+        - --dangerously-bypass-approvals-and-sandbox
+        - --no-alt-screen
+        - -c
+        - cli_auth_credentials_store="file"
+      # The Worktree trusted, since some versions still put the trust prompt up
+      # despite the bypass. The whole table rather than the one key under it:
+      # codex splits a `-c` key on every dot, and a Worktree's path may hold one.
+      worktree: [-c, 'projects={"{worktree}"={trust_level="trusted"}}']
+    account:
+      - key: home
+        label: Home directory
+        purpose: Mounted at `~/.codex`.
+        example: /home/you/accounts/work/.codex
+        kind: directory
+        mounted: .codex
+        allowlist: [config.toml]
+        credentials: [auth.json]
+        # The rollouts every session writes, filed by date and synced by the
+        # Worktree they name; and the files the memories feature keeps, whole,
+        # carried as the part `memory`, which is what the in-process Codex
+        # called it and a device on an older release still sends.
+        # Not the SQLite databases beside them — `state_5.sqlite`,
+        # `memories_1.sqlite` and the rest in codex 0.154 — which are each
+        # session's own: one linked a file at a time loses its write-ahead-log
+        # siblings and won't open. A fresh state database beside shared
+        # `sessions/` does no paid work: codex fills it from the rollouts as it
+        # starts, and the memories feature that would summarise them is off
+        # unless `[features]` turns it on, which a root's `config.toml` never
+        # carries.
+        memory:
+          - path: sessions
+            synced: worktree
+          - path: memories
+            synced: everything
+            part: memory
+    # Read off codex 0.164.0, mid-turn: `• Working (13s • esc to interrupt)`,
+    # and gone from the frame it leaves when the turn is over. The fragment
+    # rather than the line, since the spinner and the seconds move.
+    idle:
+      signature: esc to interrupt
+    # What codex 0.149.0 opens its usage-limit banner with, the apostrophe
+    # ASCII as codex writes it. Verkstead runs no Codex login.
+    phrases:
+      exhausted: you've hit your usage limit
+    ask:
+      channel: store-and-nudge
+      guide: |
+        **Run `verkstead ask` as an ordinary foreground call.** It comes back as soon as
+        the server has stored the Set — there is nothing to wait for on this end — and
+        what it prints is the stored Set rather than a Response: the `id` it was stored
+        under, and when the server took it.
+
+        Pipe the Set in on stdin — no file to name, and nothing left behind:
+
+        ```
+        verkstead ask <<'YAML'
+        title: …
+        questions:
+          - label: Q1
+            text: …
+        YAML
+        ```
+
+        Quote the heredoc delimiter (`<<'YAML'`, not `<<YAML`) so the shell leaves the
+        Set alone — backticks and `$` are ordinary characters in prose and in a diff.
+
+        Then **end the turn.** Do any work that does not depend on the Answers first —
+        but don't speculate about what the human will say, don't start work the Answers
+        might throw away, and don't poll for them. Say what is now waiting on the human,
+        and stop.
+
+        Verkstead types a line into this terminal when the Response lands, and that line
+        is what starts the next turn. Fetch the Answers with the `id` the ask printed:
+
+        ```
+        verkstead answers 42
+        ```
+
+        Stdout is the Response YAML and nothing else, exactly as **Reading the Response**
+        below describes it. A Set nobody has answered yet is a non-zero exit rather than
+        something to idle on, so run this when the line has said the Answers are there.
+
+        A Set sent with `--deferred` is never nudged about and has no Answers to come
+        back for — see **Two kinds of ask**. Everything below about a failure that isn't
+        the Set holds for both.
+    models:
+      - id: gpt-5-codex
+        name: GPT-5 Codex
+        default: true
+    # Read off codex 0.155.1.
+    tools: mcp__<server>__<tool>
+    instructions: AGENTS.md
+    # npm carries it everywhere but a Mac, where Homebrew carries it as a cask:
+    # the wizard installs either the way it installs a built-in harness, npm's
+    # behind the one raised package batch with node where there is none, and
+    # the cask behind the Homebrew it installs first. An Intel Mac has neither,
+    # and its releases page is what is left.
+    install:
+      instructions: https://github.com/openai/codex/releases
+      npm: "@openai/codex"
+      nix: codex
+    macos:
+      install:
+        instructions: https://github.com/openai/codex/releases
+        cask: codex

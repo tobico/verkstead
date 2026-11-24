@@ -335,7 +335,12 @@ async fn filled(
 
     usable(
         state,
-        crate::pairing_defaults::platform_default(profiles, role, &state.plugins.harnesses()),
+        crate::pairing_defaults::platform_default(
+            profiles,
+            role,
+            &state.plugins.harnesses(),
+            &crate::profiles::unticked(&state.pool).await?,
+        ),
     )
     .await
 }

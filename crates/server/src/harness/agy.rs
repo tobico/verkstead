@@ -58,12 +58,12 @@ const PICKER: &str = "select login method:";
 /// repaints a screen takes, and because a turn waiting on a slow model would
 /// otherwise rest on a spinner nobody has promised to keep turning.
 ///
-/// Three words, as codex's are, and a different three — `esc to cancel` against
-/// `esc to interrupt` — so neither backend's constant reads the other's frame.
+/// Three words, and not the three a built-in plugin's `idle.signature` declares
+/// — `esc to cancel` against `esc to interrupt` — so neither reading takes the
+/// other's frame.
 ///
-/// Named for the same reason [`super::codex::AT_WORK`] is, and it is the same bargain
-/// the usage-limit phrase makes: the wording is agy's and it will move, and
-/// moving it costs one edit here.
+/// Named for the bargain the usage-limit phrase makes: the wording is agy's
+/// and it will move, and moving it costs one edit here.
 const AT_WORK: &str = "esc to cancel";
 
 /// The Antigravity CLI.
@@ -137,6 +137,7 @@ impl Harness for Agy {
             session: None,
             resume: Some(Resume::Flag(said(&["--conversation", SESSION]))),
             tail,
+            worktree: Vec::new(),
         }
     }
 
@@ -301,12 +302,12 @@ impl Harness for Agy {
     ) -> Vec<Part> {
         vec![
             Part {
-                label: root::CONVERSATIONS,
+                label: root::CONVERSATIONS.into(),
                 inside: PathBuf::from(root::AGY_MEMORY[0]),
                 whose: Whose::Databases(sessions.to_vec()),
             },
             Part {
-                label: root::BRAIN,
+                label: root::BRAIN.into(),
                 inside: PathBuf::from(root::AGY_MEMORY[1]),
                 whose: Whose::Called(sessions.to_vec()),
             },
@@ -393,7 +394,7 @@ impl Harness for Agy {
 /// - `trustedWorkspaces`, the Worktree and every companion, so none of them
 ///   stops the session on a question about trusting it.
 /// - `altScreenMode: never`, so agy draws inline and the Capture is the record
-///   of what the session did, as `--no-alt-screen` is for codex and grok.
+///   of what the session did, as `--no-alt-screen` is for grok.
 /// - `runningLightSpeed: off`, the light agy runs along its at-work line, which
 ///   would repaint the Screen for nothing every few frames.
 /// - `enableTerminalSandbox: false`: agy's own sandbox for its shell tool,
