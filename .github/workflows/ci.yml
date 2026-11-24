@@ -1267,6 +1267,14 @@ jobs:
         run: >
           cargo nextest run --workspace
           --partition slice:${{ matrix.partition }}/10 --no-fail-fast
+        env:
+          # Twice the suite's own clock, as the `Rust` job sets it and for the
+          # same reason: `crates/server/tests/suite/sessions_windows.rs` reads
+          # that factor in ten places, and this runner is the same shared
+          # four-core class dealt into ten legs rather than five. Left unset
+          # here until now, which meant every paced budget on Windows ran at a
+          # developer machine's `1.0`.
+          VERKSTEAD_TEST_PACE: "2"
 
       # **And the doc-tests, which nextest does not run.** The workspace has
       # none today, so this step costs little. It is here so that the first one
