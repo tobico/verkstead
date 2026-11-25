@@ -54,13 +54,14 @@ named is what was turned down.
   **run**'s is the state of the task it was building, read off `.tasks/` and the
   branch by the same reading the launch itself makes of them: every step of a run
   ends in a commit, so a session that left its work standing was part way through
-  and one that got its commit in stopped between two steps. A **follow-up**'s is
-  how its session ended, a round being a conversation with nothing of it on the
-  branch: a session taken away while it was running and one that fell over where
-  it stood were each mid-sentence, and one that exited cleanly had the turn it
-  was having. Reading the stop's own kind instead was turned down — a force stop
-  over a run that had just committed is not a conversation anybody is losing, and
-  a crash over one that had is not either.
+  and one that got its commit in stopped between two steps. A **follow-up**'s and
+  an **investigation**'s are how the session ended, a round of either being a
+  conversation with nothing of it on the branch: a session taken away while it
+  was running and one that fell over where it stood were each mid-sentence, and
+  one that exited cleanly had the turn it was having. Reading the stop's own kind
+  instead was turned down — a force stop over a run that had just committed is
+  not a conversation anybody is losing, and a crash over one that had is not
+  either.
 
 - **An inline implementation and a roadmap's own writing read as between steps.**
   Neither has a backlog to have been part way through, and the question each of
@@ -140,12 +141,13 @@ where a row already stands is what keeps them theirs. Nothing about a stop
 changes: it is recorded the same way, marked the same way, and reaches a phone
 or does not by the same rule — what changes is what the press after it starts.
 A Conversation that finished its step still gets Verkstead's own Resume, which
-is a complete way to take work up. So does a state with no cut-off reading in
-it: **Wrapping**, whose press starts the five watchers rather than a session,
-and **Investigating**, which this did not reach — an investigation cut off
-mid-round is still re-primed from the question it was opened with and the rounds
-already answered. And nothing here is the human's to answer: both outcomes are a
-session appearing on the Timeline, and the clause beside it is there to say
+is a complete way to take work up. So does the one state with no cut-off reading
+in it: **Wrapping**, whose press starts the five watchers rather than a session,
+and where a **Review** whose session is gone reads the branch afresh by a rule
+of its own — what it had decided, half done and never started are beyond asking
+once nobody is left to act on them, which is the self-review's own rule and not
+this one to change. And nothing here is the human's to answer: both outcomes
+are a session appearing on the Timeline, and the clause beside it is there to say
 which, not to ask anything.
 
 Two neighbours of the incident were deliberately left out, and both are easier

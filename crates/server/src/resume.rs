@@ -648,13 +648,17 @@ async fn recompute(
 
         // And a fresh session on the investigating skill, on the question this
         // Investigating was opened with and the rounds it has already been
-        // through — the follow-up's shape, and for the follow-up's reason: an
-        // investigation is a conversation, so nothing of it is written on the
-        // branch and what outlives the session having it is the Timeline. See
-        // [`crate::investigations`].
+        // through — or, where the session having the round was taken away
+        // mid-sentence, that session carried on. The follow-up's shape, and for
+        // the follow-up's reason: an investigation is a conversation, so nothing
+        // of it is written on the branch and what outlives the session having it
+        // is the Timeline. See [`crate::investigations`], and [`mid_round`].
         //
         // There is no ending left half-made to look for here, the way a
         // follow-up's owed pull request is: an investigation never ends on one.
+        // Which is also why nothing here has a job to re-derive and so nothing
+        // has to be told not to: an investigation has the one job it was opened
+        // with, whoever launches it.
         Lifecycle::Investigating => {
             if conversation.implementation_pairing.is_none() {
                 return Ok(Resumed::NoImplementationPairing);
@@ -664,6 +668,19 @@ async fn recompute(
             else {
                 return Ok(Resumed::NoInvestigation);
             };
+
+            // After every refusal and before the spawn, where the other three
+            // states' readings are and for their two reasons — see [`cut_off`].
+            // Read the follow-up's way because a round is the same thing here: a
+            // conversation with nothing of it on the branch, so what tells one
+            // cut off mid-sentence from one that finished the turn it was having
+            // is how its session ended.
+            cut_off(
+                state,
+                conversation_id,
+                mid_round(state, conversation_id).await,
+            )
+            .await;
 
             starting(state, conversation_id, resuming).await?;
 
@@ -701,9 +718,9 @@ async fn recompute(
 /// down there. A **grilling's** is unconditional — a grilling is over when it has
 /// picked a direction, and picking one moves the Conversation out of Grilling. A
 /// **run's** is the state of what it was building, because a run stops between
-/// tasks as routinely as mid-task: see [`mid_turn`]. And a **follow-up's** is how
-/// its session ended, a round being a conversation with nothing of it on the
-/// branch to read: see [`mid_round`].
+/// tasks as routinely as mid-task: see [`mid_turn`]. And a **follow-up's** and an
+/// **investigation's** are how the session ended, a round being a conversation
+/// with nothing of it on the branch to read: see [`mid_round`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MidTurn {
     /// It was: the step the session was running did not finish, so there is a
@@ -746,10 +763,10 @@ async fn mid_turn(direction: Direction, worktree: &Path) -> MidTurn {
     }
 }
 
-/// And how a **follow-up** reads the same thing: how the session that stopped
-/// here ended.
+/// And how a **follow-up** and an **investigation** read the same thing: how the
+/// session that stopped here ended.
 ///
-/// A follow-up's rounds are a conversation rather than a step with a commit at
+/// A round of either is a conversation rather than a step with a commit at
 /// the end of it, so there is nothing in the Worktree to read — and the state
 /// alone cannot say either, a Conversation sitting in Follow-up through every
 /// round it has and going on sitting there where an ending that sent for a pull
@@ -799,7 +816,7 @@ async fn mid_round(state: &AppState, conversation_id: i64) -> MidTurn {
         Ok(Some(_)) => MidTurn::BetweenSteps,
 
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading how a follow-up's session ended failed, so the session started for it is Verkstead's own resume");
+            tracing::error!(error = ?error, conversation_id, "reading how the session of a round that stopped ended failed, so the session started for it is Verkstead's own resume");
             MidTurn::BetweenSteps
         }
     }

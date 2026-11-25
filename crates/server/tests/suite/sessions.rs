@@ -20106,14 +20106,21 @@ signed_out() {{
         sleep 300
     fi
 }}
+# Which role this session is in, kept beside the Worktree rather than read off
+# the prompt every time: an investigation cut off mid-round is carried on, and a
+# carried session is primed with the note instead of its role's own prompt — so
+# `$2` says which role the first launch was in and nothing about the ones after
+# it. The Worktree is what the two have in common. See ADR-0030.
+role={spill}/role-$(printf '%s' "$PWD" | tr -c 'a-zA-Z0-9' -)
 case "$2" in
-*investigating/SKILL.md*)
+*investigating/SKILL.md*) printf 'investigated' > "$role" ;;
+esac
+if [ -s "$role" ]; then
     signed_out
-    cat "$HOME/.claude/.credentials.json" > {spill}/investigated
+    cat "$HOME/.claude/.credentials.json" > {spill}/$(cat "$role")
     printf 'found it\n'
     sleep 300
-    ;;
-esac
+fi
 case "$1" in
 claude-grilling-5) ;;
 *)
@@ -20158,6 +20165,12 @@ async fn until_on<T>(
 /// One login resumes every run stopped as Signed out on its Profile — here an
 /// implementation run and an investigation beside it, both under the
 /// implementation Profile — and each resumed session is given the new login.
+///
+/// The investigation's is a conversation carried on rather than a fresh session
+/// (ADR-0030), which changes nothing about the login and everything about how
+/// the stub can tell which role it is in: a carried session is primed with the
+/// note, so the role is read off the marker its first launch left beside the
+/// Worktree. See [`signed_out_until_logged_in`].
 #[tokio::test]
 async fn a_login_resumes_every_run_it_unblocks() {
     let spill = tempfile::tempdir().unwrap();
@@ -33388,6 +33401,124 @@ async fn resume_investigates_again_on_the_brief_and_the_rounds_answered() {
     assert!(
         relaunched.contains("About the 429s") && relaunched.contains("It counts them against"),
         "which is the round it asked before it went: {relaunched:?}",
+    );
+}
+
+/// An investigating session that puts its round up and holds, keeping claude's
+/// own log of the conversation — and which says, where it is resumed, that it is
+/// the session that was having that round rather than a fresh one on the Brief.
+fn an_investigating_round_carried_on() -> String {
+    format!(
+        r#"
+{CLAUDES_LOG}
+case "$3" in
+--resume)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Back to it."}}]}}}}' >> "$log"
+    printf 'carried on\r\n'
+    sleep 300
+    ;;
+*)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"A round."}}]}}}}' > "$log"
+    SAYING='finding it out'
+    printf '%s\r\n' "$SAYING"
+    {WHILE_NOBODY_HAS_ASKED}
+    while :; do printf 'finding more out\r\n'; sleep 0.1; done
+    ;;
+esac
+"#
+    )
+}
+
+/// **An investigation cut off mid-round is carried on too**, with the round it
+/// left open held for the session coming back to it.
+///
+/// The follow-up's reading in the one other state that has a conversation to
+/// lose: an investigation's rounds are a conversation with nothing of them on the
+/// branch, so what tells one cut off mid-sentence from one that finished the turn
+/// it was having is how its session ended — see the server's `resume::mid_round`.
+/// Re-primed, what the agent had worked out across every round it has had is
+/// thrown away and the human is asked again for what they have already said.
+///
+/// Nothing about the job turns on it here, which is what parts this from the
+/// follow-up: an investigation has the one job it was opened with, whoever
+/// launches it. What it loses by being re-primed is the thinking alone.
+#[tokio::test]
+async fn an_investigation_cut_off_mid_round_is_carried_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let fixture = investigating(spill, &an_investigating_round_carried_on()).await;
+
+    let round = fixture.running().await;
+
+    // The round's question, with the human holding it when the session that
+    // asked is taken away.
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    fixture.printed(round, "finding more out").await;
+
+    assert_eq!(
+        fixture.force_stop().await,
+        ConversationStopped::Stopped,
+        "the session is taken away mid-round, which is what makes this a cut-off",
+    );
+
+    fixture.quiet().await;
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let again = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(again).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the round the stop took away: {said:?}",
+    );
+    assert!(
+        !said.contains("finding it out"),
+        "rather than a fresh investigation being primed from the Brief and the \
+         rounds already answered over the top of it: {said:?}",
+    );
+
+    let view = fixture.view().await;
+    let notices = notices(&view);
+
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "and the Timeline says which of the two resumes it was: {notices:?}",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Investigating,
+        "and the investigation is still the investigation",
+    );
+
+    let standing = sets(&view)
+        .into_iter()
+        .find(|asked| asked.set_id == set)
+        .expect("the Set the stopped session was idling on is on the Timeline")
+        .standing
+        .clone();
+
+    assert!(
+        !matches!(standing, verkstead_render::Standing::LockedUnanswered(_)),
+        "and the round is held open for the reader that is coming back rather \
+         than locked: {standing:?}",
+    );
+    assert_eq!(
+        fixture
+            .respond(set, serde_json::json!([{ "label": "Q9", "selected": 1 }]))
+            .await,
+        Submitted::Accepted,
+        "which the human can still answer, that being what open means to them",
     );
 }
 

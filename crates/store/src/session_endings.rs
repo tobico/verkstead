@@ -200,13 +200,13 @@ pub async fn session_ending(
 /// How the **newest** session of `conversation_id` ended, where anything was
 /// written down about it.
 ///
-/// `None` is half of what its one reader is after: **a session that was taken
+/// `None` is half of what its readers are after: **a session that was taken
 /// away while it was running**. A row is written for a session that ended on its
 /// own account and never for one Verkstead ended itself — a force stop, a
 /// sign-out, an account out of window — so the absence of one over a session
 /// that is no longer running is the live kill. See the server's `resume` module,
-/// which asks this about a follow-up: a round's session taken away mid-sentence
-/// is one with a conversation to carry on.
+/// which asks this about a follow-up and about an investigation: a round's
+/// session taken away mid-sentence is one with a conversation to carry on.
 ///
 /// And the other half is [`Ended::fell_over`] over the row that is there: a
 /// session that exited of its own account had the turn it was having **unless it

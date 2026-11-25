@@ -435,7 +435,7 @@ async fn the_last_ending_is_the_newest_sessions_and_is_absent_for_one_verkstead_
 /// Every way of ending badly, because what the reading turns on is the exit code
 /// and two of the three ways have none: a status the agent chose, a process
 /// something else killed, and a relay that could not reap one at all. See the
-/// server's `resume::mid_round`, the one reader.
+/// server's `resume::mid_round`, which is where the three are read.
 #[tokio::test]
 async fn an_ending_fell_over_unless_the_session_exited_with_nothing_wrong() {
     assert!(

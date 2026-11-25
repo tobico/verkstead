@@ -970,10 +970,15 @@ says *between steps* about it by itself. And what stays Verkstead's own **Resume
 stays it silently — a run stopped between two tasks, a session that finished its
 step, a stall over a Conversation no session ever ran for, and a Conversation
 that has never run one — there being no conversation anybody is losing and so
-nothing to tell anybody about. Two states read no cut-off at all either:
-**Wrapping**, whose press starts the five watchers rather than a session, and
-**Investigating**, which is re-primed from the question it was opened with and
-the rounds already answered.
+nothing to tell anybody about. **One state reads no cut-off at all**, and it is
+**Wrapping**, whose press starts the five watchers rather than a session — and a
+**Review** whose session is gone is the one thing there that reads afresh by a
+rule of its own, its findings being beyond asking once nobody is left to act on
+them. **Investigating** reads one the follow-up's way, a round of either being a
+conversation with nothing of it on the branch — and it is the one occasion where
+the job cannot change under the carry-on whatever is read, an investigation
+having the one job it was opened with whoever launches it. What a re-prime there
+threw away was the thinking alone, and that was enough.
 **And the job must not change under it.** A launch with a conversation standing
 to be carried on *is* the session that was cut off, resumed, so what it works is
 its own turn's to decide: the drivers that re-derive a job before launching ask

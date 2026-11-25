@@ -2682,6 +2682,15 @@ async fn finished(state: &AppState, conversation_id: i64, driving: Driving) {
 /// open leaves the human holding a Conversation they can neither answer nor end,
 /// so it is spoken to, and the human told where it will not answer. The session
 /// is left running for them to move.
+///
+/// **And a round cut off mid-sentence is carried on** (ADR-0030), which is the
+/// follow-up's rule here too and for its reason: a round is a conversation with
+/// nothing of it on the branch, so what the agent had in its head is the whole
+/// of what the session after it is for. The launch below is then that session
+/// resumed, and the Set it was idling on is held for it rather than locked.
+/// Nothing about the job turns on it — an investigation has the one job it was
+/// opened with, whoever launches it — so there is nothing here to tell not to
+/// re-derive one. See [`crate::resume::mid_round`], which is where it is read.
 pub(crate) async fn investigating(
     state: AppState,
     conversation_id: i64,
@@ -2693,18 +2702,22 @@ pub(crate) async fn investigating(
     // handed somebody else's — so a question left over from the session that
     // died is one the human could answer for ever with nothing reading it.
     // Locked unanswered as the fresh session starts, which is what a relaunched
-    // grilling and a relaunched follow-up both do with their own.
-    if investigation.again {
-        left_open(&state, conversation_id).await;
-    }
+    // grilling and a relaunched follow-up both do with their own — and held for
+    // the resume instead where the session that asked is the one being carried
+    // on, which is the same reversal they both make. See [`held_open`].
+    let held = held_open(&state, conversation_id, investigation.again).await;
 
-    let Some(mut session) = launch_in_turn(
+    let Some(mut session) = launch_in_turn_holding(
         &state,
         conversation_id,
         Prompt::Investigating(investigation),
+        &held,
     )
     .await
     else {
+        // And a launch that never happened settled nothing, so what was held
+        // for it is made good here instead.
+        made_good(&state, conversation_id, &held).await;
         return;
     };
 
