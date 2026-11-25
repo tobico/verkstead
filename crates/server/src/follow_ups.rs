@@ -50,7 +50,10 @@ pub(crate) struct FollowUp {
     /// follow-up that is being picked up had a session that died mid-round, and
     /// an ask it was idling on when it went is a question with nobody behind it
     /// — locked as the fresh session starts, exactly as a relaunched grilling
-    /// locks what its dead interview left. See [`crate::runner::following_up`].
+    /// locks what its dead interview left. Unless the session that asked is the
+    /// one being carried on, in which case the reader is coming back and the Set
+    /// is held for it: see [`crate::runner::held_open`], which is where the two
+    /// are decided between, and [`crate::runner::following_up`].
     ///
     /// `false` where a steer opened it, which is a launch with nothing of its
     /// own behind it: what a steer displaces is displaced by the launch itself,

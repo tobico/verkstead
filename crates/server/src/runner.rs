@@ -2176,13 +2176,25 @@ pub(crate) async fn following_up(
     // and named in the note it is primed with — the same reversal a relaunched
     // grilling makes, where the reasoning is written up: see
     // `crate::grillings::held_for_a_resume`, and [`carrying_on`].
-    if follow_up.again && !carrying_on(&state, conversation_id).await {
-        left_open(&state, conversation_id).await;
-    }
+    //
+    // **Handed to the launch rather than simply skipped**, which is the rest of
+    // that reversal: whether the resume can be made at all is not settled until
+    // the launch has looked, so the holding is what this hands over and the
+    // launch is what makes it good — see [`held_open`].
+    let held = held_open(&state, conversation_id, follow_up.again).await;
 
-    let Some(mut session) =
-        launch_in_turn(&state, conversation_id, Prompt::FollowingUp(follow_up)).await
+    let Some(mut session) = launch_in_turn_holding(
+        &state,
+        conversation_id,
+        Prompt::FollowingUp(follow_up),
+        &held,
+    )
+    .await
     else {
+        // And a launch that never happened settled nothing, so what was held
+        // for it is made good here instead — the relaunched grilling's own last
+        // step, and for its reason.
+        made_good(&state, conversation_id, &held).await;
         return;
     };
 
@@ -3091,6 +3103,93 @@ async fn left_open(state: &AppState, conversation_id: i64) {
     };
 
     if let Some(set_id) = standing {
+        crate::review::closed(state, conversation_id, set_id).await;
+    }
+}
+
+/// The same reading with the other outcome beside it: what the session before
+/// this one left standing is **locked**, or **held** for the resume about to be
+/// tried — and where it is held, it is handed back for the launch to make good.
+///
+/// [`left_open`] is the whole of this where nothing is being carried on, and it
+/// is what runs there. What this adds is the reversal: a conversation standing to
+/// be carried on means the reader has not gone, so the Set it asked is one the
+/// resumed session is coming back for and locking it would throw away a round the
+/// human was part way through. Held, it is named in the note that session is
+/// primed with — see [`crate::sessions::carried_on`].
+///
+/// **And the holding is a promise somebody has to keep**, which is why what is
+/// held comes back rather than simply being skipped. Whether the resume can be
+/// made at all is not settled here: it turns on the harness having a resume line
+/// and on its record being where it looks, and neither is known until the launch
+/// has looked. So the launch is handed the holding and locks it on every way that
+/// comes out *no* — see [`crate::sessions::Held`] — and a launch that never
+/// happened settles nothing, which is what [`made_good`] is for. Without the
+/// hand-over the Set stays open in front of a fresh session that knows nothing
+/// about it: nothing reads what the human writes into it, the rescue passes over
+/// a Conversation with a question standing, and the follow-up can never end while
+/// it stands.
+///
+/// `again` is whether there was a session before this one at all. Empty where
+/// there was not, where nothing is standing, and where the record will not say —
+/// a read that failed is no reason to lock a question and no reason to promise
+/// anybody a resume, so it leaves the Set exactly as it is.
+///
+/// The same shape as a relaunched grilling's, where the reasoning for the
+/// reversal and for its one-launch window is written up: see
+/// `crate::grillings::held_for_a_resume`.
+async fn held_open(state: &AppState, conversation_id: i64, again: bool) -> Vec<i64> {
+    if !again {
+        return Vec::new();
+    }
+
+    let standing = match store::open_set(&state.pool, conversation_id).await {
+        Ok(standing) => standing,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what the round before this one left open failed, so nothing is held for a resume and nothing is locked against one");
+            return Vec::new();
+        }
+    };
+
+    let Some(set_id) = standing else {
+        return Vec::new();
+    };
+
+    if !carrying_on(state, conversation_id).await {
+        crate::review::closed(state, conversation_id, set_id).await;
+        return Vec::new();
+    }
+
+    tracing::info!(
+        conversation_id,
+        set_id,
+        "a conversation is standing to be carried on here, so the Question Set the round \
+         left open is held for the session coming back to it rather than locked",
+    );
+
+    vec![set_id]
+}
+
+/// Lock what [`held_open`] held, because the launch it was held for never
+/// happened.
+///
+/// The launch is what ordinarily settles it, whichever way its reading of the
+/// resume comes out. A launch that was refused before it started — the
+/// Conversation stopped under it, a Pairing gone, a sandbox that would not build
+/// — read nothing and settled nothing, so the holding falls back here and leaves
+/// this exactly where a relaunch that held nothing leaves it: no session, and no
+/// question standing in front of the human with nobody behind it.
+///
+/// Locked the way [`left_open`] locks, that being what this is making good.
+async fn made_good(state: &AppState, conversation_id: i64, held: &[i64]) {
+    for &set_id in held {
+        tracing::info!(
+            conversation_id,
+            set_id,
+            "no session was started to carry the conversation on, so the Question Set held \
+             for it is locked after all",
+        );
+
         crate::review::closed(state, conversation_id, set_id).await;
     }
 }
@@ -4345,13 +4444,29 @@ impl Prompt {
 /// between sessions. A launch that looked for the waiting press alone would walk
 /// straight past both of them.
 async fn launch_in_turn(state: &AppState, conversation_id: i64, inside: Prompt) -> Option<Session> {
+    launch_in_turn_holding(state, conversation_id, inside, &[]).await
+}
+
+/// The same, for the relaunch that has **held** a Question Set open for the
+/// resume this launch is about to try.
+///
+/// `held` is what the caller held and nothing more — see [`held_open`]. The
+/// launch locks it on every way the resume comes out *no*, and a caller that held
+/// nothing hands over nothing, which is every launch but one. See
+/// [`crate::sessions::Held`], where the hand-over is written up.
+async fn launch_in_turn_holding(
+    state: &AppState,
+    conversation_id: i64,
+    inside: Prompt,
+    held: &[i64],
+) -> Option<Session> {
     let _turn = state.sessions.turn(conversation_id).await;
 
     if crate::stopping::stopped(state, conversation_id).await {
         return None;
     }
 
-    launch(state, conversation_id, inside).await
+    launch_holding(state, conversation_id, inside, held).await
 }
 
 /// The Pairing a session on `role` is launched under, of what the Conversation
@@ -4421,6 +4536,17 @@ fn under(
 /// be taken here: a wrap-up takes the Turn before it decides what to dispatch,
 /// and a lock taken twice by the one task is a task waiting on itself.
 async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Option<Session> {
+    launch_holding(state, conversation_id, inside, &[]).await
+}
+
+/// The same, with whatever Question Set a relaunch held open for the resume this
+/// launch is about to try — see [`launch_in_turn_holding`], and [`held_open`].
+async fn launch_holding(
+    state: &AppState,
+    conversation_id: i64,
+    inside: Prompt,
+    held: &[i64],
+) -> Option<Session> {
     let conversation = match store::load_conversation(&state.pool, conversation_id).await {
         Ok(Some(conversation)) => conversation,
         Ok(None) => {
@@ -4550,10 +4676,14 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
             &pairing,
             &prompt,
             inside.retires_memos(),
-            // Nothing held: a run's relaunch locks no Question Set, so there is
-            // nothing for the launch to make good either way — see
-            // [`crate::sessions::Held`].
-            crate::sessions::Held::nothing(&state.settlements),
+            // Whatever the caller held open for a resume it may not get, which
+            // is empty for every launch but the one that reverses the locking —
+            // see [`held_open`], and [`crate::sessions::Held`]. A launch handed
+            // none locks none, whatever else it finds open.
+            crate::sessions::Held {
+                sets: held,
+                settlements: &state.settlements,
+            },
         )
         .await
     {

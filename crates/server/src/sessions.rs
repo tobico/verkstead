@@ -3728,9 +3728,15 @@ impl Sessions {
 /// A relaunch locks every Question Set it orphans, because the session that asked
 /// has gone and the human would be answering into nothing — and it holds off where
 /// a conversation is standing to be carried on here, a resume bringing that reader
-/// back on another machine. Which of the two it is turns on the log having come
-/// across with the memory sync, and that is not settled until the launch has run
-/// the sync: so the holding is handed over and settled there. See [`continuing`].
+/// back. Which of the two it is turns on things the relaunch cannot see: the log
+/// having come across with the memory sync, where the work arrived, and the
+/// harness's record being where it looks, where the session was cut off here. So
+/// the holding is handed over and settled at the launch. See [`continuing`].
+///
+/// **Two relaunches hand one over**, and for the one reason: a grilling's, over a
+/// conversation standing to be carried on, and a follow-up's or an
+/// investigation's round, over the same — see [`crate::grillings::again`] and
+/// [`crate::runner::held_open`].
 ///
 /// **The channel travels with the Sets** because it is what shutting one takes
 /// besides the store, and it has no other business in a launch: the one thing a
@@ -3738,8 +3744,8 @@ impl Sessions {
 #[derive(Clone, Copy)]
 pub(crate) struct Held<'a> {
     /// The Sets left open rather than locked. Empty from every caller that held
-    /// nothing, which is every launch but a grilling relaunched over an arrival —
-    /// and a launch handed none locks none, whatever else it finds open.
+    /// nothing, which is every launch but the relaunches above — and a launch
+    /// handed none locks none, whatever else it finds open.
     pub(crate) sets: &'a [i64],
 
     /// And the channel a settlement is announced on, so a wait held here on one of

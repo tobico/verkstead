@@ -18584,6 +18584,145 @@ async fn the_sign_out_incident_carries_the_follow_up_on_rather_than_sending_for_
     );
 }
 
+/// A **Tinker**'s round that commits, puts its question up and holds — and
+/// **keeps no log of its conversation at all**, so nothing can carry it on.
+///
+/// Which is what a test about the holding needs: the launch after the stop tries
+/// the resume, finds claude has no record of that session under this Worktree,
+/// and falls back to Verkstead's own resume — so it is primed with the role in
+/// `$2` where this can read it, and whatever was held for the resume is a
+/// promise the launch has to make good rather than keep. See the server's
+/// `transcript::carried`, which is the reading that comes out empty.
+///
+/// The marker the ask leaves is what tells the second launch from the first: the
+/// round asks once, and the session after it is the fallback.
+fn a_follow_up_round_that_keeps_no_log() -> String {
+    format!(
+        r#"
+case "$2" in
+*submitting/SKILL.md*)
+    printf 'sent for the pull request\r\n'
+    sleep 300
+    ;;
+*)
+    if [ -f /tmp/verkstead/asked ]; then
+        printf 'a fresh round primed from the record: %s\r\n' "$2"
+        sleep 300
+    else
+        printf 'a limiter\n' >> limiter.md
+        git add -A
+        git commit --quiet -m 'feat: count what the limiter rejects'
+        SAYING='following it up'
+        printf '%s\r\n' "$SAYING"
+        {WHILE_NOBODY_HAS_ASKED}
+        while :; do printf 'acting on the answers\r\n'; sleep 0.1; done
+    fi
+    ;;
+esac
+"#
+    )
+}
+
+/// **A Question Set held for a carry-on that cannot be made is locked after
+/// all**, rather than left standing in front of a session that knows nothing
+/// about it.
+///
+/// The holding is the reversal a carried-on round makes: the reader has not
+/// gone, so the Set it asked is one the resumed session is coming back for, and
+/// locking it would throw away a round the human was part way through. But
+/// whether the resume can be made is not settled where the holding is decided —
+/// it turns on the harness having a resume line and on its record being where it
+/// looks — so the holding is handed to the launch, and the launch locks it on
+/// every way that comes out *no*. See the server's `runner::held_open`, and
+/// `sessions::Held`, which a relaunched grilling has always handed its own
+/// through.
+///
+/// What getting it wrong costs is the whole Conversation. The Set stays open in
+/// front of a fresh session that knows nothing about it: the human can answer it
+/// and nothing reads what they write, the rescue passes over a Conversation with
+/// a question standing rather than prodding the session, and the follow-up's own
+/// ending needs no Set open — so it could never end while it stood.
+#[tokio::test]
+async fn a_set_held_for_a_carry_on_that_cannot_be_made_is_locked_by_the_launch() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("never-opened-by-hand");
+
+    let fixture = tinkering_asking(
+        spill,
+        &a_follow_up_round_that_keeps_no_log(),
+        &gh_opened_by_hand(&opened),
+    )
+    .await;
+
+    let round = fixture.attachable(1).await;
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("feat: count what the limiter"))
+                .then_some(())
+        })
+        .await;
+
+    // The round's question, unanswered: the human is left holding it when the
+    // session that asked it is taken away.
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    fixture.printed(round, "acting on the answers").await;
+
+    assert_eq!(
+        fixture.force_stop().await,
+        ConversationStopped::Stopped,
+        "the session is taken away mid-round, which is what leaves a conversation \
+         standing to be carried on",
+    );
+
+    fixture.quiet().await;
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let again = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(again).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("a fresh round primed from the record"),
+        "the resume could not be made, so what started is Verkstead's own: {said:?}",
+    );
+
+    let view = fixture.view().await;
+    let notices = notices(&view);
+
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("isn't where claude looks for it")),
+        "and the Timeline says why it was not carried on: {notices:?}",
+    );
+
+    let standing = sets(&view)
+        .into_iter()
+        .find(|asked| asked.set_id == set)
+        .expect("the Set the stopped session was idling on is on the Timeline")
+        .standing
+        .clone();
+
+    assert!(
+        matches!(standing, verkstead_render::Standing::LockedUnanswered(_)),
+        "so a Set held for a reader that is not coming back after all is locked \
+         rather than left in front of a session that knows nothing about it: \
+         {standing:?}",
+    );
+}
+
 /// **An answer that adds nothing to the sandbox ends nothing**: the session
 /// waiting on it is still the one running once the Response is stored, and
 /// hears it through the wait it is idling in (ADR-0028).
