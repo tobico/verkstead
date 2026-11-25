@@ -13,3 +13,9 @@
 
 # Blender writes one of these beside a file every time it saves over it.
 *.blend1
+
+# A crash dumps one of these into the process's working directory, which on a
+# checkout is the repository root. The suite crashes harnesses on purpose, so a
+# `git add -A` has swept a hundred megabytes of core into a commit before.
+/core
+core.[0-9]*
