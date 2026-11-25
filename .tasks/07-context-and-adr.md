@@ -21,6 +21,6 @@ The finish step opens the pull request after this task; nothing here opens one.
 
 ## Acceptance criteria
 
-- [ ] CONTEXT.md's Carried Conversation entry describes the new occasion and each in-scope way's outcome, in the register docs/copy.md sets.
-- [ ] A new ADR states the mid-turn rule and the carry-on-at-launch, cross-referencing ADR-0020, ADR-0028 and ADR-0029.
-- [ ] The Resume, Stopped and Transfer entries read consistently with the new rule.
+- [x] CONTEXT.md's Carried Conversation entry describes the new occasion and each in-scope way's outcome, in the register docs/copy.md sets.
+- [x] A new ADR states the mid-turn rule and the carry-on-at-launch, cross-referencing ADR-0020, ADR-0028 and ADR-0029.
+- [x] The Resume, Stopped and Transfer entries read consistently with the new rule.

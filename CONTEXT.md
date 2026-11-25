@@ -852,7 +852,9 @@ travelled, because a session under a Profile that shares no memory gets a store 
 its own and empty, from a copy exactly as where the Profile is bound. **No session on the record**
 is the second — a Conversation that moved before it had ever run one, and one whose
 sessions were on a backend that names none and whose own id was never written down —
-and it is the one known at the arrival rather than at the launch. **A Pairing on a
+and it is the one an arrival knows before anything is launched. **Or the launch
+itself does**, where what it is reading is a cut-off: a session that really ran
+and that Verkstead cannot name is the same absence found at the other end. **A Pairing on a
 harness other than the one that session ran on** is the third, a Conversation whose
 Profile was changed under it having a log no other backend can read. **A log that is
 not where the harness will look for it** is the fourth, and it is proved rather than
@@ -928,6 +930,91 @@ end and puts a **Question Set** of Verkstead's own. Answered *Keep it here*, the
 session is carried on where it is, the same way as the second occasion. The row
 names the Set, and the note says the human kept the work on this device and
 nothing moved.
+**And a session cut off part way through is the fourth** (ADR-0030). A session
+that stopped before its step was done — however it stopped — is carried on by
+whatever starts the run again: the human's **Resume**, a login's own carry-on
+after a sign-out, a restart's startup pass, and an arrival alike. What the agent
+had in its head is the whole of what the session after it is for, and a re-prime
+from the record throws that away and may set the next session a different job
+besides.
+**Read at the launch rather than written at the stop**, which is the one thing
+that parts this occasion from the other three. An arrival, an answer that
+widened a sandbox and a *Keep it here* are each somebody's act, with something
+running to write the row as it goes; a stop is nobody's answer, and two of the
+ways a session is cut off leave nothing running to write anything — a crash, and
+a server killed or shut down, there being no graceful path out of the process.
+So the question is asked in the recompute, where every way back in passes, and
+the row is written there for the launch after it to spend.
+**Mid-turn is what makes it a cut-off, and each state reads that for itself.** A
+**grilling**'s is unconditional: a grilling is over when it has picked a
+direction and picking one moves the Conversation out of Grilling, so one still
+grilling with a session behind it was cut off whatever stopped it. A **run**'s is
+the state of the task it was building, read off `.tasks/` and the branch by the
+same reading the launch makes of the two — every step of a run ends in a commit,
+so a session that left its work standing was part way through its step and one
+that got its commit in stopped between two. A **follow-up**'s is how its session
+ended, a round being a conversation with nothing of it on the branch to read: a
+session taken away while it was running and one that fell over where it stood
+were each mid-sentence, and one that exited cleanly had the turn it was having.
+An inline implementation and a roadmap's own writing read as between steps, what
+each of them answers being asked over the network by the launch itself and
+liable to come out as a wrap-up with no session in it at all.
+**So every way a session is cut off is carried on**, each by that reading rather
+than by a rule of its own: a sign-out stop, a sign-out on a login replaced
+since, a **Force stop**, an **Agent Profile** out of usage window, a stall found
+over a session that fell over, a harness that exited or crashed mid-turn, and a
+restart, a kill or a shutdown over a session that was running. And the plain
+**Stop** needs no rule of its own either: it lets the step it found reach its
+own end, so the session it stops is one whose turn was over and the reading
+says *between steps* about it by itself. And what stays Verkstead's own **Resume**
+stays it silently — a run stopped between two tasks, a session that finished its
+step, a stall over a Conversation no session ever ran for, and a Conversation
+that has never run one — there being no conversation anybody is losing and so
+nothing to tell anybody about. Two states read no cut-off at all either:
+**Wrapping**, whose press starts the five watchers rather than a session, and
+**Investigating**, which is re-primed from the question it was opened with and
+the rounds already answered.
+**And the job must not change under it.** A launch with a conversation standing
+to be carried on *is* the session that was cut off, resumed, so what it works is
+its own turn's to decide: the drivers that re-derive a job before launching ask
+whether one is standing before they re-derive it, and leave that reading alone
+where one is. A follow-up cut off between the human's answer and the agent
+reading it is picked up as that follow-up, rather than a `submitting` session
+being sent to open a pull request over the top of it; a backlog with nothing
+left in it is carried on rather than decided again. Which is the incident this
+rule was written for.
+**What it is primed with is one sentence**, and nothing about why it stopped: the
+stop said that in a **Notice** of its own at the time, and a second telling is
+the human reading the same bad news twice. The **Question Sets** the session was
+idling on are named under the ids they already have, nothing having moved and so
+nothing having been renumbered, with the `verkstead answers` line that fetches
+the Answers — and they stay open rather than locked, as the second and third
+occasions leave theirs, the reader being the one coming back.
+**A stop waiting for a press keeps its cut-off until the press.** A restart
+leaves a stop somebody decided on exactly where it stands, reading nothing and
+writing nothing down, so the force stop answered the next morning finds the
+session that stopped as it stood. And a **Steer** never reaches the reading at
+all: the human saying what is to happen instead replaces that session, which is
+the rule as it was.
+**Four of the five reasons still part the two outcomes**, and the Timeline says
+which of the two it was in the cut-off's own clause, naming the session that was
+resumed or the reason it was not. No session on the record is one of them here,
+read by the launch itself rather than known at an arrival: a session that really
+ran under a backend that names none, and one whose own id was never written
+down. A Pairing on another harness, a record that is not where the harness will
+look for it, and the harness refusing are the other three. The memory switch is
+no reason at all here, as it is none for the second and the third occasion:
+nothing moved, so the Conversation's own home holds the log either way. And a
+Conversation no session ever ran for says nothing, there having been nothing to
+cut off.
+**And the line the run stopped on is behind where the resumed session is read.**
+A harness that resumes a conversation draws it again, so the sign-out line or
+the exhausted-window line the run stopped on the first time lands back on the
+terminal, the frame and the **Capture** of a session whose account is perfectly
+good. Every reader of those opens where this session does: what it has printed
+is empty, the frame is the one it draws, and the log is followed from the length
+the launch measured before it started. Which is what the log needs and the other
+two do not, being the one record of the three that outlives a session.
 _Avoid_: resumed session (that is ambiguous with Verkstead's **Resume**),
 rehydrate, replay, continuation
 
@@ -5217,6 +5304,12 @@ stopped reverts, resets or stashes anything: the repository is left exactly as
 the session left it, which is what makes taking the Worktree on by hand possible
 at all.
 
+**And a session stopped part way through its step is carried on rather than
+replaced** (ADR-0030). Nothing about the stop itself changes. What changes is
+what the press after it starts: where the session it stopped had not finished
+its step, that session is resumed with the harness's own resume rather than a
+fresh one being primed from this Timeline. See **Carried Conversation**.
+
 Who stopped it is recorded, and two things follow from it. **Verkstead** is the
 brake it pulled — a session that fell over, checks that would not go green, work
 whose pull request never arrived even after a session was sent for it, an Agent
@@ -5286,6 +5379,13 @@ be answered the next morning, and the Conversation moves on in the meantime;
 where the stop carries words about a usage window coming back, this row leads
 with them — *when* being the half the human does not already know — and nothing
 is waiting on them.
+
+**And what it starts for a session that was cut off is that session carried on**
+(ADR-0030). The recompute still says which state is being driven and the press is
+still the one standing way in; what it does not do is decide the job again over a
+conversation somebody is mid-sentence in. A run whose step was done is the
+ordinary case and is primed from the record as it always was. See **Carried
+Conversation**.
 
 It carries nothing. Steering the work is what **Steer** is for, so there is no
 note to write and one row rather than one per way of stopping. It is never
