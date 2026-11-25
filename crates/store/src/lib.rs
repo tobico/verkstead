@@ -205,7 +205,7 @@ pub use repos::{
     register_repo_as, registered_repo, registered_repo_at, registered_repos, repoint_repo,
     unregister_repo,
 };
-pub use session_endings::{Ended, end_session, session_ending};
+pub use session_endings::{Ended, end_session, session_ending, the_last_ending};
 pub use session_names::{continued_as, found_as, session_id, session_ids};
 pub use session_pairings::{RanUnder, newest_agent};
 pub use set_additions::{

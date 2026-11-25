@@ -608,6 +608,12 @@ async fn recompute(
         // The brief is read for either way. It costs one read of the Timeline,
         // and a Conversation in this state with nothing to pick up is one the
         // press should say so about by name rather than one it acts on halfway.
+        //
+        // **Or the round that was being had carried on**, where the session
+        // having it was taken away mid-sentence — which is the occasion this
+        // state is the whole reason for: a follow-up cut off between the human's
+        // answer and the agent reading it is what the carrying-on was written
+        // for. See [`mid_round`], and [`cut_off`].
         Lifecycle::FollowUp => {
             if conversation.implementation_pairing.is_none() {
                 return Ok(Resumed::NoImplementationPairing);
@@ -616,6 +622,19 @@ async fn recompute(
             let Some(follow_up) = crate::follow_ups::opened(state, conversation_id).await? else {
                 return Ok(Resumed::NoFollowUpBrief);
             };
+
+            // After every refusal and before the spawn, where the other two
+            // states' readings are and for their two reasons — and before the
+            // spawn in the stronger sense here: what the launch below decides
+            // about the job turns on a conversation standing to be carried on,
+            // so the row has to be there by the time it looks. See
+            // [`crate::runner::follow_up_again`].
+            cut_off(
+                state,
+                conversation_id,
+                mid_round(state, conversation_id).await,
+            )
+            .await;
 
             starting(state, conversation_id, resuming).await?;
 
@@ -682,7 +701,9 @@ async fn recompute(
 /// down there. A **grilling's** is unconditional — a grilling is over when it has
 /// picked a direction, and picking one moves the Conversation out of Grilling. A
 /// **run's** is the state of what it was building, because a run stops between
-/// tasks as routinely as mid-task: see [`mid_turn`].
+/// tasks as routinely as mid-task: see [`mid_turn`]. And a **follow-up's** is how
+/// its session ended, a round being a conversation with nothing of it on the
+/// branch to read: see [`mid_round`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MidTurn {
     /// It was: the step the session was running did not finish, so there is a
@@ -722,6 +743,54 @@ async fn mid_turn(direction: Direction, worktree: &Path) -> MidTurn {
     match part_way {
         true => MidTurn::PartWayThrough,
         false => MidTurn::BetweenSteps,
+    }
+}
+
+/// And how a **follow-up** reads the same thing: how the session that stopped
+/// here ended.
+///
+/// A follow-up's rounds are a conversation rather than a step with a commit at
+/// the end of it, so there is nothing in the Worktree to read — and the state
+/// alone cannot say either, a Conversation sitting in Follow-up through every
+/// round it has and going on sitting there where an ending that sent for a pull
+/// request got nowhere. What tells the two apart is the session: one taken away
+/// while it was running was mid-sentence, and one that exited on its own account
+/// had finished the turn it was having.
+///
+/// **Which is the absence of a row.** How a session ended is written down for one
+/// that ended on its own account and never for one Verkstead ended itself — a
+/// force stop, a sign-out, an account out of window — so nothing written down
+/// over a session that is no longer running is the live kill this is looking for.
+/// See [`store::the_last_ending`], where that reading is written up.
+///
+/// **A harness that fell over mid-round reads as between steps here**, which is
+/// the way round every part of this decision falls: an exit of its own account is
+/// read as the turn having ended, and Verkstead's own Resume is a complete way to
+/// take a follow-up up. Reading a bad exit as the cut-off it usually is belongs
+/// with the rest of the stop-ways.
+///
+/// **And what the session was sent for is not part of it**, because nothing
+/// writes that down: a Tinker whose rounds are over sits in Follow-up while the
+/// `submitting` session its ending sent for runs, and one of those taken away
+/// while it was running reads as a cut-off here like any other. Which is the
+/// right half of the answer — that conversation is one somebody is mid-sentence
+/// in, and carrying it on is what this is for — with the role it is picked up in
+/// the follow-up's rather than its own. The alternative is worse and is certain
+/// rather than possible: a session killed mid-push is one whose turn would
+/// otherwise be thrown away every time.
+async fn mid_round(state: &AppState, conversation_id: i64) -> MidTurn {
+    match store::the_last_ending(&state.pool, conversation_id).await {
+        // Nothing was written down about how it ended, so it was taken away
+        // while it was running.
+        Ok(None) => MidTurn::PartWayThrough,
+
+        // It ended on its own account, which is a turn that was over.
+        Ok(Some(_)) => MidTurn::BetweenSteps,
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading how a follow-up's session ended failed, so the session started for it is Verkstead's own resume");
+            MidTurn::BetweenSteps
+        }
     }
 }
 

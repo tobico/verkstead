@@ -94,7 +94,10 @@ use verkstead_server::{
     Agents, Gh, Pace, open_database, router_running_sessions,
     router_running_sessions_answering_devices,
 };
-use verkstead_store::{Decision, StageOf, stage_roadmap};
+use verkstead_store::{
+    Decision, Lifecycle as State, StageOf, continue_on_arrival, nothing_else, stage_roadmap,
+    the_last_session,
+};
 
 /// The device every Conversation started here is ranked by, named the way a
 /// cluster names one (ADR-0020, *Ranks*).
@@ -16879,6 +16882,390 @@ async fn a_run_stopped_between_two_tasks_is_re_primed_for_the_next_one() {
             .any(|notice| notice.contains("The session that stopped here was part way through")),
         "and nothing was said about carrying anything on, nothing having been cut \
          off: {notices:?}",
+    );
+}
+
+/// A **Tinker** whose round commits, puts its question up, and goes on working
+/// once the human has answered — and which says, where it is resumed, that it is
+/// the session that was having that round rather than a fresh one.
+///
+/// The resumed session says it is done once the test opens the gate, and what
+/// becomes of that signal is what says which role the launch really was: a
+/// follow-up's is checked against the human's Nothing-else mark, and a
+/// `submitting` session's against a pull request — see `crate::done::Evidence`.
+/// Which is the only thing that can say it, a carried session being primed with
+/// the note rather than with any role's own prompt.
+fn a_follow_up_round_that_works_on_the_answers() -> String {
+    format!(
+        r#"
+entry=$(printf '%s' "$PWD" | tr -c 'a-zA-Z0-9' '-')
+mkdir -p "$HOME/.claude/projects/$entry"
+record="$HOME/.claude/projects/$entry/$4.jsonl"
+case "$3" in
+--resume)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Reading the answers."}}]}}}}' >> "$record"
+    printf 'carried on\r\n'
+    printf 'prompt=%s\r\n' "$2"
+    while [ ! -f /tmp/verkstead/acted ]; do sleep 0.1; done
+    : > /tmp/verkstead/done
+    printf 'acted on the answers and said it is done\r\n'
+    sleep 300
+    ;;
+*)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"A round."}}]}}}}' > "$record"
+    case "$2" in
+    *submitting/SKILL.md*)
+        printf 'sent for the pull request: %s\r\n' "$2"
+        sleep 300
+        ;;
+    *)
+        printf 'a limiter\n' >> limiter.md
+        git add -A
+        git commit --quiet -m 'feat: count what the limiter rejects'
+        SAYING='following it up'
+        printf '%s\r\n' "$SAYING"
+        {WHILE_NOBODY_HAS_ASKED}
+        while :; do printf 'acting on the answers\r\n'; sleep 0.1; done
+        ;;
+    esac
+    ;;
+esac
+"#
+    )
+}
+
+/// **A follow-up cut off mid-answer is carried on rather than diverted into
+/// opening a pull request** — the incident this occasion came from, end to end.
+///
+/// The human answers the round, marking that there is nothing else, and the
+/// session is taken away before it has read a word of what came back. All three
+/// of the ending's questions then say the follow-up is over and its work is on no
+/// pull request — the round is marked, `gh` finds none, and the branch holds a
+/// commit — so the press sent a `submitting` session to open one, and the answers
+/// the human had just given were read by nobody.
+///
+/// **A conversation standing to be carried on is what settles it.** The launch is
+/// the session that was cut off, resumed, so what it is working is its own turn's
+/// to say: the follow-up is picked up in the role it stopped in and the ending's
+/// reading is not asked at all. See the server's `runner::carrying_on`.
+///
+/// **Which role it is is read off its Done signal.** A carried session is primed
+/// with the note rather than with any role's own prompt, so what it was launched
+/// as cannot be read off what it was told — but what each role's signal is
+/// checked against differs: a follow-up's against the human's Nothing-else mark,
+/// which is set, and a `submitting` session's against a pull request, which is
+/// not there. So the resumed session says it is done, the signal is taken, and
+/// the ending it is taken *for* is the follow-up's: the pull request is sent for
+/// then, by the session that was doing the work rather than over the top of it.
+#[tokio::test]
+async fn a_follow_up_cut_off_mid_answer_is_carried_on_rather_than_sent_for_a_pull_request() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("never-opened-by-hand");
+
+    let fixture = tinkering_asking(
+        spill,
+        &a_follow_up_round_that_works_on_the_answers(),
+        &gh_opened_by_hand(&opened),
+    )
+    .await;
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("feat: count what the limiter"))
+                .then_some(())
+        })
+        .await;
+
+    let round = fixture.attachable(1).await;
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(
+        fixture.answer_ending(set).await,
+        Submitted::Accepted,
+        "the human answers the round and marks that there is nothing else",
+    );
+
+    // And the session is at work with that answer in front of it, which is the
+    // moment the incident happened in: nothing has acted on what came back.
+    fixture.printed(round, "acting on the answers").await;
+
+    assert_eq!(
+        fixture.force_stop().await,
+        ConversationStopped::Stopped,
+        "the round was stopped where it stood",
+    );
+
+    fixture.quiet().await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::FollowUp,
+        "a stop leaves the Conversation where it is",
+    );
+    assert_eq!(
+        pull_request(&view),
+        None,
+        "and the branch is on none, which is what the ending's reading acts on",
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    assert!(
+        nothing_else(&pool, fixture.id, State::FollowUp)
+            .await
+            .unwrap(),
+        "and the round the human answered carries the Nothing-else mark, which is \
+         the rest of what the ending's reading acts on: all three of its questions \
+         say this follow-up is over and owes a pull request",
+    );
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(resumed).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the round that was cut off: {said:?}",
+    );
+    assert!(
+        !said.contains("sent for the pull request"),
+        "and nothing was sent to open a pull request over the top of it: {said:?}",
+    );
+    assert!(
+        !said.contains("submitting/SKILL.md"),
+        "which is to say nothing primed it as the session that opens one: {said:?}",
+    );
+
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        0,
+        "and nothing was sent for the pull request the ending's reading would \
+         have asked for",
+    );
+
+    let view = fixture.view().await;
+    let notices = notices(&view);
+
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "the Timeline says which of the two resumes it was: {notices:?}",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::FollowUp,
+        "and the follow-up is still the follow-up: the job did not change under \
+         the resume",
+    );
+
+    // And the role it was launched in, which is the one thing the note it was
+    // primed with cannot say: the resumed session acts on the answers and says it
+    // is done, and the signal is taken. A follow-up's is checked against the
+    // human's mark, and a `submitting` session's against a pull request that is
+    // not there — so a signal taken is a session that was launched to follow the
+    // work up.
+    std::fs::write(handoff_directory(&fixture).join("acted"), "").unwrap();
+
+    let sent = fixture
+        .until(|view| {
+            outputs(view)
+                .get(2)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    assert!(
+        fixture
+            .capture(sent)
+            .await
+            .contains("sent for the pull request"),
+        "and the pull request is sent for after that",
+    );
+
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        1,
+        "and the pull request is sent for after that, by the ending of the \
+         follow-up the carried session finished rather than over the top of one \
+         it was still having",
+    );
+}
+
+/// A one-task backlog worked all the way to its finish, where the finish takes
+/// `.tasks/` away, commits that, and opens nothing.
+///
+/// Which leaves the two things the reading below turns on: a backlog with nothing
+/// left in it, and a pull request still owed. The `submitting` session says what
+/// it was sent for, so a run diverted into one is plain to see.
+///
+/// It keeps no log of its conversation, and that is deliberate: what this is
+/// about is *which role* the launch after the stop is, and a launch that can
+/// resume nothing is primed with its role in the prompt where the stub can read
+/// it.
+const A_BACKLOG_WORKED_TO_ITS_FINISH: &str = r#"
+case "$2" in
+*submitting/SKILL.md*)
+    printf 'sent for the pull request\r\n'
+    sleep 300
+    ;;
+*)
+    case "$1" in
+    claude-grilling-5)
+        printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+        : > /tmp/verkstead/done
+        printf 'breaking down\r\n'
+        mkdir -p .tasks
+        printf '# Rate limiting\n\n## Tasks\n\n- [ ] 01: count the requests\n' > .tasks/TODO.md
+        printf '# 01. Count the requests\n' > .tasks/01-count.md
+        git add .tasks
+        git commit --quiet -m 'chore: plan rate-limiting tasks'
+        : > /tmp/verkstead/done
+        printf 'the backlog has landed\r\n'
+        sleep 300
+        ;;
+    *)
+        number=''
+        if [ -f .tasks/TODO.md ]; then
+            number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+        fi
+        if [ -n "$number" ]; then
+            printf 'working the task\r\n'
+            printf 'a limiter\n' >> limiter.md
+            sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+            git add -A
+            git commit --quiet -m 'feat: count the requests'
+            : > /tmp/verkstead/done
+            printf 'committed the task\r\n'
+        else
+            printf 'finishing the feature\r\n'
+            if [ -d .tasks ]; then
+                git rm --quiet -r .tasks
+                git commit --quiet -m 'chore: finish rate limiting'
+                printf 'the backlog is gone\r\n'
+            fi
+        fi
+        sleep 300
+        ;;
+    esac
+    ;;
+esac
+"#;
+
+/// **A run whose backlog is worked out is not re-decided while a conversation is
+/// standing to be carried on**: what the launch is is the finish it was in the
+/// middle of, rather than a `submitting` session sent for the pull request the
+/// emptied backlog's own reading says is owed.
+///
+/// The other half of the job-must-not-change rule, on the side a run stops on. An
+/// emptied backlog is the one shape in which a Resume's readings decide a job of
+/// their own — plan a stage, wrap up a pull request nothing recorded, send for
+/// the one that is owed, give up — and every one of them is a job for a fresh
+/// session. A session cut off part way through its step has its own job in its
+/// head, and the launch after it is that session.
+///
+/// **The row is written here the way an arrival or a widened sandbox writes
+/// one**, which is what a row standing in front of an emptied backlog really is:
+/// a run's own cut-off is read off the step `.tasks/` names, and a backlog with
+/// nothing left in it names none. What the session it points at cannot do is be
+/// resumed — this stub keeps no log — and that is what makes the reading visible:
+/// the launch falls back to Verkstead's own resume, which is primed with the role
+/// it was launched in.
+#[tokio::test]
+async fn a_carried_on_run_with_an_emptied_backlog_finishes_rather_than_sending_for_a_pull_request()
+{
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("never-opened-by-hand");
+
+    let fixture = grilling_spilling(
+        spill,
+        A_BACKLOG_WORKED_TO_ITS_FINISH,
+        &gh_opened_by_hand(&opened),
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    // The task is worked and committed, and then the finish takes the backlog
+    // away — so what the stop below catches is a run with nothing left in
+    // `.tasks/` and no pull request to show for it.
+    let finishing = fixture.attachable(3).await;
+    fixture.printed(finishing, "the backlog is gone").await;
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+    fixture.quiet().await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("the Conversation has a worktree")
+            .path,
+    );
+
+    assert!(
+        !worktree.join(".tasks").exists(),
+        "the finish took the backlog away and committed it, which is what leaves \
+         the run with nothing to read",
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    let standing = the_last_session(&pool, fixture.id)
+        .await
+        .unwrap()
+        .expect("the finish session is named on the record");
+
+    continue_on_arrival(&pool, fixture.id, &standing)
+        .await
+        .unwrap();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let again = fixture
+        .until(|view| {
+            outputs(view)
+                .get(3)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(again).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("finishing the feature"),
+        "the launch is the finish the run was in the middle of: {said:?}",
+    );
+    assert!(
+        !said.contains("sent for the pull request"),
+        "rather than a session sent for the pull request the emptied backlog's \
+         own reading says is owed: {said:?}",
+    );
+
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        0,
+        "and nothing was spent on one anywhere along it",
     );
 }
 

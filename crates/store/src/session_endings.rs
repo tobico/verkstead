@@ -35,8 +35,16 @@
 //! that is not a session going wrong: its step had landed, or the human pressed
 //! something, and how it exited says nothing about either. An Event with no row
 //! is that, or a session from before any of this was written down, or one still
-//! running — every reader shows all three the way it always showed a session
+//! running — a stop's Notice shows all three the way it always showed a session
 //! that said nothing.
+//!
+//! **Which makes the absence a reading of its own**, and the second reader is
+//! after that one: a session no longer running with nothing written down about
+//! how it ended is one that was taken away while it was running — force-stopped,
+//! signed out, out of window — rather than one that exited on its own account.
+//! Which is what says a follow-up's round was cut off mid-sentence rather than
+//! having finished the turn it was having. See [`the_last_ending`], and the
+//! server's `resume` module.
 
 use std::time::Duration;
 
@@ -153,5 +161,59 @@ pub async fn session_ending(
         code,
         lived: Duration::from_millis(lived_ms.unsigned_abs()),
         printed,
+    }))
+}
+
+/// How the **newest** session of `conversation_id` ended, where anything was
+/// written down about it.
+///
+/// `None` is the answer its one reader is after: **a session that was taken away
+/// while it was running**. A row is written for a session that ended on its own
+/// account and never for one Verkstead ended itself — a force stop, a sign-out,
+/// an account out of window — so the absence of one over a session that is no
+/// longer running is the live kill. See the server's `resume` module, which asks
+/// this about a follow-up: a round's session taken away mid-sentence is one with
+/// a conversation to carry on, and one that exited on its own account had
+/// finished the turn it was having.
+///
+/// Which is why the two other ways `None` comes out cost nothing here. A
+/// Conversation with no sessions at all is asked about by nobody — the launch
+/// reads [`super::newest_agent`] first, and says nothing where no session ever
+/// ran — and a session from before any of this was recorded is read as the live
+/// kill, which is the way round every part of this decision falls.
+///
+/// The newest by the Event its session printed into, which is the order
+/// [`super::the_last_session`] reads them in and for its reason: the last of them
+/// is the conversation the agent was having.
+pub async fn the_last_ending(pool: &SqlitePool, conversation_id: i64) -> Result<Option<Ended>> {
+    // Left, so that the newest session is still the newest where nothing was
+    // written down about how it ended: an inner join would answer with the one
+    // before it, which is a session whose ending says nothing about this one.
+    let found: Option<(Option<i64>, Option<i64>, Option<bool>)> = sqlx::query_as(
+        "SELECT s.code, s.lived_ms, s.printed
+         FROM session_agents a
+         JOIN timeline_events e ON e.id = a.event_id
+         LEFT JOIN session_endings s ON s.event_id = a.event_id
+         WHERE e.conversation_id = ?
+         ORDER BY a.event_id DESC
+         LIMIT 1",
+    )
+    .bind(conversation_id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!("reading how the newest session of Conversation {conversation_id} ended")
+    })?;
+
+    // `lived_ms` is the column that cannot be null, so it is what says there was
+    // a row to read at all.
+    let Some((code, Some(lived_ms), printed)) = found else {
+        return Ok(None);
+    };
+
+    Ok(Some(Ended {
+        code,
+        lived: Duration::from_millis(lived_ms.unsigned_abs()),
+        printed: printed.unwrap_or(false),
     }))
 }

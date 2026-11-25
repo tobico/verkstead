@@ -25,7 +25,7 @@ use sqlx::SqlitePool;
 use verkstead_store::{
     Account, AgentType, Continued, Pairing, ProfileFacts, carrying_a_conversation,
     continue_on_arrival, create_profile, end_session, open_database, register_repo, start_capture,
-    start_conversation, take_up_the_conversation, the_last_session,
+    start_conversation, take_up_the_conversation, the_last_ending, the_last_session,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -56,8 +56,23 @@ async fn conversation(pool: &SqlitePool) -> i64 {
 }
 
 /// A session of that Conversation, named and paired the way a launch names and
-/// pairs one — which is what the lookup below reads.
+/// pairs one — which is what the lookup below reads — and ended on its own
+/// account, which is what writes down how it went.
 async fn ran(pool: &SqlitePool, id: i64, session: &str, agent_type: AgentType) {
+    let event = killed(pool, id, session, agent_type).await;
+
+    end_session(pool, event, Some(0), Duration::from_millis(400), true)
+        .await
+        .unwrap();
+}
+
+/// The same session, **taken away while it was running**: Verkstead ended it, so
+/// nothing is written down about how it went — which is the one ending that is
+/// not a session going wrong, and the absence a launch reads as the live kill.
+///
+/// Answers with the Event it printed into, which is what an ending is written
+/// against.
+async fn killed(pool: &SqlitePool, id: i64, session: &str, agent_type: AgentType) -> i64 {
     let profile = create_profile(
         pool,
         &ProfileFacts {
@@ -84,13 +99,9 @@ async fn ran(pool: &SqlitePool, id: i64, session: &str, agent_type: AgentType) {
         model: Some("claude-opus-5".to_owned()),
     };
 
-    let event = start_capture(pool, id, Some(session), Some(&pairing))
+    start_capture(pool, id, Some(session), Some(&pairing))
         .await
-        .unwrap();
-
-    end_session(pool, event, Some(0), Duration::from_millis(400), true)
-        .await
-        .unwrap();
+        .unwrap()
 }
 
 /// The **newest** session is the one to carry on from, with the harness that ran
@@ -359,5 +370,60 @@ async fn coming_back_again_carries_on_from_the_newer_session() {
             .unwrap()
             .map(|continued| continued.session_id),
         Some("66666666-6666-4666-8666-666666666666".to_owned()),
+    );
+}
+
+/// **How the newest session ended is what a follow-up's cut-off is read off**,
+/// and the reading it is after is the absence of a row: a session Verkstead ended
+/// itself — force-stopped, signed out, out of window — is one that was taken away
+/// while it was running.
+///
+/// A follow-up's rounds are a conversation rather than a step with a commit at
+/// the end of it, so there is nothing on the branch to read and nothing the state
+/// alone can say. What tells a round cut off mid-sentence from one that finished
+/// the turn it was having is this. See the server's `resume::mid_round`.
+#[tokio::test]
+async fn the_last_ending_is_the_newest_sessions_and_is_absent_for_one_verkstead_ended() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    assert_eq!(
+        the_last_ending(&pool, id).await.unwrap(),
+        None,
+        "a Conversation with no sessions at all has no ending to read, which is \
+         asked about by nobody: the launch reads whether a session ran first",
+    );
+
+    ran(
+        &pool,
+        id,
+        "11111111-1111-4111-8111-111111111111",
+        AgentType::Claude,
+    )
+    .await;
+
+    assert_eq!(
+        the_last_ending(&pool, id)
+            .await
+            .unwrap()
+            .map(|ended| ended.code),
+        Some(Some(0)),
+        "a session that exited on its own account wrote down how it went",
+    );
+
+    killed(
+        &pool,
+        id,
+        "22222222-2222-4222-8222-222222222222",
+        AgentType::Claude,
+    )
+    .await;
+
+    assert_eq!(
+        the_last_ending(&pool, id).await.unwrap(),
+        None,
+        "and the newest session is still the newest where nothing was written \
+         down about how it ended: a session Verkstead took away while it was \
+         running, which is the live kill the launch is looking for",
     );
 }
