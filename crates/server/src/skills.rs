@@ -1687,6 +1687,14 @@ pub(crate) fn kept(set_id: i64, title: Option<&str>) -> String {
 /// agent's own Capture holds whatever it had reached. A note that explained the
 /// stop would be Verkstead guessing at a story the record already tells better.
 ///
+/// **Nor who stopped it**, which is the same rule one step along. Verkstead ended
+/// some of them — a sign-out, a **Force stop**, an account out of window, a
+/// stall — and ended none of the two this occasion is most for: a harness that
+/// crashed or exited badly mid-turn, and a restart, a kill or a shutdown that
+/// took the whole process with it. So the sentence says the session stopped
+/// rather than that anybody stopped it, there being nothing here that knows
+/// which.
+///
 /// **`sets` is the one thing it does go on about**, where there are any: a
 /// blocking ask is a wait held open by a command running in the session's
 /// sandbox, and that command died with the process. So the agent comes back to a
@@ -1696,8 +1704,8 @@ pub(crate) fn kept(set_id: i64, title: Option<&str>) -> String {
 /// Set and it is the one the agent already has. Empty for a session that was
 /// idling on nothing, which is told nothing about Sets at all.
 pub(crate) fn cut_off(sets: &[i64]) -> String {
-    let mut note = "Verkstead stopped the session that was running here part way through its \
-                    step, and this session is that one carried on rather than a new one. \
+    let mut note = "The session that was running here stopped part way through its step, and \
+                    this session is that one carried on rather than a new one. \
                     Nothing about the work has changed: the worktree, the branch and the \
                     sandbox are the ones you had. Carry on from where you were.\n"
         .to_owned();
@@ -6416,5 +6424,47 @@ mod tests {
         let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
 
         assert_eq!(joining(&prompt, &[]), prompt);
+    }
+
+    /// **The note a cut-off session comes back to says that it stopped and not
+    /// who stopped it**, which is the same rule as saying nothing about why.
+    ///
+    /// Verkstead ended some of them — a sign-out, a Force stop, an account out
+    /// of window, a stall — and ended neither of the two this occasion is most
+    /// for: a harness that crashed or exited badly mid-turn, and a restart, a
+    /// kill or a shutdown that took the process with it. Nothing here knows
+    /// which, so the sentence claims neither.
+    #[test]
+    fn the_cut_off_note_says_the_session_stopped_and_not_who_stopped_it() {
+        let note = cut_off(&[]);
+
+        assert!(
+            note.contains("The session that was running here stopped part way through its step"),
+            "the stop is the whole of what it says happened: {note:?}",
+        );
+        assert!(
+            !note.contains("Verkstead stopped"),
+            "and nobody is named as having stopped it, a crash and a kill being \
+             nobody's act: {note:?}",
+        );
+        assert!(
+            !note.contains("Question Set") && !note.contains("verkstead answers"),
+            "and a session that was idling on nothing is told nothing about \
+             Sets: {note:?}",
+        );
+    }
+
+    /// And the Sets it was idling on are named under the ids it asked them
+    /// under, with the line that fetches the Answers the dead wait was holding.
+    #[test]
+    fn the_cut_off_note_names_the_sets_it_was_idling_on_once_each() {
+        let note = cut_off(&[7, 9]);
+
+        assert!(
+            note.contains("Set 7 is still open: `verkstead answers 7`")
+                && note.contains("Set 9 is still open: `verkstead answers 9`"),
+            "each under the one id it has, nothing having moved and so nothing \
+             having been renumbered: {note:?}",
+        );
     }
 }
