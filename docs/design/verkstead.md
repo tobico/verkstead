@@ -545,15 +545,27 @@ flowchart LR
   advances past a stop, and the status button says the conversation is waiting.
   Getting going again is one standing **Resume**, recomputed from the lifecycle
   and the branch rather than replaying whatever failed; steering the work is
-  what **Steer** is for, so Resume carries nothing. It is the first row of the
-  conversation actions menu (*refined 2026-08-30, building status-button*),
+  what **Steer** is for, so Resume carries nothing. The recompute is what a
+  fresh session is primed from, and it is the second half of the press rather
+  than the whole of it (*refined 2026-11-25, building cutoff-carry-on*): where
+  the session it stopped had not finished its step, the press resumes **that
+  session's own conversation** with the harness's own resume, and the job is
+  then its turn's to decide rather than something the recompute derives over
+  the top of it. Which of the two it was is a clause on the timeline. Every way
+  back in does it — the press, a login's own carry-on after a sign-out, a
+  restart's startup pass, an arrival — and a conversation that finished its
+  step still gets the recompute, there being no conversation to lose. See
+  [ADR-0030](../adr/0030-a-cut-off-session-is-carried-on.md). It is the first
+  row of the conversation actions menu (*refined 2026-08-30, building
+  status-button*),
   above the stops because it is the one go among them — so it is reached from
   the button that says nothing is driving this, and from the sidebar's
-  right-click, which drops the same rows. A follow-up is
+  right-click, which drops the same rows. A follow-up whose round was over is
   recomputed like everything else: a fresh session on the brief its steer
   opened it with and the rounds already answered, read off the timeline the way
   a relaunched grilling reads what it settled (*refined 2026-08-27, building
-  follow-ups*). What replaced
+  follow-ups*) — and one whose session was taken away mid-sentence is carried
+  on instead, which is the conversation ADR-0030 was written for. What replaced
   roadrunner's three remedies: retry is Resume, take over manually is the stop
   already standing, and abort is **Close**.
 - **Usage limits.** When a claude account exhausts its window mid-run, the
