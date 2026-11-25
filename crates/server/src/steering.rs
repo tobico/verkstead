@@ -709,11 +709,19 @@ pub(crate) async fn submit(
             // [`crate::runner::implementing_again`], which reads the branch
             // again for itself a moment after this and holds the registration
             // until its session has one.
+            //
+            // **Told it is a steer**, which is the one thing the two of them do
+            // not share: a way back in carries a session cut off part way
+            // through on, and a steer is the human saying what is to happen
+            // instead. [`clear`] above has already spent whatever conversation
+            // was standing to be carried on, and this is what stops a fresh row
+            // being written in its place — see [`crate::runner::Again`].
             None => {
                 tokio::spawn(crate::runner::implementing_again(
                     state.clone(),
                     conversation_id,
                     driving,
+                    crate::runner::Again::ASteer,
                 ));
             }
         },

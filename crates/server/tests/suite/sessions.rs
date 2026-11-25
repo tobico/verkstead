@@ -16885,6 +16885,619 @@ async fn a_run_stopped_between_two_tasks_is_re_primed_for_the_next_one() {
     );
 }
 
+/// An inline implementation that writes the log claude keeps of its
+/// conversation, leaves what it is building uncommitted, and holds — and which
+/// says, where it is resumed, that it is the session that was building the work
+/// rather than a fresh one primed to build it over again.
+///
+/// Three roles, which is what an inline Conversation spends: the grilling that
+/// hands the direction over, the implementation that holds, and the review a
+/// wrap-up starts once the branch is on a pull request — which is the session
+/// the test with nothing to carry on watches for.
+///
+/// The role is read off the prompt rather than off the model, because that is
+/// the one of the two a carried session cannot have: its prompt is the note it
+/// is primed with. Which is why `--resume` is answered before anything else is
+/// looked at.
+fn an_inline_run_that_holds() -> String {
+    format!(
+        r#"
+{CLAUDES_LOG}
+case "$3" in
+--resume)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Picking the work up."}}]}}}}' >> "$log"
+    printf 'carried on\r\n'
+    printf 'prompt=%s\r\n' "$2"
+    sleep 300
+    ;;
+*)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Working."}}]}}}}' > "$log"
+    case "$2" in
+    *implementing/SKILL.md*)
+        printf 'building the limiter\r\n'
+        printf 'a limiter\n' >> limiter.md
+        sleep 300
+        ;;
+    *reviewing/SKILL.md*)
+        printf 'reading the whole branch\r\n'
+        sleep 300
+        ;;
+    *)
+        printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+        : > /tmp/verkstead/done
+        printf 'the handoff is written\r\n'
+        sleep 300
+        ;;
+    esac
+    ;;
+esac
+"#
+    )
+}
+
+/// **An inline implementation cut off part way through is carried on when the
+/// run starts again**, rather than a fresh session being primed to build work
+/// somebody is already in the middle of.
+///
+/// The first of the two directions with no backlog to read a step off, and the
+/// reason its reading sits where the session is launched rather than in the
+/// recompute: an inline run ends on a pull request, so what says whether its one
+/// step finished is `gh`, asked by the driver that takes the run up — and two of
+/// the three answers it can give launch no session at all. The arm that does is
+/// the arm where the work is unfinished, which is also where the session that
+/// stopped was part way through it. See the server's `runner::inline_again`.
+///
+/// Nothing about the note says why it stopped: the force stop wrote its own
+/// Notice at the time, and what the resumed agent needs told is that it is the
+/// session it was and the work is where it left it.
+#[tokio::test]
+async fn an_inline_run_cut_off_part_way_through_is_carried_on_when_the_run_starts_again() {
+    let fixture = grilling_spilling(
+        tempfile::tempdir().unwrap(),
+        &an_inline_run_that_holds(),
+        NO_PULL_REQUEST,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    // The implementation session at work: it has written what it was building
+    // and nothing has committed it, let alone pushed it anywhere.
+    let building = fixture.attachable(2).await;
+    fixture.printed(building, "building the limiter").await;
+
+    assert_eq!(
+        fixture.force_stop().await,
+        ConversationStopped::Stopped,
+        "the work was stopped where it stood",
+    );
+
+    fixture.quiet().await;
+
+    assert_ne!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "and what it had written is still in the Worktree, nothing having \
+         committed it",
+    );
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(2)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(resumed).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the session that was building the work: {said:?}",
+    );
+    assert!(
+        !said.contains("building the limiter"),
+        "and not primed as a fresh session for work it was already part way \
+         through: {said:?}",
+    );
+    assert!(
+        !said.contains("implementing/SKILL.md"),
+        "which is the prompt it was not given, a carried session being primed \
+         with the note and nothing else: {said:?}",
+    );
+
+    let notices = notices(&fixture.view().await);
+
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "the Timeline says which of the two resumes it was: {notices:?}",
+    );
+}
+
+/// **And a restart over an inline run part way through carries it on too**, with
+/// nobody having pressed anything.
+///
+/// The way back in that is not a press, over the direction whose reading is made
+/// at the launch: a server coming up presses Resume for itself and the recompute
+/// is the one the button gives, so the two drivers reached beyond it are the same
+/// two, told the same thing about which press this is. See the server's
+/// `resume::at_startup`, and `runner::Again`.
+///
+/// A second server over the database of the first, which is what a restart is
+/// here: the session the first one was running lived in the process that started
+/// it.
+#[tokio::test]
+async fn a_restart_over_an_inline_run_part_way_through_carries_it_on() {
+    let stub = an_inline_run_that_holds();
+    let fixture = grilling_spilling(tempfile::tempdir().unwrap(), &stub, NO_PULL_REQUEST).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    let building = fixture.attachable(2).await;
+    fixture.printed(building, "building the limiter").await;
+
+    assert!(
+        notices(&fixture.view().await).is_empty(),
+        "the first server is driving it happily, which is what makes this a \
+         restart over a session at work rather than over a stop",
+    );
+
+    let before = outputs(&fixture.view().await).len();
+
+    let _restarted = fixture.restarted(&stub, NO_PULL_REQUEST).await;
+
+    let said = fixture.printed_after(before).await;
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the session the restart took away: {said:?}",
+    );
+    assert!(
+        !said.contains("building the limiter"),
+        "and nothing was primed as a fresh session for work that was already part \
+         way built: {said:?}",
+    );
+
+    let view = fixture.view().await;
+    let raised = notices(&view);
+
+    assert!(
+        raised.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "the Timeline says which of the two resumes it was: {raised:?}",
+    );
+    assert!(
+        notices_but_the_carrying_on(&view).is_empty(),
+        "and nothing was raised about the session the restart killed, beyond the \
+         line saying which of the two took it up: {raised:?}",
+    );
+}
+
+/// **And an inline run whose branch turns out to be on a pull request leaves
+/// nothing standing to be carried on**: the wrap-up starts with no session in
+/// it, and the session after that is an ordinary one of the work.
+///
+/// Which is the whole reason this direction's reading is made at the launch
+/// rather than in the recompute. What an inline run answers is asked over the
+/// network, and one of its answers is *the work is already on a pull request* —
+/// which spends no session at all. A row written in front of that would sit
+/// there until the next session of the work took it up, and that session would
+/// be told to resume a conversation that had nothing to do with it: here, a
+/// review primed with a note about an implementation it never had.
+///
+/// The pull request appears mid-test while nothing about the repository changes,
+/// because that is how it really happens: the human opens one in a browser off
+/// the halt's own advice, and a branch cannot say that it was.
+#[tokio::test]
+async fn an_inline_run_found_on_a_pull_request_leaves_nothing_standing_to_be_carried_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-by-hand");
+    let gh = gh_opened_by_hand(&opened);
+    let fixture = grilling_spilling(spill, &an_inline_run_that_holds(), &gh).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    let building = fixture.attachable(2).await;
+    fixture.printed(building, "building the limiter").await;
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+    fixture.quiet().await;
+
+    // And the human opens the pull request from their phone, which is the one
+    // thing that makes this press a wrap-up rather than the work carried on.
+    std::fs::write(&opened, "https://github.com/tobico/verkstead/pull/41\n").unwrap();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let found = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping)
+                .then(|| pull_request(view).cloned())
+                .flatten()
+        })
+        .await;
+
+    assert_eq!(
+        found.number, 41,
+        "the press found the pull request and wrapped it up, spending no session \
+         on work that was already on one",
+    );
+
+    // The review the wrap-up starts, which is the next session of the work and
+    // the one a row left standing here would have been spent on.
+    let reviewing = fixture
+        .until(|view| {
+            outputs(view)
+                .get(2)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(reviewing).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("reading the whole branch"),
+        "an ordinary session of the work, primed for what it was sent to do: {said:?}",
+    );
+    assert!(
+        !said.contains("carried on"),
+        "rather than a harness told to resume the conversation that was building \
+         the work: {said:?}",
+    );
+
+    let notices = notices(&fixture.view().await);
+
+    assert!(
+        !notices
+            .iter()
+            .any(|notice| notice.contains("The session that stopped here was part way through")),
+        "and nothing was said about carrying anything on, nothing having been \
+         written down to carry: {notices:?}",
+    );
+}
+
+/// A roadmap Conversation whose own writing waits at a gate: the session that
+/// is to write the document says so, holds until the gate is opened, and then
+/// writes it, commits it and signals.
+///
+/// Which is what makes the roadmap's two stops tellable apart. A session stopped
+/// in front of the gate left no document, so the writing is what it was part way
+/// through; one stopped behind it had its step, and what is left of the run is
+/// the pull request the document goes to.
+///
+/// Both of the sessions that can be writing it do the same thing, because both
+/// of them really write it: the grilling session reads on into the staging skill
+/// when the direction is picked, and a staging session of its own is what a
+/// press launches where the document was never written.
+///
+/// The role is read off the prompt rather than off the model, because that is
+/// the one of the two a carried session cannot have: its prompt is the note it
+/// is primed with. Which is why `--resume` is answered before anything else is
+/// looked at.
+fn a_roadmap_held_at(gate: &Path) -> String {
+    format!(
+        r#"
+{CLAUDES_LOG}
+case "$3" in
+--resume)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Picking the roadmap up."}}]}}}}' >> "$log"
+    printf 'carried on\r\n'
+    printf 'prompt=%s\r\n' "$2"
+    sleep 300
+    ;;
+*)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Working."}}]}}}}' > "$log"
+    case "$2" in
+    *submitting/SKILL.md*)
+        printf 'prompt=%s\r\n' "$2"
+        printf 'nothing opened a pull request\r\n'
+        ;;
+    *)
+        case "$2" in
+        *staging/SKILL.md*) printf 'writing the roadmap afresh\r\n' ;;
+        *)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
+            printf 'the handoff is written\r\n'
+            ;;
+        esac
+        while [ ! -f {gate} ]; do sleep 0.05; done
+        mkdir -p docs/roadmaps/rate-limiting
+        printf '# Rate limiting roadmap\n\n## Stages\n\n- [ ] 01: Count the requests — [brief](01-counter.md)\n' > docs/roadmaps/rate-limiting/ROADMAP.md
+        printf '# 01. Count the requests\n' > docs/roadmaps/rate-limiting/01-counter.md
+        git add docs
+        git commit --quiet -m 'docs: stage the rate-limiting roadmap'
+        : > /tmp/verkstead/done
+        printf 'the roadmap is written\r\n'
+        sleep 300
+        ;;
+    esac
+    ;;
+esac
+"#,
+        gate = quoted(gate),
+    )
+}
+
+/// **A roadmap's own writing cut off before the document was written is carried
+/// on when the run starts again**, rather than a fresh session being primed to
+/// write a roadmap somebody is already thinking one out.
+///
+/// The second of the two directions with no backlog, and the one whose step ends
+/// on a document rather than on a pull request: a roadmap Conversation's own work
+/// is one session writing `docs/roadmaps/`, so a session that ran here and left
+/// nothing of one was part way through the writing. Read by the reading the
+/// driver already makes to decide what to launch, and the row written in front
+/// of the launch that writes — which is also the only launch that driver makes,
+/// the sighting and the pull request beside it both being able to end with
+/// nothing started. See the server's `runner::roadmap_again`.
+///
+/// **The steer is how an Implementing roadmap comes about at all**, which is
+/// what the middle of this test is: a roadmap Conversation passes straight from
+/// Grilling to Wrapping — its building belongs to its Stages — so the writing
+/// itself is a grilling, carried on by the grilling's own unconditional reading.
+/// What this closes is the window on the other side of a steer into Implementing:
+/// a staging session launched there, cut off before it had written a word of the
+/// document.
+///
+/// **And the steer itself starts a fresh session, whatever was cut off here.**
+/// The human saying what is to happen instead replaces the session that stopped
+/// rather than picking it up, which is ADR-0020's rule and the one press that
+/// reaches these two readings meaning something else — see the server's
+/// `runner::Again`.
+#[tokio::test]
+async fn a_roadmap_cut_off_before_it_was_written_is_carried_on_when_the_run_starts_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("never");
+    let fixture = grilling_spilling(spill, &a_roadmap_held_at(&gate), NO_PULL_REQUEST).await;
+
+    let grilled = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "roadmap").await, Submitted::Accepted);
+
+    fixture.printed(grilled, "the handoff is written").await;
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+    fixture.quiet().await;
+
+    // The Worktree taken away under it, which is what leaves a bare steer into
+    // Implementing offerable over a roadmap nobody has written: there is no
+    // branch to read, so the form cannot refuse on one, and the steer checks the
+    // branch out again before anything runs in it.
+    let _opened = fixture.steer().await;
+    std::fs::remove_dir_all(&worktree).unwrap();
+
+    assert_eq!(
+        fixture.steer_into("Implementing", false).await,
+        ConversationSteered::Steered,
+    );
+
+    let steered = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(steered).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("writing the roadmap afresh"),
+        "the steer started a fresh session to write the roadmap: {said:?}",
+    );
+    assert!(
+        !said.contains("carried on"),
+        "rather than the conversation that stopped resumed, the human having said \
+         what is to happen instead: {said:?}",
+    );
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+    fixture.quiet().await;
+
+    assert!(
+        !worktree.join("docs/roadmaps").exists(),
+        "nothing of the roadmap was ever written, which is what says the writing \
+         was part way through rather than done",
+    );
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(2)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(resumed).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the session that was writing the \
+         roadmap: {said:?}",
+    );
+    assert!(
+        !said.contains("writing the roadmap afresh"),
+        "and not primed as a fresh session to write one from the Brief: {said:?}",
+    );
+    assert!(
+        !said.contains("staging/SKILL.md"),
+        "which is the prompt it was not given, a carried session being primed with \
+         the note and nothing else: {said:?}",
+    );
+
+    let notices = notices(&fixture.view().await);
+
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "the Timeline says which of the two resumes it was: {notices:?}",
+    );
+}
+
+/// **And a roadmap that is written stays Verkstead's own Resume**: the document
+/// is on the branch, so what is left of the run is the pull request it goes to,
+/// and that is a session of its own.
+///
+/// Which is why this direction's reading is the driver's rather than
+/// unconditional. A roadmap Conversation comes to rest with its document
+/// committed as ordinarily as it is cut off before writing one, and a
+/// conversation carried on into the pull request would be an agent told to pick
+/// up the writing it had just finished.
+///
+/// Steered into Implementing for the reason the test above is, that being the
+/// only state the roadmap's reading is made in — and offerable with nothing
+/// written in the box here because the document on the branch is what there is
+/// to carry on.
+#[tokio::test]
+async fn a_roadmap_already_written_is_sent_for_its_pull_request_rather_than_carried_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    std::fs::write(&gate, "").unwrap();
+
+    let fixture = grilling_spilling(spill, &a_roadmap_held_at(&gate), NO_PULL_REQUEST).await;
+
+    let writing = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "roadmap").await, Submitted::Accepted);
+
+    // The gate is open, so the session gets its document committed before
+    // anything stops it.
+    fixture.printed(writing, "the roadmap is written").await;
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+    fixture.quiet().await;
+
+    assert_eq!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "nothing of the roadmap is left waiting for a commit, which is what says \
+         the writing was done",
+    );
+
+    let _opened = fixture.steer().await;
+
+    assert_eq!(
+        fixture.steer_into("Implementing", false).await,
+        ConversationSteered::Steered,
+    );
+
+    // The session the staged reading sends for, which is the whole of what is
+    // left of a roadmap run: the document is written and on no pull request. It
+    // opens none, so the run stops over it — and the press below is another go
+    // through the same reading.
+    let sent = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 1)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(sent).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("submitting/SKILL.md"),
+        "a fresh session sent for the pull request, which is what the steer \
+         started: {said:?}",
+    );
+    assert!(
+        !said.contains("carried on"),
+        "and nothing was resumed, a steer being the human saying what is to \
+         happen instead: {said:?}",
+    );
+
+    fixture.stopped().await;
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let said = fixture.printed_after(before).await;
+
+    assert!(
+        said.contains("submitting/SKILL.md"),
+        "and the press sends for it again, which is what Verkstead's own Resume \
+         launches over a roadmap that is written: {said:?}",
+    );
+    assert!(
+        !said.contains("carried on"),
+        "with no harness told to resume a conversation that had finished what it \
+         was sent for: {said:?}",
+    );
+
+    let notices = notices(&fixture.view().await);
+
+    assert!(
+        !notices
+            .iter()
+            .any(|notice| notice.contains("The session that stopped here was part way through")),
+        "and nothing was said about carrying anything on, nothing having been cut \
+         off: {notices:?}",
+    );
+}
+
 /// **A restart over a task session part way through its task carries it on**,
 /// with nobody having pressed anything.
 ///

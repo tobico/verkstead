@@ -596,6 +596,36 @@ async fn follow_breakdown(
     carry_on(state, conversation_id, driving).await
 }
 
+/// Which press is taking the run up, which two of the three directions need
+/// told and nothing else here does.
+///
+/// **Because a Steer reaches this driver too.** A human steering an implementing
+/// Conversation with nothing written in the box is asking for the next step off
+/// the branch, which is exactly what a Resume asks for — so the two share the
+/// driver rather than forking it. What they do not share is the carrying-on: a
+/// session cut off part way through is carried on by every way back in, and a
+/// steer is the human saying what is to happen *instead*, which replaces that
+/// session rather than picking it up (ADR-0020, and ADR-0030's *Every way a
+/// session is cut off*). So the press is carried down to the two readings made
+/// at a launch, and [`crate::resume::cut_off_at_the_launch`] is where it is
+/// answered.
+///
+/// Only the two directions that read their own cut-off ever look at it. A
+/// backlog's was read in the recompute before this was spawned, where a steer
+/// never passes at all — see [`crate::resume::cut_off`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Again {
+    /// A way back in: the human's Resume, a login's carry-on after a sign-out, a
+    /// restart's startup pass, or an arrival. A session cut off part way through
+    /// its step is carried on by it.
+    AWayBackIn,
+
+    /// A **Steer** with nothing in the box, which is the human asking for the
+    /// next step off the branch. What it starts is a fresh session of the work,
+    /// whatever was cut off here.
+    ASteer,
+}
+
 /// Start driving a stalled implementation again, from wherever the repository
 /// now stands.
 ///
@@ -618,7 +648,15 @@ async fn follow_breakdown(
 /// The registration is handed on rather than taken again, so a Conversation the
 /// human has just pressed Resume on is driven from that moment rather than from
 /// whenever the launch gets round to it — see [`crate::drivers`].
-pub(crate) async fn implementing_again(state: AppState, conversation_id: i64, driving: Driving) {
+///
+/// `again` is which press this is, and the two directions that read their own
+/// cut-off are the whole of what it is for — see [`Again`].
+pub(crate) async fn implementing_again(
+    state: AppState,
+    conversation_id: i64,
+    driving: Driving,
+    again: Again,
+) {
     let conversation = match store::load_conversation(&state.pool, conversation_id).await {
         Ok(Some(conversation)) => conversation,
         Ok(None) => {
@@ -652,8 +690,10 @@ pub(crate) async fn implementing_again(state: AppState, conversation_id: i64, dr
     };
 
     match direction {
-        Direction::Inline => inline_again(state, conversation_id, driving).await,
-        Direction::Roadmap => roadmap_again(state, conversation_id, &working_in, driving).await,
+        Direction::Inline => inline_again(state, conversation_id, driving, again).await,
+        Direction::Roadmap => {
+            roadmap_again(state, conversation_id, &working_in, driving, again).await
+        }
         // The backlog's own answer to what is next, asked of `.tasks/` exactly
         // as every other turn of the run asks it — a stage's backlog included,
         // it being a backlog like any other by the time there is one. What is
@@ -968,7 +1008,31 @@ async fn nothing_left(
 ///   session launched into it could only dead-end on the same missing thing
 ///   when it came to push, and the halt is what reaches the human on their
 ///   phone.
-async fn inline_again(state: AppState, conversation_id: i64, driving: Driving) {
+///
+/// **And the session cut off part way through the work is carried on in the
+/// middle of those three.** An inline implementation is one session's worth of
+/// work ending on the pull request `gh` was just asked about, so there is no
+/// backlog to read a step off and no resting place between two steps to have
+/// stopped in: a press that reaches the second answer is a press over work that
+/// is not finished, which makes the session that stopped here one that was part
+/// way through it. So the row saying it is carried on is written there — in the
+/// one arm of the three that launches a session, after the reading that decides
+/// there is one to launch. Written any earlier and it would be a row the other
+/// two leave standing for the next session of the work to take up, which is the
+/// reason this reading is not in the recompute with the backlog's. See
+/// [`crate::resume::cut_off_at_the_launch`], which is handed [`Again`] because
+/// the same writing is made from [`roadmap_again`], where a steer does arrive —
+/// a bare steer on an inline run is refused outright, there being nothing on a
+/// branch that an inline implementation could be carried on from. See
+/// [`crate::steering::standing`].
+///
+/// **And what the session was sent for is not part of it**, as it is not for a
+/// round of a follow-up: a session Verkstead sent to open the pull request and
+/// lost mid-push reads as a cut-off here exactly as the session that built the
+/// work does, and is carried on under the implementing prompt — which the note
+/// replaces anyway. The alternative is certain rather than possible: a session
+/// killed mid-push would have its turn thrown away every time.
+async fn inline_again(state: AppState, conversation_id: i64, driving: Driving, again: Again) {
     // A run the human is still being asked where to start has not started, and
     // its open Set is the wait — a restart reaching it included. See
     // [`crate::placing::inline_waiting`].
@@ -995,6 +1059,12 @@ async fn inline_again(state: AppState, conversation_id: i64, driving: Driving) {
             crate::wrapping::opened(&state, conversation_id, None).await
         }
         Err(github::Trouble::NoPullRequest) => {
+            // The work is unfinished, which is what makes the session that
+            // stopped here one that was cut off part way through it — and this
+            // is the only one of the three answers with a session to carry it
+            // on.
+            crate::resume::cut_off_at_the_launch(&state, conversation_id, again).await;
+
             let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Implementing).await
             else {
                 return;
@@ -1025,7 +1095,26 @@ async fn inline_again(state: AppState, conversation_id: i64, driving: Driving) {
 /// the press is worth something either way — a roadmap that is not written is
 /// written by a fresh session, and one that is written but on no pull request is
 /// sent for the pull request. See [`to_a_pull_request`].
-async fn roadmap_again(state: AppState, conversation_id: i64, working_in: &Path, driving: Driving) {
+///
+/// **And where the writing is what stopped, that session is carried on.** The
+/// reading is the one this driver already makes and nothing more: a roadmap
+/// Conversation's own step is a session writing the document, so a session that
+/// ran here and left nothing of one was part way through the writing, and a
+/// branch that has a roadmap on it had its step — what is left of that is a push
+/// and a `gh pr create`, which is a session of its own sent for it or no session
+/// at all. So the row goes in front of the launch that writes, which is also the
+/// only arm here that launches anything: the sighting and the pull request above
+/// it may both end with nothing started, and a row nothing spends would be taken
+/// up by the next session of the work. See
+/// [`crate::resume::cut_off_at_the_launch`], and [`Again`], which is what parts
+/// a way back in from a steer.
+async fn roadmap_again(
+    state: AppState,
+    conversation_id: i64,
+    working_in: &Path,
+    driving: Driving,
+    again: Again,
+) {
     let Some(base) = base(&state, conversation_id).await else {
         return;
     };
@@ -1054,6 +1143,11 @@ async fn roadmap_again(state: AppState, conversation_id: i64, working_in: &Path,
 
         return to_a_pull_request(&state, conversation_id, None).await;
     }
+
+    // Nothing of the roadmap is written, so a session that ran here was part way
+    // through writing it — and this is where it is carried on, there being no
+    // other launch in this driver to spend the row.
+    crate::resume::cut_off_at_the_launch(&state, conversation_id, again).await;
 
     let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Staging).await else {
         return;

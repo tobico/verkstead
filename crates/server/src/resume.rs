@@ -482,6 +482,13 @@ async fn recompute(
             // mid-task, and only one of the two has a conversation worth
             // carrying on. See [`mid_turn`], and [`cut_off`].
             //
+            // Two of the three directions answer it where their session is
+            // launched instead, there being no backlog to read it off and a
+            // reading in front of them that may launch nothing at all — see
+            // [`MidTurn::AtTheLaunch`], and [`cut_off_at_the_launch`]. Which is
+            // what the spawn below is told it is: a way back in rather than a
+            // steer.
+            //
             // After every refusal above and before the spawn, which is where a
             // grilling's is for the same two reasons: nothing may be written
             // down as standing to be carried on where the press is about to
@@ -496,6 +503,7 @@ async fn recompute(
                 state.clone(),
                 conversation_id,
                 driving,
+                crate::runner::Again::AWayBackIn,
             ));
         }
 
@@ -721,6 +729,10 @@ async fn recompute(
 /// tasks as routinely as mid-task: see [`mid_turn`]. And a **follow-up's** and an
 /// **investigation's** are how the session ended, a round being a conversation
 /// with nothing of it on the branch to read: see [`mid_round`].
+///
+/// And two of the three directions a run can be following answer it **where the
+/// session is launched** rather than here: see [`MidTurn::AtTheLaunch`], and
+/// [`cut_off_at_the_launch`], which is this writing made from there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MidTurn {
     /// It was: the step the session was running did not finish, so there is a
@@ -732,6 +744,22 @@ enum MidTurn {
     /// was cut off, so Verkstead's own Resume is simply what it always was and
     /// there is nothing to tell anybody about.
     BetweenSteps,
+
+    /// And not this reading's to make at all: the direction being followed
+    /// answers it where its session is launched, so nothing is written here and
+    /// nothing is said.
+    ///
+    /// **An inline implementation and a roadmap's own writing**, the two
+    /// directions with no backlog to have been part way through. What each of
+    /// them is in the middle of is read by the driver that takes it up — the
+    /// pull request an inline run ends on, the document a roadmap's writing ends
+    /// on — and those readings may come out as a wrap-up or a stop with no
+    /// session in them at all. A row written in front of one would be a row
+    /// nothing spends, which the next session of the work would take up and be
+    /// told to resume a conversation that had nothing to do with it. So the row
+    /// goes in where the session goes in: see
+    /// [`crate::runner::inline_again`] and [`crate::runner::roadmap_again`].
+    AtTheLaunch,
 }
 
 /// How a run reads whether the session that stopped was cut off part way through
@@ -744,22 +772,21 @@ enum MidTurn {
 /// between the states that have a cut-off is how *mid-turn* is read and nothing
 /// else about the occasion.
 ///
-/// **An inline implementation and a roadmap's own writing read as between
-/// steps**, which leaves them Verkstead's own Resume. Neither has a backlog to
-/// have been part way through, and the question each of them does answer — what
-/// the branch is already on — is asked over the network by the launch itself and
-/// may come out as a wrap-up with no session in it at all. A row written in front
-/// of that is a row nothing spends, which the next session of the work would take
-/// up and be told to resume a conversation that had nothing to do with it.
+/// **An inline implementation and a roadmap's own writing are read where their
+/// session is launched** rather than here. Neither has a backlog to have been
+/// part way through, and what each of them is in the middle of is read by the
+/// driver that takes it up — a reading that may come out as a wrap-up or a stop
+/// with no session in it at all, which is no place for a row that only a launch
+/// spends. See [`MidTurn::AtTheLaunch`], and [`cut_off_at_the_launch`], which is
+/// where the two of them write it.
 async fn mid_turn(direction: Direction, worktree: &Path) -> MidTurn {
-    let part_way = match direction {
-        Direction::TaskList => crate::runner::mid_step(worktree).await,
-        Direction::Inline | Direction::Roadmap => false,
-    };
+    match direction {
+        Direction::TaskList => match crate::runner::mid_step(worktree).await {
+            true => MidTurn::PartWayThrough,
+            false => MidTurn::BetweenSteps,
+        },
 
-    match part_way {
-        true => MidTurn::PartWayThrough,
-        false => MidTurn::BetweenSteps,
+        Direction::Inline | Direction::Roadmap => MidTurn::AtTheLaunch,
     }
 }
 
@@ -860,10 +887,10 @@ async fn mid_round(state: &AppState, conversation_id: i64) -> MidTurn {
 /// be said in advance says so on the Timeline, the human pressing one thing and
 /// seeing two outcomes from it.
 async fn cut_off(state: &AppState, conversation_id: i64, mid_turn: MidTurn) {
-    // Nothing was cut off, so there is nothing to carry on and nothing to say.
-    // Asked before any of the reads below, this being the one answer already in
-    // hand.
-    if mid_turn == MidTurn::BetweenSteps {
+    // Nothing was cut off, or nothing here is the one to say so: either way
+    // there is nothing to write and nothing to tell anybody. Asked before any of
+    // the reads below, this being the one answer already in hand.
+    if mid_turn != MidTurn::PartWayThrough {
         return;
     }
 
@@ -937,6 +964,45 @@ async fn cut_off(state: &AppState, conversation_id: i64, mid_turn: MidTurn) {
             tracing::error!(error = ?error, conversation_id, "recording the conversation a cut-off session is carried on from failed, so the session started for it will be re-primed instead");
         }
     }
+}
+
+/// The same writing, where the reading was the **launch's** own to make.
+///
+/// [`cut_off`] with the answer already in hand, for the two directions whose
+/// mid-turn is read where their session is launched rather than in the
+/// recompute: an inline implementation, which is one session's worth of work
+/// ending on a pull request, and a roadmap's own writing, which is one session's
+/// worth ending on the document. Neither has a backlog to have been part way
+/// through, and the driver that takes either of them up asks what the work is
+/// already on before it decides there is a session to launch at all — so this is
+/// called from the one arm of each that launches one, which is the arm where the
+/// work is not finished. See [`MidTurn::AtTheLaunch`] for why it cannot be
+/// written any earlier, and [`crate::runner::inline_again`] and
+/// [`crate::runner::roadmap_again`] for the two readings themselves.
+///
+/// **And nothing is written for a Steer**, which is the one press that reaches
+/// those two drivers meaning something else. A way back in picks the session
+/// that stopped up where it left off; a steer is the human saying what is to
+/// happen *instead*, which replaces that session (ADR-0020). The steer has
+/// already spent whatever row was standing as it cleared the stop — see
+/// [`crate::steering`] — so all there is to do here is not write a fresh one.
+/// Asked once, here, rather than at each launch: the two directions are one
+/// rule, and a guard at one of them would be a trap at the other.
+///
+/// Everything else is [`cut_off`]'s: the guard on a row already standing, the
+/// silence where no session ever ran, the Notice naming why not where one ran
+/// that Verkstead cannot name, and the launch left as Verkstead's own Resume
+/// wherever any of it fails.
+pub(crate) async fn cut_off_at_the_launch(
+    state: &AppState,
+    conversation_id: i64,
+    again: crate::runner::Again,
+) {
+    if again == crate::runner::Again::ASteer {
+        return;
+    }
+
+    cut_off(state, conversation_id, MidTurn::PartWayThrough).await
 }
 
 /// Start driving again everything a restart left, which is what a server does as

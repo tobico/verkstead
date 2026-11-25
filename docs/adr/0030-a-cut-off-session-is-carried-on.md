@@ -63,15 +63,32 @@ named is what was turned down.
   not a conversation anybody is losing, and a crash over one that had is not
   either.
 
-- **An inline implementation and a roadmap's own writing read as between steps.**
-  Neither has a backlog to have been part way through, and the question each of
-  them does answer — whether the branch is already on a pull request — is asked
-  over the network by the launch itself and may come out as a wrap-up with no
-  session in it at all. A row written in front of that is a row nothing spends,
-  which the next session of the work would take up and be told to resume a
-  conversation that had nothing to do with it. Carrying those on is a row written
-  where the session is launched rather than in the recompute, and was left for
-  whoever wants it.
+- **An inline implementation and a roadmap's own writing are read where their
+  session is launched.** Neither has a backlog to have been part way through, so
+  what each of them is in the middle of is the artifact its one step ends on: the
+  pull request an inline run goes to, and the document a roadmap's writing
+  commits. Both of those are read by the driver that takes the run up rather than
+  by anything in the recompute — an inline run asks GitHub over the network — and
+  both of those drivers may come out as a wrap-up or a stop with no session in it
+  at all. So the row goes in in front of the launch that carries the step on,
+  which in each of them is the one arm that launches anything. Writing it in the
+  recompute with the backlog's was turned down and is why these two were left out
+  of the first cut: a row nothing spends sits there until the next session of the
+  work takes it up, and that session is told to resume a conversation that had
+  nothing to do with it. Which leaves one press to answer for, because it is the
+  only one that reaches these two drivers meaning something else: a **Steer**
+  writes nothing, the human saying what is to happen instead replacing the
+  session that stopped rather than picking it up.
+
+- **And a roadmap's own writing is mostly a grilling's cut-off, not this one.** A
+  roadmap Conversation passes straight from Grilling to Wrapping — its building
+  belongs to its Stages — so the session that writes the document is the grilling
+  session reading on into the staging skill, and one cut off doing that is carried
+  on by the grilling's unconditional reading. What the launch reading answers for
+  is the window on the other side of a steer into Implementing: a staging session
+  launched there and cut off before it had written a word. Worth writing down
+  because the two readings look like alternatives and are not — a roadmap
+  Conversation reaches the second one only by being steered.
 
 - **The job must not change under a carry-on.** A launch with a conversation
   standing to be carried on *is* the session that was cut off, resumed, so what

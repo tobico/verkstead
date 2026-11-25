@@ -944,7 +944,9 @@ running to write the row as it goes; a stop is nobody's answer, and two of the
 ways a session is cut off leave nothing running to write anything — a crash, and
 a server killed or shut down, there being no graceful path out of the process.
 So the question is asked in the recompute, where every way back in passes, and
-the row is written there for the launch after it to spend.
+the row is written there for the launch after it to spend — except for the two
+directions whose answer is the launch's own to read, where it is asked a moment
+later, in front of the session it is for.
 **Mid-turn is what makes it a cut-off, and each state reads that for itself.** A
 **grilling**'s is unconditional: a grilling is over when it has picked a
 direction and picking one moves the Conversation out of Grilling, so one still
@@ -956,9 +958,21 @@ that got its commit in stopped between two. A **follow-up**'s is how its session
 ended, a round being a conversation with nothing of it on the branch to read: a
 session taken away while it was running and one that fell over where it stood
 were each mid-sentence, and one that exited cleanly had the turn it was having.
-An inline implementation and a roadmap's own writing read as between steps, what
-each of them answers being asked over the network by the launch itself and
-liable to come out as a wrap-up with no session in it at all.
+An **inline implementation** and a **roadmap**'s own writing have no backlog to
+have been part way through, so each of them is read where its session is
+launched: what an inline run's one step ends on is a pull request, which the
+driver that takes the run up asks GitHub about, and what a roadmap's writing ends
+on is the document it commits. Both of those drivers may come out as a wrap-up or
+a stop with no session in it at all, so the row goes in in front of the launch
+that carries the step on rather than in the recompute — a row nothing spends
+would be taken up by the next session of the work, which would be told to resume
+a conversation that had nothing to do with it. And a **Steer** reaching either of
+them writes nothing: the human saying what is to happen instead replaces the
+session that stopped rather than picking it up. A roadmap Conversation passes
+straight from Grilling to Wrapping, so the writing itself is a grilling and a
+session cut off doing it is carried on by the grilling's own reading; what the
+launch reading answers for there is the staging session a steer into Implementing
+leaves behind.
 **So every way a session is cut off is carried on**, each by that reading rather
 than by a rule of its own: a sign-out stop, a sign-out on a login replaced
 since, a **Force stop**, an **Agent Profile** out of usage window, a stall found

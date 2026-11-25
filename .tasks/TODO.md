@@ -22,4 +22,4 @@ human's answer to it.
 
 ## Tasks
 
-- [ ] 01: Carry an inline run and a roadmap's writing on — [details](01-inline-and-roadmap.md)
+- [x] 01: Carry an inline run and a roadmap's writing on — [details](01-inline-and-roadmap.md)
