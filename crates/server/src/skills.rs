@@ -1673,6 +1673,60 @@ pub(crate) fn kept(set_id: i64, title: Option<&str>) -> String {
     )
 }
 
+/// The note a session is resumed with after it was **cut off**: stopped part way
+/// through its step rather than finishing it.
+///
+/// [`kept`]'s occasion one along, and the quietest of the four. Nothing about the
+/// work changed — the sandbox is the one it had, the Worktree is where it left
+/// it, and the only fact it does not already hold is that something stopped it
+/// and this is it picked up again. So the note says that in a sentence and then
+/// gets out of the way.
+///
+/// **And why it stopped is not in it.** The stop wrote its own Notice at the time,
+/// in words about the sign-out or the press or the window that caused it, and the
+/// agent's own Capture holds whatever it had reached. A note that explained the
+/// stop would be Verkstead guessing at a story the record already tells better.
+///
+/// **`sets` is the one thing it does go on about**, where there are any: a
+/// blocking ask is a wait held open by a command running in the session's
+/// sandbox, and that command died with the process. So the agent comes back to a
+/// question it asked with nothing in front of it, and the line that fetches the
+/// Answers is given whole. **Under the ids it asked them under**, unlike
+/// [`moved`]'s: nothing moved and nothing was renumbered, so there is one id per
+/// Set and it is the one the agent already has. Empty for a session that was
+/// idling on nothing, which is told nothing about Sets at all.
+pub(crate) fn cut_off(sets: &[i64]) -> String {
+    let mut note = "Verkstead stopped the session that was running here part way through its \
+                    step, and this session is that one carried on rather than a new one. \
+                    Nothing about the work has changed: the worktree, the branch and the \
+                    sandbox are the ones you had. Carry on from where you were.\n"
+        .to_owned();
+
+    if sets.is_empty() {
+        return note;
+    }
+
+    note.push_str(
+        "\nExcept for the Question Sets you were waiting on. Each wait was a command running \
+         in the session that was stopped, so the waits are gone — but the Sets are still open, \
+         still the human's to answer, and still under the ids you asked them under. Come back \
+         for the Answers:\n\n",
+    );
+
+    for set in sets {
+        note.push_str(&format!(
+            "- Set {set} is still open: `verkstead answers {set}`\n"
+        ));
+    }
+
+    note.push_str(
+        "\nA Set nobody has answered yet refuses that command rather than waiting on the \
+         door, so ask again when the nudge lands.\n",
+    );
+
+    note
+}
+
 /// One Question Set a resumed session was idling on, said both ways round.
 ///
 /// **The id it has here is what a session does anything with**, and the id it had

@@ -748,6 +748,7 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
             agent_type: AgentType::Claude,
             widened_by: None,
             kept_here_by: None,
+            cut_off: false,
         },
     )
     .await

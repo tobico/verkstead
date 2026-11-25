@@ -122,6 +122,7 @@ async fn the_last_session_is_the_one_to_carry_on_from() {
             agent_type: AgentType::Claude,
             widened_by: None,
             kept_here_by: None,
+            cut_off: false,
         }),
         "the newest of them, rather than the first: an older one is a conversation \
          somebody had already left",
@@ -173,6 +174,7 @@ async fn taking_the_conversation_up_spends_it() {
         agent_type: AgentType::Claude,
         widened_by: None,
         kept_here_by: None,
+        cut_off: false,
     };
 
     continue_on_arrival(&pool, id, &continued).await.unwrap();
@@ -214,6 +216,7 @@ async fn asking_whether_there_is_a_conversation_to_carry_on_does_not_spend_it() 
         agent_type: AgentType::Claude,
         widened_by: None,
         kept_here_by: None,
+        cut_off: false,
     };
 
     continue_on_arrival(&pool, id, &continued).await.unwrap();
@@ -248,6 +251,7 @@ async fn a_conversation_carried_on_for_an_answer_names_its_set() {
         agent_type: AgentType::Claude,
         widened_by: Some(12),
         kept_here_by: None,
+        cut_off: false,
     };
 
     continue_on_arrival(&pool, id, &continued).await.unwrap();
@@ -271,6 +275,7 @@ async fn a_conversation_kept_here_names_its_set() {
         agent_type: AgentType::Claude,
         widened_by: None,
         kept_here_by: Some(14),
+        cut_off: false,
     };
 
     continue_on_arrival(&pool, id, &continued).await.unwrap();
@@ -279,6 +284,32 @@ async fn a_conversation_kept_here_names_its_set() {
         take_up_the_conversation(&pool, id).await.unwrap(),
         Some(continued),
         "the Set comes back with the session it kept here",
+    );
+}
+
+/// **And a row a cut-off wrote says so with no Set at all**, which is what parts
+/// the third occasion from the two answers: a session stopped part way through
+/// its step is nobody's answer, so there is no Question Set to name — and the
+/// launch that reads the record is what writes the row.
+#[tokio::test]
+async fn a_conversation_carried_on_after_a_cut_off_names_no_set() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    let continued = Continued {
+        session_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned(),
+        agent_type: AgentType::Claude,
+        widened_by: None,
+        kept_here_by: None,
+        cut_off: true,
+    };
+
+    continue_on_arrival(&pool, id, &continued).await.unwrap();
+
+    assert_eq!(
+        take_up_the_conversation(&pool, id).await.unwrap(),
+        Some(continued),
+        "the cut-off comes back with the session it stopped, and no Set beside it",
     );
 }
 
@@ -315,6 +346,7 @@ async fn coming_back_again_carries_on_from_the_newer_session() {
                 agent_type: AgentType::Claude,
                 widened_by: None,
                 kept_here_by: None,
+                cut_off: false,
             },
         )
         .await

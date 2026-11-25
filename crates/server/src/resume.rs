@@ -350,12 +350,25 @@ async fn recompute(
 
     match conversation.state {
         // A fresh grilling on the Brief and the digest of what has already been
-        // asked and answered — the interview itself went with the process it ran
-        // in. See [`crate::grillings::again`].
+        // asked and answered — or, where the grilling that ran here was cut off
+        // part way through, that very session carried on. The interview itself
+        // went with the process it ran in, so a fresh one is the fallback rather
+        // than the aim. See [`crate::grillings::again`], and [`cut_off`].
         Lifecycle::Grilling => {
             if conversation.grilling_pairing.is_none() {
                 return Ok(Resumed::NoGrillingPairing);
             }
+
+            // Before the spawn, because the relaunch reads it: a conversation
+            // standing to be carried on is what holds the Question Sets the gone
+            // session was idling on open rather than locking them.
+            //
+            // **A grilling's cut-off is unconditional**, which is why it is the
+            // state this reading starts on: a grilling is over when it has picked
+            // a direction, and picking one moves the Conversation out of Grilling.
+            // So a Conversation still grilling with a session behind it is one
+            // whose interview stopped part way through, however it stopped.
+            cut_off(state, conversation_id).await;
 
             starting(state, conversation_id, resuming).await?;
 
@@ -641,6 +654,111 @@ async fn recompute(
     );
 
     Ok(Resumed::Resumed)
+}
+
+/// Write down that the launch about to happen carries on the session that was
+/// **cut off** here — stopped part way through its step rather than finishing it
+/// — so that what starts is that session resumed rather than a fresh one primed
+/// from the record.
+///
+/// **Read at the launch rather than written at the stop**, which is the one thing
+/// that parts this occasion from the other three. An arrival, an answer that
+/// widened a sandbox and a *Keep it here* are each somebody's act, with something
+/// running to write the row as it goes; a session cut off is nobody's answer, and
+/// the ways it is cut off include the two that leave nothing running at all — a
+/// crash, and a server being killed. So the question is asked here, where every
+/// way back in passes: the human's press, a login's carry-on, a restart's
+/// `at_startup`, and an arrival. See [`store::carrying_a_conversation`].
+///
+/// **Guarded on there being no row yet**, which is what keeps it clear of those
+/// three: each of them pre-writes its own row and then reaches the recompute, and
+/// a second write over the top would lose the Set the Notice is to name. The peek
+/// reads without spending, the spending being the launch's — see
+/// [`store::take_up_the_conversation`].
+///
+/// **And on a session having run at all.** A grilling whose first launch never
+/// got as far as a process has nothing to carry on and nothing was cut off, so
+/// there is nothing to say: what the Notice below is for is the other case, a
+/// session that really ran under a harness whose id Verkstead never wrote down.
+/// [`store::newest_agent`] is what tells the two apart — one row per session, from
+/// inside the transaction that opens its Capture.
+///
+/// Nothing here refuses and nothing waits on it. A read that fails, a write that
+/// fails and a session Verkstead cannot name all leave the launch as Verkstead's
+/// own Resume, which is a complete way to take the work up — and the one that can
+/// be said in advance says so on the Timeline, the human pressing one thing and
+/// seeing two outcomes from it.
+async fn cut_off(state: &AppState, conversation_id: i64) {
+    match store::carrying_a_conversation(&state.pool, conversation_id).await {
+        // Nothing has been written, so this reading is the one that decides.
+        Ok(false) => {}
+
+        // An arrival's, an answer's or a *Keep it here*'s, already written with
+        // the occasion it is to be said under.
+        Ok(true) => return,
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a conversation was already standing to be carried on failed, so the session started for this one is Verkstead's own resume");
+            return;
+        }
+    }
+
+    match store::newest_agent(&state.pool, conversation_id).await {
+        // A session ran here, which is what makes this a cut-off at all.
+        Ok(Some(_)) => {}
+
+        // Nothing ever ran, so nothing was cut off: this is a first launch that
+        // never reached a process, and Verkstead's own Resume is simply what it
+        // always was. Nothing to tell anybody about.
+        Ok(None) => return,
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a session had run for a Conversation being started again failed, so the session started for it is Verkstead's own resume");
+            return;
+        }
+    }
+
+    let continued = match store::the_last_session(&state.pool, conversation_id).await {
+        Ok(Some(continued)) => store::Continued {
+            cut_off: true,
+            ..continued
+        },
+
+        // A session ran and Verkstead cannot name it — a backend that names none
+        // and whose own id was never written down. Said on the Timeline, because
+        // it is the reason the session in front of the human is not the one that
+        // was mid-sentence.
+        Ok(None) => {
+            crate::carrying::instead(
+                &state.pool,
+                &state.nudges,
+                conversation_id,
+                crate::carrying::Occasion::CutOff,
+                &crate::carrying::Instead::NoSession,
+            )
+            .await;
+
+            return;
+        }
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the session a cut-off Conversation would be carried on from failed, so the session started for it is Verkstead's own resume");
+            return;
+        }
+    };
+
+    match store::continue_on_arrival(&state.pool, conversation_id, &continued).await {
+        Ok(()) => tracing::info!(
+            conversation_id,
+            session = %continued.session_id,
+            "the session that stopped here was cut off part way through its step, so the \
+             launch starting now carries its conversation on",
+        ),
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "recording the conversation a cut-off session is carried on from failed, so the session started for it will be re-primed instead");
+        }
+    }
 }
 
 /// Start driving again everything a restart left, which is what a server does as

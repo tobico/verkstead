@@ -6900,6 +6900,13 @@ async fn a_later_pick_moves_the_watcher_onto_the_artifact_it_asked_for() {
 /// on a Conversation that is grilling is a fresh grilling — the same Brief, and a
 /// digest of what the dead interview already settled.
 ///
+/// **A fresh one here because this stub kept no log.** A grilling cut off part
+/// way through is carried on where there is a conversation on this machine to
+/// carry on, so what stands in for claude above decides which of the two this
+/// restart gets — and one that writes nothing into `projects/` is Verkstead's
+/// own Resume, which is the launch this has always been about. The line saying
+/// which it was is the one thing on the Timeline either way; it raises nothing.
+///
 /// Which is the whole of what this replaces. A restart used to leave a stop with
 /// the tail named on it and wait for somebody to press a button about a
 /// Conversation nothing had chosen to stop.
@@ -6967,8 +6974,9 @@ async fn a_restarted_server_grills_the_work_again_rather_than_raising_anything()
     let view = fixture.view().await;
 
     assert!(
-        notices(&view).is_empty(),
-        "and nothing was written about the session the restart killed: {:?}",
+        notices_but_the_carrying_on(&view).is_empty(),
+        "and nothing was raised about the session the restart killed, beyond the \
+         line saying which of the two resumes took it up: {:?}",
         notices(&view),
     );
     assert_eq!(
@@ -16406,6 +16414,14 @@ async fn an_answer_that_adds_to_the_sandbox_carries_the_waiting_session_on() {
     );
 
     assert!(
+        !notices
+            .iter()
+            .any(|notice| notice.contains("The session that stopped here")),
+        "and the occasion is the answer rather than a stop: the answer wrote the row \
+         before the launch could read a cut-off into it: {notices:?}",
+    );
+
+    assert!(
         sets(&view)
             .iter()
             .any(|asked| asked.set_id == set && asked.carried_on),
@@ -16475,6 +16491,159 @@ async fn an_answer_whose_session_cannot_be_resumed_is_re_primed_and_says_why() {
                 && notice.contains("Verkstead&#39;s own resume")
                 || notice.contains(&format!("question set {set}"))
                     && notice.contains("Verkstead's own resume")),
+        "the Timeline says why it was not carried on: {notices:?}",
+    );
+}
+
+/// **A grilling force-stopped part way through is carried on when the run starts
+/// again**, rather than re-primed as a fresh interview.
+///
+/// The third occasion for the same resume, and the first one nobody wrote down as
+/// it happened: a stop is not an answer, so the row saying a conversation is
+/// standing to be carried on is written by the launch that reads the record — see
+/// the server's `resume::cut_off`. **A grilling's cut-off is unconditional**: a
+/// grilling is over when it has picked a direction, and picking one moves the
+/// Conversation out of Grilling, so one still grilling with a session behind it is
+/// one whose interview stopped part way through.
+///
+/// And the Question Set it was idling on stays **open**, which is the reversal a
+/// carried conversation makes anywhere: the reader has not gone, it is coming
+/// back. Its wait died with the process, so the note names the Set and the line
+/// that fetches the Answers — under the id it already has, nothing having moved
+/// and nothing having been renumbered.
+#[tokio::test]
+async fn a_force_stopped_grilling_is_carried_on_when_the_run_starts_again() {
+    let fixture = grilling(WAITS_AND_CARRIES_ON).await;
+
+    let first = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(ASKED_ALREADY).await;
+
+    assert_eq!(
+        fixture.force_stop().await,
+        ConversationStopped::Stopped,
+        "the grilling was stopped where it stood",
+    );
+
+    fixture.quiet().await;
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    assert_ne!(
+        resumed, first,
+        "a second session, after the one that stopped"
+    );
+
+    let said = fixture.capture(resumed).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the session that stopped: {said:?}",
+    );
+    assert!(
+        said.contains(&format!("verkstead answers {set}")),
+        "and primed with the Set it was idling on and the line that reads its \
+         Answers: {said:?}",
+    );
+    assert!(
+        !said.contains("# The Brief this started from"),
+        "and not re-primed with the interview it is already part way through: {said:?}",
+    );
+
+    let view = fixture.view().await;
+    let notices = notices(&view);
+
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "the Timeline says which of the two resumes it was: {notices:?}",
+    );
+
+    let standing = sets(&view)
+        .into_iter()
+        .find(|asked| asked.set_id == set)
+        .expect("the Set the stopped session was idling on is on the Timeline")
+        .standing
+        .clone();
+
+    assert!(
+        !matches!(standing, verkstead_render::Standing::LockedUnanswered(_)),
+        "the Set is held open for the reader that is coming back rather than \
+         locked: {standing:?}",
+    );
+    assert_eq!(
+        fixture
+            .respond(set, serde_json::json!([{ "label": "Q1", "selected": 1 }]))
+            .await,
+        Submitted::Accepted,
+        "and the human can still answer it, which is what open means to them",
+    );
+}
+
+/// **And a cut-off session Verkstead cannot name stays Verkstead's own Resume**,
+/// with the Timeline saying so: there is no id to tell a harness to resume, so
+/// what starts is a fresh session primed from the record.
+///
+/// **What it stands for is a session on a backend that names none and whose own
+/// id was never written down.** Standing that up as it really happens would mean
+/// a harness this suite does not have, so the names come off the record
+/// instead — which leaves exactly what such a Conversation has: Events, and
+/// nothing saying which session wrote them.
+#[tokio::test]
+async fn a_cut_off_session_verkstead_cannot_name_is_re_primed_and_says_why() {
+    let fixture = grilling(WAITS_AND_CARRIES_ON).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+    fixture.quiet().await;
+
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    sqlx::query("DELETE FROM session_names")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let again = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(again).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("the grilling is running"),
+        "a session of its own rather than a resume: {said:?}",
+    );
+
+    let notices = notices(&fixture.view().await);
+
+    assert!(
+        notices
+            .iter()
+            .any(|notice| notice.contains("named on the record")
+                && notice.contains("no conversation to carry on from")),
         "the Timeline says why it was not carried on: {notices:?}",
     );
 }
@@ -19647,6 +19816,22 @@ fn notices(view: &ConversationView) -> Vec<String> {
     said(view)
         .into_iter()
         .map(|notice| notice.html.clone())
+        .collect()
+}
+
+/// The same, passing over the line a launch over a **cut-off** session writes:
+/// which of the two resumes it was, and nothing else.
+///
+/// Read by the tests that ask what a restart *raised* about a Conversation it
+/// simply drove again. Every launch over a session that was stopped part way
+/// through its step now says on the Timeline whether the harness carried that
+/// conversation on or Verkstead's own Resume stood in for it — which is a fact
+/// about the session in front of the human rather than anything to answer, and
+/// is what those tests mean by nothing.
+fn notices_but_the_carrying_on(view: &ConversationView) -> Vec<String> {
+    notices(view)
+        .into_iter()
+        .filter(|notice| !notice.contains("The session that stopped here was part way through"))
         .collect()
 }
 
@@ -28662,7 +28847,10 @@ async fn a_conversation_nothing_is_driving_is_halted_while_the_server_runs() {
 ///
 /// So there is nothing to read afterwards, which is the assertion. A Notice here
 /// would be a Conversation told it had stopped a moment after being started
-/// again.
+/// again — and the one line a launch over a cut-off session does write is not
+/// that: it says which of the two resumes took the session up, and is passed
+/// over here for the reason it is passed over everywhere a restart is asked what
+/// it raised. See [`notices_but_the_carrying_on`].
 #[tokio::test]
 async fn a_conversation_a_stopped_server_left_mid_run_is_driven_again_before_the_sweep_looks() {
     let fixture = grilling(r#"printf 'the grilling has nothing to say\n'"#).await;
@@ -28696,8 +28884,9 @@ async fn a_conversation_a_stopped_server_left_mid_run_is_driven_again_before_the
     let view = fixture.view().await;
 
     assert!(
-        notices(&view).is_empty(),
-        "nothing was written about a Conversation that is being worked on: {:?}",
+        notices_but_the_carrying_on(&view).is_empty(),
+        "nothing was written about a Conversation that is being worked on, beyond \
+         the line saying which of the two resumes took its session up: {:?}",
         notices(&view),
     );
     assert_eq!(
@@ -37810,7 +37999,7 @@ async fn a_halt_nobody_chose_is_driven_again_by_the_next_server() {
          on the human once the Conversation is being driven again",
     );
     assert_eq!(
-        notices(&view).len(),
+        notices_but_the_carrying_on(&view).len(),
         1,
         "and the Notice stays where it is: {:?}",
         notices(&view),

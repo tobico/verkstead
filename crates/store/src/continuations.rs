@@ -9,6 +9,14 @@
 //! is here: the name Verkstead gave the session that crossed, and which harness
 //! ran it.
 //!
+//! **And written by the launch itself, where what left the conversation standing
+//! was the session being cut off.** The other occasions are somebody's act — an
+//! arrival, an answer — and whatever carried it out wrote the row as it went; a
+//! session stopped part way through its step is nobody's answer, and a crash or
+//! a restart has nothing running to write anything down at all. So that one is
+//! read off the record at the launch and written there. See the server's
+//! `resume` module.
+//!
 //! **A row of its own rather than a reading of the Timeline.** Whether a launch
 //! continues something is a fact about *this* device, and it holds while nothing
 //! has been launched here yet — which is a moment rather than a shape the record
@@ -75,6 +83,18 @@ pub struct Continued {
     /// session that had asked to move the work, where that is why it is being
     /// carried on (ADR-0029). `None` everywhere else.
     pub kept_here_by: Option<i64>,
+
+    /// Whether what left the conversation standing was the session being **cut
+    /// off**: stopped part way through its step rather than finishing it.
+    ///
+    /// A flag rather than a Set's id, because there is no Set behind this one.
+    /// The other two occasions are an answer somebody gave, and whoever stored
+    /// it wrote the row as it went; a stop is nobody's answer, and the launch
+    /// that comes after it is what reads the occasion off the record and writes
+    /// the row for itself.
+    ///
+    /// `false` is an arrival, and every row read off the record's own sessions.
+    pub cut_off: bool,
 }
 
 /// The two tables: the conversation a launch continues, one at most per
@@ -124,6 +144,23 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
             .execute(pool)
             .await
             .context("adding the column naming the Set that kept the work here")?;
+    }
+
+    // And whether the session was cut off part way through its step, which is
+    // the occasion with no Set behind it. The same way again, so a database
+    // from before there was one takes the same path.
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('continued_sessions') WHERE name = ?")
+            .bind("cut_off")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the column saying the session was cut off")?;
+
+    if there.is_none() {
+        sqlx::query("ALTER TABLE continued_sessions ADD COLUMN cut_off INTEGER")
+            .execute(pool)
+            .await
+            .context("adding the column saying the session was cut off")?;
     }
 
     // Keyed by the Conversation and the id the Set was asked under, because that
@@ -222,8 +259,10 @@ pub async fn sets_as_they_landed(
 /// Write down that the next session launched for `conversation_id` on this device
 /// continues `continued` rather than opening one of its own.
 ///
-/// An arrival's, an answer's that widened the sandbox, and a *Keep it here*'s —
-/// see [`Continued::widened_by`] and [`Continued::kept_here_by`], which say which.
+/// An arrival's, an answer's that widened the sandbox, a *Keep it here*'s, and a
+/// session's that was cut off part way through its step — see
+/// [`Continued::widened_by`], [`Continued::kept_here_by`] and
+/// [`Continued::cut_off`], which say which.
 ///
 /// Written over whatever is there, the way an arriving row is: a Conversation
 /// that has come and gone and come back again is carrying on from the newest
@@ -236,17 +275,19 @@ pub async fn continue_on_arrival(
 ) -> Result<()> {
     sqlx::query(
         "INSERT INTO continued_sessions
-             (conversation_id, session_id, agent_type, widened_by, kept_here_by)
-         VALUES (?, ?, ?, ?, ?)
+             (conversation_id, session_id, agent_type, widened_by, kept_here_by, cut_off)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(conversation_id) DO UPDATE
              SET session_id = excluded.session_id, agent_type = excluded.agent_type,
-                 widened_by = excluded.widened_by, kept_here_by = excluded.kept_here_by",
+                 widened_by = excluded.widened_by, kept_here_by = excluded.kept_here_by,
+                 cut_off = excluded.cut_off",
     )
     .bind(conversation_id)
     .bind(&continued.session_id)
     .bind(continued.agent_type.word())
     .bind(continued.widened_by)
     .bind(continued.kept_here_by)
+    .bind(continued.cut_off)
     .execute(pool)
     .await
     .with_context(|| {
@@ -255,6 +296,13 @@ pub async fn continue_on_arrival(
 
     Ok(())
 }
+
+/// One row of `continued_sessions` as it comes back: the session and its harness,
+/// then the three columns that say which occasion left it standing — the Set that
+/// widened a sandbox, the Set that kept the work here, and whether the session was
+/// cut off. Every one of the three null is an arrival, which is what wrote the
+/// first of these rows and what a row from before any of the columns existed is.
+type Row = (String, String, Option<i64>, Option<i64>, Option<bool>);
 
 /// What the next launch for `conversation_id` carries on from, **spent in the
 /// same breath**.
@@ -272,9 +320,9 @@ pub async fn take_up_the_conversation(
 ) -> Result<Option<Continued>> {
     let mut tx = super::writing(pool, "taking up a carried conversation").await?;
 
-    let row: Option<(String, String, Option<i64>, Option<i64>)> = sqlx::query_as(
+    let row: Option<Row> = sqlx::query_as(
         "DELETE FROM continued_sessions WHERE conversation_id = ?
-         RETURNING session_id, agent_type, widened_by, kept_here_by",
+         RETURNING session_id, agent_type, widened_by, kept_here_by, cut_off",
     )
     .bind(conversation_id)
     .fetch_optional(&mut *tx)
@@ -287,7 +335,7 @@ pub async fn take_up_the_conversation(
         .await
         .context("taking up a carried conversation")?;
 
-    let Some((session_id, agent_type, widened_by, kept_here_by)) = row else {
+    let Some((session_id, agent_type, widened_by, kept_here_by, cut_off)) = row else {
         return Ok(None);
     };
 
@@ -304,6 +352,9 @@ pub async fn take_up_the_conversation(
         agent_type,
         widened_by,
         kept_here_by,
+        // Null for every row written before the column was there, which is an
+        // arrival — the same reading the two Set columns get from a null.
+        cut_off: cut_off.unwrap_or(false),
     }))
 }
 
@@ -317,8 +368,13 @@ pub async fn take_up_the_conversation(
 /// that came out wrong costs a Set held open for a session that then opened one of
 /// its own — which the launch locks on its way through instead.
 ///
-/// False for nearly every launch there is, this being a row written only by an
-/// arrival.
+/// **And asked by the launch that writes one too**, which is the other thing
+/// reading without spending is for: a session cut off part way through its step
+/// is carried on, and what says so is a row the launch writes for itself — so
+/// the launch asks first whether somebody has already written one, an arrival
+/// and an answer both pre-writing theirs. See the server's `resume` module.
+///
+/// False for nearly every launch there is.
 pub async fn carrying_a_conversation(pool: &SqlitePool, conversation_id: i64) -> Result<bool> {
     let row: Option<(i64,)> =
         sqlx::query_as("SELECT conversation_id FROM continued_sessions WHERE conversation_id = ?")
@@ -382,5 +438,6 @@ pub async fn the_last_session(
         agent_type,
         widened_by: None,
         kept_here_by: None,
+        cut_off: false,
     }))
 }
