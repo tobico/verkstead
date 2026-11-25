@@ -625,6 +625,14 @@ impl Tail {
 /// polled, and that is the whole point of it being a value: a length taken at the
 /// first poll would already have this session's opening lines in it, and the
 /// Transcript would begin part way through the turn.
+///
+/// **And it is what keeps the account watchers honest across a carry-on.** The
+/// sign-out a run stopped on and the window it ran out in are both written in
+/// the log the resumed session is appending to, and both are read there — so an
+/// offset is the difference between a session reading what it said and a session
+/// reading what the one before it said. See [`crate::signouts`] and
+/// [`crate::limits`].
+///
 /// **Two shapes, for the two shapes a backend keeps a record in** — see
 /// [`Following`], whose pair these are the crossed halves of. A file of lines is
 /// carried on from a byte offset into it; a store is carried on from the last

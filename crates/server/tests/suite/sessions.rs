@@ -17529,14 +17529,29 @@ async fn a_carried_on_run_with_an_emptied_backlog_finishes_rather_than_sending_f
 /// Two tasks rather than one, for [`two_tasks_carrying_on_at`]'s reason: a
 /// backlog with one in it would read as a feature finished with.
 fn a_task_held_by(holding: &str) -> String {
+    a_task_held_by_resumed_with(holding, PICKS_THE_TASK_UP)
+}
+
+/// What the resume of [`a_task_held_by`] ordinarily says: a line in the log to
+/// show the conversation moved, the word on the terminal, and nothing else.
+const PICKS_THE_TASK_UP: &str = r#"    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Picking the task up."}]}}' >> "$log"
+    printf 'carried on\r\n'
+    sleep 300
+"#;
+
+/// The same backlog, with `resumed` for whatever the carried-on session does.
+///
+/// Which is what the two reader tests need and the stop-way tests do not: a
+/// resumed harness **draws the conversation it is resuming**, so the line the
+/// run stopped on the first time is drawn again by the session carrying it on,
+/// with a login and a window that are both perfectly good.
+fn a_task_held_by_resumed_with(holding: &str, resumed: &str) -> String {
     format!(
         r#"
 {CLAUDES_LOG}
 case "$3" in
 --resume)
-    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Picking the task up."}}]}}}}' >> "$log"
-    printf 'carried on\r\n'
-    sleep 300
+{resumed}
     ;;
 *)
     printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Working."}}]}}}}' > "$log"
@@ -17728,6 +17743,247 @@ async fn a_task_cut_off_by_an_exhausted_window_is_carried_on() {
             .contains("The session that stopped here was part way through")
             && notice.contains("carries it on")),
         "and the Timeline says which of the two resumes it was: {notices:?}",
+    );
+}
+
+/// The banner claude 2.1.234 turns while the account it is spending is out of
+/// window, with the reset written whole.
+const WINDOW_SPENT: &str =
+    "Usage limit reached · continuing automatically at 2026-08-24T05:00:00Z · esc to cancel";
+
+/// Say it the way claude does — the banner turning on the terminal while it
+/// waits — and **in its own log besides**, which is the record a session
+/// carrying the conversation on goes on appending to.
+///
+/// Both, because the window is read in every record a session leaves and a
+/// backend that says so in one and not the others would otherwise go unnoticed.
+/// The log is the one of the three that outlives the session, which is what
+/// makes it the half a carry-on has to be careful with.
+fn says_its_window_is_spent() -> String {
+    format!(
+        "{logged}        for pass in 1 2; do\n            \
+         for turning in '✻' '✽' '✳' '✢'; do\n                \
+         printf \"$turning {WINDOW_SPENT}\\r\\n\"\n                \
+         sleep 0.125\n            done\n        done\n",
+        logged = said_in_the_log(WINDOW_SPENT),
+    )
+}
+
+/// The resume that **draws the sign-out again**, which is what claude does with
+/// every conversation it resumes: the line was the answer to the turn that
+/// failed, so it is in the log being carried on and on the terminal of the
+/// session carrying it.
+///
+/// Then it gets on with the task and commits it, which is what says the run
+/// carried on rather than stopping a second time on a sign-out that had already
+/// happened — a stop ends the session that is read, so a session that reached
+/// its commit is one nothing stopped.
+fn a_sign_out_its_resume_draws_again() -> String {
+    format!(
+        r#"    for pass in 1 2 3; do
+        printf '  ⎿  {LOGIN_EXPIRED}\r\n'
+        sleep 0.3
+    done
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Picking the task up."}}]}}}}' >> "$log"
+    printf 'carried on\r\n'
+    sed -i 's/- \[ \] 01:/- [x] 01:/' .tasks/TODO.md
+    git add -A
+    git commit --quiet -m 'feat: 01-count.md'
+    printf 'committed 01-count.md\r\n'
+    sleep 300
+"#
+    )
+}
+
+/// And the resume of a run whose window had run out: nothing of the banner on
+/// its terminal, and the log it goes on appending to still holding the line the
+/// stop was read in.
+///
+/// The wait before it says anything of its own is the whole point. A reading
+/// that opened at the top of the carried log would find that line as the newest
+/// thing the agent had said, on every poll until something newer landed — so a
+/// session with a window perfectly good again would be stopped on the one its
+/// conversation ran out in.
+const CARRIES_ON_WITH_THE_WINDOW_BACK: &str = r#"    printf 'carried on\r\n'
+    sleep 2
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Picking the task up."}]}}' >> "$log"
+    sed -i 's/- \[ \] 01:/- [x] 01:/' .tasks/TODO.md
+    git add -A
+    git commit --quiet -m 'feat: 01-count.md'
+    printf 'committed 01-count.md\r\n'
+    sleep 300
+"#;
+
+/// **A carried-on session that draws its own sign-out again is not stopped a
+/// second time** (ADR-0022).
+///
+/// claude writes the line into its log as the answer to the turn that failed and
+/// draws every message of a conversation it resumes, so a session carrying one
+/// on puts the old sign-out back on its terminal with a login that is perfectly
+/// good. Read there, every carry-on of a run that had once signed out would stop
+/// the moment its past was drawn, whatever the login was by then.
+///
+/// Two things keep that from happening and this proves both: claude's phrase is
+/// read in its log and nowhere else — not what it printed, not the frame it drew
+/// — and the log is followed from where *this* session begins in it, so the line
+/// the run stopped on the first time sits behind the reading rather than in
+/// front of it. See the server's `signouts::ReadIn` and `transcript::Carried`.
+#[tokio::test]
+async fn a_carried_on_session_is_not_stopped_again_by_the_sign_out_it_draws() {
+    let fixture = grilling(&a_task_held_by_resumed_with(
+        &says_it_signed_out(),
+        &a_sign_out_its_resume_draws_again(),
+    ))
+    .await;
+
+    running_out(&fixture).await;
+
+    let signed_out = fixture.stopped().await;
+
+    assert!(
+        signed_out
+            .html
+            .contains("<strong>implementation</strong> account has signed out"),
+        "the run stopped the once, because the account really had signed out: {:?}",
+        signed_out.html,
+    );
+
+    fixture.quiet().await;
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(2)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    // The hazard itself, read off the Capture of the session carrying the
+    // conversation on: the old line drawn again, over and over, the way the
+    // display draws a conversation it is resuming. So it is on that session's
+    // terminal, on the frame it drew, and in the Capture both were kept in —
+    // and none of the three is where a sign-out on claude is read.
+    fixture.printed(resumed, LOGIN_EXPIRED).await;
+
+    // And the run went on past it, which a stop would have ended the session
+    // before it could.
+    fixture.printed(resumed, "committed 01-count.md").await;
+
+    let view = fixture.view().await;
+    let worktree = PathBuf::from(view.worktree.clone().unwrap().path);
+
+    assert_eq!(
+        git(&worktree, &["log", "--format=%s", "-1"]),
+        "feat: 01-count.md\n",
+        "the carried-on session worked past its own redrawn sign-out and \
+         committed the task it was part way through",
+    );
+
+    let signed_out: Vec<String> = notices(&view)
+        .into_iter()
+        .filter(|notice| notice.contains("account has signed out"))
+        .collect();
+
+    assert_eq!(
+        signed_out.len(),
+        1,
+        "and the run signed out once: the sign-out the session really had, rather \
+         than a second one read off the line it drew again — {signed_out:?}",
+    );
+    assert!(
+        view.blocked_on.is_none(),
+        "with nobody blocked on a login that was never gone: {:?}",
+        view.blocked_on,
+    );
+    assert!(
+        view.working,
+        "and the Conversation is working rather than stopped a second time",
+    );
+}
+
+/// **And the window reader is held to the same rule**: a session carrying a
+/// conversation on appends to the log the run ran out in, and the line that
+/// stopped it the first time is behind where this session's reading begins.
+///
+/// The same hazard in the one record a session leaves that outlives it. What it
+/// printed and the frame it drew are this session's own, and both are empty when
+/// it starts; the log is the one that was already there, with a backend's own
+/// account of the window it ran out of still in it — which is a record the
+/// window is read in, because a backend that says so there and not on its
+/// display would otherwise go unnoticed. So the following opens where the
+/// carried-on session opens, and not at the top. See the server's
+/// `transcript::Carried`, whose offset this is.
+#[tokio::test]
+async fn a_carried_on_session_is_not_stopped_again_by_the_window_in_its_log() {
+    let fixture = grilling(&a_task_held_by_resumed_with(
+        &says_its_window_is_spent(),
+        CARRIES_ON_WITH_THE_WINDOW_BACK,
+    ))
+    .await;
+
+    running_out(&fixture).await;
+
+    let out_of_window = fixture.stopped().await;
+
+    assert!(
+        out_of_window
+            .html
+            .contains("<strong>implementation</strong> account is out of window"),
+        "the run stopped the once, because the account really had run out: {:?}",
+        out_of_window.html,
+    );
+
+    fixture.quiet().await;
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(2)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    // The session says nothing of its own in the log for a moment, which is the
+    // window a reading opened at the top of the carried log would have stopped
+    // in — and then gets on with the task and commits it.
+    fixture.printed(resumed, "committed 01-count.md").await;
+
+    let view = fixture.view().await;
+    let worktree = PathBuf::from(view.worktree.clone().unwrap().path);
+
+    assert_eq!(
+        git(&worktree, &["log", "--format=%s", "-1"]),
+        "feat: 01-count.md\n",
+        "the carried-on session worked the task it was part way through to its \
+         commit, the line it inherited in the log having stopped nothing",
+    );
+
+    let out_of_window: Vec<String> = notices(&view)
+        .into_iter()
+        .filter(|notice| notice.contains("account is out of window"))
+        .collect();
+
+    assert_eq!(
+        out_of_window.len(),
+        1,
+        "and the run ran out once: the window the session really spent, rather \
+         than the same line read again out of the log it carried on — \
+         {out_of_window:?}",
+    );
+    assert!(
+        view.blocked_on.is_none(),
+        "with nobody blocked on a window that had already come back: {:?}",
+        view.blocked_on,
+    );
+    assert!(
+        view.working,
+        "and the Conversation is working rather than stopped a second time",
     );
 }
 

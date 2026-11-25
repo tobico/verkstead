@@ -19,6 +19,6 @@ redrawn frame or a Capture holding replayed bytes must not re-trigger a stop.
 
 ## Acceptance criteria
 
-- [ ] A session carried on after a sign-out, whose history holds the old sign-out line, does not stop the run again (tested).
-- [ ] The usage-window reader is held to the same rule and is tested the same way.
-- [ ] The frame and Capture readers are checked for a redrawn-history re-trigger, as the Brief asks.
+- [x] A session carried on after a sign-out, whose history holds the old sign-out line, does not stop the run again (tested).
+- [x] The usage-window reader is held to the same rule and is tested the same way.
+- [x] The frame and Capture readers are checked for a redrawn-history re-trigger, as the Brief asks.
