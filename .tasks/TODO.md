@@ -25,6 +25,6 @@ write anything.
 - [x] 02: The Implementing mid-turn signal — [details](02-implementing-signal.md)
 - [x] 03: The job-must-not-change short-circuit — [details](03-job-short-circuit.md)
 - [x] 04: The remaining stop-ways — [details](04-remaining-stop-ways.md)
-- [ ] 05: Restart and shutdown — [details](05-restart-and-shutdown.md)
+- [x] 05: Restart and shutdown — [details](05-restart-and-shutdown.md)
 - [ ] 06: The sign-out and usage-window reader preservation — [details](06-reader-preservation.md)
 - [ ] 07: CONTEXT.md and the ADR — [details](07-context-and-adr.md)

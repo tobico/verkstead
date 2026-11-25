@@ -16885,6 +16885,252 @@ async fn a_run_stopped_between_two_tasks_is_re_primed_for_the_next_one() {
     );
 }
 
+/// **A restart over a task session part way through its task carries it on**,
+/// with nobody having pressed anything.
+///
+/// No session survives the process, so a server coming up holds a Conversation
+/// whose task is half-built and whose agent has gone — which is a cut-off by
+/// every rule the press reads, read in the same place: `at_startup` presses
+/// Resume for itself, and the recompute is the one the button gives. Which is
+/// why a restart needs nothing written at the stop. There was nothing running at
+/// the restart to write it with — a kill and a crash leave less still — so the
+/// question is asked at the launch, where every way back in passes.
+///
+/// A second server over the same database, which is what a restart is here: the
+/// session the first one was running lived in the process that started it.
+#[tokio::test]
+async fn a_restart_over_a_task_session_part_way_through_carries_it_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("never");
+    let stub = two_tasks_carrying_on_at(&gate);
+    let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    // The task session at work, in front of a gate this test never opens: it has
+    // written what it was building and nothing has committed it.
+    let working = fixture.attachable(2).await;
+    fixture.printed(working, "working 01-count.md").await;
+
+    assert!(
+        notices(&fixture.view().await).is_empty(),
+        "the first server is driving it happily, which is what makes this a \
+         restart over a session at work rather than over a stop",
+    );
+    assert_ne!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "and what the task session has written is still waiting for a commit, \
+         which is what says the task is half-built rather than done",
+    );
+
+    let before = outputs(&fixture.view().await).len();
+
+    let _restarted = fixture.restarted(&stub, PULL_REQUEST).await;
+
+    // The session the second server started, with nobody having pressed
+    // anything: a restart takes up everything the last one was driving.
+    let said = fixture.printed_after(before).await;
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the session the restart took away: {said:?}",
+    );
+    assert!(
+        !said.contains("working 01-count.md"),
+        "and nothing was primed as a fresh session for the task it was already \
+         part way through: {said:?}",
+    );
+
+    let view = fixture.view().await;
+    let raised = notices(&view);
+
+    assert!(
+        raised.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "the Timeline says which of the two resumes it was: {raised:?}",
+    );
+    assert!(
+        notices_but_the_carrying_on(&view).is_empty(),
+        "and nothing was raised about the session the restart killed, beyond the \
+         line saying which of the two took it up: {raised:?}",
+    );
+}
+
+/// **And a restart over a run left cleanly between two tasks stays Verkstead's
+/// own Resume**: the task that was being built is committed, so what the server
+/// coming up starts is a fresh session for the next one.
+///
+/// The restart's half of the reading the press makes, and the same answer: a run
+/// comes to rest between two tasks as ordinarily as it is cut off mid-task, and
+/// a server having gone away in the meantime is no reason to read it
+/// differently. A conversation carried on here would be an agent told to pick up
+/// the task it had just committed.
+#[tokio::test]
+async fn a_restart_over_a_run_left_between_two_tasks_is_re_primed_for_the_next_one() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let stub = two_tasks_carrying_on_at(&gate);
+    let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    // The gate is opened, so the task session gets its commit in before the
+    // restart finds it. It gives no Done signal, so nothing ends it and nothing
+    // launches the next task: what the second server comes up to is a run with
+    // its first task done and its second not started.
+    let working = fixture.attachable(2).await;
+    fixture.printed(working, "working 01-count.md").await;
+    std::fs::write(&gate, "").unwrap();
+    fixture.printed(working, "committed 01-count.md").await;
+
+    assert_eq!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "nothing of the task is left waiting for a commit, which is what says the \
+         run came to rest between two of them",
+    );
+
+    let before = outputs(&fixture.view().await).len();
+
+    let _restarted = fixture.restarted(&stub, PULL_REQUEST).await;
+
+    let said = fixture.printed_after(before).await;
+
+    assert!(
+        said.contains("working 02-refuse.md"),
+        "a fresh session for the next task, which is what Verkstead's own Resume \
+         launches: {said:?}",
+    );
+    assert!(
+        !said.contains("carried on"),
+        "and no harness was told to resume a conversation that had finished what \
+         it was sent for: {said:?}",
+    );
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices_but_the_carrying_on(&view).is_empty(),
+        "with nothing raised about the restart either: {:?}",
+        notices(&view),
+    );
+    assert!(
+        !notices(&view)
+            .iter()
+            .any(|notice| notice.contains("The session that stopped here was part way through")),
+        "and nothing said about carrying anything on, nothing having been cut \
+         off: {:?}",
+        notices(&view),
+    );
+}
+
+/// **And a stop somebody decided on is still left for a press across a
+/// restart**, cut off mid-task or not.
+///
+/// The one kind of stop `at_startup` passes over: Verkstead or the human pulled
+/// the brake, and a server coming back up is no reason to think differently
+/// about it. Which is a rule about whether anything starts at all rather than
+/// about what it would be — so the restart makes no reading and writes nothing
+/// down, and the press that comes the next morning finds the cut-off exactly as
+/// it stood and carries that session on.
+#[tokio::test]
+async fn a_stop_the_human_decided_on_is_left_for_a_press_across_a_restart() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("never");
+    let stub = two_tasks_carrying_on_at(&gate);
+    let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    let working = fixture.attachable(2).await;
+    fixture.printed(working, "working 01-count.md").await;
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+    fixture.quiet().await;
+
+    assert_eq!(
+        fixture.chosen().await,
+        Decision::Human,
+        "the human pressed Force stop, which is the half of the stop that says a \
+         restart leaves it alone",
+    );
+
+    let before = outputs(&fixture.view().await).len();
+
+    let _restarted = fixture.restarted(&stub, PULL_REQUEST).await;
+
+    // Long enough for the second server to have taken up everything it was ever
+    // going to take up.
+    tokio::time::sleep(BRISKLY.grace * 4).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        outputs(&view).len(),
+        before,
+        "nothing was launched over a stop somebody decided on",
+    );
+    assert!(
+        !notices(&view)
+            .iter()
+            .any(|notice| notice.contains("The session that stopped here was part way through")),
+        "and nothing was written down about carrying it on either, the reading \
+         being the launch's and no launch having happened: {:?}",
+        notices(&view),
+    );
+
+    // And the press the restart left it for, which finds the cut-off exactly
+    // where the stop left it.
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let said = fixture.printed_after(before).await;
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the session the force stop took away, a \
+         restart having spent nothing in between: {said:?}",
+    );
+    assert!(
+        !said.contains("working 01-count.md"),
+        "and nothing was primed as a fresh session for the half-built task: {said:?}",
+    );
+}
+
 /// A **Tinker** whose round commits, puts its question up, and goes on working
 /// once the human has answered — and which says, where it is resumed, that it is
 /// the session that was having that round rather than a fresh one.

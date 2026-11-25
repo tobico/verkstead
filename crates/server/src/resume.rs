@@ -935,6 +935,16 @@ async fn cut_off(state: &AppState, conversation_id: i64, mid_turn: MidTurn) {
 /// Conversation left standing still because Verkstead was upgraded is one that
 /// would wait for however long it took somebody to notice.
 ///
+/// **And a session cut off by the restart is carried on**, which costs this
+/// nothing: the recompute reads the cut-off for itself, so a Conversation whose
+/// session was mid-turn when the process went gets the harness's own resume and
+/// one left cleanly between two steps gets Verkstead's — see [`cut_off`]. Which
+/// is the whole reason that reading is made at the launch rather than written at
+/// the stop. A restart, a kill and a crash each leave nothing running to write a
+/// row with, and a shutdown is the same thing again: there is no graceful path
+/// out of this process, so a server stopping is a server whose sessions stop
+/// where they stand.
+///
 /// **Except where somebody decided to stop.** A stop [`store::Decision::decided`]
 /// answers for is Verkstead or the human pulling the brake — the checks that
 /// would not go green, a finish step with no pull request, a Stop pressed from
@@ -942,6 +952,9 @@ async fn cut_off(state: &AppState, conversation_id: i64, mid_turn: MidTurn) {
 /// to think differently about any of them. Those wait for the press, whether or
 /// not they are marked as waiting on anybody. A [`store::Decision::Circumstance`] is
 /// the other half of the same record: nobody chose it, so it is taken up here.
+/// And a stop left alone is a cut-off left alone with it: nothing is read and
+/// nothing is written down, so the press it is waiting for finds the session
+/// that stopped exactly as it stood.
 ///
 /// A refusal is written down rather than logged, because a Conversation that
 /// cannot be started is exactly the one somebody has to look at: it stops, with
