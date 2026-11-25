@@ -802,10 +802,24 @@ async fn mid_turn(direction: Direction, worktree: &Path) -> MidTurn {
 /// stood, and one that exited cleanly had finished the turn it was having.
 ///
 /// **Which is the absence of a row.** How a session ended is written down for one
-/// that ended on its own account and never for one Verkstead ended itself — a
-/// force stop, a sign-out, an account out of window — so nothing written down
-/// over a session that is no longer running is the live kill this is looking for.
-/// See [`store::the_last_ending`], where that reading is written up.
+/// that ended on its own account and never for one Verkstead ended itself, so
+/// nothing written down over a session that is no longer running is Verkstead
+/// having ended it — a force stop, a sign-out, an account out of window — which
+/// is the live kill this is looking for. See [`store::the_last_ending`], where
+/// that reading is written up.
+///
+/// **And it is wider than the kills by two**, which is worth knowing before
+/// reading an absence as one: a session that had said it was done and gone quiet
+/// since leaves no row either, nor does one that had asked for the work to be
+/// moved — see [`crate::sessions::Ended::on_purpose`]. The move never reaches
+/// here, the Transfer having written its own row for the session that crossed
+/// and the guard below finding it. The done one is a round that was over, and
+/// the state it was over *in* is left behind as its ending lands — so what is
+/// left is the gap between a round's session being ended and its ending's own
+/// next launch, where this reads a cut-off over a conversation that had nothing
+/// left to say. One session, and the round it starts says it is done again. Told
+/// apart properly it wants a row written for the ending that landed, which is a
+/// change to what that table records rather than to this reading.
 ///
 /// **And a harness that fell over mid-round is the other half of it**, read off
 /// the row rather than off its absence: a session that exited of its own account

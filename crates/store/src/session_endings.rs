@@ -40,11 +40,11 @@
 //!
 //! **Which makes the absence a reading of its own**, and the second reader is
 //! after that one: a session no longer running with nothing written down about
-//! how it ended is one that was taken away while it was running — force-stopped,
-//! signed out, out of window — rather than one that exited on its own account.
-//! Which is what says a follow-up's round was cut off mid-sentence rather than
-//! having finished the turn it was having. See [`the_last_ending`], and the
-//! server's `resume` module.
+//! how it ended is one Verkstead ended rather than one that exited on its own
+//! account, and that is mostly the live kill — force-stopped, signed out, out of
+//! window. Which is what says a follow-up's round was cut off mid-sentence
+//! rather than having finished the turn it was having. See [`the_last_ending`],
+//! which is where the *mostly* is spelled out, and the server's `resume` module.
 //!
 //! **And the row that is there is read for the same question**, because a
 //! session that exited of its own account may have fallen over doing it — which
@@ -103,8 +103,9 @@ impl Ended {
     /// relay that could not reap one at all — the last two having no code to
     /// read, and no account of themselves either.
     ///
-    /// Read beside the absence of a row, which is the live kill — see
-    /// [`the_last_ending`]. The two together are what say a session was taken
+    /// Read beside the absence of a row, which is Verkstead having ended the
+    /// session and mostly the live kill — see [`the_last_ending`], which says
+    /// where the *mostly* is. The two together are what say a session was taken
     /// away part way through its turn rather than having finished it, the clean
     /// exit being the one ending of the three that was not. See the server's
     /// `resume` module, where that is decided.
@@ -202,11 +203,30 @@ pub async fn session_ending(
 ///
 /// `None` is half of what its readers are after: **a session that was taken
 /// away while it was running**. A row is written for a session that ended on its
-/// own account and never for one Verkstead ended itself — a force stop, a
-/// sign-out, an account out of window — so the absence of one over a session
-/// that is no longer running is the live kill. See the server's `resume` module,
-/// which asks this about a follow-up and about an investigation: a round's
-/// session taken away mid-sentence is one with a conversation to carry on.
+/// own account and never for one Verkstead ended itself, so the absence of one
+/// over a session that is no longer running is Verkstead having ended it. See
+/// the server's `resume` module, which asks this about a follow-up and about an
+/// investigation: a round's session taken away mid-sentence is one with a
+/// conversation to carry on.
+///
+/// **And *Verkstead ended it* is wider than the live kill**, which is the one
+/// thing to know before reading `None` as one. A force stop, the Conversation
+/// closed, a sign-out and an account out of window are the kills, and they are
+/// what this is for. Two more leave no row and are not kills: a session that had
+/// **said it was done** and gone quiet since, and one that had **asked for the
+/// work to be moved** and gone quiet since — see the server's `Ended::on_purpose`,
+/// which is the one place the ways in are counted.
+///
+/// Both of those cost the readers nothing, for two different reasons. The move
+/// is never asked about: whatever carries a Transfer out writes its own row for
+/// the session that crossed, and the launch reads that rather than this. A
+/// session that had said it was done is a round that was over, and the states
+/// those readers ask from are left behind as the ending lands — so the window
+/// where one is still read here is the gap between a round's session being ended
+/// and the ending's own next launch, and what it costs is one session carried on
+/// that had nothing left to say. Told apart properly it would want a row of its
+/// own, which is a change to what this table is for rather than to how it is
+/// read.
 ///
 /// And the other half is [`Ended::fell_over`] over the row that is there: a
 /// session that exited of its own account had the turn it was having **unless it
