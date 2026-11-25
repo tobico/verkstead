@@ -754,8 +754,8 @@ async fn mid_turn(direction: Direction, worktree: &Path) -> MidTurn {
 /// alone cannot say either, a Conversation sitting in Follow-up through every
 /// round it has and going on sitting there where an ending that sent for a pull
 /// request got nowhere. What tells the two apart is the session: one taken away
-/// while it was running was mid-sentence, and one that exited on its own account
-/// had finished the turn it was having.
+/// while it was running was mid-sentence, as was one that fell over where it
+/// stood, and one that exited cleanly had finished the turn it was having.
 ///
 /// **Which is the absence of a row.** How a session ended is written down for one
 /// that ended on its own account and never for one Verkstead ended itself — a
@@ -763,11 +763,17 @@ async fn mid_turn(direction: Direction, worktree: &Path) -> MidTurn {
 /// over a session that is no longer running is the live kill this is looking for.
 /// See [`store::the_last_ending`], where that reading is written up.
 ///
-/// **A harness that fell over mid-round reads as between steps here**, which is
-/// the way round every part of this decision falls: an exit of its own account is
-/// read as the turn having ended, and Verkstead's own Resume is a complete way to
-/// take a follow-up up. Reading a bad exit as the cut-off it usually is belongs
-/// with the rest of the stop-ways.
+/// **And a harness that fell over mid-round is the other half of it**, read off
+/// the row rather than off its absence: a session that exited of its own account
+/// had the turn it was having unless it fell over in the middle of one, which is
+/// the same cut-off by another route. So the one ending that leaves a
+/// conversation nobody is mid-sentence in is the clean exit — see
+/// [`store::Ended::fell_over`], which is where the three are told apart.
+///
+/// Which is why a crash costs the run nothing here however it was found: the
+/// stall sweep that noticed it, the stop a driver wrote over it, and a restart
+/// coming up to a Conversation nothing has driven since all read the same row and
+/// all carry the same conversation on.
 ///
 /// **And what the session was sent for is not part of it**, because nothing
 /// writes that down: a Tinker whose rounds are over sits in Follow-up while the
@@ -784,7 +790,12 @@ async fn mid_round(state: &AppState, conversation_id: i64) -> MidTurn {
         // while it was running.
         Ok(None) => MidTurn::PartWayThrough,
 
-        // It ended on its own account, which is a turn that was over.
+        // It ended on its own account and fell over doing it, which is a turn
+        // that stopped in the middle rather than one that was over.
+        Ok(Some(ended)) if ended.fell_over() => MidTurn::PartWayThrough,
+
+        // And it ended on its own account and cleanly, which is a turn that was
+        // over.
         Ok(Some(_)) => MidTurn::BetweenSteps,
 
         Err(error) => {

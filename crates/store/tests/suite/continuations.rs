@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, AgentType, Continued, Pairing, ProfileFacts, carrying_a_conversation,
+    Account, AgentType, Continued, Ended, Pairing, ProfileFacts, carrying_a_conversation,
     continue_on_arrival, create_profile, end_session, open_database, register_repo, start_capture,
     start_conversation, take_up_the_conversation, the_last_ending, the_last_session,
 };
@@ -425,5 +425,49 @@ async fn the_last_ending_is_the_newest_sessions_and_is_absent_for_one_verkstead_
         "and the newest session is still the newest where nothing was written \
          down about how it ended: a session Verkstead took away while it was \
          running, which is the live kill the launch is looking for",
+    );
+}
+
+/// **And a row that is there says which ending it was**: a session that fell
+/// over is a cut-off like one taken away, and the clean exit is the one ending
+/// of the three that finished the turn it was having.
+///
+/// Every way of ending badly, because what the reading turns on is the exit code
+/// and two of the three ways have none: a status the agent chose, a process
+/// something else killed, and a relay that could not reap one at all. See the
+/// server's `resume::mid_round`, the one reader.
+#[tokio::test]
+async fn an_ending_fell_over_unless_the_session_exited_with_nothing_wrong() {
+    assert!(
+        !Ended {
+            code: Some(0),
+            lived: Duration::from_millis(400),
+            printed: true,
+        }
+        .fell_over(),
+        "a session that ran its turn out and exited zero — which is not the same \
+         as having done the work, an agent with nothing to do exiting zero too",
+    );
+
+    assert!(
+        Ended {
+            code: Some(1),
+            lived: Duration::from_millis(400),
+            printed: true,
+        }
+        .fell_over(),
+        "a status the agent chose",
+    );
+
+    assert!(
+        Ended {
+            code: None,
+            lived: Duration::from_millis(400),
+            printed: false,
+        }
+        .fell_over(),
+        "and no status at all, which is a process something else killed or a \
+         relay that could not reap one: no code to read, and no account of \
+         itself either",
     );
 }

@@ -45,6 +45,12 @@
 //! Which is what says a follow-up's round was cut off mid-sentence rather than
 //! having finished the turn it was having. See [`the_last_ending`], and the
 //! server's `resume` module.
+//!
+//! **And the row that is there is read for the same question**, because a
+//! session that exited of its own account may have fallen over doing it — which
+//! is a turn stopped in the middle by another route. So the one ending of the
+//! three that leaves a conversation nobody is mid-sentence in is the clean
+//! exit: see [`Ended::fell_over`].
 
 use std::time::Duration;
 
@@ -83,6 +89,33 @@ pub struct Ended {
     /// nothing has nothing in its Capture worth showing the human however full
     /// that Capture looks.
     pub printed: bool,
+}
+
+impl Ended {
+    /// Whether the session **fell over**: it ended badly rather than running
+    /// its turn out.
+    ///
+    /// What a row here is written for is a session that ended on its own
+    /// account, and an exit code of zero is the one of those that went to plan
+    /// — which is not the same as *did the work*, an agent that decides there
+    /// is nothing to do exiting zero as well. Everything else is a harness that
+    /// fell over: a status it chose, a process something else killed, and a
+    /// relay that could not reap one at all — the last two having no code to
+    /// read, and no account of themselves either.
+    ///
+    /// Read beside the absence of a row, which is the live kill — see
+    /// [`the_last_ending`]. The two together are what say a session was taken
+    /// away part way through its turn rather than having finished it, the clean
+    /// exit being the one ending of the three that was not. See the server's
+    /// `resume` module, where that is decided.
+    ///
+    /// `fell_over` rather than *badly*, for the reason [`Ended`] is not called
+    /// `Ending`: the server has an `Ended::badly` of its own that answers a
+    /// different question — what a stop's Notice calls this ending — and the
+    /// server is where both are read.
+    pub fn fell_over(&self) -> bool {
+        self.code != Some(0)
+    }
 }
 
 /// The table the endings live in.
@@ -167,14 +200,19 @@ pub async fn session_ending(
 /// How the **newest** session of `conversation_id` ended, where anything was
 /// written down about it.
 ///
-/// `None` is the answer its one reader is after: **a session that was taken away
-/// while it was running**. A row is written for a session that ended on its own
-/// account and never for one Verkstead ended itself — a force stop, a sign-out,
-/// an account out of window — so the absence of one over a session that is no
-/// longer running is the live kill. See the server's `resume` module, which asks
-/// this about a follow-up: a round's session taken away mid-sentence is one with
-/// a conversation to carry on, and one that exited on its own account had
-/// finished the turn it was having.
+/// `None` is half of what its one reader is after: **a session that was taken
+/// away while it was running**. A row is written for a session that ended on its
+/// own account and never for one Verkstead ended itself — a force stop, a
+/// sign-out, an account out of window — so the absence of one over a session
+/// that is no longer running is the live kill. See the server's `resume` module,
+/// which asks this about a follow-up: a round's session taken away mid-sentence
+/// is one with a conversation to carry on.
+///
+/// And the other half is [`Ended::fell_over`] over the row that is there: a
+/// session that exited of its own account had the turn it was having **unless it
+/// fell over in the middle of it**, which is the same cut-off by another route.
+/// So one ending of the three leaves a conversation that was finished with, and
+/// it is the clean exit.
 ///
 /// Which is why the two other ways `None` comes out cost nothing here. A
 /// Conversation with no sessions at all is asked about by nobody — the launch
