@@ -65,6 +65,7 @@
 //! same stops alone for the same reason. See [`on_arrival`].
 
 use std::future::Future;
+use std::path::Path;
 use std::pin::Pin;
 
 use tokio::sync::watch;
@@ -368,7 +369,7 @@ async fn recompute(
             // a direction, and picking one moves the Conversation out of Grilling.
             // So a Conversation still grilling with a session behind it is one
             // whose interview stopped part way through, however it stopped.
-            cut_off(state, conversation_id).await;
+            cut_off(state, conversation_id, MidTurn::PartWayThrough).await;
 
             starting(state, conversation_id, resuming).await?;
 
@@ -385,7 +386,10 @@ async fn recompute(
             ));
         }
 
-        // The next step read off the branch, which is the direction's to say.
+        // The next step read off the branch, which is the direction's to say —
+        // or, where the step that was running never finished, the session that
+        // was running it carried on. Which of the two is the backlog's own
+        // answer rather than an unconditional one: see [`mid_turn`].
         Lifecycle::Implementing => {
             // A Conversation implements because a direction was picked, so a
             // missing one is another record that cannot be true — and the one
@@ -471,6 +475,20 @@ async fn recompute(
                     }
                 }
             }
+
+            // And whether the session that stopped here was cut off part way
+            // through its step, which a run answers from its own state rather
+            // than unconditionally: a run stops between tasks as routinely as
+            // mid-task, and only one of the two has a conversation worth
+            // carrying on. See [`mid_turn`], and [`cut_off`].
+            //
+            // After every refusal above and before the spawn, which is where a
+            // grilling's is for the same two reasons: nothing may be written
+            // down as standing to be carried on where the press is about to
+            // refuse and launch nothing at all, and a conversation standing to
+            // be carried on is what holds the Question Sets the gone session was
+            // idling on open rather than locking them.
+            cut_off(state, conversation_id, mid_turn(direction, &worktree).await).await;
 
             starting(state, conversation_id, resuming).await?;
 
@@ -656,10 +674,66 @@ async fn recompute(
     Ok(Resumed::Resumed)
 }
 
+/// Whether the session that stopped here was **cut off**: stopped part way
+/// through its step rather than finishing it.
+///
+/// The one thing the states that reach [`cut_off`] answer differently, which is
+/// why it is read where the state is known and handed in rather than worked out
+/// down there. A **grilling's** is unconditional — a grilling is over when it has
+/// picked a direction, and picking one moves the Conversation out of Grilling. A
+/// **run's** is the state of what it was building, because a run stops between
+/// tasks as routinely as mid-task: see [`mid_turn`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MidTurn {
+    /// It was: the step the session was running did not finish, so there is a
+    /// conversation with the whole of that step in it to carry on.
+    PartWayThrough,
+
+    /// It was not: the step finished and the run stopped between two of them,
+    /// where what is next is a fresh session whatever anybody decides. Nothing
+    /// was cut off, so Verkstead's own Resume is simply what it always was and
+    /// there is nothing to tell anybody about.
+    BetweenSteps,
+}
+
+/// How a run reads whether the session that stopped was cut off part way through
+/// its step: the backlog's own answer, where the direction being followed has
+/// one.
+///
+/// Asked of `.tasks/` and the branch by the same reading the launch itself makes
+/// of the two — see [`crate::runner::mid_step`], which is where it is written up.
+/// Folded in here rather than asked as a second question, because what differs
+/// between the states that have a cut-off is how *mid-turn* is read and nothing
+/// else about the occasion.
+///
+/// **An inline implementation and a roadmap's own writing read as between
+/// steps**, which leaves them Verkstead's own Resume. Neither has a backlog to
+/// have been part way through, and the question each of them does answer — what
+/// the branch is already on — is asked over the network by the launch itself and
+/// may come out as a wrap-up with no session in it at all. A row written in front
+/// of that is a row nothing spends, which the next session of the work would take
+/// up and be told to resume a conversation that had nothing to do with it.
+async fn mid_turn(direction: Direction, worktree: &Path) -> MidTurn {
+    let part_way = match direction {
+        Direction::TaskList => crate::runner::mid_step(worktree).await,
+        Direction::Inline | Direction::Roadmap => false,
+    };
+
+    match part_way {
+        true => MidTurn::PartWayThrough,
+        false => MidTurn::BetweenSteps,
+    }
+}
+
 /// Write down that the launch about to happen carries on the session that was
 /// **cut off** here — stopped part way through its step rather than finishing it
 /// — so that what starts is that session resumed rather than a fresh one primed
 /// from the record.
+///
+/// `mid_turn` is the state's own answer to whether it was cut off at all, read
+/// where the state is known — see [`MidTurn`]. `BetweenSteps` writes nothing and
+/// says nothing: a run that stopped with its step done is a run whose next step
+/// is a fresh session anyway, so there is no conversation anybody is losing.
 ///
 /// **Read at the launch rather than written at the stop**, which is the one thing
 /// that parts this occasion from the other three. An arrival, an answer that
@@ -688,7 +762,14 @@ async fn recompute(
 /// own Resume, which is a complete way to take the work up — and the one that can
 /// be said in advance says so on the Timeline, the human pressing one thing and
 /// seeing two outcomes from it.
-async fn cut_off(state: &AppState, conversation_id: i64) {
+async fn cut_off(state: &AppState, conversation_id: i64, mid_turn: MidTurn) {
+    // Nothing was cut off, so there is nothing to carry on and nothing to say.
+    // Asked before any of the reads below, this being the one answer already in
+    // hand.
+    if mid_turn == MidTurn::BetweenSteps {
+        return;
+    }
+
     match store::carrying_a_conversation(&state.pool, conversation_id).await {
         // Nothing has been written, so this reading is the one that decides.
         Ok(false) => {}

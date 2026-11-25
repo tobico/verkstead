@@ -3944,13 +3944,80 @@ fn writes(line: &str) -> bool {
 
 /// Whether `.tasks/` has anything left in it to work.
 ///
-/// The one thing about a backlog anybody outside the runner asks: Resume refuses
-/// by name where there is nothing to launch a session for, and what *nothing*
-/// means is this module's own answer rather than a second reading of the
-/// directory — see [`crate::resume`]. What is left is asked again by whatever
+/// One of the two things about a backlog anybody outside the runner asks: Resume
+/// refuses by name where there is nothing to launch a session for, and what
+/// *nothing* means is this module's own answer rather than a second reading of
+/// the directory — see [`crate::resume`]. What is left is asked again by whatever
 /// the resume spawns, a moment later and for itself.
 pub(crate) async fn anything_to_work(worktree: &Path) -> bool {
     decide(worktree).await != Step::Nothing
+}
+
+/// And the other: whether the run that stopped in `worktree` was cut off **part
+/// way through a step** rather than between two of them.
+///
+/// Asked by the two readings [`backlog_again`] makes of a backlog — the step
+/// `.tasks/` says is next, and whether the branch holds what has been written for
+/// it. Every step of a run ends in a commit: a task's ticks its own box off, the
+/// finish takes `.tasks/` away. So a session that got its step done left the
+/// Worktree with nothing in it, and one cut off part way through left what it had
+/// written standing there.
+///
+/// Which is the difference a Resume has to tell, a run stopping between tasks as
+/// routinely as mid-task. A task committed and the run stopped is a next step that
+/// is a fresh session whatever anybody decides about it; a task half-built is a
+/// session with the whole of it still in the agent's head, and that is the one
+/// carried on — see [`crate::resume`], which is what tells a harness to resume
+/// the one and not the other.
+///
+/// `false` where `.tasks/` names no step to have been part way through: a backlog
+/// that is not there, and an entry nothing can be read out of. Those are also the
+/// two readings that may launch no session at all, and a conversation written
+/// down as standing to be carried on with nothing launched to take it up would be
+/// spent by whatever ran next instead.
+///
+/// And `false` where git will not answer, which is the way round everything about
+/// this decision falls: Verkstead's own Resume is a complete way to take the work
+/// up, and a git that was briefly busy is no reason to tell a harness to resume a
+/// conversation.
+pub(crate) async fn mid_step(worktree: &Path) -> bool {
+    match decide(worktree).await {
+        // A task to work, or the finish to run: what says whether a session was
+        // in the middle of one is what it left behind in the Worktree.
+        Step::Task { .. } | Step::Finish => {
+            let worktree = worktree.to_owned();
+
+            match tokio::task::spawn_blocking(move || anything_pending(&worktree)).await {
+                Ok(pending) => pending.unwrap_or(false),
+                Err(error) => {
+                    tracing::error!(error = ?error, "asking a Worktree whether a step was left part way through failed");
+                    false
+                }
+            }
+        }
+
+        // Neither of these is a step, so neither is one a session could have
+        // been stopped in the middle of.
+        Step::Nothing | Step::Broken { .. } => false,
+
+        // And none of these is ever what [`decide`] answers — see
+        // [`Step::Planning`]. Answered the same way, for want of anything a
+        // reading of `.tasks/` could mean by them.
+        Step::Planning | Step::PlanningStage | Step::Handoff(_) | Step::Staging(_) => false,
+    }
+}
+
+/// Whether git has any pending change at all in `worktree`, or `None` where it
+/// cannot say.
+///
+/// The whole of it rather than one path, which is the opposite of what
+/// [`pending`] is asked and for the opposite question: a landing is one step's own
+/// commit having happened, and this is whether *anything* a session wrote is
+/// still waiting for one.
+fn anything_pending(worktree: &Path) -> Option<bool> {
+    let said = git(worktree, &["status", "--porcelain"])?;
+
+    Some(!said.trim().is_empty())
 }
 
 /// What to run next in `worktree`, off the runtime's threads.
@@ -4659,6 +4726,55 @@ mod tests {
         run(path, &["commit", "-m", "feat: count the requests"]);
 
         assert!(landed(path, &landing), "ticked and committed");
+    }
+
+    /// And the same two readings asked the other question: what tells a task
+    /// **cut off part way through** from a run that stopped **between two of
+    /// them**, which is what says whether the session that stopped has a
+    /// conversation worth carrying on — see [`crate::resume`].
+    #[tokio::test]
+    async fn a_task_half_built_is_mid_step_and_a_task_committed_is_not() {
+        let dir = worktree(&list(0), &DOCUMENTS);
+        let path = dir.path();
+
+        assert!(
+            !mid_step(path).await,
+            "a backlog nobody has started on: the first task is next and nothing \
+             is waiting for a commit",
+        );
+
+        std::fs::write(path.join("limiter.md"), "a limiter\n").unwrap();
+
+        assert!(
+            mid_step(path).await,
+            "and a session part way through that task leaves what it has written \
+             standing in the Worktree",
+        );
+
+        // Which is what the task's own commit takes, box and work together.
+        finish(path, "01");
+
+        assert!(
+            !mid_step(path).await,
+            "so a task committed is a run stopped between two of them, where the \
+             next task is a fresh session anyway",
+        );
+
+        finish(path, "02");
+        finish(path, "03");
+
+        assert!(
+            !mid_step(path).await,
+            "and the finish is a step like the others: next, and not half-run",
+        );
+
+        std::fs::remove_dir_all(path.join(BACKLOG)).unwrap();
+
+        assert!(
+            !mid_step(path).await,
+            "while a `.tasks/` that has gone names no step to have been part way \
+             through, however much is pending",
+        );
     }
 
     /// The other way round, which is the breakdown's signal: the plan is written

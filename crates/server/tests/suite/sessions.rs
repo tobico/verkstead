@@ -16648,6 +16648,240 @@ async fn a_cut_off_session_verkstead_cannot_name_is_re_primed_and_says_why() {
     );
 }
 
+/// A two-task backlog whose task sessions write the log claude keeps of their
+/// conversation and say, when they are resumed, what they were resumed with —
+/// and whose work is committed only once the test opens the gate.
+///
+/// Which is what makes a run's two stops tellable apart: a session stopped in
+/// front of the gate left its task half-built, and one stopped behind it
+/// committed the task and the run came to rest between two of them.
+///
+/// Two tasks rather than one, because what the second stop is about is the
+/// *next* task: a backlog with one in it would read as a feature finished with
+/// whatever anybody pressed.
+fn two_tasks_carrying_on_at(gate: &Path) -> String {
+    format!(
+        r#"
+entry=$(printf '%s' "$PWD" | tr -c 'a-zA-Z0-9' '-')
+mkdir -p "$HOME/.claude/projects/$entry"
+record="$HOME/.claude/projects/$entry/$4.jsonl"
+case "$3" in
+--resume)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Picking the task up."}}]}}}}' >> "$record"
+    printf 'carried on\r\n'
+    printf 'prompt=%s\r\n' "$2"
+    sleep 300
+    ;;
+*)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Working."}}]}}}}' > "$record"
+    case "$1" in
+    claude-grilling-5)
+        printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+        : > /tmp/verkstead/done
+        printf 'breaking down\r\n'
+        mkdir -p .tasks
+        printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+        printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+        printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
+        printf '# 01. Count the requests\n' > .tasks/01-count.md
+        printf '# 02. Refuse the excess\n' > .tasks/02-refuse.md
+        git add .tasks
+        git commit --quiet -m 'chore: plan rate-limiting tasks'
+        : > /tmp/verkstead/done
+        printf 'the backlog has landed\r\n'
+        sleep 300
+        ;;
+    *)
+        number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+        next=$(ls .tasks | grep -E "^$number-" | head -n 1)
+        printf 'working %s\r\n' "$next"
+        printf 'a limiter\n' >> limiter.md
+        while [ ! -f {gate} ]; do sleep 0.05; done
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m "feat: $next"
+        printf 'committed %s\r\n' "$next"
+        sleep 300
+        ;;
+    esac
+    ;;
+esac
+"#,
+        gate = quoted(gate),
+    )
+}
+
+/// **A task session cut off part way through its task is carried on**, rather
+/// than a fresh session being primed for the task it was already building.
+///
+/// The Implementing reading of the same occasion, and the one that is not
+/// unconditional the way a grilling's is: a run stops between tasks as routinely
+/// as mid-task. What says which this was is the backlog's own state — the task's
+/// box unticked and what the session wrote still standing in the Worktree, rather
+/// than taken by a commit. See the server's `runner::mid_step`.
+///
+/// Nothing about the note says why it stopped. The stop wrote its own Notice at
+/// the time, and what the resumed agent needs is that it is the session it was
+/// and the work is where it left it.
+#[tokio::test]
+async fn a_task_cut_off_part_way_through_is_carried_on_when_the_run_starts_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("never");
+    let fixture = grilling_spilling(spill, &two_tasks_carrying_on_at(&gate), PULL_REQUEST).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    // The task session, in front of a gate this test never opens: it has written
+    // what it was building and nothing has committed it.
+    let working = fixture.attachable(2).await;
+    fixture.printed(working, "working 01-count.md").await;
+
+    assert_eq!(
+        fixture.force_stop().await,
+        ConversationStopped::Stopped,
+        "the task was stopped where it stood",
+    );
+
+    fixture.quiet().await;
+
+    assert_ne!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "and what it had written is still in the Worktree, which is what says \
+         the task was half-built rather than done",
+    );
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(2)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(resumed).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the session that was building the task: {said:?}",
+    );
+    assert!(
+        !said.contains("working 01-count.md"),
+        "and not primed as a fresh session for the task it was already part way \
+         through: {said:?}",
+    );
+
+    let notices = notices(&fixture.view().await);
+
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "the Timeline says which of the two resumes it was: {notices:?}",
+    );
+}
+
+/// **And a run that stopped cleanly between two tasks stays Verkstead's own
+/// Resume**: the task it was on is committed, so what is next is a fresh session
+/// for the next task whatever anybody decides.
+///
+/// Which is why the Implementing reading is the state's rather than
+/// unconditional. A run comes to rest between tasks as ordinarily as it is cut
+/// off mid-task, and a conversation carried on into the next task would be an
+/// agent told to pick up a task it had just finished.
+#[tokio::test]
+async fn a_run_stopped_between_two_tasks_is_re_primed_for_the_next_one() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let fixture = grilling_spilling(spill, &two_tasks_carrying_on_at(&gate), PULL_REQUEST).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    // The gate is opened, so the task session gets its commit in. It gives no
+    // Done signal, so nothing ends it and nothing launches the next task: what
+    // the stop below catches is a run with its first task done and its second
+    // not started.
+    let working = fixture.attachable(2).await;
+    fixture.printed(working, "working 01-count.md").await;
+    std::fs::write(&gate, "").unwrap();
+    fixture.printed(working, "committed 01-count.md").await;
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+    fixture.quiet().await;
+
+    assert_eq!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "nothing of the task is left waiting for a commit, which is what says \
+         the run stopped between two of them",
+    );
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let next = fixture
+        .until(|view| {
+            outputs(view)
+                .get(2)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(next).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("working 02-refuse.md"),
+        "a fresh session for the next task, which is what Verkstead's own Resume \
+         launches: {said:?}",
+    );
+    assert!(
+        !said.contains("carried on"),
+        "and no harness was told to resume a conversation that had finished what \
+         it was sent for: {said:?}",
+    );
+
+    let notices = notices(&fixture.view().await);
+
+    assert!(
+        !notices
+            .iter()
+            .any(|notice| notice.contains("The session that stopped here was part way through")),
+        "and nothing was said about carrying anything on, nothing having been cut \
+         off: {notices:?}",
+    );
+}
+
 /// **An answer that adds nothing to the sandbox ends nothing**: the session
 /// waiting on it is still the one running once the Response is stored, and
 /// hears it through the wait it is idling in (ADR-0028).
@@ -29171,6 +29405,14 @@ async fn wrapping_unwatched(fixture: &Grilling) {
 /// anything, and nothing reads the step off whatever stopped — a stop is
 /// answered whenever the human gets to it, and the branch is what has the
 /// answer by then.
+///
+/// **A fresh session here because the stub kept no log.** The session that died
+/// left what it had written in the Worktree uncommitted, so the task reads as
+/// half-built and the launch is a cut-off being carried on — and nothing stands
+/// in for claude's own record of that conversation, so it comes out as
+/// Verkstead's own Resume, which is the launch this test has always been about.
+/// The line saying which of the two it was is the one thing added to the
+/// Timeline; it raises nothing, which is why the count below reads past it.
 #[tokio::test]
 async fn resuming_a_stalled_backlog_run_takes_the_next_task_off_the_repository() {
     let fixture = grilling_swept(
@@ -29263,7 +29505,7 @@ async fn resuming_a_stalled_backlog_run_takes_the_next_task_off_the_repository()
         "and there is nothing left to resume, because something is driving it",
     );
     assert_eq!(
-        notices(&view).len(),
+        notices_but_the_carrying_on(&view).len(),
         1,
         "while the Notice stays where it is: it is a stop that really happened",
     );
