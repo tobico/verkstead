@@ -159,15 +159,15 @@
   gap: 0.5rem;
 }
 
-/* The presses that do rather than undo, filled. The keep is a secondary press
+/* The presses that do rather than undo, filled. The cancel is a secondary press
    and is painted once in `styles/base.css` — see `.secondary` there, and the
    note below that says which of these buttons is one.
 
-   The keep is stood out of the way with `:where`, which weighs nothing: a bare
-   `:not` would carry the keep's own class into this selector's weight, and the
+   The cancel is stood out of the way with `:where`, which weighs nothing: a bare
+   `:not` would carry the cancel's own class into this selector's weight, and the
    outlines written below to sit over this rule — the clear, and the two on a
    rule's row — would find themselves under it instead. */
-.form button:not(:where(.keep)) {
+.form button:not(:where(.cancel)) {
   padding: 0.5rem 1rem;
   font: inherit;
   font-weight: 600;
@@ -184,7 +184,7 @@
 }
 
 /* The way back from the field a token is pasted into is a secondary press, like
-   every other way back in the app: what `.keep` looks like is `.secondary` in
+   every other way back in the app: what `.cancel` looks like is `.secondary` in
    `styles/base.css`, and the class is named in this file only so that the filled
    rule above knows which of its buttons is not one of them. There is no
    cancelling the form itself any more — the pane is left by opening something
@@ -287,7 +287,7 @@
     border-color: var(--ink-soft);
   }
 
-  .form button:not(:where(.keep)):not(:disabled):hover {
+  .form button:not(:where(.cancel)):not(:disabled):hover {
     background: var(--accent-deep);
     border-color: var(--accent-deep);
   }
