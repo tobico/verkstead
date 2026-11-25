@@ -999,9 +999,11 @@ its own turn's to decide: the drivers that re-derive a job before launching ask
 whether one is standing before they re-derive it, and leave that reading alone
 where one is. A follow-up cut off between the human's answer and the agent
 reading it is picked up as that follow-up, rather than a `submitting` session
-being sent to open a pull request over the top of it; a backlog with nothing
-left in it is carried on rather than decided again. Which is the incident this
-rule was written for.
+being sent to open a pull request over the top of it; a backlog this branch
+wrote and worked to empty is carried on as the finish rather than decided again,
+and a stage that has written none is carried on as the planning that never
+landed, the two steps being watched for the opposite landing. Which is the
+incident this rule was written for.
 **What it is primed with is one sentence**, and nothing about why it stopped: the
 stop said that in a **Notice** of its own at the time, and a second telling is
 the human reading the same bad news twice. The **Question Sets** the session was

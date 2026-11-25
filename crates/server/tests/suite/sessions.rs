@@ -27900,6 +27900,104 @@ async fn resuming_a_stage_that_never_planned_runs_the_planning_again() {
     );
 }
 
+/// **And it runs the planning again with a conversation standing to be carried
+/// on**, rather than reading the stage's empty backlog as a finish part way
+/// through.
+///
+/// A run with nothing left in `.tasks/` and a conversation standing is ordinarily
+/// a finish that was cut off — the finish commit is what takes the backlog away,
+/// so a backlog already gone is the step that was running. A stage that never
+/// planned has an empty backlog for the opposite reason: its first step has not
+/// run. The two are watched for the opposite landing, the planning's being
+/// `.tasks/TODO.md` arrived and the finish's being the same file gone, so a
+/// planning session carried on as the finish is seen out against a rule its own
+/// commit makes false — and held at its roadmap's join before it is launched at
+/// all. What tells them apart is whether the branch has ever written a backlog,
+/// which is the reading the planning's own refusal already turns on. See the
+/// server's `runner::backlog_again`.
+///
+/// The row is written here the way an arrival or an answer that widened a
+/// sandbox writes one, which is what a row standing in front of an empty backlog
+/// really is: a run's own cut-off reads *between steps* over a `.tasks/` that
+/// names no step. A planning session ended for either of those, before it had
+/// committed, is exactly this shape.
+#[tokio::test]
+async fn a_stage_that_never_planned_is_carried_on_as_its_planning_and_not_as_a_finish() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+    let remembered = spill.path().join("tried");
+
+    let fixture = adopting_asking(
+        spill,
+        &plans_nothing_then_plans(&planning, &worked, &remembered),
+        NO_PULL_REQUEST,
+    )
+    .await;
+
+    // The planning ran and came to nothing, so the run stopped on the step it
+    // could not see land — the sibling above is where that is read in full.
+    fixture
+        .until(|view| {
+            said(view)
+                .into_iter()
+                .find(|notice| Some(notice.id) == view.blocked_on)
+                .cloned()
+        })
+        .await;
+
+    let view = fixture.view().await;
+    let worktree = PathBuf::from(view.worktree.expect("a stage has a Worktree").path);
+
+    assert!(
+        !worktree.join(".tasks").exists(),
+        "the planning died before it wrote a backlog, which is the whole condition",
+    );
+    assert_eq!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "and left nothing standing either, so the run's own cut-off reads nothing \
+         here and the row below is the only one there is",
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    let standing = the_last_session(&pool, fixture.id)
+        .await
+        .unwrap()
+        .expect("the planning session is named on the record");
+
+    continue_on_arrival(&pool, fixture.id, &standing)
+        .await
+        .unwrap();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    // The planning, again — rather than a session launched at the finish, which
+    // is what a backlog this branch had written and worked to empty would have
+    // made of the same row.
+    let started = until_written_saying(&worked, "next-task").await;
+    let planned = std::fs::read_to_string(&planning).unwrap();
+
+    assert_eq!(
+        prompts(&planned).len(),
+        2,
+        "the planning ran again, which is the step the stage was in the middle \
+         of: {planned:?}",
+    );
+    assert!(
+        prompts(&planned)[1].contains("/verkstead/skills/next-stage/SKILL.md"),
+        "in the fork of next-stage as the first was: {planned:?}",
+    );
+
+    assert!(
+        started.contains("/verkstead/skills/next-task/SKILL.md"),
+        "and the backlog it wrote is worked from there, the planning's own \
+         landing having been seen out: {started:?}",
+    );
+
+    assert_eq!(fixture.view().await.state, Lifecycle::Implementing);
+}
+
 /// A stub that carries a roadmap stage the whole way on its own: plans it, works
 /// the one task the plan wrote, finishes it, and reads the branch back finding
 /// nothing worth raising.

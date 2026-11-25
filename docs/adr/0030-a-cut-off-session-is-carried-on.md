@@ -95,7 +95,12 @@ named is what was turned down.
   it works is its own turn's to decide. The drivers that re-derive a job before
   launching ask whether one is standing before they re-derive it: a follow-up is
   picked up as that follow-up rather than diverted into opening a pull request,
-  and a backlog with nothing left in it is carried on rather than decided again.
+  and a backlog with nothing left in it is carried on rather than decided again
+  — as the finish where this branch wrote that backlog and worked it to empty,
+  and as the planning where it is a stage that never wrote one, the finish's
+  landing being `.tasks/TODO.md` gone and the planning's being the same file
+  arrived, so reading either as the other sees a session out against a rule its
+  own commit makes false.
   This is the incident's own fix, and it is the half that was not about losing
   context: a recompute is the right answer for a fresh session and the wrong
   question entirely for a resumed one.

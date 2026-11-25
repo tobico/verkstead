@@ -756,27 +756,41 @@ async fn backlog_again(
     // `.tasks/` gone and the branch on a pull request is what says the finish
     // landed, and nothing less ends the session. See [`Step::Finish`].
     //
+    // **And only where the branch has written one**, which is what parts the
+    // finish from the other thing an empty `.tasks/` can be: a step that has not
+    // run yet. A stage whose planning never committed has an empty backlog too,
+    // and the two steps are watched for the opposite landing — the planning's is
+    // `.tasks/TODO.md` **arrived** and the finish's is the same file **gone** —
+    // so a planning session carried on as the finish would be seen out against a
+    // rule its own commit makes false, and held at its roadmap's join before it
+    // was launched at all. The branch's own writing is what tells them apart, and
+    // it is the reading [`stage_to_plan`] already turns on, so the two agree
+    // wherever git does: *written* is the branch worked to empty, and a stage that
+    // planned nothing falls through to the reading it has always had. See
+    // [`wrote_a_backlog`], where *written* is also the careful answer to a git
+    // that will not say.
+    //
     // A run's own cut-off never reads this way: `.tasks/` naming no step is no
     // step to have been part way through, so [`mid_step`] answers *between
     // steps* over one and writes no row. A row standing here was written by an
     // arrival or by an answer that ended the session to widen its sandbox, each
     // of which has a session mid-turn on the other side of it all the same.
-    let step = match (
-        decide(working_in).await,
-        carrying_on(&state, conversation_id).await,
-    ) {
-        (Step::Nothing, true) => {
+    let step = match decide(working_in).await {
+        Step::Nothing
+            if carrying_on(&state, conversation_id).await
+                && wrote_a_backlog(working_in, base).await =>
+        {
             tracing::info!(
                 conversation_id,
-                "a conversation is standing to be carried on here and the backlog is worked \
-                 out, so the finish is carried on rather than what is left of the run \
-                 decided again",
+                "a conversation is standing to be carried on here and the backlog this branch \
+                 wrote is worked out, so the finish is carried on rather than what is left of \
+                 the run decided again",
             );
 
             Step::Finish
         }
 
-        (step, _) => step,
+        step => step,
     };
 
     if step == Step::Nothing {
