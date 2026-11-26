@@ -1560,6 +1560,13 @@ fn chained(stack: &[store::PullRequest]) -> Option<Vec<&str>> {
 /// to force-push over or to throw away. The branches are named in order from
 /// the bottom, which is the order a human checks a chain in.
 ///
+/// **Read back top first**, because that is the order `gh stack view` prints a
+/// chain in — `docs/agents/git-workflow.md`, measured. The list the session is
+/// given to check against is reversed for that one sentence and bottom-first
+/// everywhere else: named bottom first, a session would read a perfectly good
+/// chain, see it the other way up and stop at it, which is the stack's goes
+/// spent and the human asked about a conflict the machine could have fixed.
+///
 /// **And the worktree goes back on the Conversation's own branch at the end.**
 /// `checkout` switches to the top of the chain and nothing switches back, so
 /// an ordinary run would end with the Conversation's Worktree on a branch of
@@ -1585,6 +1592,15 @@ fn syncing(watched: &Watched, stack: &[store::PullRequest], branches: &[&str]) -
             Some(head) => format!("#{} (`{head}`)", opened.number),
             None => format!("#{}", opened.number),
         })
+        .collect();
+
+    // The chain as the session reads it back, which is the other way up: `gh
+    // stack view` prints a stack top first — measured, and in
+    // `docs/agents/git-workflow.md` — so a bottom-first list named as what it
+    // should say would be a session reading a healthy chain and stopping at it.
+    let quoted: Vec<String> = branches
+        .iter()
+        .map(|branch| format!("`{branch}`"))
         .collect();
 
     // Where the adoption is to leave this worktree, which is where it was: the
@@ -1628,9 +1644,10 @@ fn syncing(watched: &Watched, stack: &[store::PullRequest], branches: &[&str]) -
          With that done, adopt the chain with one command, which reads it off GitHub \
          rather than off this checkout — `gh {extension} checkout {url}`. It creates any \
          branch of the \
-         chain this worktree has not got, at origin's commit, and switches to the top. A \
-         chain that comes back from `gh {extension} view` as anything but {chain}, \
-         bottom first, is one to stop at rather than to force-push.\n\n\
+         chain this worktree has not got, at origin's commit, and switches to the top. \
+         Read it back with `gh {extension} view`, which prints a chain **top first**: what \
+         it should say is {reversed}. Anything else is one to stop at rather than to \
+         force-push.\n\n\
          Then `gh stack sync`. Where it reports a conflict it backs out rather than leaving \
          a branch half-rebased, and `gh stack rebase` is what walks the chain again and \
          stops in the conflict for you to resolve. Resolving it is the job: a conflict is \
@@ -1648,9 +1665,11 @@ fn syncing(watched: &Watched, stack: &[store::PullRequest], branches: &[&str]) -
         listed = listed.join(", "),
         worktree = watched.worktree.display(),
         extension = crate::stacks::EXTENSION,
-        chain = branches
+        chain = quoted.join(", "),
+        reversed = quoted
             .iter()
-            .map(|branch| format!("`{branch}`"))
+            .rev()
+            .cloned()
             .collect::<Vec<_>>()
             .join(", "),
         url = adopted(watched, stack),
@@ -2106,6 +2125,13 @@ mod tests {
         assert!(
             !told.contains("gh stack init"),
             "rather than the `init` that invents them: {told}",
+        );
+        assert!(
+            told.contains("top first")
+                && told.contains("`rate-limiting`, `stage-02`, `stage-01`"),
+            "and the chain is read back in the order `gh stack view` prints \
+             one, which is the other way up: named bottom first, a session \
+             would stop at a chain that came back perfectly good: {told}",
         );
         assert!(
             told.contains("switch this worktree back to `rate-limiting`"),

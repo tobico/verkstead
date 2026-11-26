@@ -30509,6 +30509,11 @@ async fn a_conflict_low_in_a_stack_sends_one_session_told_the_whole_chain() {
         "and to stop rather than sync over work nobody pushed: {prompt}",
     );
     assert!(
+        prompt.contains("top first") && prompt.contains("`stage-03`, `rate-limiting`, `stage-01`"),
+        "and to read the adopted chain back in the order `gh stack view` \
+         prints one, which is the other way up from the list above: {prompt}",
+    );
+    assert!(
         prompt.contains("switch this worktree back to `stage-01`"),
         "and to leave this worktree on the Conversation's own branch, which \
          `gh stack checkout` switches away from: {prompt}",
