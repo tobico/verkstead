@@ -18847,7 +18847,7 @@ async fn a_stall_with_no_session_behind_it_says_nothing_about_carrying_anything_
         .unwrap();
     pool.close().await;
 
-    let before = notices(&fixture.view().await).len();
+    let before = notices(&fixture.view().await);
 
     assert_eq!(fixture.resume().await, Resumed::Resumed);
 
@@ -18867,7 +18867,19 @@ async fn a_stall_with_no_session_behind_it_says_nothing_about_carrying_anything_
         "a session of its own, primed from the record: {said:?}",
     );
 
-    let notices = notices(&fixture.view().await);
+    // The session the press started falls over in its turn — it is the same
+    // stub, primed afresh — so the sweep finds the Conversation stalled a
+    // second time and stops it in the same words. Waited for rather than read
+    // past: the sweep fires every [`SWEEPING`] and the session exits whenever
+    // it exits, so a Timeline read taken the moment the output lands sees
+    // whichever of the two got there first.
+    let notices = fixture
+        .until(|view| {
+            let notices = notices(view);
+
+            (notices.len() > before.len()).then_some(notices)
+        })
+        .await;
 
     assert!(
         !notices
@@ -18876,10 +18888,31 @@ async fn a_stall_with_no_session_behind_it_says_nothing_about_carrying_anything_
         "and nothing was said about carrying anything on, nothing having been cut \
          off: {notices:?}",
     );
+
+    // What the second stall *is* rather than its bytes, because the two stalls
+    // are not byte-identical whenever the sweep gets there first: the evidence
+    // block quotes the last thing a session said, read off the Timeline, and a
+    // stop written before the fallen-over session's output has landed there
+    // quotes nothing instead. Which of the two the second Notice carries is the
+    // same race as the count was, one layer down, and it is already decided by
+    // the time this reads — so what is asserted is the one Notice the press is
+    // owed and the stall it says, and the line this test exists to refuse is
+    // refused above.
     assert_eq!(
         notices.len(),
-        before,
-        "which is to say the press added no Notice at all: {notices:?}",
+        before.len() + 1,
+        "which is to say the press itself added one Notice and no more: {notices:?}",
+    );
+
+    let added = &notices[before.len()];
+
+    assert!(
+        added.contains("<strong>Grilling the work</strong> stopped.")
+            && added.contains(
+                "Nothing is driving it. No session is running, and nothing is left to start one."
+            ),
+        "and that one is the stall it was pressed over said again, of the session \
+         the press started, rather than a Notice of the press's own: {added:?}",
     );
 }
 

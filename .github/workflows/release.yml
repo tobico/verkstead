@@ -2533,7 +2533,6 @@ jobs:
           key=$(cat "$data/workbench.key")
 
           "$INSTALL/Verkstead.exe" --hidden > app.log 2>&1 &
-          app=$!
 
           for _ in $(seq 150); do
             if grep -q "the notices stream is held" "$log" 2> /dev/null; then
@@ -2541,6 +2540,18 @@ jobs:
             fi
             sleep 0.2
           done
+
+          # **Every piece of evidence is said where it is gathered, rather than
+          # weighed at the end.** This step stopped once between the reading and
+          # the judging — `exit code 2304`, on the release of 0.3.3, with none of
+          # the refusals below reaching the log — and took with it both the stage
+          # it had got to and the toasts it had already read. So each stage says
+          # so as it passes, and the reading below prints what it found as it
+          # finds it: a shell that stops after a line still leaves a log saying
+          # how far it got.
+          grep -q "the notices stream is held" "$log" 2> /dev/null \
+            && echo "The app holds the notices stream." \
+            || echo "The app never said it holds the notices stream."
 
           # A repository of the step's own to ask from, on a `main` with one
           # commit: the checkout is a detached HEAD with no default branch, which
@@ -2571,6 +2582,10 @@ jobs:
           # Time for a refusal, which arrives after the show it refuses.
           sleep 3
 
+          grep -q "a notice is shown" "$log" 2> /dev/null \
+            && echo "The app says a notice is shown." \
+            || echo "The app never said a notice is shown."
+
           # And Windows' own record of it: the notification platform writes
           # every toast it accepts into this user's database, under the
           # application id it was raised for — so a row under the Start-menu
@@ -2587,11 +2602,26 @@ jobs:
               print(handler, (payload or b"").decode("utf-8", "replace").replace("\r\n", " "))
           EOF
           )
+          echo "Windows holds these toasts:"
+          printf '%s\n' "$toasts"
 
-          taskkill //F //IM verkstead.exe > /dev/null 2>&1 || true
-          kill -9 "$app" 2> /dev/null || true
+          # Both logs before anything is killed, for the reason the stages
+          # above are said as they pass: `exit code 2304` landed a hundred and
+          # sixty milliseconds after this step's last line, which was
+          # `cat app.log`, so what ended the shell was on the far side of the
+          # kill and not in the reading. The refusals below read the file
+          # rather than this copy, and nothing they look for is written on the
+          # way out.
           cat app.log
           cat "$log" 2> /dev/null || echo "There is no log at $log."
+
+          # By image name and by nothing else. The `kill -9` on the pid this
+          # shell backgrounded is gone: taskkill covers `Verkstead.exe` and the
+          # `verkstead.exe` it spawned both, Windows comparing an image name
+          # without regard to case, so the pid kill was belt over braces — and
+          # it was the one signal this step sent, aimed at a pid the app may
+          # already have let go of.
+          taskkill //F //IM verkstead.exe > /dev/null 2>&1 || true
 
           for said in "the notices stream is held" "a notice is shown"; do
             if ! grep -q "$said" "$log" 2> /dev/null; then
@@ -2604,7 +2634,6 @@ jobs:
             exit 1
           fi
 
-          printf '%s\n' "$toasts"
           if ! printf '%s\n' "$toasts" |
             grep -q "^net.tobico.Verkstead .*Rate limiting for the public API"; then
             echo "::error::Windows holds no toast from net.tobico.Verkstead with the Set's title."
@@ -3195,6 +3224,14 @@ jobs:
       # the manifest promises is what an adopter actually receives. A hash taken
       # from the build output would still be a true hash of a file we built; it
       # would just have never been compared against the one GitHub serves.
+      #
+      # **And retried, a 404 among the replies they retry** — here and in the
+      # step below, which downloads the same four again — for the reason
+      # `ci.yml`'s header gives about the pinned downloads there: every url
+      # between the two names an asset this run has just published, so a reply
+      # that is not the file is never news about the release. And this is the
+      # last job of one, the tag cut and the assets already out, so a single
+      # refusal from the asset CDN would turn a finished release red.
       - name: Build the manifest
         run: |
           mkdir -p downloads
@@ -3209,6 +3246,7 @@ jobs:
             asset=${pair#*:}
             url="$DOWNLOAD_BASE/$asset"
             curl --fail --location --silent --show-error \
+              --retry 5 --retry-all-errors --retry-max-time 120 \
               --output "downloads/$asset" "$url"
             digest=$(sha256sum "downloads/$asset" | cut -d' ' -f1 |
               tr 'a-f' 'A-F' | basenc --base16 --decode | basenc --base64)
@@ -3245,6 +3283,7 @@ jobs:
           # this shell and `drift` survives it.
           while read -r system url hash; do
             curl --fail --location --silent --show-error \
+              --retry 5 --retry-all-errors --retry-max-time 120 \
               --output verify/asset "$url"
             digest=$(sha256sum verify/asset | cut -d' ' -f1 |
               tr 'a-f' 'A-F' | basenc --base16 --decode | basenc --base64)
