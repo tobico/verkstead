@@ -2533,7 +2533,6 @@ jobs:
           key=$(cat "$data/workbench.key")
 
           "$INSTALL/Verkstead.exe" --hidden > app.log 2>&1 &
-          app=$!
 
           for _ in $(seq 150); do
             if grep -q "the notices stream is held" "$log" 2> /dev/null; then
@@ -2606,10 +2605,23 @@ jobs:
           echo "Windows holds these toasts:"
           printf '%s\n' "$toasts"
 
-          taskkill //F //IM verkstead.exe > /dev/null 2>&1 || true
-          kill -9 "$app" 2> /dev/null || true
+          # Both logs before anything is killed, for the reason the stages
+          # above are said as they pass: `exit code 2304` landed a hundred and
+          # sixty milliseconds after this step's last line, which was
+          # `cat app.log`, so what ended the shell was on the far side of the
+          # kill and not in the reading. The refusals below read the file
+          # rather than this copy, and nothing they look for is written on the
+          # way out.
           cat app.log
           cat "$log" 2> /dev/null || echo "There is no log at $log."
+
+          # By image name and by nothing else. The `kill -9` on the pid this
+          # shell backgrounded is gone: taskkill covers `Verkstead.exe` and the
+          # `verkstead.exe` it spawned both, Windows comparing an image name
+          # without regard to case, so the pid kill was belt over braces — and
+          # it was the one signal this step sent, aimed at a pid the app may
+          # already have let go of.
+          taskkill //F //IM verkstead.exe > /dev/null 2>&1 || true
 
           for said in "the notices stream is held" "a notice is shown"; do
             if ! grep -q "$said" "$log" 2> /dev/null; then
