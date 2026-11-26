@@ -30509,6 +30509,11 @@ async fn a_conflict_low_in_a_stack_sends_one_session_told_the_whole_chain() {
         "and to stop rather than sync over work nobody pushed: {prompt}",
     );
     assert!(
+        prompt.contains("switch this worktree back to `stage-01`"),
+        "and to leave this worktree on the Conversation's own branch, which \
+         `gh stack checkout` switches away from: {prompt}",
+    );
+    assert!(
         !prompt.contains("Merge the pull request's base branch"),
         "and nothing of the configured strategy, which a stack is not resolved \
          by: {prompt}",

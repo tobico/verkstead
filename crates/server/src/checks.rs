@@ -1560,6 +1560,15 @@ fn chained(stack: &[store::PullRequest]) -> Option<Vec<&str>> {
 /// to force-push over or to throw away. The branches are named in order from
 /// the bottom, which is the order a human checks a chain in.
 ///
+/// **And the worktree goes back on the Conversation's own branch at the end.**
+/// `checkout` switches to the top of the chain and nothing switches back, so
+/// an ordinary run would end with the Conversation's Worktree on a branch of
+/// somebody else's work — which
+/// [`crate::worktrees::healthy`] reads as broken, so the next Resume or
+/// Resolve-conflicts press takes the directory away and makes it again, and
+/// the second go at the same stack starts in a checkout that is not where the
+/// skill tells a session it is. `init` adopted in place and had none of this.
+///
 /// **And what the sync backs out on is the session's to resolve.** `gh stack
 /// sync` refuses rather than half-rebases when a branch conflicts, and `gh
 /// stack rebase` is the verb that stops in it — so the session is told both,
@@ -1577,6 +1586,18 @@ fn syncing(watched: &Watched, stack: &[store::PullRequest], branches: &[&str]) -
             None => format!("#{}", opened.number),
         })
         .collect();
+
+    // Where the adoption is to leave this worktree, which is where it was: the
+    // Conversation's own branch, off the row rather than off the checkout, for
+    // the reason [`Watched::head`] is read off one — a stack's branches share
+    // the one Worktree and the checkout answers for whichever of them was
+    // adopted last. A row written before Verkstead wrote the head down names
+    // no branch, and a session told to go back to where it started can still
+    // do that.
+    let back = match watched.head.as_deref() {
+        Some(branch) => format!("back to `{branch}`"),
+        None => "back to the branch it was on when you started".to_owned(),
+    };
 
     format!(
         "GitHub cannot merge {} into its base branch, and it is one of a stack of {deep} \
@@ -1617,7 +1638,11 @@ fn syncing(watched: &Watched, stack: &[store::PullRequest], branches: &[&str]) -
          somebody did. Then run the repository's tests over the top branch, and make sure \
          every branch of the stack is pushed before you finish — the sync force-pushes \
          them, which is what a stack is rebased and re-linked by, and is the one place \
-         force-pushing is what was asked for.",
+         force-pushing is what was asked for.\n\n\
+         **Last, switch this worktree {back}.** The adoption above left it on the top of \
+         the chain, and this worktree is the Conversation's own rather than the stack's: a \
+         worktree left on another branch is one Verkstead reads as broken and makes again, \
+         and the next session sent here starts wherever you left it.",
         named(watched),
         deep = stack.len(),
         listed = listed.join(", "),
@@ -2081,6 +2106,12 @@ mod tests {
         assert!(
             !told.contains("gh stack init"),
             "rather than the `init` that invents them: {told}",
+        );
+        assert!(
+            told.contains("switch this worktree back to `rate-limiting`"),
+            "and the worktree goes back on the Conversation's own branch, which \
+             `checkout` switched away from: one left on the top of the chain is \
+             one Verkstead reads as broken: {told}",
         );
         assert!(
             told.contains("gh stack rebase"),
