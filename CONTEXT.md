@@ -1126,7 +1126,13 @@ into, where that too is under the home — which is how the harness a human
 installed for themselves is one a session can run, a native install being a
 link on the `PATH` into a versions directory no `PATH` names. A link leading
 anywhere else, or leading nowhere, is a name a session is not given at all,
-and nothing else of that home is. A Claude session is told not to update the
+and nothing else of that home is. **One program on that list is inside
+somewhere else as well as where it is**: the `gh-stack` a stack is synced
+with, read-only at `~/.local/share/gh/extensions/gh-stack/gh-stack` under the
+empty HOME, because `gh` looks for an extension inside the home it is run
+under and has no variable that names one elsewhere. The one file, rather than
+the data directory it is in: everything else under `~/.local/share` is a
+session's own to write. Linux for now. A Claude session is told not to update the
 install it runs, which is read-only inside and the human's own besides, so
 nothing a session does moves it. The account's own skills are not there to be
 found: a Built Root holds none, so there is nothing to hide and nothing to

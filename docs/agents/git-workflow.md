@@ -44,10 +44,17 @@ then, before its pull request opens, which is the only rebase it gets.
 Only branch off `main`, unstacked, when the stage is genuinely independent
 of any unmerged predecessor.
 
-Prerequisite: `gh extension install github/gh-stack` (skip if
-`gh stack --help` already works). Everything below was measured against
-`gh stack` version 0.1.1 in a scratch repository rather than read off its
-documentation; re-measure after an upgrade.
+Prerequisite: `gh stack --help` has to answer. **In a session here it already
+does, and there is nothing to install.** Verkstead places the `gh-stack` off
+the machine's own `PATH` where `gh` looks for an extension, read-only, and
+stops a stack run before dispatching a session that would be given none — so a
+`gh extension install` run inside a session is a command with nothing to do
+that would fail against a read-only file anyway. Elsewhere, and only where
+`gh stack --help` does not answer: `gh extension install github/gh-stack`, or
+`gh-stack` on the `PATH`, which is the one that reaches a session.
+
+Everything below was measured against `gh stack` version 0.1.1 in a scratch
+repository rather than read off its documentation; re-measure after an upgrade.
 
 **The registry is per worktree.** `gh stack` keeps what it knows about a
 stack inside the checkout it was run in, and every stage is worked in a
