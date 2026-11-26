@@ -30443,10 +30443,35 @@ async fn a_conflict_low_in_a_stack_sends_one_session_told_the_whole_chain() {
          and then to sync it: {prompt}",
     );
     assert!(
-        prompt.contains("git fetch origin") && prompt.contains("origin's commit"),
-        "and to hold every branch of the chain locally first, an adoption \
-         creating what this checkout has not got and the sync force-pushing it \
-         over the real one: {prompt}",
+        prompt.contains("gh stack checkout https://github.com/tobico/verkstead/pull/40"),
+        "and the adoption is `checkout` off the watched pull request's own URL: \
+         it reads the chain off GitHub and creates what this checkout has not \
+         got at origin's commit, where an `init` over the same names invents \
+         them at the trunk — measured, and in `docs/agents/git-workflow.md`: \
+         {prompt}",
+    );
+    assert!(
+        !prompt.contains("gh stack init"),
+        "rather than the `init` that invents them: {prompt}",
+    );
+    assert!(
+        prompt.contains("git fetch origin")
+            && prompt.contains("origin's commit")
+            && prompt.contains("git rev-parse <branch>")
+            && prompt.contains("git branch -f <branch> origin/<branch>"),
+        "and to put every branch of the chain at origin's commit before it \
+         adopts anything, compared either side rather than asked of the \
+         extension: a branch this worktree already holds is adopted as it \
+         stands, and the sync force-pushes it: {prompt}",
+    );
+    assert!(
+        prompt.contains("needsRebase: false"),
+        "and told why the extension is not what answers that question — it \
+         reports a branch trailing origin as healthy: {prompt}",
+    );
+    assert!(
+        prompt.contains("ahead* of origin") && prompt.contains("stop and"),
+        "and to stop rather than sync over work nobody pushed: {prompt}",
     );
     assert!(
         !prompt.contains("Merge the pull request's base branch"),

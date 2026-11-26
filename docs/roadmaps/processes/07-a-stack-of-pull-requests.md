@@ -54,8 +54,15 @@ goes counted per pull request.
   requests of the Repo whose base is another's head, followed until a base is
   not an open head and a head is not another's base. `gh stack`'s own registry
   is per-worktree and may not exist, so it is not what discovery reads; the
-  session runs `gh stack init` over the ordered branches where the registry is
-  missing, before it syncs.
+  session adopts the chain with `gh stack checkout <this pull request's URL>`
+  before it syncs, which reads the chain off GitHub. **Not `gh stack init` over
+  the ordered branches**, which is what it was: re-measured against 0.3.0, an
+  `init` over an eleven-branch chain invented all eleven at the trunk and
+  reported success, in a checkout where every `origin/<branch>` was present —
+  and the sync force-pushes whatever was adopted. Neither command aligns a
+  branch the worktree already holds, so the session is told to put every one of
+  them at origin's commit first, by comparing `git rev-parse` either side.
+  See `docs/agents/git-workflow.md`, which holds the measurement.
 - **One conflict session per stack**, not per pull request: dispatched when any
   recorded pull request reads *conflicting*, told the ordered list from the
   bottom, told to `gh stack sync` and resolve what it backs out on, run the

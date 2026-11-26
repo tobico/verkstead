@@ -1517,25 +1517,39 @@ fn chained(stack: &[store::PullRequest]) -> Option<Vec<&str>> {
 /// is why what the session is told is the extension rather than git.
 ///
 /// **The registry is per worktree**, and this Conversation's was made minutes
-/// ago by the take-up, so there may be nothing in it: the session is told to
-/// adopt the chain where `gh stack view` finds none. The branches are named in
-/// order from the bottom, which is the order a chain is adopted in and the
-/// order a human checks it against, and the command is named with them: one
-/// `gh stack init` takes a chain of any depth, bottom first, which
-/// `docs/agents/git-workflow.md` now documents from what the extension was
-/// measured doing rather than from what its own documentation says. A prompt
-/// that left the argument list to the session would be a session working out
-/// again what the repository has already written down.
+/// ago by the take-up, so there is usually nothing in it: the chain is the
+/// session's to adopt. What it is told to adopt with is `gh stack checkout`,
+/// and the pull request it names is this Conversation's own, by URL.
 ///
-/// **And what this checkout holds is what an adoption adopts.** The take-up cut
-/// its Worktree on the Conversation's own branch, and the rest of the chain may
-/// be nowhere but `origin/…`: adopting a branch that is not here *creates* it
-/// rather than refusing, and the sync force-pushes whatever was adopted — so a
-/// branch invented empty here is the real one on origin overwritten, and in
-/// this workbench that branch is another Conversation's work. So the session is
-/// told to fetch and have every branch of the chain locally at origin's commit
-/// before it adopts anything, and to read the adopted chain back before it
-/// syncs.
+/// **Measured, and the measurement is why it is that command and not
+/// `init`** — `docs/agents/git-workflow.md` holds it, taken against this
+/// repository's own eleven-deep stack. `checkout` reads the chain off GitHub
+/// and creates the branches the checkout has not got **at origin's commits**;
+/// `init` over the same eleven names invented all eleven **at the trunk** and
+/// reported `✓ Created stack`, and did so in a clone where every
+/// `origin/<branch>` was present. The sync force-pushes whatever was adopted,
+/// so that is eleven real pull requests overwritten — and in this workbench
+/// each of them is another Conversation's work. One command off a URL
+/// Verkstead already holds beats eleven the session has to get right.
+///
+/// The URL rather than the number, for the same measurement's reason: a bare
+/// number is read as a *stack* number first, GitHub's stacks sharing the
+/// pull-request numbering, and a URL is unambiguous by construction. This
+/// Conversation's own pull request rather than the bottom of the chain, because
+/// `checkout` discovers the whole stack from any of them and this is the one
+/// Verkstead is watching and knows to be open.
+///
+/// **What `checkout` does not do is align a branch it already has**, and that
+/// is the half of the old paragraph that stays. It creates what is missing and
+/// leaves what is there exactly where it is — so a branch this checkout held
+/// and that trails origin is adopted as it stands, and `gh stack view --json`
+/// reports it `needsRebase: false`, which reads as healthy. Measured too. So
+/// the session is told to put every branch of the chain at origin's commit
+/// *before* it adopts, by comparing `git rev-parse` either side rather than by
+/// asking the extension, and to stop rather than sync where one has diverged:
+/// a branch ahead of origin is somebody's unpushed work, which is not a thing
+/// to force-push over or to throw away. The branches are named in order from
+/// the bottom, which is the order a human checks a chain in.
 ///
 /// **And what the sync backs out on is the session's to resolve.** `gh stack
 /// sync` refuses rather than half-rebases when a branch conflicts, and `gh
@@ -1566,17 +1580,27 @@ fn syncing(watched: &Watched, stack: &[store::PullRequest], branches: &[&str]) -
          Sync the stack with the `gh {extension}` extension rather than merging or rebasing \
          by hand: it cascade-rebases each branch onto its updated parent and force-pushes \
          them atomically, which is what keeps the chain a chain. Its registry is kept per \
-         worktree and this worktree is new, so run `gh {extension} view` first.\n\n\
-         Where it knows of no stack, the chain is yours to adopt — and what this checkout \
-         holds is what gets adopted. Run `git fetch origin`, and make sure there is a \
-         local branch at origin's commit for every one of {init}, bottom first, before \
-         you adopt anything: adopting a branch this checkout has not got creates it empty \
-         rather than refusing, and the sync below force-pushes whatever was adopted, so a \
-         branch invented here is the real one on origin overwritten — and these branches \
-         are other people's work. Then adopt the whole chain with one command, bottom \
-         first — `gh {extension} init {adopting}` — and read it back with \
-         `gh {extension} view` before you sync anything: a chain that came back wrong is \
-         one to stop at rather than to force-push.\n\n\
+         worktree and this worktree is new, so the chain is yours to adopt first.\n\n\
+         **Put every branch of the chain at origin's commit before you adopt anything.** \
+         Run `git fetch origin`, then for each of {chain}, bottom first, compare \
+         `git rev-parse <branch>` with `git rev-parse origin/<branch>`. Where origin is \
+         ahead, `git branch -f <branch> origin/<branch>` — a branch this worktree holds is \
+         adopted exactly as it stands, and the sync below force-pushes whatever was \
+         adopted, so a branch trailing origin here is somebody's real work overwritten. \
+         Where the local branch is *ahead* of origin, or the two have diverged, stop and \
+         say so rather than syncing: that is work nobody pushed, and it is neither yours to \
+         force-push over nor yours to throw away. A branch this worktree has not got at \
+         all is nothing to compare — the adoption below is what creates it. And \
+         `git branch -f` refuses the branch you are standing on, so `git switch --detach \
+         HEAD` before you move that one. Don't ask `gh {extension} view` any of this — it \
+         reports a branch that trails origin as `needsRebase: false`, which reads as \
+         healthy.\n\n\
+         With that done, adopt the chain with one command, which reads it off GitHub \
+         rather than off this checkout — `gh {extension} checkout {url}`. It creates any \
+         branch of the \
+         chain this worktree has not got, at origin's commit, and switches to the top. A \
+         chain that comes back from `gh {extension} view` as anything but {chain}, \
+         bottom first, is one to stop at rather than to force-push.\n\n\
          Then `gh stack sync`. Where it reports a conflict it backs out rather than leaving \
          a branch half-rebased, and `gh stack rebase` is what walks the chain again and \
          stops in the conflict for you to resolve. Resolving it is the job: a conflict is \
@@ -1590,13 +1614,37 @@ fn syncing(watched: &Watched, stack: &[store::PullRequest], branches: &[&str]) -
         listed = listed.join(", "),
         worktree = watched.worktree.display(),
         extension = crate::stacks::EXTENSION,
-        init = branches
+        chain = branches
             .iter()
             .map(|branch| format!("`{branch}`"))
             .collect::<Vec<_>>()
             .join(", "),
-        adopting = branches.join(" "),
+        url = adopted(watched, stack),
     )
+}
+
+/// What `gh stack checkout` is given to adopt this Conversation's chain by: the
+/// URL of the pull request Verkstead is watching, or its number where the row
+/// somehow has none.
+///
+/// **This Conversation's own rather than the bottom of the chain.** `checkout`
+/// discovers the whole stack from any pull request of it, so which one is named
+/// is only a question of which one is surely there to be named — and that is
+/// the one the wrap-up is watching, whose conflict is what sent the session.
+///
+/// **The URL rather than the number**, because a bare number is read as a
+/// *stack* number before a pull request's and GitHub's stacks share the
+/// pull-request numbering — see [`syncing`], and
+/// `docs/agents/git-workflow.md`, where the measurement is. The number is the
+/// fallback and not a good one; a row with no URL is a row written before
+/// Verkstead wrote them down, and naming the number is better than naming
+/// nothing.
+fn adopted(watched: &Watched, stack: &[store::PullRequest]) -> String {
+    stack
+        .iter()
+        .find(|opened| opened.number == watched.number)
+        .map(|opened| opened.url.clone())
+        .unwrap_or_else(|| watched.number.to_string())
 }
 
 /// How often the checks are asked about.
@@ -1995,15 +2043,35 @@ mod tests {
              first: {told}",
         );
         assert!(
-            told.contains("git fetch origin") && told.contains("origin's commit"),
-            "and this checkout is made to hold every branch of it before \
-             anything is adopted, an adoption creating what it cannot find: \
-             {told}",
+            told.contains("git fetch origin")
+                && told.contains("origin's commit")
+                && told.contains("git rev-parse <branch>")
+                && told.contains("git branch -f <branch> origin/<branch>"),
+            "and every branch of it is put at origin's commit before anything \
+             is adopted, compared either side rather than asked of the \
+             extension: a branch this worktree already holds is adopted as it \
+             stands, and the sync force-pushes it: {told}",
         );
         assert!(
-            told.contains("gh stack init stage-01 stage-02 rate-limiting"),
-            "and the one command that adopts a chain of that depth, with the \
-             whole of it as its argument list: {told}",
+            told.contains("needsRebase: false"),
+            "and told why the extension is not what answers that question — it \
+             reports a branch trailing origin as healthy: {told}",
+        );
+        assert!(
+            told.contains("ahead* of origin") && told.contains("stop and"),
+            "and to stop rather than sync over work nobody pushed: {told}",
+        );
+        assert!(
+            told.contains("gh stack checkout https://github.com/tobico/askance/pull/7"),
+            "and the chain is adopted with `checkout`, off the watched pull \
+             request's own URL: it reads the chain off GitHub and creates what \
+             this checkout has not got at origin's commit, where an `init` over \
+             the same names invents them at the trunk — measured, and in \
+             `docs/agents/git-workflow.md`: {told}",
+        );
+        assert!(
+            !told.contains("gh stack init"),
+            "rather than the `init` that invents them: {told}",
         );
         assert!(
             told.contains("gh stack rebase"),
