@@ -585,18 +585,29 @@ jobs:
       # down for the day from holding the job open: it bounds when a further
       # attempt may *start*, so the slow download the comment above remembers
       # is not cut off by it.
+      #
+      # **And `--retry-all-errors`, because a pinned artifact cannot really be
+      # missing.** Central answered a runner a bare `404` for the Maven
+      # distribution a tenth of a second into this step on 2026-11-26, and the
+      # next run of the same workflow downloaded it: a CDN edge that has not got
+      # the file this second, rather than a version that is not there. `--retry`
+      # alone retries the replies curl holds to be transient and 404 is not one
+      # of them, so that one answer failed a release. Every url here names a
+      # version this file pins, so a 404 is never news — a version that really
+      # went would fail the same way five attempts later, at the cost of the
+      # backoff `--retry-max-time` already bounds.
       - name: Install JDK 21, Maven 3.9.12 and Gradle 8.14.4
         run: |
           sudo ln -sf /usr/lib/jvm/temurin-21-jdk-amd64/bin/java /usr/local/bin/java
           sudo ln -sf /usr/lib/jvm/temurin-21-jdk-amd64/bin/javac /usr/local/bin/javac
 
-          curl -sSfL --retry 5 --retry-max-time 120 -o "$RUNNER_TEMP/maven.tar.gz" \
+          curl -sSfL --retry 5 --retry-all-errors --retry-max-time 120 -o "$RUNNER_TEMP/maven.tar.gz" \
             https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.12/apache-maven-3.9.12-bin.tar.gz
           sudo mkdir -p /usr/local/maven
           sudo tar -C /usr/local/maven --strip-components=1 -xzf "$RUNNER_TEMP/maven.tar.gz"
           sudo ln -sf /usr/local/maven/bin/mvn /usr/local/bin/mvn
 
-          curl -sSfL --retry 5 --retry-max-time 120 -o "$RUNNER_TEMP/gradle.zip" \
+          curl -sSfL --retry 5 --retry-all-errors --retry-max-time 120 -o "$RUNNER_TEMP/gradle.zip" \
             https://services.gradle.org/distributions/gradle-8.14.4-bin.zip
           sudo unzip -q -o "$RUNNER_TEMP/gradle.zip" -d /usr/local
           sudo ln -sf /usr/local/gradle-8.14.4/bin/gradle /usr/local/bin/gradle
