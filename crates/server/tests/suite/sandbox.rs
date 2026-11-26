@@ -35,12 +35,13 @@ use verkstead_server::handoffs::Handoffs;
 use verkstead_server::key::WorkbenchKey;
 use verkstead_server::platform::Platform;
 use verkstead_server::sandbox::{
-    Bind, Closing, Executable, Homes, Reachable, Sandbox, SandboxConfig, machine_path,
-    stack_extension, under_dev_shell,
+    Bind, Closing, Executable, Homes, Reachable, Sandbox, SandboxConfig, under_dev_shell,
 };
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::store;
+
+use crate::session_home::and_the_stack_extension;
 
 /// The device every Conversation started here is ranked by, named the way a
 /// cluster names one (ADR-0020, *Ranks*).
@@ -6958,29 +6959,6 @@ fn a_bind_that_is_not_an_absolute_path_is_refused_by_name() {
             error.contains(&refused),
             "the entry itself is what the refusal names: {error}"
         );
-    }
-}
-
-/// What a session's HOME holds beyond its account's own, said by the machine
-/// rather than written down: `.local`, where this machine has a `gh-stack` on
-/// the `PATH` a session is handed.
-///
-/// The one entry of a HOME listing that is a fact about the host. `gh` looks
-/// for an extension inside the home it runs under, so the file is bound at
-/// `~/.local/share/gh/extensions/gh-stack/gh-stack` and bwrap makes the
-/// parents — see `sandbox::stack_extension`, which is asked here so that the
-/// listings below read the same on a machine with one and a machine without.
-/// Trailing space included, the probe's listing being separator-terminated.
-///
-/// **Shared with the suites beside this one**, because the entry is a fact
-/// about the host rather than about this file: every listing of a session's
-/// HOME anywhere in this binary gains it on a machine with an extension to
-/// place, and one that spelled its own answer would be one that goes red on
-/// the Annex box and nowhere else — see `sessions::…_runs_from_its_home_…`.
-pub(crate) fn and_the_stack_extension() -> &'static str {
-    match stack_extension(Platform::HERE, &machine_path(Platform::HERE)).is_some() {
-        true => ".local ",
-        false => "",
     }
 }
 

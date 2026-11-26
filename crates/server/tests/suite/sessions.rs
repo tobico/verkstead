@@ -4858,7 +4858,7 @@ async fn a_session_on_a_second_backend_runs_from_its_home_with_the_capture_as_it
     // listing of a session's HOME in this binary is.
     let held = format!(
         "home=.codex {}\n",
-        crate::sandbox::and_the_stack_extension()
+        crate::session_home::and_the_stack_extension()
     );
 
     assert!(

@@ -15,9 +15,12 @@
 //! file here runs on threads of the one process under `cargo test`, beside
 //! every other.
 //!
-//! Two modules are not suites: `fixture_repositories` is the git repository a
-//! test copies rather than makes, for the suites that can reach it, and `pace`
-//! is the one ruler the suites judged on wall clock stretch their waits by.
+//! Three modules are not suites: `fixture_repositories` is the git repository a
+//! test copies rather than makes, for the suites that can reach it, `pace` is
+//! the one ruler the suites judged on wall clock stretch their waits by, and
+//! `session_home` is what a session's HOME holds that is a fact about this
+//! machine, asked by every suite that lists one and on every platform they run
+//! on.
 
 mod account_windows;
 mod accounts;
@@ -73,6 +76,7 @@ mod sandbox;
 mod sandbox_macos;
 mod sandbox_windows;
 mod screen;
+mod session_home;
 mod sessions;
 mod sessions_windows;
 mod sets;
