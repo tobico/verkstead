@@ -2542,6 +2542,18 @@ jobs:
             sleep 0.2
           done
 
+          # **Every piece of evidence is said where it is gathered, rather than
+          # weighed at the end.** This step stopped once between the reading and
+          # the judging — `exit code 2304`, on the release of 0.3.3, with none of
+          # the refusals below reaching the log — and took with it both the stage
+          # it had got to and the toasts it had already read. So each stage says
+          # so as it passes, and the reading below prints what it found as it
+          # finds it: a shell that stops after a line still leaves a log saying
+          # how far it got.
+          grep -q "the notices stream is held" "$log" 2> /dev/null \
+            && echo "The app holds the notices stream." \
+            || echo "The app never said it holds the notices stream."
+
           # A repository of the step's own to ask from, on a `main` with one
           # commit: the checkout is a detached HEAD with no default branch, which
           # a Repo is refused for.
@@ -2571,6 +2583,10 @@ jobs:
           # Time for a refusal, which arrives after the show it refuses.
           sleep 3
 
+          grep -q "a notice is shown" "$log" 2> /dev/null \
+            && echo "The app says a notice is shown." \
+            || echo "The app never said a notice is shown."
+
           # And Windows' own record of it: the notification platform writes
           # every toast it accepts into this user's database, under the
           # application id it was raised for — so a row under the Start-menu
@@ -2587,6 +2603,8 @@ jobs:
               print(handler, (payload or b"").decode("utf-8", "replace").replace("\r\n", " "))
           EOF
           )
+          echo "Windows holds these toasts:"
+          printf '%s\n' "$toasts"
 
           taskkill //F //IM verkstead.exe > /dev/null 2>&1 || true
           kill -9 "$app" 2> /dev/null || true
@@ -2604,7 +2622,6 @@ jobs:
             exit 1
           fi
 
-          printf '%s\n' "$toasts"
           if ! printf '%s\n' "$toasts" |
             grep -q "^net.tobico.Verkstead .*Rate limiting for the public API"; then
             echo "::error::Windows holds no toast from net.tobico.Verkstead with the Set's title."
