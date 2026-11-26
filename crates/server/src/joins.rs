@@ -73,12 +73,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use verkstead_render::{BirthKey, ChainLink, StageAhead, StageJoin, StageJoining};
+use verkstead_render::{BirthKey, ChainLink, StageAdopting, StageAhead, StageJoin, StageJoining};
 use verkstead_schema::Nudge;
 
 use crate::AppState;
 use crate::peer::chains::CHAINS;
 use crate::relaying::{self, Call, Streamed, as_json};
+use crate::reporting::Described;
 use crate::skills;
 use crate::store;
 use crate::worktrees;
@@ -315,15 +316,45 @@ async fn held_away(state: &AppState, conversation_id: i64) -> Option<Vec<skills:
     let mut waiting: Option<Waiting> = None;
 
     // What was last said, as [`hold`] keeps it — and home not answering, or
-    // refusing, or having left, are three more things it can have said.
+    // refusing, or having left, or having nowhere to keep it, are four more
+    // things it can have said.
     let mut said: Option<Heard> = None;
+
+    // What this stage is, as an heir is told it, and which heir it was made for:
+    // made once rather than at every look, it being a reading of the heir's
+    // registry, and made again for an heir named since.
+    let mut described: Option<(String, StageAdopting)> = None;
 
     loop {
         // Asked afresh at every look: an heir named while the stage waits is
         // where home is now, and this device named one is home.
         let away = away(state, conversation_id).await?;
 
-        let answered = ask_home(state, &away).await;
+        // An heir holds no tombstone of the stage until it adopts one, so the
+        // ask says what the stage is — as the report does, and so as not to
+        // wait on one having landed. And where the heir has no repo to keep it
+        // in, that is what is said while it waits.
+        let mut no_repo: Option<String> = None;
+
+        let adopting = match away.home != away.born.device {
+            false => None,
+            true => match &described {
+                Some((heir, adopting)) if *heir == away.home => Some(adopting.clone()),
+                _ => match crate::reporting::described(state, conversation_id, &away.home).await {
+                    Described::Told(adopting) => {
+                        described = Some((away.home.clone(), adopting.clone()));
+                        Some(adopting)
+                    }
+                    Described::NoRepo { repo } => {
+                        no_repo = Some(repo);
+                        None
+                    }
+                    Described::Untold => None,
+                },
+            },
+        };
+
+        let answered = ask_home(state, &away, adopting).await;
 
         if let Ok(join) = &answered {
             if join.ahead.is_empty() {
@@ -387,10 +418,13 @@ async fn held_away(state: &AppState, conversation_id: i64) -> Option<Vec<skills:
                     refusal.saying,
                 );
 
-                match refusal.answered() {
-                    true => Heard::Refused(refusal.saying),
-                    false if left(state, &away.home).await => Heard::Left(away.home.clone()),
-                    false => Heard::Unanswered,
+                match (refusal.answered(), no_repo) {
+                    // An heir with nowhere to keep the stage refuses it for
+                    // that, and that is the reason worth saying.
+                    (true, Some(repo)) => Heard::NoRepo(repo),
+                    (true, None) => Heard::Refused(refusal.saying),
+                    (false, _) if left(state, &away.home).await => Heard::Left(away.home.clone()),
+                    (false, _) => Heard::Unanswered,
                 }
             }
         };
@@ -405,6 +439,10 @@ async fn held_away(state: &AppState, conversation_id: i64) -> Option<Vec<skills:
                 Heard::Refused(saying) => {
                     let named = relaying::called(state.devices.as_ref(), &away.home).await;
                     refused(state, conversation_id, &of.roadmap, &named, saying).await;
+                }
+                Heard::NoRepo(repo) => {
+                    let named = relaying::called(state.devices.as_ref(), &away.home).await;
+                    repoless(state, conversation_id, &of.roadmap, &named, repo).await;
                 }
                 Heard::Left(home) => {
                     gone(state, conversation_id, &of.roadmap).await;
@@ -437,18 +475,29 @@ enum Heard {
     /// says the release gap where there is one, the likeliest reason a home
     /// would not know the question.
     Refused(String),
+
+    /// Home is the **Heir** of the device the stage was born on, holds no
+    /// tombstone of it, and has no repo matching the stage's to adopt it into:
+    /// the stage's repo, by the name it has here.
+    NoRepo(String),
 }
 
 /// The most home's answer may be: a chain's worth of branch names.
 const MOST_AN_ANSWER_IS: usize = 256 * 1024;
 
-/// Put the question to home: may this stage join, and onto what.
-async fn ask_home(state: &AppState, away: &store::Away) -> Result<StageJoin, relaying::Refusal> {
+/// Put the question to home: may this stage join, and onto what — saying what
+/// the stage is where home is an heir that may never have heard of it.
+async fn ask_home(
+    state: &AppState,
+    away: &store::Away,
+    adopting: Option<StageAdopting>,
+) -> Result<StageJoin, relaying::Refusal> {
     let asking = StageJoining {
         born: BirthKey {
             device: away.born.device.clone(),
             id: away.born.id,
         },
+        adopting,
     };
 
     relaying::word_from::<StageJoin>(
@@ -997,6 +1046,22 @@ async fn refused(state: &AppState, conversation_id: i64, roadmap: &str, home: &s
     let markdown = format!(
         "**Waiting to join.** Every task is done, and the finish is held until **{home}** \
          lets this stage join: it keeps the `{roadmap}` roadmap. {saying}",
+    );
+
+    noted(state, conversation_id, &markdown).await;
+}
+
+/// Say on the Timeline that a stage away from home is waiting on an heir that
+/// has no repo to keep it in — see [`Heard::NoRepo`].
+///
+/// The match across devices is by origin, so that is what is said: a repo of
+/// the same name with another origin is not this one, and a human reading only
+/// the name would look at the heir and find it there.
+async fn repoless(state: &AppState, conversation_id: i64, roadmap: &str, home: &str, repo: &str) {
+    let markdown = format!(
+        "**Waiting to join.** Every task is done, and the finish is held: **{home}** keeps the \
+         `{roadmap}` roadmap now, and has no repo with the same origin as `{repo}`, the one this \
+         stage is in. Clone or open it on {home} to let this stage join.",
     );
 
     noted(state, conversation_id, &markdown).await;

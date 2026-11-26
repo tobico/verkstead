@@ -47,6 +47,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
+use tokio::task::JoinHandle;
 use tower::ServiceExt;
 use verkstead_render::{AskingDevice, DevicesView};
 use verkstead_schema::Nudge;
@@ -129,6 +130,10 @@ struct Verkstead {
     /// a Verkstead that only ever does the asking.
     address: Option<SocketAddr>,
 
+    /// The listener, served — held so that a test can stop it, the way
+    /// `tests/suite/advertised.rs` holds its own.
+    serving: Option<JoinHandle<anyhow::Result<()>>>,
+
     /// Its Data Directory, held for the length of the test: the identity, the
     /// database and the `config.yaml` an Annex is told it is kept in all live
     /// in it — and a Keeper links an Annex by naming it.
@@ -152,6 +157,7 @@ impl Verkstead {
             reading,
             pool,
             address: None,
+            serving: None,
             dir,
         }
     }
@@ -225,14 +231,23 @@ impl Verkstead {
 
         self.address = Some(listener.address());
 
-        tokio::spawn(listener.serving(peer::router(
+        self.serving = Some(tokio::spawn(listener.serving(peer::router(
             self.device.clone(),
             self.reading.clone(),
             self.members.clone(),
             self.joins.clone(),
             self.nudges.clone(),
             workbench,
-        )));
+        ))));
+    }
+
+    /// Stop its peer listener, and wait until nothing is listening there: a
+    /// Verkstead that was answering and is not any more.
+    async fn stopped(&mut self) {
+        if let Some(serving) = self.serving.take() {
+            serving.abort();
+            let _ = serving.await;
+        }
     }
 
     /// Where another device dials it.
@@ -2653,12 +2668,21 @@ async fn a_keepers_start_hands_its_annex_its_settings_about_the_work() {
 /// service says of itself, and the Keeper's workbench goes on answering.
 #[tokio::test]
 async fn an_annex_that_never_answers_is_a_line_on_its_row() {
-    let annex = made_annex().await;
+    let mut annex = made_annex().await;
     let keeper = Verkstead::asking().await;
 
     Annexed::of(Arc::new(Boxed::of(&annex, KEEPER_AT)), keeper.settings())
         .started(&keeper.devices())
         .await;
+
+    // And the Annex's own listener stops with it, so nothing answers at the
+    // address the Keeper holds it at either. Stopped rather than left to the
+    // dead address below, because a Keeper reads every member of its own
+    // accord — its Conversations, its Agent Profiles, the rest — and a stub
+    // Annex that is still listening answers each of those reads with a 404,
+    // which is a line of its own on the row this test is about. A read that
+    // reaches nobody leaves none.
+    annex.stopped().await;
 
     // And at the next start the service will not come up: nothing is on the
     // port it would answer at.

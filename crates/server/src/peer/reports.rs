@@ -194,7 +194,18 @@ pub(super) async fn tombstone_of(
         }
     };
 
+    // Each refusal below is said in the log as well as to the caller: the
+    // caller's Timeline has the status alone, and this end is where the reason
+    // is.
     if home != state.device {
+        tracing::warn!(
+            caller = %member.device,
+            born = %born.device,
+            born_as = born.id,
+            home,
+            "a member called about a stage whose home is not this device, and was refused",
+        );
+
         return Err(refused(
             StatusCode::NOT_FOUND,
             "that stage was not born on this device, so this is not its home",
@@ -219,6 +230,14 @@ pub(super) async fn tombstone_of(
         }
 
         Ok(None) => {
+            tracing::warn!(
+                caller = %member.device,
+                born = born.key(),
+                adopting = adopting.is_some(),
+                "a member called about a stage this device holds no copy of, and said nothing \
+                 to adopt it from, so it was refused",
+            );
+
             return Err(refused(
                 StatusCode::NOT_FOUND,
                 "this device holds no copy of that stage",
@@ -341,10 +360,20 @@ async fn adopted(
             Ok(tombstone)
         }
 
-        Ok(None) => Err(refused(
-            StatusCode::NOT_FOUND,
-            "this device has no repo registered for that stage",
-        )),
+        Ok(None) => {
+            tracing::warn!(
+                born = born.key(),
+                repo = facts.repo_id,
+                caller,
+                "a stage whose home left the cluster names a repo this device has not registered, \
+                 so it was not adopted",
+            );
+
+            Err(refused(
+                StatusCode::NOT_FOUND,
+                "this device has no repo registered for that stage",
+            ))
+        }
 
         Err(why) => {
             tracing::error!(error = ?why, born = born.key(), "adopting a stage failed");

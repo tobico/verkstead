@@ -10,7 +10,10 @@
 //!
 //! **Only the device the work is on may ask**, for the report's reason, and
 //! under the same check — see [`super::reports::tombstone_of`]. A member's own
-//! call, so it stands inside [`super::gate`] beside the reports.
+//! call, so it stands inside [`super::gate`] beside the reports. And an ask to
+//! an **Heir** adopts the stage as a report would, from what it says the stage
+//! is: the ask is what the stage is waiting on, and a report that has not
+//! landed is no reason for it to wait longer.
 
 use axum::Json;
 use axum::Router;
@@ -36,10 +39,20 @@ pub(crate) async fn asked(
     ConnectInfo(caller): ConnectInfo<Caller>,
     Json(asking): Json<StageJoining>,
 ) -> Response {
-    let tombstone = match super::reports::tombstone_of(&state, &caller, &asking.born, None).await {
-        Ok(tombstone) => tombstone,
-        Err(refusal) => return refusal,
-    };
+    // An ask carries its state inside what it says the stage is, having none of
+    // its own; one that says no state adopts nothing, and is answered as an
+    // ask about a stage held here.
+    let adopting = asking.adopting.as_ref().and_then(|adopting| {
+        adopting
+            .state
+            .map(|state| (adopting, crate::ui::state_of(state)))
+    });
+
+    let tombstone =
+        match super::reports::tombstone_of(&state, &caller, &asking.born, adopting).await {
+            Ok(tombstone) => tombstone,
+            Err(refusal) => return refusal,
+        };
 
     let answer = crate::joins::asked(&state, tombstone).await;
 

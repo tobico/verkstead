@@ -236,7 +236,11 @@ it: its tombstones, the order its chain joined in, the places in its queue. The
 live copies elsewhere still hold their own stages, so each reports to the heir
 as it would have to home, telling it what the stage is — roadmap, label,
 branches, and which of the heir's Repos it is in — and the heir makes the
-tombstone the leaver would have held. The chain is read off those tombstones
+tombstone the leaver would have held. A stage's ask to join says the same, so
+a finish held on the heir adopts the stage itself rather than waiting on a
+report to have landed; and an heir with no Repo of the stage's origin has
+nowhere to keep it, which is what the stage's Timeline says while it waits.
+The chain is read off those tombstones
 in the order the heir learned of each join, and a stage that has merged is out
 of it by git's reading as ever. A stage that finished on the device that left,
 and never moved, has no copy anywhere, so the heir never hears of it.

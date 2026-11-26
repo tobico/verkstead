@@ -21,6 +21,7 @@
 //! into the server binary that links it.
 
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
@@ -743,6 +744,11 @@ async fn settled_set(pool: &SqlitePool, set_id: i64) -> Result<SettledSet> {
     })
 }
 
+/// How long a write waits for a database another connection is holding — see
+/// [`open_database`], which asks for it, and `tests/suite/database.rs`, which
+/// reads it back off a connection.
+const HELD_DATABASE_IS_WAITED_OUT_FOR: Duration = Duration::from_secs(30);
+
 /// Open the SQLite database at `path`, creating the file if it is absent and
 /// bringing its schema up to date.
 ///
@@ -759,6 +765,21 @@ async fn settled_set(pool: &SqlitePool, set_id: i64) -> Result<SettledSet> {
 /// writes continuously while a session runs and reads on every open page. WAL is
 /// the mode that shape of use is for.
 ///
+/// **And thirty seconds of busy timeout**, where sqlx's own default is five.
+/// That is the wait a write makes for a database another connection is holding,
+/// and it is the whole of what [`writing`]'s `BEGIN IMMEDIATE` turns a failed
+/// promotion into — so how long it is, is how loaded a machine this store goes
+/// on working on.
+///
+/// Five seconds was nobody's decision here, and a CI leg running ten ways at
+/// once went past it: a press on a member's Allow answered 500, saying
+/// *recording a member: database is locked*, on a machine that had done nothing
+/// worse than stall. It is only ever waited out while another connection holds
+/// the write lock, and every transaction here is short and ends in a write, so
+/// on a machine that is keeping up there is nothing to wait for at all. What the
+/// length buys is the other end: a write that waits is a slow press, and a write
+/// that is refused is a record that is not there.
+///
 /// It is not, on its own, what makes a write safe from a concurrent one — see
 /// [`writing`], which is the other half.
 pub async fn open_database(path: &Path) -> Result<SqlitePool> {
@@ -770,7 +791,8 @@ pub async fn open_database(path: &Path) -> Result<SqlitePool> {
     let options = SqliteConnectOptions::new()
         .filename(path)
         .create_if_missing(true)
-        .journal_mode(SqliteJournalMode::Wal);
+        .journal_mode(SqliteJournalMode::Wal)
+        .busy_timeout(HELD_DATABASE_IS_WAITED_OUT_FOR);
 
     let pool = SqlitePool::connect_with(options)
         .await
