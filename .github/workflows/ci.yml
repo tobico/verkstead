@@ -2,6 +2,20 @@
 # them. Everything here is pinned — the actions to a released version, the
 # runner to an image rather than `ubuntu-latest`, and Rust to a patch version —
 # because a check that quietly moves under us is a check nobody is reading.
+#
+# **And every download of a pinned url retries, a 404 among the replies it
+# retries.** A dozen steps below install a tool by `curl`, each at a version
+# this file names, and a job whose tool will not download is a job that fails
+# with every check under it unrun — on a release, twenty-five jobs where a skip
+# is a failure. Being rate limited is not being unavailable: Maven Central
+# answers a runner's shared address a bare `429` a tenth of a second into a
+# step, and `--retry` counts that among the transient replies. Neither is a 404
+# here. Central answered one a bare 404 for the Maven distribution on
+# 2026-11-26, failing a release, and served the same url to the next run — so
+# `--retry-all-errors` puts 404 among them too. Every url here names a version
+# this file pins, so a 404 is never news about the version: one that really went
+# fails the same way five attempts later, inside the `--retry-max-time` that
+# bounds when a further attempt may start.
 name: CI
 
 # Pull requests and pushes to `main`, which between them cover every commit
@@ -204,13 +218,19 @@ jobs:
       # `.config/nextest.toml`, which says why.
       #
       # Pinned to the `Windows` job's release, unpacked and put on the `PATH`.
+      #
+      # Downloaded to a file and unpacked from it, rather than piped into `tar`
+      # as this once was: a retry restarts the transfer from the top, and a tar
+      # already reading the first copy would be handed the head of a second.
       - name: Install cargo-nextest
         run: |
           version=0.9.144
           into="$RUNNER_TEMP/cargo-nextest"
           mkdir -p "$into"
-          curl -sSfL "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$version/cargo-nextest-$version-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar xz -C "$into"
+          curl -sSfL --retry 5 --retry-all-errors --retry-max-time 120 \
+            -o "$RUNNER_TEMP/cargo-nextest.tar.gz" \
+            "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$version/cargo-nextest-$version-x86_64-unknown-linux-gnu.tar.gz"
+          tar xz -C "$into" -f "$RUNNER_TEMP/cargo-nextest.tar.gz"
           echo "$into" >> "$GITHUB_PATH"
 
       # The viewer is not built first. `web/dist` is gitignored and the embed
@@ -416,7 +436,8 @@ jobs:
       # Pinned to a release, like every other tool this file installs.
       - name: Install Go 1.26.8
         run: |
-          curl -sSfL -o "$RUNNER_TEMP/go.tar.gz" https://go.dev/dl/go1.26.8.linux-amd64.tar.gz
+          curl -sSfL --retry 5 --retry-all-errors --retry-max-time 120 \
+            -o "$RUNNER_TEMP/go.tar.gz" https://go.dev/dl/go1.26.8.linux-amd64.tar.gz
           sudo tar -C /usr/local -xzf "$RUNNER_TEMP/go.tar.gz"
           echo /usr/local/go/bin >> "$GITHUB_PATH"
 
@@ -437,7 +458,7 @@ jobs:
       # passes here is a proof of the versions a developer ran it against.
       - name: Install Node 24.21.0, pnpm and both yarns
         run: |
-          curl -sSfL -o "$RUNNER_TEMP/node.tar.xz" \
+          curl -sSfL --retry 5 --retry-all-errors --retry-max-time 120 -o "$RUNNER_TEMP/node.tar.xz" \
             https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.xz
           sudo mkdir -p /usr/local/node
           sudo tar -C /usr/local/node --strip-components=1 -xJf "$RUNNER_TEMP/node.tar.xz"
@@ -476,12 +497,12 @@ jobs:
       # passes here is a proof of the versions a developer ran it against.
       - name: Install deno 2.8.3 and bun 1.3.13
         run: |
-          curl -sSfL -o "$RUNNER_TEMP/deno.zip" \
+          curl -sSfL --retry 5 --retry-all-errors --retry-max-time 120 -o "$RUNNER_TEMP/deno.zip" \
             https://github.com/denoland/deno/releases/download/v2.8.3/deno-x86_64-unknown-linux-gnu.zip
           sudo unzip -q -o "$RUNNER_TEMP/deno.zip" -d /usr/local/bin
           sudo chmod 0755 /usr/local/bin/deno
 
-          curl -sSfL -o "$RUNNER_TEMP/bun.zip" \
+          curl -sSfL --retry 5 --retry-all-errors --retry-max-time 120 -o "$RUNNER_TEMP/bun.zip" \
             https://github.com/oven-sh/bun/releases/download/bun-v1.3.13/bun-linux-x64.zip
           unzip -q -o "$RUNNER_TEMP/bun.zip" -d "$RUNNER_TEMP/bun"
           sudo install -m 0755 "$RUNNER_TEMP/bun/bun-linux-x64/bun" /usr/local/bin/bun
@@ -499,7 +520,7 @@ jobs:
       # passes here is a proof of the version a developer ran it against.
       - name: Install uv 0.11.21
         run: |
-          curl -sSfL -o "$RUNNER_TEMP/uv.tar.gz" \
+          curl -sSfL --retry 5 --retry-all-errors --retry-max-time 120 -o "$RUNNER_TEMP/uv.tar.gz" \
             https://github.com/astral-sh/uv/releases/download/0.11.21/uv-x86_64-unknown-linux-gnu.tar.gz
           tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/uv.tar.gz"
           sudo install -m 0755 "$RUNNER_TEMP/uv-x86_64-unknown-linux-gnu/uv" /usr/local/bin/uv
@@ -549,7 +570,7 @@ jobs:
         run: |
           sudo apt-get install -y cmake ninja-build
 
-          curl -sSfL -o "$RUNNER_TEMP/sccache.tar.gz" \
+          curl -sSfL --retry 5 --retry-all-errors --retry-max-time 120 -o "$RUNNER_TEMP/sccache.tar.gz" \
             https://github.com/mozilla/sccache/releases/download/v0.15.0/sccache-v0.15.0-x86_64-unknown-linux-musl.tar.gz
           tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/sccache.tar.gz"
           sudo install -m 0755 "$RUNNER_TEMP/sccache-v0.15.0-x86_64-unknown-linux-musl/sccache" /usr/local/bin/sccache
@@ -586,16 +607,8 @@ jobs:
       # attempt may *start*, so the slow download the comment above remembers
       # is not cut off by it.
       #
-      # **And `--retry-all-errors`, because a pinned artifact cannot really be
-      # missing.** Central answered a runner a bare `404` for the Maven
-      # distribution a tenth of a second into this step on 2026-11-26, and the
-      # next run of the same workflow downloaded it: a CDN edge that has not got
-      # the file this second, rather than a version that is not there. `--retry`
-      # alone retries the replies curl holds to be transient and 404 is not one
-      # of them, so that one answer failed a release. Every url here names a
-      # version this file pins, so a 404 is never news — a version that really
-      # went would fail the same way five attempts later, at the cost of the
-      # backoff `--retry-max-time` already bounds.
+      # And `--retry-all-errors`, so that a 404 is waited out with them. This
+      # step's own, on 2026-11-26, is where the header's rule came from.
       - name: Install JDK 21, Maven 3.9.12 and Gradle 8.14.4
         run: |
           sudo ln -sf /usr/lib/jvm/temurin-21-jdk-amd64/bin/java /usr/local/bin/java
