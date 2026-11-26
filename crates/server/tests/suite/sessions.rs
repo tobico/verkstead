@@ -18837,7 +18837,7 @@ async fn a_stall_over_a_session_that_fell_over_carries_it_on() {
 async fn a_stall_with_no_session_behind_it_says_nothing_about_carrying_anything_on() {
     let fixture = grilling_swept(&a_grilling_that_falls_over()).await;
 
-    let stall = fixture.stopped().await.html;
+    fixture.stopped().await;
 
     let pool = open_database(&fixture.database).await.unwrap();
 
@@ -18888,12 +18888,31 @@ async fn a_stall_with_no_session_behind_it_says_nothing_about_carrying_anything_
         "and nothing was said about carrying anything on, nothing having been cut \
          off: {notices:?}",
     );
+
+    // What the second stall *is* rather than its bytes, because the two stalls
+    // are not byte-identical whenever the sweep gets there first: the evidence
+    // block quotes the last thing a session said, read off the Timeline, and a
+    // stop written before the fallen-over session's output has landed there
+    // quotes nothing instead. Which of the two the second Notice carries is the
+    // same race as the count was, one layer down, and it is already decided by
+    // the time this reads — so what is asserted is the one Notice the press is
+    // owed and the stall it says, and the line this test exists to refuse is
+    // refused above.
     assert_eq!(
-        notices,
-        [before.clone(), vec![stall]].concat(),
-        "which is to say the press itself added no Notice: what stands beside the \
-         stall it was pressed over is that same stall again, of the session it \
-         started: {notices:?}",
+        notices.len(),
+        before.len() + 1,
+        "which is to say the press itself added one Notice and no more: {notices:?}",
+    );
+
+    let added = &notices[before.len()];
+
+    assert!(
+        added.contains("<strong>Grilling the work</strong> stopped.")
+            && added.contains(
+                "Nothing is driving it. No session is running, and nothing is left to start one."
+            ),
+        "and that one is the stall it was pressed over said again, of the session \
+         the press started, rather than a Notice of the press's own: {added:?}",
     );
 }
 
