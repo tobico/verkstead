@@ -4,18 +4,18 @@
 # because a check that quietly moves under us is a check nobody is reading.
 #
 # **And every download of a pinned url retries, a 404 among the replies it
-# retries.** A dozen steps below install a tool by `curl`, each at a version
-# this file names, and a job whose tool will not download is a job that fails
-# with every check under it unrun — on a release, twenty-five jobs where a skip
-# is a failure. Being rate limited is not being unavailable: Maven Central
-# answers a runner's shared address a bare `429` a tenth of a second into a
-# step, and `--retry` counts that among the transient replies. Neither is a 404
-# here. Central answered one a bare 404 for the Maven distribution on
-# 2026-11-26, failing a release, and served the same url to the next run — so
-# `--retry-all-errors` puts 404 among them too. Every url here names a version
-# this file pins, so a 404 is never news about the version: one that really went
-# fails the same way five attempts later, inside the `--retry-max-time` that
-# bounds when a further attempt may start.
+# retries.** Seven steps below install a tool by `curl`, nine downloads between
+# them, each at a version this file names, and a job whose tool will not
+# download is a job that fails with every check under it unrun — on a release,
+# twenty-five jobs where a skip is a failure. Being rate limited is not being
+# unavailable: Maven Central answers a runner's shared address a bare `429` a
+# tenth of a second into a step, and `--retry` counts that among the transient
+# replies. Neither is a 404 here. Central answered one a bare 404 for the Maven
+# distribution on 2026-11-26, failing a release, and served the same url to the
+# next run — so `--retry-all-errors` puts 404 among them too. Every url here
+# names a version this file pins, so a 404 is never news about the version: one
+# that really went fails the same way five attempts later, inside the
+# `--retry-max-time` that bounds when a further attempt may start.
 name: CI
 
 # Pull requests and pushes to `main`, which between them cover every commit
