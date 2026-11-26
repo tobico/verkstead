@@ -1340,6 +1340,14 @@ async fn resolve(
 /// nothing would ever look in, and every Resume wrote this same stop again. A
 /// human who has done that once is owed the sentence that stops them doing it
 /// again.
+///
+/// **Which names no home, deliberately.** *A session's home is Verkstead's
+/// own* was the first wording, and it reads as *so install into that one* —
+/// sending the reader at the one install that would have made
+/// [`crate::stacks::missing`] answer *installed* about a session given nothing.
+/// There is no home to install into: what the sentence says is that the command
+/// installs where it is run and that a session's home is fresh, and the fix is
+/// the `PATH` above it.
 async fn unsyncable(
     state: &AppState,
     conversation_id: i64,
@@ -1351,9 +1359,10 @@ async fn unsyncable(
         "{} is one of a stack, and a stack is synced with the `gh {extension}` extension \
          rather than merged into branch by branch. A session here can't run it. {why} \
          Put `{program}` on this machine's `PATH` and press **Resume**. \
-         `gh extension install` won't do it: a session's home is Verkstead's own, and \
-         that's the only place `gh` looks. Nothing has been spent on the conflict, and \
-         the goes are still there once a session can reach it.",
+         `gh extension install` won't do it, wherever it's run: it installs into the home \
+         it's run from, and a session gets a fresh home with nothing in it. Nothing has \
+         been spent on the conflict, and the goes are still there once a session can \
+         reach it.",
         crate::stopping::opening(&named(watched)),
         extension = crate::stacks::EXTENSION,
         program = crate::stacks::PROGRAM,

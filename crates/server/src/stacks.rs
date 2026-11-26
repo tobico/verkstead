@@ -140,9 +140,19 @@ pub(crate) const PROGRAM: &str = sandbox::GH_STACK;
 /// `gh stack --help` is still run. The question is whether a session could sync
 /// a stack, and a `gh-stack` on the `PATH` that will not start — the wrong
 /// architecture, a truncated download — is a session that cannot however
-/// honestly it was resolved. Where nothing resolves there is nothing to lay
-/// out, and `gh` answers that it has no such command, which is the same stop by
-/// the same route.
+/// honestly it was resolved.
+///
+/// **And laid out whether or not there is anything to lay out**, which is the
+/// half of it a home would otherwise answer. `XDG_DATA_HOME` is where `gh`
+/// reads an extension from *instead of* the home it is run under, measured, so
+/// an empty directory of this call's own is what makes the answer a session's.
+/// Left unset, this `gh` reads `~/.local/share/gh/extensions` under the home
+/// [`crate::sessions::Sessions::session_environment`] composes — which on Linux
+/// is the server's own, and a machine where whoever runs the server has ever
+/// run `gh extension install` would pass this check and then hand its session
+/// nothing. That is the answer this exists to stop giving. So where nothing
+/// resolves the directory is still made and still named, `gh` answers that it
+/// has no such command, and the run stops.
 ///
 /// A server that runs no session answers as though the extension were there:
 /// there is nothing here to equip, so there is nothing for this to be in front
@@ -178,22 +188,22 @@ pub(crate) async fn missing(state: &AppState, conversation_id: i64) -> Option<St
         move || {
             let mut environment = environment;
 
-            // Held for as long as the call, and taken away by dropping it:
-            // what is laid out is for this `gh` and nothing else.
-            let _laid = match extension.as_deref().and_then(laid_out) {
-                Some(laid) => {
-                    environment.push((
-                        sandbox::XDG_DATA_HOME.to_owned(),
-                        laid.path().as_os_str().to_owned(),
-                    ));
-
-                    Some(laid)
-                }
-                // Nothing to lay out, which `gh` is asked all the same: what it
-                // says then is that it has no such command, and that is the
-                // honest answer about a session on this machine.
-                None => None,
+            // The data directory this `gh` reads an extension out of: what a
+            // session would be given and nothing beside it. Made whether or
+            // not that is anything, the name being what keeps the question off
+            // the home this would otherwise be answered under. Held for as
+            // long as the call and taken away by dropping it — what is laid
+            // out is for this `gh` and nothing else.
+            let Some(laid) = laid_out(extension.as_deref()) else {
+                return Err(github::Trouble::Ours(
+                    "Verkstead couldn't make a temporary directory to ask `gh` in.".to_owned(),
+                ));
             };
+
+            environment.push((
+                sandbox::XDG_DATA_HOME.to_owned(),
+                laid.path().as_os_str().to_owned(),
+            ));
 
             gh.extension(EXTENSION, &environment)
         }
@@ -225,18 +235,26 @@ pub(crate) async fn missing(state: &AppState, conversation_id: i64) -> Option<St
 /// tens of megabytes of Go, and what is being asked is whether *that* file
 /// starts.
 ///
-/// `None` where the directory or the link could not be made, which is a check
-/// that then asks `gh` with nothing laid out and reads back that it has no such
-/// command — a stop rather than a pass, which is the right way round for a
-/// machine Verkstead cannot write a temporary directory on.
+/// **`None` for `extension` is a directory all the same, and an empty one.**
+/// That is the whole of what a session on a machine with no `gh-stack` is
+/// given, and naming an empty directory is what has `gh` answer about *that*
+/// rather than about the home it happens to be running under — see [`missing`],
+/// where the measurement is. There is no such thing here as not laying one out.
+///
+/// `None` where the directory could not be made at all, or the link into it
+/// failed: a check that then stops the run in Verkstead's own words rather than
+/// asking `gh` a question whose answer would be about somebody's home.
 ///
 /// Blocks: it makes a directory and a link.
-fn laid_out(extension: &Path) -> Option<tempfile::TempDir> {
+fn laid_out(extension: Option<&Path>) -> Option<tempfile::TempDir> {
     let dir = tempfile::tempdir().ok()?;
     let inside = sandbox::gh_stack_inside(dir.path());
 
     std::fs::create_dir_all(inside.parent()?).ok()?;
-    linked(extension, &inside).ok()?;
+
+    if let Some(extension) = extension {
+        linked(extension, &inside).ok()?;
+    }
 
     Some(dir)
 }
@@ -938,7 +956,7 @@ mod tests {
         )
         .unwrap();
 
-        let laid = laid_out(&extension).expect("a temporary directory and a link");
+        let laid = laid_out(Some(&extension)).expect("a temporary directory and a link");
         let inside = sandbox::gh_stack_inside(laid.path());
 
         assert_eq!(
@@ -963,6 +981,32 @@ mod tests {
         drop(laid);
 
         assert!(!path.exists(), "{}", path.display());
+    }
+
+    /// And a machine with no extension to lay out is laid out all the same, as
+    /// the empty directory a session there is given — see [`laid_out`].
+    ///
+    /// Which is the whole of what keeps the check off a home. `XDG_DATA_HOME`
+    /// is where `gh` reads an extension from instead of the home it is run
+    /// under, so a directory named and empty is `gh` answering about a session;
+    /// the name left unset is `gh` answering about whoever runs the server, and
+    /// on Linux that home is the one the old check passed on.
+    #[test]
+    fn a_machine_with_nothing_to_lay_out_is_laid_out_as_the_empty_directory() {
+        let laid = laid_out(None).expect("a temporary directory of its own");
+        let inside = sandbox::gh_stack_inside(laid.path());
+
+        assert!(
+            inside.parent().expect("the extension's directory").is_dir(),
+            "the shape `gh` reads an extension out of is there to be read: {}",
+            inside.display(),
+        );
+        assert!(
+            !inside.exists(),
+            "and there is no extension in it, which is what `gh` is to answer \
+             about: {}",
+            inside.display(),
+        );
     }
 
     /// And a chain that could not be read says so, rather than leaving the

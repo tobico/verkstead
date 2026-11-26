@@ -30270,9 +30270,11 @@ async fn pressing_resolve_on_a_narrowed_wrap_up_comes_back_through_the_same_one(
 /// off a `PATH` and then unable to start is a session that cannot sync a
 /// stack, however honestly it was found.
 ///
-/// `asked` is where this `gh` records having been asked at all, which is what
-/// says the check ran the extension rather than answering off the resolution
-/// alone.
+/// `asked` is where this `gh` records what `XDG_DATA_HOME` it was asked under,
+/// one line per ask: that it was asked at all is what says the check ran the
+/// extension rather than answering off the resolution alone, and what the line
+/// holds is what says it was asked about a session rather than about a home —
+/// see [`laid_out_for_every_ask`].
 fn gh_stacked_and_conflicting(resolved: &Path, asked: &Path, installed: bool) -> String {
     let answer = match installed {
         true => "exit 0",
@@ -30323,6 +30325,32 @@ esac
 "#,
         resolved = quoted(resolved),
     )
+}
+
+/// What that `gh` recorded of `XDG_DATA_HOME` on each ask, checked: the check
+/// asked at all, and every ask named a data directory of its own.
+///
+/// **Never `unset`, whether or not this machine has an extension to lay out.**
+/// `gh` reads an extension out of that directory *instead of* the home it is
+/// run under, so the name is the whole of what keeps the answer about a
+/// session: left off, the `gh` here reads `~/.local/share/gh/extensions` under
+/// the home the session environment composes — the server's own, on Linux — and
+/// answers *installed* off an install no session would ever be given. See
+/// `stacks::missing`, where the measurement is.
+///
+/// The directory itself has gone by now, laid out for that one call and dropped
+/// with it, so what is read back is the name and not what was in it.
+fn laid_out_for_every_ask(asked: &Path) {
+    let recorded = std::fs::read_to_string(asked)
+        .unwrap_or_else(|error| panic!("the check ran `gh stack --help` at all: {error}"));
+    let named: Vec<&str> = recorded.lines().collect();
+
+    assert!(!named.is_empty(), "the check asked `gh` once at least");
+    assert!(
+        named.iter().all(|said| said.starts_with('/')),
+        "every ask named a data directory of the check's own rather than \
+         leaving `gh` to read a home: {named:?}",
+    );
 }
 
 /// A conflict low in a three-deep stack sends **one** `addressing` session,
@@ -30404,12 +30432,9 @@ async fn a_conflict_low_in_a_stack_sends_one_session_told_the_whole_chain() {
     // And the extension was really asked rather than answered off the
     // resolution: what says a session can sync a stack is `gh stack --help`
     // starting, and a `gh-stack` that resolves and will not run is a session
-    // that cannot sync anything.
-    assert!(
-        asked.exists(),
-        "the check ran `gh stack --help` before it dispatched: {:?}",
-        std::fs::read_to_string(&asked).ok(),
-    );
+    // that cannot sync anything. Asked under a data directory of the check's
+    // own, which is what keeps the answer about a session.
+    laid_out_for_every_ask(&asked);
 
     let worktree = view.worktree.clone().expect("the work is checked out").path;
     let prompt = prompts(&told)[0];
@@ -30660,6 +30685,13 @@ async fn a_sandbox_without_the_stack_extension_stops_before_it_spends_a_go() {
          {stopped:?}",
     );
     assert!(
+        stopped.contains("it installs into the home it's run from")
+            && stopped.contains("a session gets a fresh home with nothing in it"),
+        "and it says why rather than naming a home to install into: a sentence \
+         that named the server's own would send a human at the one install that \
+         passes the check and still reaches no session: {stopped:?}",
+    );
+    assert!(
         stopped.contains("#40"),
         "and which pull request it was about to be run for: {stopped:?}",
     );
@@ -30674,12 +30706,11 @@ async fn a_sandbox_without_the_stack_extension_stops_before_it_spends_a_go() {
         "and no go was spent on a session that could not have done what it was \
          told",
     );
-    assert!(
-        asked.exists(),
-        "and the answer came from running the extension rather than from a \
-         resolution alone: {:?}",
-        std::fs::read_to_string(&asked).ok(),
-    );
+    // And the answer came from running the extension rather than from a
+    // resolution alone — under a data directory of the check's own, which on a
+    // machine with nothing to lay out is the empty one a session there gets.
+    laid_out_for_every_ask(&asked);
+
     assert!(
         !dispatched.exists(),
         "nothing was dispatched at all: {:?}",
