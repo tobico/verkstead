@@ -18837,7 +18837,7 @@ async fn a_stall_over_a_session_that_fell_over_carries_it_on() {
 async fn a_stall_with_no_session_behind_it_says_nothing_about_carrying_anything_on() {
     let fixture = grilling_swept(&a_grilling_that_falls_over()).await;
 
-    fixture.stopped().await;
+    let stall = fixture.stopped().await.html;
 
     let pool = open_database(&fixture.database).await.unwrap();
 
@@ -18847,7 +18847,7 @@ async fn a_stall_with_no_session_behind_it_says_nothing_about_carrying_anything_
         .unwrap();
     pool.close().await;
 
-    let before = notices(&fixture.view().await).len();
+    let before = notices(&fixture.view().await);
 
     assert_eq!(fixture.resume().await, Resumed::Resumed);
 
@@ -18867,7 +18867,19 @@ async fn a_stall_with_no_session_behind_it_says_nothing_about_carrying_anything_
         "a session of its own, primed from the record: {said:?}",
     );
 
-    let notices = notices(&fixture.view().await);
+    // The session the press started falls over in its turn — it is the same
+    // stub, primed afresh — so the sweep finds the Conversation stalled a
+    // second time and stops it in the same words. Waited for rather than read
+    // past: the sweep fires every [`SWEEPING`] and the session exits whenever
+    // it exits, so a Timeline read taken the moment the output lands sees
+    // whichever of the two got there first.
+    let notices = fixture
+        .until(|view| {
+            let notices = notices(view);
+
+            (notices.len() > before.len()).then_some(notices)
+        })
+        .await;
 
     assert!(
         !notices
@@ -18877,9 +18889,11 @@ async fn a_stall_with_no_session_behind_it_says_nothing_about_carrying_anything_
          off: {notices:?}",
     );
     assert_eq!(
-        notices.len(),
-        before,
-        "which is to say the press added no Notice at all: {notices:?}",
+        notices,
+        [before.clone(), vec![stall]].concat(),
+        "which is to say the press itself added no Notice: what stands beside the \
+         stall it was pressed over is that same stall again, of the session it \
+         started: {notices:?}",
     );
 }
 
