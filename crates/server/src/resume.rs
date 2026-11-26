@@ -65,6 +65,7 @@
 //! same stops alone for the same reason. See [`on_arrival`].
 
 use std::future::Future;
+use std::path::Path;
 use std::pin::Pin;
 
 use tokio::sync::watch;
@@ -350,12 +351,25 @@ async fn recompute(
 
     match conversation.state {
         // A fresh grilling on the Brief and the digest of what has already been
-        // asked and answered — the interview itself went with the process it ran
-        // in. See [`crate::grillings::again`].
+        // asked and answered — or, where the grilling that ran here was cut off
+        // part way through, that very session carried on. The interview itself
+        // went with the process it ran in, so a fresh one is the fallback rather
+        // than the aim. See [`crate::grillings::again`], and [`cut_off`].
         Lifecycle::Grilling => {
             if conversation.grilling_pairing.is_none() {
                 return Ok(Resumed::NoGrillingPairing);
             }
+
+            // Before the spawn, because the relaunch reads it: a conversation
+            // standing to be carried on is what holds the Question Sets the gone
+            // session was idling on open rather than locking them.
+            //
+            // **A grilling's cut-off is unconditional**, which is why it is the
+            // state this reading starts on: a grilling is over when it has picked
+            // a direction, and picking one moves the Conversation out of Grilling.
+            // So a Conversation still grilling with a session behind it is one
+            // whose interview stopped part way through, however it stopped.
+            cut_off(state, conversation_id, MidTurn::PartWayThrough).await;
 
             starting(state, conversation_id, resuming).await?;
 
@@ -372,7 +386,10 @@ async fn recompute(
             ));
         }
 
-        // The next step read off the branch, which is the direction's to say.
+        // The next step read off the branch, which is the direction's to say —
+        // or, where the step that was running never finished, the session that
+        // was running it carried on. Which of the two is the backlog's own
+        // answer rather than an unconditional one: see [`mid_turn`].
         Lifecycle::Implementing => {
             // A Conversation implements because a direction was picked, so a
             // missing one is another record that cannot be true — and the one
@@ -459,12 +476,34 @@ async fn recompute(
                 }
             }
 
+            // And whether the session that stopped here was cut off part way
+            // through its step, which a run answers from its own state rather
+            // than unconditionally: a run stops between tasks as routinely as
+            // mid-task, and only one of the two has a conversation worth
+            // carrying on. See [`mid_turn`], and [`cut_off`].
+            //
+            // Two of the three directions answer it where their session is
+            // launched instead, there being no backlog to read it off and a
+            // reading in front of them that may launch nothing at all — see
+            // [`MidTurn::AtTheLaunch`], and [`cut_off_at_the_launch`]. Which is
+            // what the spawn below is told it is: a way back in rather than a
+            // steer.
+            //
+            // After every refusal above and before the spawn, which is where a
+            // grilling's is for the same two reasons: nothing may be written
+            // down as standing to be carried on where the press is about to
+            // refuse and launch nothing at all, and a conversation standing to
+            // be carried on is what holds the Question Sets the gone session was
+            // idling on open rather than locking them.
+            cut_off(state, conversation_id, mid_turn(direction, &worktree).await).await;
+
             starting(state, conversation_id, resuming).await?;
 
             tokio::spawn(crate::runner::implementing_again(
                 state.clone(),
                 conversation_id,
                 driving,
+                crate::runner::Again::AWayBackIn,
             ));
         }
 
@@ -577,6 +616,12 @@ async fn recompute(
         // The brief is read for either way. It costs one read of the Timeline,
         // and a Conversation in this state with nothing to pick up is one the
         // press should say so about by name rather than one it acts on halfway.
+        //
+        // **Or the round that was being had carried on**, where the session
+        // having it was taken away mid-sentence — which is the occasion this
+        // state is the whole reason for: a follow-up cut off between the human's
+        // answer and the agent reading it is what the carrying-on was written
+        // for. See [`mid_round`], and [`cut_off`].
         Lifecycle::FollowUp => {
             if conversation.implementation_pairing.is_none() {
                 return Ok(Resumed::NoImplementationPairing);
@@ -585,6 +630,19 @@ async fn recompute(
             let Some(follow_up) = crate::follow_ups::opened(state, conversation_id).await? else {
                 return Ok(Resumed::NoFollowUpBrief);
             };
+
+            // After every refusal and before the spawn, where the other two
+            // states' readings are and for their two reasons — and before the
+            // spawn in the stronger sense here: what the launch below decides
+            // about the job turns on a conversation standing to be carried on,
+            // so the row has to be there by the time it looks. See
+            // [`crate::runner::follow_up_again`].
+            cut_off(
+                state,
+                conversation_id,
+                mid_round(state, conversation_id).await,
+            )
+            .await;
 
             starting(state, conversation_id, resuming).await?;
 
@@ -598,13 +656,17 @@ async fn recompute(
 
         // And a fresh session on the investigating skill, on the question this
         // Investigating was opened with and the rounds it has already been
-        // through — the follow-up's shape, and for the follow-up's reason: an
-        // investigation is a conversation, so nothing of it is written on the
-        // branch and what outlives the session having it is the Timeline. See
-        // [`crate::investigations`].
+        // through — or, where the session having the round was taken away
+        // mid-sentence, that session carried on. The follow-up's shape, and for
+        // the follow-up's reason: an investigation is a conversation, so nothing
+        // of it is written on the branch and what outlives the session having it
+        // is the Timeline. See [`crate::investigations`], and [`mid_round`].
         //
         // There is no ending left half-made to look for here, the way a
         // follow-up's owed pull request is: an investigation never ends on one.
+        // Which is also why nothing here has a job to re-derive and so nothing
+        // has to be told not to: an investigation has the one job it was opened
+        // with, whoever launches it.
         Lifecycle::Investigating => {
             if conversation.implementation_pairing.is_none() {
                 return Ok(Resumed::NoImplementationPairing);
@@ -614,6 +676,19 @@ async fn recompute(
             else {
                 return Ok(Resumed::NoInvestigation);
             };
+
+            // After every refusal and before the spawn, where the other three
+            // states' readings are and for their two reasons — see [`cut_off`].
+            // Read the follow-up's way because a round is the same thing here: a
+            // conversation with nothing of it on the branch, so what tells one
+            // cut off mid-sentence from one that finished the turn it was having
+            // is how its session ended.
+            cut_off(
+                state,
+                conversation_id,
+                mid_round(state, conversation_id).await,
+            )
+            .await;
 
             starting(state, conversation_id, resuming).await?;
 
@@ -643,6 +718,307 @@ async fn recompute(
     Ok(Resumed::Resumed)
 }
 
+/// Whether the session that stopped here was **cut off**: stopped part way
+/// through its step rather than finishing it.
+///
+/// The one thing the states that reach [`cut_off`] answer differently, which is
+/// why it is read where the state is known and handed in rather than worked out
+/// down there. A **grilling's** is unconditional — a grilling is over when it has
+/// picked a direction, and picking one moves the Conversation out of Grilling. A
+/// **run's** is the state of what it was building, because a run stops between
+/// tasks as routinely as mid-task: see [`mid_turn`]. And a **follow-up's** and an
+/// **investigation's** are how the session ended, a round being a conversation
+/// with nothing of it on the branch to read: see [`mid_round`].
+///
+/// And two of the three directions a run can be following answer it **where the
+/// session is launched** rather than here: see [`MidTurn::AtTheLaunch`], and
+/// [`cut_off_at_the_launch`], which is this writing made from there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MidTurn {
+    /// It was: the step the session was running did not finish, so there is a
+    /// conversation with the whole of that step in it to carry on.
+    PartWayThrough,
+
+    /// It was not: the step finished and the run stopped between two of them,
+    /// where what is next is a fresh session whatever anybody decides. Nothing
+    /// was cut off, so Verkstead's own Resume is simply what it always was and
+    /// there is nothing to tell anybody about.
+    BetweenSteps,
+
+    /// And not this reading's to make at all: the direction being followed
+    /// answers it where its session is launched, so nothing is written here and
+    /// nothing is said.
+    ///
+    /// **An inline implementation and a roadmap's own writing**, the two
+    /// directions with no backlog to have been part way through. What each of
+    /// them is in the middle of is read by the driver that takes it up — the
+    /// pull request an inline run ends on, the document a roadmap's writing ends
+    /// on — and those readings may come out as a wrap-up or a stop with no
+    /// session in them at all. A row written in front of one would be a row
+    /// nothing spends, which the next session of the work would take up and be
+    /// told to resume a conversation that had nothing to do with it. So the row
+    /// goes in where the session goes in: see
+    /// [`crate::runner::inline_again`] and [`crate::runner::roadmap_again`].
+    AtTheLaunch,
+}
+
+/// How a run reads whether the session that stopped was cut off part way through
+/// its step: the backlog's own answer, where the direction being followed has
+/// one.
+///
+/// Asked of `.tasks/` and the branch by the same reading the launch itself makes
+/// of the two — see [`crate::runner::mid_step`], which is where it is written up.
+/// Folded in here rather than asked as a second question, because what differs
+/// between the states that have a cut-off is how *mid-turn* is read and nothing
+/// else about the occasion.
+///
+/// **An inline implementation and a roadmap's own writing are read where their
+/// session is launched** rather than here. Neither has a backlog to have been
+/// part way through, and what each of them is in the middle of is read by the
+/// driver that takes it up — a reading that may come out as a wrap-up or a stop
+/// with no session in it at all, which is no place for a row that only a launch
+/// spends. See [`MidTurn::AtTheLaunch`], and [`cut_off_at_the_launch`], which is
+/// where the two of them write it.
+async fn mid_turn(direction: Direction, worktree: &Path) -> MidTurn {
+    match direction {
+        Direction::TaskList => match crate::runner::mid_step(worktree).await {
+            true => MidTurn::PartWayThrough,
+            false => MidTurn::BetweenSteps,
+        },
+
+        Direction::Inline | Direction::Roadmap => MidTurn::AtTheLaunch,
+    }
+}
+
+/// And how a **follow-up** and an **investigation** read the same thing: how the
+/// session that stopped here ended.
+///
+/// A round of either is a conversation rather than a step with a commit at
+/// the end of it, so there is nothing in the Worktree to read — and the state
+/// alone cannot say either, a Conversation sitting in Follow-up through every
+/// round it has and going on sitting there where an ending that sent for a pull
+/// request got nowhere. What tells the two apart is the session: one taken away
+/// while it was running was mid-sentence, as was one that fell over where it
+/// stood, and one that exited cleanly had finished the turn it was having.
+///
+/// **Which is the absence of a row.** How a session ended is written down for one
+/// that ended on its own account and never for one Verkstead ended itself, so
+/// nothing written down over a session that is no longer running is Verkstead
+/// having ended it — a force stop, a sign-out, an account out of window — which
+/// is the live kill this is looking for. See [`store::the_last_ending`], where
+/// that reading is written up.
+///
+/// **And it is wider than the kills by two**, which is worth knowing before
+/// reading an absence as one: a session that had said it was done and gone quiet
+/// since leaves no row either, nor does one that had asked for the work to be
+/// moved — see [`crate::sessions::Ended::on_purpose`]. The move never reaches
+/// here, the Transfer having written its own row for the session that crossed
+/// and the guard below finding it. The done one is a round that was over, and
+/// the state it was over *in* is left behind as its ending lands — so what is
+/// left is the gap between a round's session being ended and its ending's own
+/// next launch, where this reads a cut-off over a conversation that had nothing
+/// left to say. One session, and the round it starts says it is done again. Told
+/// apart properly it wants a row written for the ending that landed, which is a
+/// change to what that table records rather than to this reading.
+///
+/// **And a harness that fell over mid-round is the other half of it**, read off
+/// the row rather than off its absence: a session that exited of its own account
+/// had the turn it was having unless it fell over in the middle of one, which is
+/// the same cut-off by another route. So the one ending that leaves a
+/// conversation nobody is mid-sentence in is the clean exit — see
+/// [`store::Ended::fell_over`], which is where the three are told apart.
+///
+/// Which is why a crash costs the run nothing here however it was found: the
+/// stall sweep that noticed it, the stop a driver wrote over it, and a restart
+/// coming up to a Conversation nothing has driven since all read the same row and
+/// all carry the same conversation on.
+///
+/// **And what the session was sent for is not part of it**, because nothing
+/// writes that down: a Tinker whose rounds are over sits in Follow-up while the
+/// `submitting` session its ending sent for runs, and one of those taken away
+/// while it was running reads as a cut-off here like any other. Which is the
+/// right half of the answer — that conversation is one somebody is mid-sentence
+/// in, and carrying it on is what this is for — with the role it is picked up in
+/// the follow-up's rather than its own. The alternative is worse and is certain
+/// rather than possible: a session killed mid-push is one whose turn would
+/// otherwise be thrown away every time.
+async fn mid_round(state: &AppState, conversation_id: i64) -> MidTurn {
+    match store::the_last_ending(&state.pool, conversation_id).await {
+        // Nothing was written down about how it ended, so it was taken away
+        // while it was running.
+        Ok(None) => MidTurn::PartWayThrough,
+
+        // It ended on its own account and fell over doing it, which is a turn
+        // that stopped in the middle rather than one that was over.
+        Ok(Some(ended)) if ended.fell_over() => MidTurn::PartWayThrough,
+
+        // And it ended on its own account and cleanly, which is a turn that was
+        // over.
+        Ok(Some(_)) => MidTurn::BetweenSteps,
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading how the session of a round that stopped ended failed, so the session started for it is Verkstead's own resume");
+            MidTurn::BetweenSteps
+        }
+    }
+}
+
+/// Write down that the launch about to happen carries on the session that was
+/// **cut off** here — stopped part way through its step rather than finishing it
+/// — so that what starts is that session resumed rather than a fresh one primed
+/// from the record.
+///
+/// `mid_turn` is the state's own answer to whether it was cut off at all, read
+/// where the state is known — see [`MidTurn`]. `BetweenSteps` writes nothing and
+/// says nothing: a run that stopped with its step done is a run whose next step
+/// is a fresh session anyway, so there is no conversation anybody is losing.
+///
+/// **Read at the launch rather than written at the stop**, which is the one thing
+/// that parts this occasion from the other three. An arrival, an answer that
+/// widened a sandbox and a *Keep it here* are each somebody's act, with something
+/// running to write the row as it goes; a session cut off is nobody's answer, and
+/// the ways it is cut off include the two that leave nothing running at all — a
+/// crash, and a server being killed. So the question is asked here, where every
+/// way back in passes: the human's press, a login's carry-on, a restart's
+/// `at_startup`, and an arrival. See [`store::carrying_a_conversation`].
+///
+/// **Guarded on there being no row yet**, which is what keeps it clear of those
+/// three: each of them pre-writes its own row and then reaches the recompute, and
+/// a second write over the top would lose the Set the Notice is to name. The peek
+/// reads without spending, the spending being the launch's — see
+/// [`store::take_up_the_conversation`].
+///
+/// **And on a session having run at all.** A grilling whose first launch never
+/// got as far as a process has nothing to carry on and nothing was cut off, so
+/// there is nothing to say: what the Notice below is for is the other case, a
+/// session that really ran under a harness whose id Verkstead never wrote down.
+/// [`store::newest_agent`] is what tells the two apart — one row per session, from
+/// inside the transaction that opens its Capture.
+///
+/// Nothing here refuses and nothing waits on it. A read that fails, a write that
+/// fails and a session Verkstead cannot name all leave the launch as Verkstead's
+/// own Resume, which is a complete way to take the work up — and the one that can
+/// be said in advance says so on the Timeline, the human pressing one thing and
+/// seeing two outcomes from it.
+async fn cut_off(state: &AppState, conversation_id: i64, mid_turn: MidTurn) {
+    // Nothing was cut off, or nothing here is the one to say so: either way
+    // there is nothing to write and nothing to tell anybody. Asked before any of
+    // the reads below, this being the one answer already in hand.
+    if mid_turn != MidTurn::PartWayThrough {
+        return;
+    }
+
+    match store::carrying_a_conversation(&state.pool, conversation_id).await {
+        // Nothing has been written, so this reading is the one that decides.
+        Ok(false) => {}
+
+        // An arrival's, an answer's or a *Keep it here*'s, already written with
+        // the occasion it is to be said under.
+        Ok(true) => return,
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a conversation was already standing to be carried on failed, so the session started for this one is Verkstead's own resume");
+            return;
+        }
+    }
+
+    match store::newest_agent(&state.pool, conversation_id).await {
+        // A session ran here, which is what makes this a cut-off at all.
+        Ok(Some(_)) => {}
+
+        // Nothing ever ran, so nothing was cut off: this is a first launch that
+        // never reached a process, and Verkstead's own Resume is simply what it
+        // always was. Nothing to tell anybody about.
+        Ok(None) => return,
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a session had run for a Conversation being started again failed, so the session started for it is Verkstead's own resume");
+            return;
+        }
+    }
+
+    let continued = match store::the_last_session(&state.pool, conversation_id).await {
+        Ok(Some(continued)) => store::Continued {
+            cut_off: true,
+            ..continued
+        },
+
+        // A session ran and Verkstead cannot name it — a backend that names none
+        // and whose own id was never written down. Said on the Timeline, because
+        // it is the reason the session in front of the human is not the one that
+        // was mid-sentence.
+        Ok(None) => {
+            crate::carrying::instead(
+                &state.pool,
+                &state.nudges,
+                conversation_id,
+                crate::carrying::Occasion::CutOff,
+                &crate::carrying::Instead::NoSession,
+            )
+            .await;
+
+            return;
+        }
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the session a cut-off Conversation would be carried on from failed, so the session started for it is Verkstead's own resume");
+            return;
+        }
+    };
+
+    match store::continue_on_arrival(&state.pool, conversation_id, &continued).await {
+        Ok(()) => tracing::info!(
+            conversation_id,
+            session = %continued.session_id,
+            "the session that stopped here was cut off part way through its step, so the \
+             launch starting now carries its conversation on",
+        ),
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "recording the conversation a cut-off session is carried on from failed, so the session started for it will be re-primed instead");
+        }
+    }
+}
+
+/// The same writing, where the reading was the **launch's** own to make.
+///
+/// [`cut_off`] with the answer already in hand, for the two directions whose
+/// mid-turn is read where their session is launched rather than in the
+/// recompute: an inline implementation, which is one session's worth of work
+/// ending on a pull request, and a roadmap's own writing, which is one session's
+/// worth ending on the document. Neither has a backlog to have been part way
+/// through, and the driver that takes either of them up asks what the work is
+/// already on before it decides there is a session to launch at all — so this is
+/// called from the one arm of each that launches one, which is the arm where the
+/// work is not finished. See [`MidTurn::AtTheLaunch`] for why it cannot be
+/// written any earlier, and [`crate::runner::inline_again`] and
+/// [`crate::runner::roadmap_again`] for the two readings themselves.
+///
+/// **And nothing is written for a Steer**, which is the one press that reaches
+/// those two drivers meaning something else. A way back in picks the session
+/// that stopped up where it left off; a steer is the human saying what is to
+/// happen *instead*, which replaces that session (ADR-0020). The steer has
+/// already spent whatever row was standing as it cleared the stop — see
+/// [`crate::steering`] — so all there is to do here is not write a fresh one.
+/// Asked once, here, rather than at each launch: the two directions are one
+/// rule, and a guard at one of them would be a trap at the other.
+///
+/// Everything else is [`cut_off`]'s: the guard on a row already standing, the
+/// silence where no session ever ran, the Notice naming why not where one ran
+/// that Verkstead cannot name, and the launch left as Verkstead's own Resume
+/// wherever any of it fails.
+pub(crate) async fn cut_off_at_the_launch(
+    state: &AppState,
+    conversation_id: i64,
+    again: crate::runner::Again,
+) {
+    if again == crate::runner::Again::ASteer {
+        return;
+    }
+
+    cut_off(state, conversation_id, MidTurn::PartWayThrough).await
+}
+
 /// Start driving again everything a restart left, which is what a server does as
 /// it comes up.
 ///
@@ -656,6 +1032,16 @@ async fn recompute(
 /// Conversation left standing still because Verkstead was upgraded is one that
 /// would wait for however long it took somebody to notice.
 ///
+/// **And a session cut off by the restart is carried on**, which costs this
+/// nothing: the recompute reads the cut-off for itself, so a Conversation whose
+/// session was mid-turn when the process went gets the harness's own resume and
+/// one left cleanly between two steps gets Verkstead's — see [`cut_off`]. Which
+/// is the whole reason that reading is made at the launch rather than written at
+/// the stop. A restart, a kill and a crash each leave nothing running to write a
+/// row with, and a shutdown is the same thing again: there is no graceful path
+/// out of this process, so a server stopping is a server whose sessions stop
+/// where they stand.
+///
 /// **Except where somebody decided to stop.** A stop [`store::Decision::decided`]
 /// answers for is Verkstead or the human pulling the brake — the checks that
 /// would not go green, a finish step with no pull request, a Stop pressed from
@@ -663,6 +1049,9 @@ async fn recompute(
 /// to think differently about any of them. Those wait for the press, whether or
 /// not they are marked as waiting on anybody. A [`store::Decision::Circumstance`] is
 /// the other half of the same record: nobody chose it, so it is taken up here.
+/// And a stop left alone is a cut-off left alone with it: nothing is read and
+/// nothing is written down, so the press it is waiting for finds the session
+/// that stopped exactly as it stood.
 ///
 /// A refusal is written down rather than logged, because a Conversation that
 /// cannot be started is exactly the one somebody has to look at: it stops, with

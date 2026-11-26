@@ -94,7 +94,10 @@ use verkstead_server::{
     Agents, Gh, Pace, open_database, router_running_sessions,
     router_running_sessions_answering_devices,
 };
-use verkstead_store::{Decision, StageOf, stage_roadmap};
+use verkstead_store::{
+    Decision, Lifecycle as State, StageOf, continue_on_arrival, nothing_else, stage_roadmap,
+    the_last_session,
+};
 
 /// The device every Conversation started here is ranked by, named the way a
 /// cluster names one (ADR-0020, *Ranks*).
@@ -6900,6 +6903,13 @@ async fn a_later_pick_moves_the_watcher_onto_the_artifact_it_asked_for() {
 /// on a Conversation that is grilling is a fresh grilling — the same Brief, and a
 /// digest of what the dead interview already settled.
 ///
+/// **A fresh one here because this stub kept no log.** A grilling cut off part
+/// way through is carried on where there is a conversation on this machine to
+/// carry on, so what stands in for claude above decides which of the two this
+/// restart gets — and one that writes nothing into `projects/` is Verkstead's
+/// own Resume, which is the launch this has always been about. The line saying
+/// which it was is the one thing on the Timeline either way; it raises nothing.
+///
 /// Which is the whole of what this replaces. A restart used to leave a stop with
 /// the tail named on it and wait for somebody to press a button about a
 /// Conversation nothing had chosen to stop.
@@ -6967,8 +6977,9 @@ async fn a_restarted_server_grills_the_work_again_rather_than_raising_anything()
     let view = fixture.view().await;
 
     assert!(
-        notices(&view).is_empty(),
-        "and nothing was written about the session the restart killed: {:?}",
+        notices_but_the_carrying_on(&view).is_empty(),
+        "and nothing was raised about the session the restart killed, beyond the \
+         line saying which of the two resumes took it up: {:?}",
         notices(&view),
     );
     assert_eq!(
@@ -16406,6 +16417,14 @@ async fn an_answer_that_adds_to_the_sandbox_carries_the_waiting_session_on() {
     );
 
     assert!(
+        !notices
+            .iter()
+            .any(|notice| notice.contains("The session that stopped here")),
+        "and the occasion is the answer rather than a stop: the answer wrote the row \
+         before the launch could read a cut-off into it: {notices:?}",
+    );
+
+    assert!(
         sets(&view)
             .iter()
             .any(|asked| asked.set_id == set && asked.carried_on),
@@ -16476,6 +16495,2844 @@ async fn an_answer_whose_session_cannot_be_resumed_is_re_primed_and_says_why() {
                 || notice.contains(&format!("question set {set}"))
                     && notice.contains("Verkstead's own resume")),
         "the Timeline says why it was not carried on: {notices:?}",
+    );
+}
+
+/// **A grilling force-stopped part way through is carried on when the run starts
+/// again**, rather than re-primed as a fresh interview.
+///
+/// The third occasion for the same resume, and the first one nobody wrote down as
+/// it happened: a stop is not an answer, so the row saying a conversation is
+/// standing to be carried on is written by the launch that reads the record — see
+/// the server's `resume::cut_off`. **A grilling's cut-off is unconditional**: a
+/// grilling is over when it has picked a direction, and picking one moves the
+/// Conversation out of Grilling, so one still grilling with a session behind it is
+/// one whose interview stopped part way through.
+///
+/// And the Question Set it was idling on stays **open**, which is the reversal a
+/// carried conversation makes anywhere: the reader has not gone, it is coming
+/// back. Its wait died with the process, so the note names the Set and the line
+/// that fetches the Answers — under the id it already has, nothing having moved
+/// and nothing having been renumbered.
+#[tokio::test]
+async fn a_force_stopped_grilling_is_carried_on_when_the_run_starts_again() {
+    let fixture = grilling(WAITS_AND_CARRIES_ON).await;
+
+    let first = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(ASKED_ALREADY).await;
+
+    assert_eq!(
+        fixture.force_stop().await,
+        ConversationStopped::Stopped,
+        "the grilling was stopped where it stood",
+    );
+
+    fixture.quiet().await;
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    assert_ne!(
+        resumed, first,
+        "a second session, after the one that stopped"
+    );
+
+    let said = fixture.capture(resumed).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the session that stopped: {said:?}",
+    );
+    assert!(
+        said.contains(&format!("verkstead answers {set}")),
+        "and primed with the Set it was idling on and the line that reads its \
+         Answers: {said:?}",
+    );
+    assert!(
+        !said.contains("# The Brief this started from"),
+        "and not re-primed with the interview it is already part way through: {said:?}",
+    );
+
+    let view = fixture.view().await;
+    let notices = notices(&view);
+
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "the Timeline says which of the two resumes it was: {notices:?}",
+    );
+
+    let standing = sets(&view)
+        .into_iter()
+        .find(|asked| asked.set_id == set)
+        .expect("the Set the stopped session was idling on is on the Timeline")
+        .standing
+        .clone();
+
+    assert!(
+        !matches!(standing, verkstead_render::Standing::LockedUnanswered(_)),
+        "the Set is held open for the reader that is coming back rather than \
+         locked: {standing:?}",
+    );
+    assert_eq!(
+        fixture
+            .respond(set, serde_json::json!([{ "label": "Q1", "selected": 1 }]))
+            .await,
+        Submitted::Accepted,
+        "and the human can still answer it, which is what open means to them",
+    );
+}
+
+/// **And a cut-off session Verkstead cannot name stays Verkstead's own Resume**,
+/// with the Timeline saying so: there is no id to tell a harness to resume, so
+/// what starts is a fresh session primed from the record.
+///
+/// **What it stands for is a session on a backend that names none and whose own
+/// id was never written down.** Standing that up as it really happens would mean
+/// a harness this suite does not have, so the names come off the record
+/// instead — which leaves exactly what such a Conversation has: Events, and
+/// nothing saying which session wrote them.
+#[tokio::test]
+async fn a_cut_off_session_verkstead_cannot_name_is_re_primed_and_says_why() {
+    let fixture = grilling(WAITS_AND_CARRIES_ON).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+    fixture.quiet().await;
+
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    sqlx::query("DELETE FROM session_names")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let again = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(again).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("the grilling is running"),
+        "a session of its own rather than a resume: {said:?}",
+    );
+
+    let notices = notices(&fixture.view().await);
+
+    assert!(
+        notices
+            .iter()
+            .any(|notice| notice.contains("named on the record")
+                && notice.contains("no conversation to carry on from")),
+        "the Timeline says why it was not carried on: {notices:?}",
+    );
+}
+
+/// A two-task backlog whose task sessions write the log claude keeps of their
+/// conversation and say, when they are resumed, what they were resumed with —
+/// and whose work is committed only once the test opens the gate.
+///
+/// Which is what makes a run's two stops tellable apart: a session stopped in
+/// front of the gate left its task half-built, and one stopped behind it
+/// committed the task and the run came to rest between two of them.
+///
+/// Two tasks rather than one, because what the second stop is about is the
+/// *next* task: a backlog with one in it would read as a feature finished with
+/// whatever anybody pressed.
+fn two_tasks_carrying_on_at(gate: &Path) -> String {
+    format!(
+        r#"
+entry=$(printf '%s' "$PWD" | tr -c 'a-zA-Z0-9' '-')
+mkdir -p "$HOME/.claude/projects/$entry"
+record="$HOME/.claude/projects/$entry/$4.jsonl"
+case "$3" in
+--resume)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Picking the task up."}}]}}}}' >> "$record"
+    printf 'carried on\r\n'
+    printf 'prompt=%s\r\n' "$2"
+    sleep 300
+    ;;
+*)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Working."}}]}}}}' > "$record"
+    case "$1" in
+    claude-grilling-5)
+        printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+        : > /tmp/verkstead/done
+        printf 'breaking down\r\n'
+        mkdir -p .tasks
+        printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+        printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+        printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
+        printf '# 01. Count the requests\n' > .tasks/01-count.md
+        printf '# 02. Refuse the excess\n' > .tasks/02-refuse.md
+        git add .tasks
+        git commit --quiet -m 'chore: plan rate-limiting tasks'
+        : > /tmp/verkstead/done
+        printf 'the backlog has landed\r\n'
+        sleep 300
+        ;;
+    *)
+        number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+        next=$(ls .tasks | grep -E "^$number-" | head -n 1)
+        printf 'working %s\r\n' "$next"
+        printf 'a limiter\n' >> limiter.md
+        while [ ! -f {gate} ]; do sleep 0.05; done
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m "feat: $next"
+        printf 'committed %s\r\n' "$next"
+        sleep 300
+        ;;
+    esac
+    ;;
+esac
+"#,
+        gate = quoted(gate),
+    )
+}
+
+/// **A task session cut off part way through its task is carried on**, rather
+/// than a fresh session being primed for the task it was already building.
+///
+/// The Implementing reading of the same occasion, and the one that is not
+/// unconditional the way a grilling's is: a run stops between tasks as routinely
+/// as mid-task. What says which this was is the backlog's own state — the task's
+/// box unticked and what the session wrote still standing in the Worktree, rather
+/// than taken by a commit. See the server's `runner::mid_step`.
+///
+/// Nothing about the note says why it stopped. The stop wrote its own Notice at
+/// the time, and what the resumed agent needs is that it is the session it was
+/// and the work is where it left it.
+#[tokio::test]
+async fn a_task_cut_off_part_way_through_is_carried_on_when_the_run_starts_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("never");
+    let fixture = grilling_spilling(spill, &two_tasks_carrying_on_at(&gate), PULL_REQUEST).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    // The task session, in front of a gate this test never opens: it has written
+    // what it was building and nothing has committed it.
+    let working = fixture.attachable(2).await;
+    fixture.printed(working, "working 01-count.md").await;
+
+    assert_eq!(
+        fixture.force_stop().await,
+        ConversationStopped::Stopped,
+        "the task was stopped where it stood",
+    );
+
+    fixture.quiet().await;
+
+    assert_ne!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "and what it had written is still in the Worktree, which is what says \
+         the task was half-built rather than done",
+    );
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(2)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(resumed).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the session that was building the task: {said:?}",
+    );
+    assert!(
+        !said.contains("working 01-count.md"),
+        "and not primed as a fresh session for the task it was already part way \
+         through: {said:?}",
+    );
+
+    let notices = notices(&fixture.view().await);
+
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "the Timeline says which of the two resumes it was: {notices:?}",
+    );
+}
+
+/// **And a run that stopped cleanly between two tasks stays Verkstead's own
+/// Resume**: the task it was on is committed, so what is next is a fresh session
+/// for the next task whatever anybody decides.
+///
+/// Which is why the Implementing reading is the state's rather than
+/// unconditional. A run comes to rest between tasks as ordinarily as it is cut
+/// off mid-task, and a conversation carried on into the next task would be an
+/// agent told to pick up a task it had just finished.
+#[tokio::test]
+async fn a_run_stopped_between_two_tasks_is_re_primed_for_the_next_one() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let fixture = grilling_spilling(spill, &two_tasks_carrying_on_at(&gate), PULL_REQUEST).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    // The gate is opened, so the task session gets its commit in. It gives no
+    // Done signal, so nothing ends it and nothing launches the next task: what
+    // the stop below catches is a run with its first task done and its second
+    // not started.
+    let working = fixture.attachable(2).await;
+    fixture.printed(working, "working 01-count.md").await;
+    std::fs::write(&gate, "").unwrap();
+    fixture.printed(working, "committed 01-count.md").await;
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+    fixture.quiet().await;
+
+    assert_eq!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "nothing of the task is left waiting for a commit, which is what says \
+         the run stopped between two of them",
+    );
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let next = fixture
+        .until(|view| {
+            outputs(view)
+                .get(2)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(next).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("working 02-refuse.md"),
+        "a fresh session for the next task, which is what Verkstead's own Resume \
+         launches: {said:?}",
+    );
+    assert!(
+        !said.contains("carried on"),
+        "and no harness was told to resume a conversation that had finished what \
+         it was sent for: {said:?}",
+    );
+
+    let notices = notices(&fixture.view().await);
+
+    assert!(
+        !notices
+            .iter()
+            .any(|notice| notice.contains("The session that stopped here was part way through")),
+        "and nothing was said about carrying anything on, nothing having been cut \
+         off: {notices:?}",
+    );
+}
+
+/// An inline implementation that writes the log claude keeps of its
+/// conversation, leaves what it is building uncommitted, and holds — and which
+/// says, where it is resumed, that it is the session that was building the work
+/// rather than a fresh one primed to build it over again.
+///
+/// Three roles, which is what an inline Conversation spends: the grilling that
+/// hands the direction over, the implementation that holds, and the review a
+/// wrap-up starts once the branch is on a pull request — which is the session
+/// the test with nothing to carry on watches for.
+///
+/// The role is read off the prompt rather than off the model, because that is
+/// the one of the two a carried session cannot have: its prompt is the note it
+/// is primed with. Which is why `--resume` is answered before anything else is
+/// looked at.
+fn an_inline_run_that_holds() -> String {
+    format!(
+        r#"
+{CLAUDES_LOG}
+case "$3" in
+--resume)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Picking the work up."}}]}}}}' >> "$log"
+    printf 'carried on\r\n'
+    printf 'prompt=%s\r\n' "$2"
+    sleep 300
+    ;;
+*)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Working."}}]}}}}' > "$log"
+    case "$2" in
+    *implementing/SKILL.md*)
+        printf 'building the limiter\r\n'
+        printf 'a limiter\n' >> limiter.md
+        sleep 300
+        ;;
+    *reviewing/SKILL.md*)
+        printf 'reading the whole branch\r\n'
+        sleep 300
+        ;;
+    *)
+        printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+        : > /tmp/verkstead/done
+        printf 'the handoff is written\r\n'
+        sleep 300
+        ;;
+    esac
+    ;;
+esac
+"#
+    )
+}
+
+/// **An inline implementation cut off part way through is carried on when the
+/// run starts again**, rather than a fresh session being primed to build work
+/// somebody is already in the middle of.
+///
+/// The first of the two directions with no backlog to read a step off, and the
+/// reason its reading sits where the session is launched rather than in the
+/// recompute: an inline run ends on a pull request, so what says whether its one
+/// step finished is `gh`, asked by the driver that takes the run up — and two of
+/// the three answers it can give launch no session at all. The arm that does is
+/// the arm where the work is unfinished, which is also where the session that
+/// stopped was part way through it. See the server's `runner::inline_again`.
+///
+/// Nothing about the note says why it stopped: the force stop wrote its own
+/// Notice at the time, and what the resumed agent needs told is that it is the
+/// session it was and the work is where it left it.
+#[tokio::test]
+async fn an_inline_run_cut_off_part_way_through_is_carried_on_when_the_run_starts_again() {
+    let fixture = grilling_spilling(
+        tempfile::tempdir().unwrap(),
+        &an_inline_run_that_holds(),
+        NO_PULL_REQUEST,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    // The implementation session at work: it has written what it was building
+    // and nothing has committed it, let alone pushed it anywhere.
+    let building = fixture.attachable(2).await;
+    fixture.printed(building, "building the limiter").await;
+
+    assert_eq!(
+        fixture.force_stop().await,
+        ConversationStopped::Stopped,
+        "the work was stopped where it stood",
+    );
+
+    fixture.quiet().await;
+
+    assert_ne!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "and what it had written is still in the Worktree, nothing having \
+         committed it",
+    );
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(2)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(resumed).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the session that was building the work: {said:?}",
+    );
+    assert!(
+        !said.contains("building the limiter"),
+        "and not primed as a fresh session for work it was already part way \
+         through: {said:?}",
+    );
+    assert!(
+        !said.contains("implementing/SKILL.md"),
+        "which is the prompt it was not given, a carried session being primed \
+         with the note and nothing else: {said:?}",
+    );
+
+    let notices = notices(&fixture.view().await);
+
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "the Timeline says which of the two resumes it was: {notices:?}",
+    );
+}
+
+/// **And a restart over an inline run part way through carries it on too**, with
+/// nobody having pressed anything.
+///
+/// The way back in that is not a press, over the direction whose reading is made
+/// at the launch: a server coming up presses Resume for itself and the recompute
+/// is the one the button gives, so the two drivers reached beyond it are the same
+/// two, told the same thing about which press this is. See the server's
+/// `resume::at_startup`, and `runner::Again`.
+///
+/// A second server over the database of the first, which is what a restart is
+/// here: the session the first one was running lived in the process that started
+/// it.
+#[tokio::test]
+async fn a_restart_over_an_inline_run_part_way_through_carries_it_on() {
+    let stub = an_inline_run_that_holds();
+    let fixture = grilling_spilling(tempfile::tempdir().unwrap(), &stub, NO_PULL_REQUEST).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    let building = fixture.attachable(2).await;
+    fixture.printed(building, "building the limiter").await;
+
+    assert!(
+        notices(&fixture.view().await).is_empty(),
+        "the first server is driving it happily, which is what makes this a \
+         restart over a session at work rather than over a stop",
+    );
+
+    let before = outputs(&fixture.view().await).len();
+
+    let _restarted = fixture.restarted(&stub, NO_PULL_REQUEST).await;
+
+    let said = fixture.printed_after(before).await;
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the session the restart took away: {said:?}",
+    );
+    assert!(
+        !said.contains("building the limiter"),
+        "and nothing was primed as a fresh session for work that was already part \
+         way built: {said:?}",
+    );
+
+    let view = fixture.view().await;
+    let raised = notices(&view);
+
+    assert!(
+        raised.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "the Timeline says which of the two resumes it was: {raised:?}",
+    );
+    assert!(
+        notices_but_the_carrying_on(&view).is_empty(),
+        "and nothing was raised about the session the restart killed, beyond the \
+         line saying which of the two took it up: {raised:?}",
+    );
+}
+
+/// **And an inline run whose branch turns out to be on a pull request leaves
+/// nothing standing to be carried on**: the wrap-up starts with no session in
+/// it, and the session after that is an ordinary one of the work.
+///
+/// Which is the whole reason this direction's reading is made at the launch
+/// rather than in the recompute. What an inline run answers is asked over the
+/// network, and one of its answers is *the work is already on a pull request* —
+/// which spends no session at all. A row written in front of that would sit
+/// there until the next session of the work took it up, and that session would
+/// be told to resume a conversation that had nothing to do with it: here, a
+/// review primed with a note about an implementation it never had.
+///
+/// The pull request appears mid-test while nothing about the repository changes,
+/// because that is how it really happens: the human opens one in a browser off
+/// the halt's own advice, and a branch cannot say that it was.
+#[tokio::test]
+async fn an_inline_run_found_on_a_pull_request_leaves_nothing_standing_to_be_carried_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-by-hand");
+    let gh = gh_opened_by_hand(&opened);
+    let fixture = grilling_spilling(spill, &an_inline_run_that_holds(), &gh).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    let building = fixture.attachable(2).await;
+    fixture.printed(building, "building the limiter").await;
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+    fixture.quiet().await;
+
+    // And the human opens the pull request from their phone, which is the one
+    // thing that makes this press a wrap-up rather than the work carried on.
+    std::fs::write(&opened, "https://github.com/tobico/verkstead/pull/41\n").unwrap();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let found = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping)
+                .then(|| pull_request(view).cloned())
+                .flatten()
+        })
+        .await;
+
+    assert_eq!(
+        found.number, 41,
+        "the press found the pull request and wrapped it up, spending no session \
+         on work that was already on one",
+    );
+
+    // The review the wrap-up starts, which is the next session of the work and
+    // the one a row left standing here would have been spent on.
+    let reviewing = fixture
+        .until(|view| {
+            outputs(view)
+                .get(2)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(reviewing).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("reading the whole branch"),
+        "an ordinary session of the work, primed for what it was sent to do: {said:?}",
+    );
+    assert!(
+        !said.contains("carried on"),
+        "rather than a harness told to resume the conversation that was building \
+         the work: {said:?}",
+    );
+
+    let notices = notices(&fixture.view().await);
+
+    assert!(
+        !notices
+            .iter()
+            .any(|notice| notice.contains("The session that stopped here was part way through")),
+        "and nothing was said about carrying anything on, nothing having been \
+         written down to carry: {notices:?}",
+    );
+}
+
+/// A roadmap Conversation whose own writing waits at a gate: the session that
+/// is to write the document says so, holds until the gate is opened, and then
+/// writes it, commits it and signals.
+///
+/// Which is what makes the roadmap's two stops tellable apart. A session stopped
+/// in front of the gate left no document, so the writing is what it was part way
+/// through; one stopped behind it had its step, and what is left of the run is
+/// the pull request the document goes to.
+///
+/// Both of the sessions that can be writing it do the same thing, because both
+/// of them really write it: the grilling session reads on into the staging skill
+/// when the direction is picked, and a staging session of its own is what a
+/// press launches where the document was never written.
+///
+/// The role is read off the prompt rather than off the model, because that is
+/// the one of the two a carried session cannot have: its prompt is the note it
+/// is primed with. Which is why `--resume` is answered before anything else is
+/// looked at.
+fn a_roadmap_held_at(gate: &Path) -> String {
+    format!(
+        r#"
+{CLAUDES_LOG}
+case "$3" in
+--resume)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Picking the roadmap up."}}]}}}}' >> "$log"
+    printf 'carried on\r\n'
+    printf 'prompt=%s\r\n' "$2"
+    sleep 300
+    ;;
+*)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Working."}}]}}}}' > "$log"
+    case "$2" in
+    *submitting/SKILL.md*)
+        printf 'prompt=%s\r\n' "$2"
+        printf 'nothing opened a pull request\r\n'
+        ;;
+    *)
+        case "$2" in
+        *staging/SKILL.md*) printf 'writing the roadmap afresh\r\n' ;;
+        *)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
+            printf 'the handoff is written\r\n'
+            ;;
+        esac
+        while [ ! -f {gate} ]; do sleep 0.05; done
+        mkdir -p docs/roadmaps/rate-limiting
+        printf '# Rate limiting roadmap\n\n## Stages\n\n- [ ] 01: Count the requests — [brief](01-counter.md)\n' > docs/roadmaps/rate-limiting/ROADMAP.md
+        printf '# 01. Count the requests\n' > docs/roadmaps/rate-limiting/01-counter.md
+        git add docs
+        git commit --quiet -m 'docs: stage the rate-limiting roadmap'
+        : > /tmp/verkstead/done
+        printf 'the roadmap is written\r\n'
+        sleep 300
+        ;;
+    esac
+    ;;
+esac
+"#,
+        gate = quoted(gate),
+    )
+}
+
+/// **A roadmap's own writing cut off before the document was written is carried
+/// on when the run starts again**, rather than a fresh session being primed to
+/// write a roadmap somebody is already thinking one out.
+///
+/// The second of the two directions with no backlog, and the one whose step ends
+/// on a document rather than on a pull request: a roadmap Conversation's own work
+/// is one session writing `docs/roadmaps/`, so a session that ran here and left
+/// nothing of one was part way through the writing. Read by the reading the
+/// driver already makes to decide what to launch, and the row written in front
+/// of the launch that writes — which is also the only launch that driver makes,
+/// the sighting and the pull request beside it both being able to end with
+/// nothing started. See the server's `runner::roadmap_again`.
+///
+/// **The steer is how an Implementing roadmap comes about at all**, which is
+/// what the middle of this test is: a roadmap Conversation passes straight from
+/// Grilling to Wrapping — its building belongs to its Stages — so the writing
+/// itself is a grilling, carried on by the grilling's own unconditional reading.
+/// What this closes is the window on the other side of a steer into Implementing:
+/// a staging session launched there, cut off before it had written a word of the
+/// document.
+///
+/// **And the steer itself starts a fresh session, whatever was cut off here.**
+/// The human saying what is to happen instead replaces the session that stopped
+/// rather than picking it up, which is ADR-0020's rule and the one press that
+/// reaches these two readings meaning something else — see the server's
+/// `runner::Again`.
+#[tokio::test]
+async fn a_roadmap_cut_off_before_it_was_written_is_carried_on_when_the_run_starts_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("never");
+    let fixture = grilling_spilling(spill, &a_roadmap_held_at(&gate), NO_PULL_REQUEST).await;
+
+    let grilled = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "roadmap").await, Submitted::Accepted);
+
+    fixture.printed(grilled, "the handoff is written").await;
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+    fixture.quiet().await;
+
+    // The Worktree taken away under it, which is what leaves a bare steer into
+    // Implementing offerable over a roadmap nobody has written: there is no
+    // branch to read, so the form cannot refuse on one, and the steer checks the
+    // branch out again before anything runs in it.
+    let _opened = fixture.steer().await;
+    std::fs::remove_dir_all(&worktree).unwrap();
+
+    assert_eq!(
+        fixture.steer_into("Implementing", false).await,
+        ConversationSteered::Steered,
+    );
+
+    let steered = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(steered).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("writing the roadmap afresh"),
+        "the steer started a fresh session to write the roadmap: {said:?}",
+    );
+    assert!(
+        !said.contains("carried on"),
+        "rather than the conversation that stopped resumed, the human having said \
+         what is to happen instead: {said:?}",
+    );
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+    fixture.quiet().await;
+
+    assert!(
+        !worktree.join("docs/roadmaps").exists(),
+        "nothing of the roadmap was ever written, which is what says the writing \
+         was part way through rather than done",
+    );
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(2)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(resumed).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the session that was writing the \
+         roadmap: {said:?}",
+    );
+    assert!(
+        !said.contains("writing the roadmap afresh"),
+        "and not primed as a fresh session to write one from the Brief: {said:?}",
+    );
+    assert!(
+        !said.contains("staging/SKILL.md"),
+        "which is the prompt it was not given, a carried session being primed with \
+         the note and nothing else: {said:?}",
+    );
+
+    let notices = notices(&fixture.view().await);
+
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "the Timeline says which of the two resumes it was: {notices:?}",
+    );
+}
+
+/// **And a roadmap that is written stays Verkstead's own Resume**: the document
+/// is on the branch, so what is left of the run is the pull request it goes to,
+/// and that is a session of its own.
+///
+/// Which is why this direction's reading is the driver's rather than
+/// unconditional. A roadmap Conversation comes to rest with its document
+/// committed as ordinarily as it is cut off before writing one, and a
+/// conversation carried on into the pull request would be an agent told to pick
+/// up the writing it had just finished.
+///
+/// Steered into Implementing for the reason the test above is, that being the
+/// only state the roadmap's reading is made in — and offerable with nothing
+/// written in the box here because the document on the branch is what there is
+/// to carry on.
+#[tokio::test]
+async fn a_roadmap_already_written_is_sent_for_its_pull_request_rather_than_carried_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    std::fs::write(&gate, "").unwrap();
+
+    let fixture = grilling_spilling(spill, &a_roadmap_held_at(&gate), NO_PULL_REQUEST).await;
+
+    let writing = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "roadmap").await, Submitted::Accepted);
+
+    // The gate is open, so the session gets its document committed before
+    // anything stops it.
+    fixture.printed(writing, "the roadmap is written").await;
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+    fixture.quiet().await;
+
+    assert_eq!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "nothing of the roadmap is left waiting for a commit, which is what says \
+         the writing was done",
+    );
+
+    let _opened = fixture.steer().await;
+
+    assert_eq!(
+        fixture.steer_into("Implementing", false).await,
+        ConversationSteered::Steered,
+    );
+
+    // The session the staged reading sends for, which is the whole of what is
+    // left of a roadmap run: the document is written and on no pull request. It
+    // opens none, so the run stops over it — and the press below is another go
+    // through the same reading.
+    let sent = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 1)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(sent).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("submitting/SKILL.md"),
+        "a fresh session sent for the pull request, which is what the steer \
+         started: {said:?}",
+    );
+    assert!(
+        !said.contains("carried on"),
+        "and nothing was resumed, a steer being the human saying what is to \
+         happen instead: {said:?}",
+    );
+
+    fixture.stopped().await;
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let said = fixture.printed_after(before).await;
+
+    assert!(
+        said.contains("submitting/SKILL.md"),
+        "and the press sends for it again, which is what Verkstead's own Resume \
+         launches over a roadmap that is written: {said:?}",
+    );
+    assert!(
+        !said.contains("carried on"),
+        "with no harness told to resume a conversation that had finished what it \
+         was sent for: {said:?}",
+    );
+
+    let notices = notices(&fixture.view().await);
+
+    assert!(
+        !notices
+            .iter()
+            .any(|notice| notice.contains("The session that stopped here was part way through")),
+        "and nothing was said about carrying anything on, nothing having been cut \
+         off: {notices:?}",
+    );
+}
+
+/// **A restart over a task session part way through its task carries it on**,
+/// with nobody having pressed anything.
+///
+/// No session survives the process, so a server coming up holds a Conversation
+/// whose task is half-built and whose agent has gone — which is a cut-off by
+/// every rule the press reads, read in the same place: `at_startup` presses
+/// Resume for itself, and the recompute is the one the button gives. Which is
+/// why a restart needs nothing written at the stop. There was nothing running at
+/// the restart to write it with — a kill and a crash leave less still — so the
+/// question is asked at the launch, where every way back in passes.
+///
+/// A second server over the same database, which is what a restart is here: the
+/// session the first one was running lived in the process that started it.
+#[tokio::test]
+async fn a_restart_over_a_task_session_part_way_through_carries_it_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("never");
+    let stub = two_tasks_carrying_on_at(&gate);
+    let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    // The task session at work, in front of a gate this test never opens: it has
+    // written what it was building and nothing has committed it.
+    let working = fixture.attachable(2).await;
+    fixture.printed(working, "working 01-count.md").await;
+
+    assert!(
+        notices(&fixture.view().await).is_empty(),
+        "the first server is driving it happily, which is what makes this a \
+         restart over a session at work rather than over a stop",
+    );
+    assert_ne!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "and what the task session has written is still waiting for a commit, \
+         which is what says the task is half-built rather than done",
+    );
+
+    let before = outputs(&fixture.view().await).len();
+
+    let _restarted = fixture.restarted(&stub, PULL_REQUEST).await;
+
+    // The session the second server started, with nobody having pressed
+    // anything: a restart takes up everything the last one was driving.
+    let said = fixture.printed_after(before).await;
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the session the restart took away: {said:?}",
+    );
+    assert!(
+        !said.contains("working 01-count.md"),
+        "and nothing was primed as a fresh session for the task it was already \
+         part way through: {said:?}",
+    );
+
+    let view = fixture.view().await;
+    let raised = notices(&view);
+
+    assert!(
+        raised.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "the Timeline says which of the two resumes it was: {raised:?}",
+    );
+    assert!(
+        notices_but_the_carrying_on(&view).is_empty(),
+        "and nothing was raised about the session the restart killed, beyond the \
+         line saying which of the two took it up: {raised:?}",
+    );
+}
+
+/// **And a restart over a run left cleanly between two tasks stays Verkstead's
+/// own Resume**: the task that was being built is committed, so what the server
+/// coming up starts is a fresh session for the next one.
+///
+/// The restart's half of the reading the press makes, and the same answer: a run
+/// comes to rest between two tasks as ordinarily as it is cut off mid-task, and
+/// a server having gone away in the meantime is no reason to read it
+/// differently. A conversation carried on here would be an agent told to pick up
+/// the task it had just committed.
+#[tokio::test]
+async fn a_restart_over_a_run_left_between_two_tasks_is_re_primed_for_the_next_one() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let stub = two_tasks_carrying_on_at(&gate);
+    let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    // The gate is opened, so the task session gets its commit in before the
+    // restart finds it. It gives no Done signal, so nothing ends it and nothing
+    // launches the next task: what the second server comes up to is a run with
+    // its first task done and its second not started.
+    let working = fixture.attachable(2).await;
+    fixture.printed(working, "working 01-count.md").await;
+    std::fs::write(&gate, "").unwrap();
+    fixture.printed(working, "committed 01-count.md").await;
+
+    assert_eq!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "nothing of the task is left waiting for a commit, which is what says the \
+         run came to rest between two of them",
+    );
+
+    let before = outputs(&fixture.view().await).len();
+
+    let _restarted = fixture.restarted(&stub, PULL_REQUEST).await;
+
+    let said = fixture.printed_after(before).await;
+
+    assert!(
+        said.contains("working 02-refuse.md"),
+        "a fresh session for the next task, which is what Verkstead's own Resume \
+         launches: {said:?}",
+    );
+    assert!(
+        !said.contains("carried on"),
+        "and no harness was told to resume a conversation that had finished what \
+         it was sent for: {said:?}",
+    );
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices_but_the_carrying_on(&view).is_empty(),
+        "with nothing raised about the restart either: {:?}",
+        notices(&view),
+    );
+    assert!(
+        !notices(&view)
+            .iter()
+            .any(|notice| notice.contains("The session that stopped here was part way through")),
+        "and nothing said about carrying anything on, nothing having been cut \
+         off: {:?}",
+        notices(&view),
+    );
+}
+
+/// **And a stop somebody decided on is still left for a press across a
+/// restart**, cut off mid-task or not.
+///
+/// The one kind of stop `at_startup` passes over: Verkstead or the human pulled
+/// the brake, and a server coming back up is no reason to think differently
+/// about it. Which is a rule about whether anything starts at all rather than
+/// about what it would be — so the restart makes no reading and writes nothing
+/// down, and the press that comes the next morning finds the cut-off exactly as
+/// it stood and carries that session on.
+#[tokio::test]
+async fn a_stop_the_human_decided_on_is_left_for_a_press_across_a_restart() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("never");
+    let stub = two_tasks_carrying_on_at(&gate);
+    let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    let working = fixture.attachable(2).await;
+    fixture.printed(working, "working 01-count.md").await;
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+    fixture.quiet().await;
+
+    assert_eq!(
+        fixture.chosen().await,
+        Decision::Human,
+        "the human pressed Force stop, which is the half of the stop that says a \
+         restart leaves it alone",
+    );
+
+    let before = outputs(&fixture.view().await).len();
+
+    let _restarted = fixture.restarted(&stub, PULL_REQUEST).await;
+
+    // Long enough for the second server to have taken up everything it was ever
+    // going to take up.
+    tokio::time::sleep(BRISKLY.grace * 4).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        outputs(&view).len(),
+        before,
+        "nothing was launched over a stop somebody decided on",
+    );
+    assert!(
+        !notices(&view)
+            .iter()
+            .any(|notice| notice.contains("The session that stopped here was part way through")),
+        "and nothing was written down about carrying it on either, the reading \
+         being the launch's and no launch having happened: {:?}",
+        notices(&view),
+    );
+
+    // And the press the restart left it for, which finds the cut-off exactly
+    // where the stop left it.
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let said = fixture.printed_after(before).await;
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the session the force stop took away, a \
+         restart having spent nothing in between: {said:?}",
+    );
+    assert!(
+        !said.contains("working 01-count.md"),
+        "and nothing was primed as a fresh session for the half-built task: {said:?}",
+    );
+}
+
+/// A **Tinker** whose round commits, puts its question up, and goes on working
+/// once the human has answered — and which says, where it is resumed, that it is
+/// the session that was having that round rather than a fresh one.
+///
+/// The resumed session says it is done once the test opens the gate, and what
+/// becomes of that signal is what says which role the launch really was: a
+/// follow-up's is checked against the human's Nothing-else mark, and a
+/// `submitting` session's against a pull request — see `crate::done::Evidence`.
+/// Which is the only thing that can say it, a carried session being primed with
+/// the note rather than with any role's own prompt.
+fn a_follow_up_round_that_works_on_the_answers() -> String {
+    format!(
+        r#"
+entry=$(printf '%s' "$PWD" | tr -c 'a-zA-Z0-9' '-')
+mkdir -p "$HOME/.claude/projects/$entry"
+record="$HOME/.claude/projects/$entry/$4.jsonl"
+case "$3" in
+--resume)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Reading the answers."}}]}}}}' >> "$record"
+    printf 'carried on\r\n'
+    printf 'prompt=%s\r\n' "$2"
+    while [ ! -f /tmp/verkstead/acted ]; do sleep 0.1; done
+    : > /tmp/verkstead/done
+    printf 'acted on the answers and said it is done\r\n'
+    sleep 300
+    ;;
+*)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"A round."}}]}}}}' > "$record"
+    case "$2" in
+    *submitting/SKILL.md*)
+        printf 'sent for the pull request: %s\r\n' "$2"
+        sleep 300
+        ;;
+    *)
+        printf 'a limiter\n' >> limiter.md
+        git add -A
+        git commit --quiet -m 'feat: count what the limiter rejects'
+        SAYING='following it up'
+        printf '%s\r\n' "$SAYING"
+        {WHILE_NOBODY_HAS_ASKED}
+        while :; do printf 'acting on the answers\r\n'; sleep 0.1; done
+        ;;
+    esac
+    ;;
+esac
+"#
+    )
+}
+
+/// **A follow-up cut off mid-answer is carried on rather than diverted into
+/// opening a pull request** — the incident this occasion came from, end to end.
+///
+/// The human answers the round, marking that there is nothing else, and the
+/// session is taken away before it has read a word of what came back. All three
+/// of the ending's questions then say the follow-up is over and its work is on no
+/// pull request — the round is marked, `gh` finds none, and the branch holds a
+/// commit — so the press sent a `submitting` session to open one, and the answers
+/// the human had just given were read by nobody.
+///
+/// **A conversation standing to be carried on is what settles it.** The launch is
+/// the session that was cut off, resumed, so what it is working is its own turn's
+/// to say: the follow-up is picked up in the role it stopped in and the ending's
+/// reading is not asked at all. See the server's `runner::carrying_on`.
+///
+/// **Which role it is is read off its Done signal.** A carried session is primed
+/// with the note rather than with any role's own prompt, so what it was launched
+/// as cannot be read off what it was told — but what each role's signal is
+/// checked against differs: a follow-up's against the human's Nothing-else mark,
+/// which is set, and a `submitting` session's against a pull request, which is
+/// not there. So the resumed session says it is done, the signal is taken, and
+/// the ending it is taken *for* is the follow-up's: the pull request is sent for
+/// then, by the session that was doing the work rather than over the top of it.
+#[tokio::test]
+async fn a_follow_up_cut_off_mid_answer_is_carried_on_rather_than_sent_for_a_pull_request() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("never-opened-by-hand");
+
+    let fixture = tinkering_asking(
+        spill,
+        &a_follow_up_round_that_works_on_the_answers(),
+        &gh_opened_by_hand(&opened),
+    )
+    .await;
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("feat: count what the limiter"))
+                .then_some(())
+        })
+        .await;
+
+    let round = fixture.attachable(1).await;
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(
+        fixture.answer_ending(set).await,
+        Submitted::Accepted,
+        "the human answers the round and marks that there is nothing else",
+    );
+
+    // And the session is at work with that answer in front of it, which is the
+    // moment the incident happened in: nothing has acted on what came back.
+    fixture.printed(round, "acting on the answers").await;
+
+    assert_eq!(
+        fixture.force_stop().await,
+        ConversationStopped::Stopped,
+        "the round was stopped where it stood",
+    );
+
+    fixture.quiet().await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::FollowUp,
+        "a stop leaves the Conversation where it is",
+    );
+    assert_eq!(
+        pull_request(&view),
+        None,
+        "and the branch is on none, which is what the ending's reading acts on",
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    assert!(
+        nothing_else(&pool, fixture.id, State::FollowUp)
+            .await
+            .unwrap(),
+        "and the round the human answered carries the Nothing-else mark, which is \
+         the rest of what the ending's reading acts on: all three of its questions \
+         say this follow-up is over and owes a pull request",
+    );
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(resumed).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the round that was cut off: {said:?}",
+    );
+    assert!(
+        !said.contains("sent for the pull request"),
+        "and nothing was sent to open a pull request over the top of it: {said:?}",
+    );
+    assert!(
+        !said.contains("submitting/SKILL.md"),
+        "which is to say nothing primed it as the session that opens one: {said:?}",
+    );
+
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        0,
+        "and nothing was sent for the pull request the ending's reading would \
+         have asked for",
+    );
+
+    let view = fixture.view().await;
+    let notices = notices(&view);
+
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "the Timeline says which of the two resumes it was: {notices:?}",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::FollowUp,
+        "and the follow-up is still the follow-up: the job did not change under \
+         the resume",
+    );
+
+    // And the role it was launched in, which is the one thing the note it was
+    // primed with cannot say: the resumed session acts on the answers and says it
+    // is done, and the signal is taken. A follow-up's is checked against the
+    // human's mark, and a `submitting` session's against a pull request that is
+    // not there — so a signal taken is a session that was launched to follow the
+    // work up.
+    std::fs::write(handoff_directory(&fixture).join("acted"), "").unwrap();
+
+    let sent = fixture
+        .until(|view| {
+            outputs(view)
+                .get(2)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    assert!(
+        fixture
+            .capture(sent)
+            .await
+            .contains("sent for the pull request"),
+        "and the pull request is sent for after that",
+    );
+
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        1,
+        "and the pull request is sent for after that, by the ending of the \
+         follow-up the carried session finished rather than over the top of one \
+         it was still having",
+    );
+}
+
+/// A one-task backlog worked all the way to its finish, where the finish takes
+/// `.tasks/` away, commits that, and opens nothing.
+///
+/// Which leaves the two things the reading below turns on: a backlog with nothing
+/// left in it, and a pull request still owed. The `submitting` session says what
+/// it was sent for, so a run diverted into one is plain to see.
+///
+/// It keeps no log of its conversation, and that is deliberate: what this is
+/// about is *which role* the launch after the stop is, and a launch that can
+/// resume nothing is primed with its role in the prompt where the stub can read
+/// it.
+const A_BACKLOG_WORKED_TO_ITS_FINISH: &str = r#"
+case "$2" in
+*submitting/SKILL.md*)
+    printf 'sent for the pull request\r\n'
+    sleep 300
+    ;;
+*)
+    case "$1" in
+    claude-grilling-5)
+        printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+        : > /tmp/verkstead/done
+        printf 'breaking down\r\n'
+        mkdir -p .tasks
+        printf '# Rate limiting\n\n## Tasks\n\n- [ ] 01: count the requests\n' > .tasks/TODO.md
+        printf '# 01. Count the requests\n' > .tasks/01-count.md
+        git add .tasks
+        git commit --quiet -m 'chore: plan rate-limiting tasks'
+        : > /tmp/verkstead/done
+        printf 'the backlog has landed\r\n'
+        sleep 300
+        ;;
+    *)
+        number=''
+        if [ -f .tasks/TODO.md ]; then
+            number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+        fi
+        if [ -n "$number" ]; then
+            printf 'working the task\r\n'
+            printf 'a limiter\n' >> limiter.md
+            sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+            git add -A
+            git commit --quiet -m 'feat: count the requests'
+            : > /tmp/verkstead/done
+            printf 'committed the task\r\n'
+        else
+            printf 'finishing the feature\r\n'
+            if [ -d .tasks ]; then
+                git rm --quiet -r .tasks
+                git commit --quiet -m 'chore: finish rate limiting'
+                printf 'the backlog is gone\r\n'
+            fi
+        fi
+        sleep 300
+        ;;
+    esac
+    ;;
+esac
+"#;
+
+/// **A run whose backlog is worked out is not re-decided while a conversation is
+/// standing to be carried on**: what the launch is is the finish it was in the
+/// middle of, rather than a `submitting` session sent for the pull request the
+/// emptied backlog's own reading says is owed.
+///
+/// The other half of the job-must-not-change rule, on the side a run stops on. An
+/// emptied backlog is the one shape in which a Resume's readings decide a job of
+/// their own — plan a stage, wrap up a pull request nothing recorded, send for
+/// the one that is owed, give up — and every one of them is a job for a fresh
+/// session. A session cut off part way through its step has its own job in its
+/// head, and the launch after it is that session.
+///
+/// **The row is written here the way an arrival or a widened sandbox writes
+/// one**, which is what a row standing in front of an emptied backlog really is:
+/// a run's own cut-off is read off the step `.tasks/` names, and a backlog with
+/// nothing left in it names none. What the session it points at cannot do is be
+/// resumed — this stub keeps no log — and that is what makes the reading visible:
+/// the launch falls back to Verkstead's own resume, which is primed with the role
+/// it was launched in.
+#[tokio::test]
+async fn a_carried_on_run_with_an_emptied_backlog_finishes_rather_than_sending_for_a_pull_request()
+{
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("never-opened-by-hand");
+
+    let fixture = grilling_spilling(
+        spill,
+        A_BACKLOG_WORKED_TO_ITS_FINISH,
+        &gh_opened_by_hand(&opened),
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    // The task is worked and committed, and then the finish takes the backlog
+    // away — so what the stop below catches is a run with nothing left in
+    // `.tasks/` and no pull request to show for it.
+    let finishing = fixture.attachable(3).await;
+    fixture.printed(finishing, "the backlog is gone").await;
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+    fixture.quiet().await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("the Conversation has a worktree")
+            .path,
+    );
+
+    assert!(
+        !worktree.join(".tasks").exists(),
+        "the finish took the backlog away and committed it, which is what leaves \
+         the run with nothing to read",
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    let standing = the_last_session(&pool, fixture.id)
+        .await
+        .unwrap()
+        .expect("the finish session is named on the record");
+
+    continue_on_arrival(&pool, fixture.id, &standing)
+        .await
+        .unwrap();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let again = fixture
+        .until(|view| {
+            outputs(view)
+                .get(3)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(again).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("finishing the feature"),
+        "the launch is the finish the run was in the middle of: {said:?}",
+    );
+    assert!(
+        !said.contains("sent for the pull request"),
+        "rather than a session sent for the pull request the emptied backlog's \
+         own reading says is owed: {said:?}",
+    );
+
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        0,
+        "and nothing was spent on one anywhere along it",
+    );
+}
+
+/// A two-task backlog whose first task session writes what it is building,
+/// **holds with whatever `holding` puts up**, and never commits — and which
+/// says, where it is resumed, that it is the conversation that was building
+/// the task rather than a fresh session primed for it.
+///
+/// `holding` is the shell that stands one stop-way up: the line claude writes
+/// into its log when the login it was given has gone, or the banner a backend
+/// draws while the account it is spending is out of window. What the two have
+/// in common is the shape this is for — a task half-built, and a session about
+/// to be ended over something that has nothing to do with the task.
+///
+/// Two tasks rather than one, for [`two_tasks_carrying_on_at`]'s reason: a
+/// backlog with one in it would read as a feature finished with.
+fn a_task_held_by(holding: &str) -> String {
+    a_task_held_by_resumed_with(holding, PICKS_THE_TASK_UP)
+}
+
+/// What the resume of [`a_task_held_by`] ordinarily says: a line in the log to
+/// show the conversation moved, the word on the terminal, and nothing else.
+const PICKS_THE_TASK_UP: &str = r#"    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Picking the task up."}]}}' >> "$log"
+    printf 'carried on\r\n'
+    sleep 300
+"#;
+
+/// The same backlog, with `resumed` for whatever the carried-on session does.
+///
+/// Which is what the two reader tests need and the stop-way tests do not: a
+/// resumed harness **draws the conversation it is resuming**, so the line the
+/// run stopped on the first time is drawn again by the session carrying it on,
+/// with a login and a window that are both perfectly good.
+fn a_task_held_by_resumed_with(holding: &str, resumed: &str) -> String {
+    format!(
+        r#"
+{CLAUDES_LOG}
+case "$3" in
+--resume)
+{resumed}
+    ;;
+*)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Working."}}]}}}}' > "$log"
+    case "$1" in
+    claude-grilling-5)
+        printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+        : > /tmp/verkstead/done
+        mkdir -p .tasks
+        printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+        printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+        printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
+        printf '# 01. Count the requests\n' > .tasks/01-count.md
+        printf '# 02. Refuse the excess\n' > .tasks/02-refuse.md
+        git add .tasks
+        git commit --quiet -m 'chore: plan the rate limiter'
+        : > /tmp/verkstead/done
+        printf 'the backlog is written\r\n'
+        sleep 300
+        ;;
+    *)
+        printf 'working 01-count.md\r\n'
+        printf 'a limiter\n' >> limiter.md
+{holding}
+        sleep 300
+        ;;
+    esac
+    ;;
+esac
+"#
+    )
+}
+
+/// The line claude 2.1.329 ends a turn with when the login it was handed has
+/// gone, which is the line the incident's own session printed.
+const LOGIN_EXPIRED: &str = "Login expired · Please run /login";
+
+/// Say it: written into claude's log as the turn's answer, which is where a
+/// sign-out is read, and drawn on the terminal the way the display draws it.
+fn says_it_signed_out() -> String {
+    format!(
+        "{logged}        for pass in 1 2 3 4; do\n            \
+         printf '  ⎿  {LOGIN_EXPIRED}\\r\\n'\n            sleep 0.25\n        done\n",
+        logged = said_in_the_log(LOGIN_EXPIRED),
+    )
+}
+
+/// **A sign-out part way through a task is carried on when the run starts
+/// again** — the stop-way the Brief came from, on the side the work is built.
+///
+/// The account the task was being spent on signed out, so the run stopped and
+/// the session with it: nothing of it was the task's doing, and what it was
+/// building is still half-built in the Worktree. So the press is the session
+/// that was building it, resumed, rather than a fresh one primed for a task
+/// somebody is already part way through.
+///
+/// And the Timeline says both things, each where it belongs: the stop says the
+/// account signed out, and the launch over it says which of the two resumes it
+/// was. A carried-on line does not restate why the session stopped — the stop's
+/// own Notice is right above it.
+#[tokio::test]
+async fn a_sign_out_part_way_through_a_task_is_carried_on_when_the_run_starts_again() {
+    let fixture = grilling(&a_task_held_by(&says_it_signed_out())).await;
+
+    running_out(&fixture).await;
+
+    let signed_out = fixture.stopped().await;
+
+    assert!(
+        signed_out
+            .html
+            .contains("<strong>implementation</strong> account has signed out"),
+        "the run stopped because the account signed out: {:?}",
+        signed_out.html,
+    );
+
+    fixture.quiet().await;
+
+    let worktree = PathBuf::from(fixture.view().await.worktree.unwrap().path);
+
+    assert_ne!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "and what the task session had written is still waiting for a commit, \
+         which is what says the task was half-built rather than done",
+    );
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(2)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(resumed).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the session the sign-out took away: {said:?}",
+    );
+    assert!(
+        !said.contains("working 01-count.md"),
+        "and nothing was primed as a fresh session for the task it was already \
+         part way through: {said:?}",
+    );
+
+    let notices = notices(&fixture.view().await);
+
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "the Timeline says which of the two resumes it was: {notices:?}",
+    );
+    assert!(
+        !notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("signed out")),
+        "and says it once: the carried-on line does not restate why it stopped, \
+         the stop's own Notice being right above it: {notices:?}",
+    );
+}
+
+/// **And a task cut off by an exhausted window is carried on too**: the account
+/// ran out mid-task, so the session went and what it was building stayed where
+/// it was.
+///
+/// The same reading as the sign-out above, over the other stop Verkstead writes
+/// while a session is still running — and the one the agent would otherwise have
+/// waited out itself. What the human presses when the window comes back is the
+/// conversation that was mid-task rather than a fresh go at it.
+#[tokio::test]
+async fn a_task_cut_off_by_an_exhausted_window_is_carried_on() {
+    let fixture = grilling(&a_task_held_by(
+        r#"        for pass in 1 2; do
+            for turning in '✻' '✽' '✳' '✢'
+            do
+                printf "$turning Usage limit reached · continuing automatically at 2026-08-24T05:00:00Z · esc to cancel\r\n"
+                sleep 0.125
+            done
+        done
+"#,
+    ))
+    .await;
+
+    running_out(&fixture).await;
+
+    let out_of_window = fixture.stopped().await;
+
+    assert!(
+        out_of_window
+            .html
+            .contains("<strong>implementation</strong> account is out of window"),
+        "the run stopped because the account ran out: {:?}",
+        out_of_window.html,
+    );
+
+    fixture.quiet().await;
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(2)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(resumed).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the session the window took away: {said:?}",
+    );
+    assert!(
+        !said.contains("working 01-count.md"),
+        "rather than starting the task over: {said:?}",
+    );
+
+    let notices = notices(&fixture.view().await);
+
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "and the Timeline says which of the two resumes it was: {notices:?}",
+    );
+}
+
+/// The banner claude 2.1.234 turns while the account it is spending is out of
+/// window, with the reset written whole.
+const WINDOW_SPENT: &str =
+    "Usage limit reached · continuing automatically at 2026-08-24T05:00:00Z · esc to cancel";
+
+/// Say it the way claude does — the banner turning on the terminal while it
+/// waits — and **in its own log besides**, which is the record a session
+/// carrying the conversation on goes on appending to.
+///
+/// Both, because the window is read in every record a session leaves and a
+/// backend that says so in one and not the others would otherwise go unnoticed.
+/// The log is the one of the three that outlives the session, which is what
+/// makes it the half a carry-on has to be careful with.
+fn says_its_window_is_spent() -> String {
+    format!(
+        "{logged}        for pass in 1 2; do\n            \
+         for turning in '✻' '✽' '✳' '✢'; do\n                \
+         printf \"$turning {WINDOW_SPENT}\\r\\n\"\n                \
+         sleep 0.125\n            done\n        done\n",
+        logged = said_in_the_log(WINDOW_SPENT),
+    )
+}
+
+/// The resume that **draws the sign-out again**, which is what claude does with
+/// every conversation it resumes: the line was the answer to the turn that
+/// failed, so it is in the log being carried on and on the terminal of the
+/// session carrying it.
+///
+/// Then it gets on with the task and commits it, which is what says the run
+/// carried on rather than stopping a second time on a sign-out that had already
+/// happened — a stop ends the session that is read, so a session that reached
+/// its commit is one nothing stopped.
+fn a_sign_out_its_resume_draws_again() -> String {
+    format!(
+        r#"    for pass in 1 2 3; do
+        printf '  ⎿  {LOGIN_EXPIRED}\r\n'
+        sleep 0.3
+    done
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Picking the task up."}}]}}}}' >> "$log"
+    printf 'carried on\r\n'
+    sed -i 's/- \[ \] 01:/- [x] 01:/' .tasks/TODO.md
+    git add -A
+    git commit --quiet -m 'feat: 01-count.md'
+    printf 'committed 01-count.md\r\n'
+    sleep 300
+"#
+    )
+}
+
+/// And the resume of a run whose window had run out: nothing of the banner on
+/// its terminal, and the log it goes on appending to still holding the line the
+/// stop was read in.
+///
+/// The wait before it says anything of its own is the whole point. A reading
+/// that opened at the top of the carried log would find that line as the newest
+/// thing the agent had said, on every poll until something newer landed — so a
+/// session with a window perfectly good again would be stopped on the one its
+/// conversation ran out in.
+const CARRIES_ON_WITH_THE_WINDOW_BACK: &str = r#"    printf 'carried on\r\n'
+    sleep 2
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Picking the task up."}]}}' >> "$log"
+    sed -i 's/- \[ \] 01:/- [x] 01:/' .tasks/TODO.md
+    git add -A
+    git commit --quiet -m 'feat: 01-count.md'
+    printf 'committed 01-count.md\r\n'
+    sleep 300
+"#;
+
+/// **A carried-on session that draws its own sign-out again is not stopped a
+/// second time** (ADR-0022).
+///
+/// claude writes the line into its log as the answer to the turn that failed and
+/// draws every message of a conversation it resumes, so a session carrying one
+/// on puts the old sign-out back on its terminal with a login that is perfectly
+/// good. Read there, every carry-on of a run that had once signed out would stop
+/// the moment its past was drawn, whatever the login was by then.
+///
+/// Two things keep that from happening and this proves both: claude's phrase is
+/// read in its log and nowhere else — not what it printed, not the frame it drew
+/// — and the log is followed from where *this* session begins in it, so the line
+/// the run stopped on the first time sits behind the reading rather than in
+/// front of it. See the server's `signouts::ReadIn` and `transcript::Carried`.
+#[tokio::test]
+async fn a_carried_on_session_is_not_stopped_again_by_the_sign_out_it_draws() {
+    let fixture = grilling(&a_task_held_by_resumed_with(
+        &says_it_signed_out(),
+        &a_sign_out_its_resume_draws_again(),
+    ))
+    .await;
+
+    running_out(&fixture).await;
+
+    let signed_out = fixture.stopped().await;
+
+    assert!(
+        signed_out
+            .html
+            .contains("<strong>implementation</strong> account has signed out"),
+        "the run stopped the once, because the account really had signed out: {:?}",
+        signed_out.html,
+    );
+
+    fixture.quiet().await;
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(2)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    // The hazard itself, read off the Capture of the session carrying the
+    // conversation on: the old line drawn again, over and over, the way the
+    // display draws a conversation it is resuming. So it is on that session's
+    // terminal, on the frame it drew, and in the Capture both were kept in —
+    // and none of the three is where a sign-out on claude is read.
+    fixture.printed(resumed, LOGIN_EXPIRED).await;
+
+    // And the run went on past it, which a stop would have ended the session
+    // before it could.
+    fixture.printed(resumed, "committed 01-count.md").await;
+
+    let view = fixture.view().await;
+    let worktree = PathBuf::from(view.worktree.clone().unwrap().path);
+
+    assert_eq!(
+        git(&worktree, &["log", "--format=%s", "-1"]),
+        "feat: 01-count.md\n",
+        "the carried-on session worked past its own redrawn sign-out and \
+         committed the task it was part way through",
+    );
+
+    let signed_out: Vec<String> = notices(&view)
+        .into_iter()
+        .filter(|notice| notice.contains("account has signed out"))
+        .collect();
+
+    assert_eq!(
+        signed_out.len(),
+        1,
+        "and the run signed out once: the sign-out the session really had, rather \
+         than a second one read off the line it drew again — {signed_out:?}",
+    );
+    assert!(
+        view.blocked_on.is_none(),
+        "with nobody blocked on a login that was never gone: {:?}",
+        view.blocked_on,
+    );
+    assert!(
+        view.working,
+        "and the Conversation is working rather than stopped a second time",
+    );
+}
+
+/// **And the window reader is held to the same rule**: a session carrying a
+/// conversation on appends to the log the run ran out in, and the line that
+/// stopped it the first time is behind where this session's reading begins.
+///
+/// The same hazard in the one record a session leaves that outlives it. What it
+/// printed and the frame it drew are this session's own, and both are empty when
+/// it starts; the log is the one that was already there, with a backend's own
+/// account of the window it ran out of still in it — which is a record the
+/// window is read in, because a backend that says so there and not on its
+/// display would otherwise go unnoticed. So the following opens where the
+/// carried-on session opens, and not at the top. See the server's
+/// `transcript::Carried`, whose offset this is.
+#[tokio::test]
+async fn a_carried_on_session_is_not_stopped_again_by_the_window_in_its_log() {
+    let fixture = grilling(&a_task_held_by_resumed_with(
+        &says_its_window_is_spent(),
+        CARRIES_ON_WITH_THE_WINDOW_BACK,
+    ))
+    .await;
+
+    running_out(&fixture).await;
+
+    let out_of_window = fixture.stopped().await;
+
+    assert!(
+        out_of_window
+            .html
+            .contains("<strong>implementation</strong> account is out of window"),
+        "the run stopped the once, because the account really had run out: {:?}",
+        out_of_window.html,
+    );
+
+    fixture.quiet().await;
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(2)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    // The session says nothing of its own in the log for a moment, which is the
+    // window a reading opened at the top of the carried log would have stopped
+    // in — and then gets on with the task and commits it.
+    fixture.printed(resumed, "committed 01-count.md").await;
+
+    let view = fixture.view().await;
+    let worktree = PathBuf::from(view.worktree.clone().unwrap().path);
+
+    assert_eq!(
+        git(&worktree, &["log", "--format=%s", "-1"]),
+        "feat: 01-count.md\n",
+        "the carried-on session worked the task it was part way through to its \
+         commit, the line it inherited in the log having stopped nothing",
+    );
+
+    let out_of_window: Vec<String> = notices(&view)
+        .into_iter()
+        .filter(|notice| notice.contains("account is out of window"))
+        .collect();
+
+    assert_eq!(
+        out_of_window.len(),
+        1,
+        "and the run ran out once: the window the session really spent, rather \
+         than the same line read again out of the log it carried on — \
+         {out_of_window:?}",
+    );
+    assert!(
+        view.blocked_on.is_none(),
+        "with nobody blocked on a window that had already come back: {:?}",
+        view.blocked_on,
+    );
+    assert!(
+        view.working,
+        "and the Conversation is working rather than stopped a second time",
+    );
+}
+
+/// A grilling that waits for the test's word and then signs out, having written
+/// the line into its log as the turn's answer — and which says, where it is
+/// resumed, that it is the interview that was cut off.
+const SIGNS_OUT_ON_THE_WORD: &str = "waits-and-signs-out";
+
+/// Build it: the wait is what lets the test replace the login behind the
+/// session's back, which is the whole of what makes the sign-out a **late** one.
+fn signs_out_on_the_word() -> String {
+    format!(
+        r#"
+{CLAUDES_LOG}
+case "$3" in
+--resume)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Reading on."}}]}}}}' >> "$log"
+    printf 'carried on\r\n'
+    sleep 300
+    ;;
+*)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Per key or per address?"}}]}}}}' > "$log"
+    printf 'the grilling is running\r\n'
+    while [ ! -f /tmp/verkstead/{SIGNS_OUT_ON_THE_WORD} ]; do sleep 0.1; done
+{logged}
+    for pass in 1 2 3 4; do
+        printf '  ⎿  {LOGIN_EXPIRED}\r\n'
+        sleep 0.25
+    done
+    sleep 300
+    ;;
+esac
+"#,
+        logged = said_in_the_log(LOGIN_EXPIRED),
+    )
+}
+
+/// **A late sign-out carries the session it cut off on by itself**: the login
+/// was replaced while the session was running, so nobody is asked and nothing
+/// is pressed — and what the run carries on with is the conversation that was
+/// cut off rather than a fresh interview.
+///
+/// The stop-way nobody answers. A session signing out on a login that has
+/// since been replaced is a stop Verkstead starts the run again out of the
+/// moment the session has gone — see the server's `signouts::carrying_on` —
+/// and that way back in reads the cut-off exactly as the human's press does.
+///
+/// A grilling, because a grilling's cut-off is the unconditional one: what this
+/// is about is the way *back in* rather than how mid-turn is read, and the
+/// reading is the same one every state's is handed to.
+#[tokio::test]
+async fn a_late_sign_out_carries_the_grilling_it_cut_off_on_by_itself() {
+    let spill = tempfile::tempdir().unwrap();
+    let fixture = grilling_spilling(spill, &signs_out_on_the_word(), PULL_REQUEST).await;
+
+    let first = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    fixture.printed(first, "the grilling is running").await;
+
+    // Logged in again behind the running session's back, the way the Profile
+    // card's Log in leaves the account — so by the time the session says its
+    // login has gone, the login it signed out on is not the one the account
+    // holds.
+    let account = fixture._elsewhere.path().join("grilling/.claude");
+    std::fs::write(account.join(".credentials.json.new"), GOOD_CODE).unwrap();
+    std::fs::rename(
+        account.join(".credentials.json.new"),
+        account.join(".credentials.json"),
+    )
+    .unwrap();
+
+    std::fs::write(handoff_directory(&fixture).join(SIGNS_OUT_ON_THE_WORD), "").unwrap();
+
+    // Nothing is pressed from here on: what starts the next session is the
+    // carry-on the stop sent for itself.
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    assert_ne!(
+        resumed, first,
+        "a second session, after the one that signed out"
+    );
+
+    let said = fixture.capture(resumed).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the interview that was cut off: {said:?}",
+    );
+    assert!(
+        !said.contains("# The Brief this started from"),
+        "rather than a fresh interview primed from the record: {said:?}",
+    );
+
+    let view = fixture.view().await;
+    let notices = notices(&view);
+
+    assert!(
+        notices
+            .iter()
+            .any(|notice| notice.contains("logged in again")),
+        "the Timeline says why the run carried on without anybody pressing \
+         anything: {notices:?}",
+    );
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "and which of the two resumes started it: {notices:?}",
+    );
+    assert_eq!(
+        view.blocked_on, None,
+        "and nothing is waiting on the human, a stop nobody chose being one \
+         nobody answers",
+    );
+}
+
+/// A grilling that writes its log and then **falls over**, and which says,
+/// where it is resumed, that it is the conversation that was having the
+/// interview.
+///
+/// Nothing reads a grilling session's ending, so there is no stop written over
+/// this one: what finds it is the stall sweep, a Conversation that says it is
+/// being grilled with nothing grilling it.
+fn a_grilling_that_falls_over() -> String {
+    format!(
+        r#"
+{CLAUDES_LOG}
+case "$3" in
+--resume)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Reading on."}}]}}}}' >> "$log"
+    printf 'carried on\r\n'
+    sleep 300
+    ;;
+*)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Per key or per address?"}}]}}}}' > "$log"
+    printf 'the grilling fell over\r\n'
+    exit 1
+    ;;
+esac
+"#
+    )
+}
+
+/// **A stall found over a session that fell over carries it on**: the harness
+/// crashed mid-interview, nothing was left to write a stop, and the sweep that
+/// found the Conversation standing still is what put it on the record.
+///
+/// Which is the stop-way with nothing running behind it by the time anybody
+/// looks — and it costs the conversation nothing, because the cut-off is read
+/// at the launch off what the record says rather than written at the moment the
+/// session went. See the server's `resume::cut_off`.
+#[tokio::test]
+async fn a_stall_over_a_session_that_fell_over_carries_it_on() {
+    let fixture = grilling_swept(&a_grilling_that_falls_over()).await;
+
+    let stalled = fixture.stopped().await;
+
+    assert!(
+        stalled.html.contains("Grilling the work"),
+        "what nobody was doing, which for a stall is what the state says: {:?}",
+        stalled.html,
+    );
+    assert!(
+        stalled
+            .html
+            .contains("Nothing is driving it. No session is running"),
+        "and it is the sweep's own stop rather than one written over the session \
+         that fell over: {:?}",
+        stalled.html,
+    );
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(resumed).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the interview that fell over: {said:?}",
+    );
+
+    let notices = notices(&fixture.view().await);
+
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "and the Timeline says which of the two resumes it was: {notices:?}",
+    );
+}
+
+/// **And a stall with no session behind it at all says nothing about carrying
+/// anything on**: nothing was cut off, so Verkstead's own Resume is simply what
+/// it always was.
+///
+/// The reading that tells the two apart is whether a session ever ran here —
+/// one row per session, written in the transaction that opens its Capture. A
+/// Conversation with none is a launch that never reached a process rather than
+/// a conversation somebody is mid-sentence in, and the one worth a line on the
+/// Timeline is the other case: a session that really ran under a harness whose
+/// id Verkstead never wrote down. See
+/// [`a_cut_off_session_verkstead_cannot_name_is_re_primed_and_says_why`].
+///
+/// **What it stands for is a server that runs no agents**, where no session can
+/// ever run and every Conversation mid-run is this one — see
+/// `conversations::a_resume_on_a_server_that_runs_no_agents_carries_nothing_on`.
+/// Standing that up here would mean a bench with no sessions in a suite that is
+/// about them, so the record is what says it instead: the sessions go, and what
+/// is left is Events and nothing saying which session wrote them.
+#[tokio::test]
+async fn a_stall_with_no_session_behind_it_says_nothing_about_carrying_anything_on() {
+    let fixture = grilling_swept(&a_grilling_that_falls_over()).await;
+
+    fixture.stopped().await;
+
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    sqlx::query("DELETE FROM session_agents")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let before = notices(&fixture.view().await).len();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let again = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(again).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("the grilling fell over"),
+        "a session of its own, primed from the record: {said:?}",
+    );
+
+    let notices = notices(&fixture.view().await);
+
+    assert!(
+        !notices
+            .iter()
+            .any(|notice| notice.contains("The session that stopped here was part way through")),
+        "and nothing was said about carrying anything on, nothing having been cut \
+         off: {notices:?}",
+    );
+    assert_eq!(
+        notices.len(),
+        before,
+        "which is to say the press added no Notice at all: {notices:?}",
+    );
+}
+
+/// A **Tinker**'s round that commits, says where it has got to and then **falls
+/// over** — a harness that exited badly of its own account rather than one
+/// Verkstead took away — and which says, where it is resumed, that it is the
+/// round that was being had.
+fn a_follow_up_round_that_falls_over() -> String {
+    format!(
+        r#"
+{CLAUDES_LOG}
+case "$3" in
+--resume)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Picking the round up."}}]}}}}' >> "$log"
+    printf 'carried on\r\n'
+    sleep 300
+    ;;
+*)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"A round."}}]}}}}' > "$log"
+    case "$2" in
+    *submitting/SKILL.md*)
+        printf 'sent for the pull request\r\n'
+        sleep 300
+        ;;
+    *)
+        printf 'a limiter\n' >> limiter.md
+        git add -A
+        git commit --quiet -m 'feat: count what the limiter rejects'
+        printf 'following it up\r\n'
+        sleep 0.5
+        printf 'the harness fell over\r\n'
+        exit 1
+        ;;
+    esac
+    ;;
+esac
+"#
+    )
+}
+
+/// **A follow-up whose harness fell over mid-round is carried on**: the session
+/// exited of its own account, and what it exited with says the turn stopped in
+/// the middle rather than having been finished.
+///
+/// The one stop-way a follow-up cannot read off the branch or off the absence
+/// of an ending. A round is a conversation with nothing of it committed, so
+/// what tells a round cut off mid-sentence from one that ran its turn out is
+/// how its session ended — nothing written down being the live kill, and a row
+/// written with anything but a clean exit on it being the same cut-off by
+/// another route. See the store's `Ended::fell_over`.
+#[tokio::test]
+async fn a_follow_up_whose_harness_fell_over_mid_round_is_carried_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let fixture = tinkering(spill, &a_follow_up_round_that_falls_over()).await;
+
+    let round = fixture.attachable(1).await;
+    fixture.printed(round, "the harness fell over").await;
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("The session exited with status 1"),
+        "the run stopped over a session that fell over rather than one Verkstead \
+         ended: {:?}",
+        stopped.html,
+    );
+
+    fixture.quiet().await;
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(resumed).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the round it fell over in the middle of: {said:?}",
+    );
+    assert!(
+        !said.contains("following it up"),
+        "rather than a fresh round being started over the top of it: {said:?}",
+    );
+
+    let view = fixture.view().await;
+    let notices = notices(&view);
+
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "and the Timeline says which of the two resumes it was: {notices:?}",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::FollowUp,
+        "and the follow-up is still the follow-up",
+    );
+}
+
+/// The marker that expires the login the incident's round was running on.
+const EXPIRED: &str = "the-login-expired";
+
+/// A **Tinker**'s round that commits, puts its question up, works on while
+/// nobody has expired its login — and then signs out, the way the incident's
+/// own session did: the access token the copy of the account held was past its
+/// life, and the refresh it went for had been spent by a login made on the
+/// device the Profile is bound on.
+///
+/// Resumed, it reads the answers and says it is done once the test opens the
+/// way — which is what says which role it was launched in, a carried session
+/// being primed with the note rather than with any role's own prompt. See
+/// [`a_follow_up_round_that_works_on_the_answers`].
+fn a_follow_up_round_that_signs_out() -> String {
+    format!(
+        r#"
+{CLAUDES_LOG}
+case "$3" in
+--resume)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Reading the answers."}}]}}}}' >> "$log"
+    printf 'carried on\r\n'
+    while [ ! -f /tmp/verkstead/acted ]; do sleep 0.1; done
+    : > /tmp/verkstead/done
+    printf 'acted on the answers and said it is done\r\n'
+    sleep 300
+    ;;
+*)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"A round."}}]}}}}' > "$log"
+    case "$2" in
+    *submitting/SKILL.md*)
+        printf 'sent for the pull request: %s\r\n' "$2"
+        sleep 300
+        ;;
+    *)
+        printf 'a limiter\n' >> limiter.md
+        git add -A
+        git commit --quiet -m 'feat: count what the limiter rejects'
+        SAYING='following it up'
+        printf '%s\r\n' "$SAYING"
+        {WHILE_NOBODY_HAS_ASKED}
+        while [ ! -f /tmp/verkstead/{EXPIRED} ]; do
+            printf 'acting on the answers\r\n'
+            sleep 0.1
+        done
+{logged}
+        for pass in 1 2 3 4; do
+            printf '  ⎿  {LOGIN_EXPIRED}\r\n'
+            sleep 0.25
+        done
+        sleep 300
+        ;;
+    esac
+    ;;
+esac
+"#,
+        logged = said_in_the_log(LOGIN_EXPIRED),
+    )
+}
+
+/// **The incident, end to end.** A Tinker's follow-up round is answered, the
+/// account it was spending signs out before the session has read a word of what
+/// came back, the human presses Resume — and the round is carried on rather than
+/// a `submitting` session being sent to open a pull request over the top of it.
+///
+/// Which is what really happened, and the whole of why this occasion exists.
+/// All three of the ending's questions say the follow-up is over and its work is
+/// on no pull request — the round carries the human's Nothing-else mark, the
+/// branch holds a commit, and `gh` finds none — so the press sent for one, and
+/// the answers the human had given at midnight were read by nobody. The human
+/// had to type `/resume` at the Screen by hand to get the conversation back.
+///
+/// **A conversation standing to be carried on is what settles it**, and the
+/// sign-out is what writes one here: the launch is the session that was cut off,
+/// so what it works is its own turn's to say and the ending's reading is not
+/// asked at all. The role it was launched in is read off its Done signal, a
+/// follow-up's being checked against the human's mark and a `submitting`
+/// session's against a pull request that is not there — so the signal taken is
+/// the follow-up's ending, and the pull request is sent for by the session that
+/// did the work rather than over the top of one still doing it.
+#[tokio::test]
+async fn the_sign_out_incident_carries_the_follow_up_on_rather_than_sending_for_a_pull_request() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("never-opened-by-hand");
+
+    let fixture = tinkering_asking(
+        spill,
+        &a_follow_up_round_that_signs_out(),
+        &gh_opened_by_hand(&opened),
+    )
+    .await;
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("feat: count what the limiter"))
+                .then_some(())
+        })
+        .await;
+
+    let round = fixture.attachable(1).await;
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(
+        fixture.answer_ending(set).await,
+        Submitted::Accepted,
+        "the human answers the round and marks that there is nothing else",
+    );
+
+    // And the session is at work with that answer in front of it, which is the
+    // moment the incident happened in: nothing has acted on what came back.
+    fixture.printed(round, "acting on the answers").await;
+
+    // The token the session was given expires, and the refresh it goes for has
+    // been spent by a login made since on the device the Profile is bound on.
+    std::fs::write(handoff_directory(&fixture).join(EXPIRED), "").unwrap();
+
+    let signed_out = fixture.stopped().await;
+
+    assert!(
+        signed_out
+            .html
+            .contains("<strong>implementation</strong> account has signed out"),
+        "the run stopped because the account signed out mid-answer: {:?}",
+        signed_out.html,
+    );
+
+    fixture.quiet().await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::FollowUp,
+        "a stop leaves the Conversation where it is",
+    );
+    assert_eq!(
+        pull_request(&view),
+        None,
+        "and the branch is on none, which is what the ending's reading acts on",
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    assert!(
+        nothing_else(&pool, fixture.id, State::FollowUp)
+            .await
+            .unwrap(),
+        "and the round the human answered carries the Nothing-else mark: all \
+         three of the ending's questions say this follow-up is over and owes a \
+         pull request",
+    );
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(resumed).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the round the sign-out cut off: {said:?}",
+    );
+    assert!(
+        !said.contains("sent for the pull request"),
+        "and nothing was sent to open a pull request over the top of it: {said:?}",
+    );
+
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        0,
+        "which is to say nothing was primed as the session that opens one",
+    );
+
+    let notices = notices(&fixture.view().await);
+
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "and the Timeline says which of the two resumes it was: {notices:?}",
+    );
+
+    // And the role it was launched in, which is the one thing the note it was
+    // primed with cannot say: the resumed session acts on the answers and says
+    // it is done, and what the signal is taken *for* is the follow-up's ending.
+    std::fs::write(handoff_directory(&fixture).join("acted"), "").unwrap();
+
+    let sent = fixture
+        .until(|view| {
+            outputs(view)
+                .get(2)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    assert!(
+        fixture
+            .capture(sent)
+            .await
+            .contains("sent for the pull request"),
+        "so the pull request is sent for after that",
+    );
+
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        1,
+        "by the ending of the follow-up the carried session finished rather than \
+         over the top of one it was still having",
+    );
+}
+
+/// A **Tinker**'s round that commits, puts its question up and holds — and
+/// **keeps no log of its conversation at all**, so nothing can carry it on.
+///
+/// Which is what a test about the holding needs: the launch after the stop tries
+/// the resume, finds claude has no record of that session under this Worktree,
+/// and falls back to Verkstead's own resume — so it is primed with the role in
+/// `$2` where this can read it, and whatever was held for the resume is a
+/// promise the launch has to make good rather than keep. See the server's
+/// `transcript::carried`, which is the reading that comes out empty.
+///
+/// The marker the ask leaves is what tells the second launch from the first: the
+/// round asks once, and the session after it is the fallback.
+fn a_follow_up_round_that_keeps_no_log() -> String {
+    format!(
+        r#"
+case "$2" in
+*submitting/SKILL.md*)
+    printf 'sent for the pull request\r\n'
+    sleep 300
+    ;;
+*)
+    if [ -f /tmp/verkstead/asked ]; then
+        printf 'a fresh round primed from the record: %s\r\n' "$2"
+        sleep 300
+    else
+        printf 'a limiter\n' >> limiter.md
+        git add -A
+        git commit --quiet -m 'feat: count what the limiter rejects'
+        SAYING='following it up'
+        printf '%s\r\n' "$SAYING"
+        {WHILE_NOBODY_HAS_ASKED}
+        while :; do printf 'acting on the answers\r\n'; sleep 0.1; done
+    fi
+    ;;
+esac
+"#
+    )
+}
+
+/// **A Question Set held for a carry-on that cannot be made is locked after
+/// all**, rather than left standing in front of a session that knows nothing
+/// about it.
+///
+/// The holding is the reversal a carried-on round makes: the reader has not
+/// gone, so the Set it asked is one the resumed session is coming back for, and
+/// locking it would throw away a round the human was part way through. But
+/// whether the resume can be made is not settled where the holding is decided —
+/// it turns on the harness having a resume line and on its record being where it
+/// looks — so the holding is handed to the launch, and the launch locks it on
+/// every way that comes out *no*. See the server's `runner::held_open`, and
+/// `sessions::Held`, which a relaunched grilling has always handed its own
+/// through.
+///
+/// What getting it wrong costs is the whole Conversation. The Set stays open in
+/// front of a fresh session that knows nothing about it: the human can answer it
+/// and nothing reads what they write, the rescue passes over a Conversation with
+/// a question standing rather than prodding the session, and the follow-up's own
+/// ending needs no Set open — so it could never end while it stood.
+#[tokio::test]
+async fn a_set_held_for_a_carry_on_that_cannot_be_made_is_locked_by_the_launch() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("never-opened-by-hand");
+
+    let fixture = tinkering_asking(
+        spill,
+        &a_follow_up_round_that_keeps_no_log(),
+        &gh_opened_by_hand(&opened),
+    )
+    .await;
+
+    let round = fixture.attachable(1).await;
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("feat: count what the limiter"))
+                .then_some(())
+        })
+        .await;
+
+    // The round's question, unanswered: the human is left holding it when the
+    // session that asked it is taken away.
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    fixture.printed(round, "acting on the answers").await;
+
+    assert_eq!(
+        fixture.force_stop().await,
+        ConversationStopped::Stopped,
+        "the session is taken away mid-round, which is what leaves a conversation \
+         standing to be carried on",
+    );
+
+    fixture.quiet().await;
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let again = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(again).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("a fresh round primed from the record"),
+        "the resume could not be made, so what started is Verkstead's own: {said:?}",
+    );
+
+    let view = fixture.view().await;
+    let notices = notices(&view);
+
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("isn't where claude looks for it")),
+        "and the Timeline says why it was not carried on: {notices:?}",
+    );
+
+    let standing = sets(&view)
+        .into_iter()
+        .find(|asked| asked.set_id == set)
+        .expect("the Set the stopped session was idling on is on the Timeline")
+        .standing
+        .clone();
+
+    assert!(
+        matches!(standing, verkstead_render::Standing::LockedUnanswered(_)),
+        "so a Set held for a reader that is not coming back after all is locked \
+         rather than left in front of a session that knows nothing about it: \
+         {standing:?}",
     );
 }
 
@@ -17862,14 +20719,21 @@ signed_out() {{
         sleep 300
     fi
 }}
+# Which role this session is in, kept beside the Worktree rather than read off
+# the prompt every time: an investigation cut off mid-round is carried on, and a
+# carried session is primed with the note instead of its role's own prompt — so
+# `$2` says which role the first launch was in and nothing about the ones after
+# it. The Worktree is what the two have in common. See ADR-0030.
+role={spill}/role-$(printf '%s' "$PWD" | tr -c 'a-zA-Z0-9' -)
 case "$2" in
-*investigating/SKILL.md*)
+*investigating/SKILL.md*) printf 'investigated' > "$role" ;;
+esac
+if [ -s "$role" ]; then
     signed_out
-    cat "$HOME/.claude/.credentials.json" > {spill}/investigated
+    cat "$HOME/.claude/.credentials.json" > {spill}/$(cat "$role")
     printf 'found it\n'
     sleep 300
-    ;;
-esac
+fi
 case "$1" in
 claude-grilling-5) ;;
 *)
@@ -17914,6 +20778,12 @@ async fn until_on<T>(
 /// One login resumes every run stopped as Signed out on its Profile — here an
 /// implementation run and an investigation beside it, both under the
 /// implementation Profile — and each resumed session is given the new login.
+///
+/// The investigation's is a conversation carried on rather than a fresh session
+/// (ADR-0030), which changes nothing about the login and everything about how
+/// the stub can tell which role it is in: a carried session is primed with the
+/// note, so the role is read off the marker its first launch left beside the
+/// Worktree. See [`signed_out_until_logged_in`].
 #[tokio::test]
 async fn a_login_resumes_every_run_it_unblocks() {
     let spill = tempfile::tempdir().unwrap();
@@ -19647,6 +22517,22 @@ fn notices(view: &ConversationView) -> Vec<String> {
     said(view)
         .into_iter()
         .map(|notice| notice.html.clone())
+        .collect()
+}
+
+/// The same, passing over the line a launch over a **cut-off** session writes:
+/// which of the two resumes it was, and nothing else.
+///
+/// Read by the tests that ask what a restart *raised* about a Conversation it
+/// simply drove again. Every launch over a session that was stopped part way
+/// through its step now says on the Timeline whether the harness carried that
+/// conversation on or Verkstead's own Resume stood in for it — which is a fact
+/// about the session in front of the human rather than anything to answer, and
+/// is what those tests mean by nothing.
+fn notices_but_the_carrying_on(view: &ConversationView) -> Vec<String> {
+    notices(view)
+        .into_iter()
+        .filter(|notice| !notice.contains("The session that stopped here was part way through"))
         .collect()
 }
 
@@ -25014,6 +27900,104 @@ async fn resuming_a_stage_that_never_planned_runs_the_planning_again() {
     );
 }
 
+/// **And it runs the planning again with a conversation standing to be carried
+/// on**, rather than reading the stage's empty backlog as a finish part way
+/// through.
+///
+/// A run with nothing left in `.tasks/` and a conversation standing is ordinarily
+/// a finish that was cut off — the finish commit is what takes the backlog away,
+/// so a backlog already gone is the step that was running. A stage that never
+/// planned has an empty backlog for the opposite reason: its first step has not
+/// run. The two are watched for the opposite landing, the planning's being
+/// `.tasks/TODO.md` arrived and the finish's being the same file gone, so a
+/// planning session carried on as the finish is seen out against a rule its own
+/// commit makes false — and held at its roadmap's join before it is launched at
+/// all. What tells them apart is whether the branch has ever written a backlog,
+/// which is the reading the planning's own refusal already turns on. See the
+/// server's `runner::backlog_again`.
+///
+/// The row is written here the way an arrival or an answer that widened a
+/// sandbox writes one, which is what a row standing in front of an empty backlog
+/// really is: a run's own cut-off reads *between steps* over a `.tasks/` that
+/// names no step. A planning session ended for either of those, before it had
+/// committed, is exactly this shape.
+#[tokio::test]
+async fn a_stage_that_never_planned_is_carried_on_as_its_planning_and_not_as_a_finish() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+    let remembered = spill.path().join("tried");
+
+    let fixture = adopting_asking(
+        spill,
+        &plans_nothing_then_plans(&planning, &worked, &remembered),
+        NO_PULL_REQUEST,
+    )
+    .await;
+
+    // The planning ran and came to nothing, so the run stopped on the step it
+    // could not see land — the sibling above is where that is read in full.
+    fixture
+        .until(|view| {
+            said(view)
+                .into_iter()
+                .find(|notice| Some(notice.id) == view.blocked_on)
+                .cloned()
+        })
+        .await;
+
+    let view = fixture.view().await;
+    let worktree = PathBuf::from(view.worktree.expect("a stage has a Worktree").path);
+
+    assert!(
+        !worktree.join(".tasks").exists(),
+        "the planning died before it wrote a backlog, which is the whole condition",
+    );
+    assert_eq!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "and left nothing standing either, so the run's own cut-off reads nothing \
+         here and the row below is the only one there is",
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    let standing = the_last_session(&pool, fixture.id)
+        .await
+        .unwrap()
+        .expect("the planning session is named on the record");
+
+    continue_on_arrival(&pool, fixture.id, &standing)
+        .await
+        .unwrap();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    // The planning, again — rather than a session launched at the finish, which
+    // is what a backlog this branch had written and worked to empty would have
+    // made of the same row.
+    let started = until_written_saying(&worked, "next-task").await;
+    let planned = std::fs::read_to_string(&planning).unwrap();
+
+    assert_eq!(
+        prompts(&planned).len(),
+        2,
+        "the planning ran again, which is the step the stage was in the middle \
+         of: {planned:?}",
+    );
+    assert!(
+        prompts(&planned)[1].contains("/verkstead/skills/next-stage/SKILL.md"),
+        "in the fork of next-stage as the first was: {planned:?}",
+    );
+
+    assert!(
+        started.contains("/verkstead/skills/next-task/SKILL.md"),
+        "and the backlog it wrote is worked from there, the planning's own \
+         landing having been seen out: {started:?}",
+    );
+
+    assert_eq!(fixture.view().await.state, Lifecycle::Implementing);
+}
+
 /// A stub that carries a roadmap stage the whole way on its own: plans it, works
 /// the one task the plan wrote, finishes it, and reads the branch back finding
 /// nothing worth raising.
@@ -28662,7 +31646,10 @@ async fn a_conversation_nothing_is_driving_is_halted_while_the_server_runs() {
 ///
 /// So there is nothing to read afterwards, which is the assertion. A Notice here
 /// would be a Conversation told it had stopped a moment after being started
-/// again.
+/// again — and the one line a launch over a cut-off session does write is not
+/// that: it says which of the two resumes took the session up, and is passed
+/// over here for the reason it is passed over everywhere a restart is asked what
+/// it raised. See [`notices_but_the_carrying_on`].
 #[tokio::test]
 async fn a_conversation_a_stopped_server_left_mid_run_is_driven_again_before_the_sweep_looks() {
     let fixture = grilling(r#"printf 'the grilling has nothing to say\n'"#).await;
@@ -28696,8 +31683,9 @@ async fn a_conversation_a_stopped_server_left_mid_run_is_driven_again_before_the
     let view = fixture.view().await;
 
     assert!(
-        notices(&view).is_empty(),
-        "nothing was written about a Conversation that is being worked on: {:?}",
+        notices_but_the_carrying_on(&view).is_empty(),
+        "nothing was written about a Conversation that is being worked on, beyond \
+         the line saying which of the two resumes took its session up: {:?}",
         notices(&view),
     );
     assert_eq!(
@@ -28982,6 +31970,14 @@ async fn wrapping_unwatched(fixture: &Grilling) {
 /// anything, and nothing reads the step off whatever stopped — a stop is
 /// answered whenever the human gets to it, and the branch is what has the
 /// answer by then.
+///
+/// **A fresh session here because the stub kept no log.** The session that died
+/// left what it had written in the Worktree uncommitted, so the task reads as
+/// half-built and the launch is a cut-off being carried on — and nothing stands
+/// in for claude's own record of that conversation, so it comes out as
+/// Verkstead's own Resume, which is the launch this test has always been about.
+/// The line saying which of the two it was is the one thing added to the
+/// Timeline; it raises nothing, which is why the count below reads past it.
 #[tokio::test]
 async fn resuming_a_stalled_backlog_run_takes_the_next_task_off_the_repository() {
     let fixture = grilling_swept(
@@ -29074,7 +32070,7 @@ async fn resuming_a_stalled_backlog_run_takes_the_next_task_off_the_repository()
         "and there is nothing left to resume, because something is driving it",
     );
     assert_eq!(
-        notices(&view).len(),
+        notices_but_the_carrying_on(&view).len(),
         1,
         "while the Notice stays where it is: it is a stop that really happened",
     );
@@ -31116,6 +34112,124 @@ async fn resume_investigates_again_on_the_brief_and_the_rounds_answered() {
     assert!(
         relaunched.contains("About the 429s") && relaunched.contains("It counts them against"),
         "which is the round it asked before it went: {relaunched:?}",
+    );
+}
+
+/// An investigating session that puts its round up and holds, keeping claude's
+/// own log of the conversation — and which says, where it is resumed, that it is
+/// the session that was having that round rather than a fresh one on the Brief.
+fn an_investigating_round_carried_on() -> String {
+    format!(
+        r#"
+{CLAUDES_LOG}
+case "$3" in
+--resume)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Back to it."}}]}}}}' >> "$log"
+    printf 'carried on\r\n'
+    sleep 300
+    ;;
+*)
+    printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"A round."}}]}}}}' > "$log"
+    SAYING='finding it out'
+    printf '%s\r\n' "$SAYING"
+    {WHILE_NOBODY_HAS_ASKED}
+    while :; do printf 'finding more out\r\n'; sleep 0.1; done
+    ;;
+esac
+"#
+    )
+}
+
+/// **An investigation cut off mid-round is carried on too**, with the round it
+/// left open held for the session coming back to it.
+///
+/// The follow-up's reading in the one other state that has a conversation to
+/// lose: an investigation's rounds are a conversation with nothing of them on the
+/// branch, so what tells one cut off mid-sentence from one that finished the turn
+/// it was having is how its session ended — see the server's `resume::mid_round`.
+/// Re-primed, what the agent had worked out across every round it has had is
+/// thrown away and the human is asked again for what they have already said.
+///
+/// Nothing about the job turns on it here, which is what parts this from the
+/// follow-up: an investigation has the one job it was opened with, whoever
+/// launches it. What it loses by being re-primed is the thinking alone.
+#[tokio::test]
+async fn an_investigation_cut_off_mid_round_is_carried_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let fixture = investigating(spill, &an_investigating_round_carried_on()).await;
+
+    let round = fixture.running().await;
+
+    // The round's question, with the human holding it when the session that
+    // asked is taken away.
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    fixture.printed(round, "finding more out").await;
+
+    assert_eq!(
+        fixture.force_stop().await,
+        ConversationStopped::Stopped,
+        "the session is taken away mid-round, which is what makes this a cut-off",
+    );
+
+    fixture.quiet().await;
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let again = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(again).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume the round the stop took away: {said:?}",
+    );
+    assert!(
+        !said.contains("finding it out"),
+        "rather than a fresh investigation being primed from the Brief and the \
+         rounds already answered over the top of it: {said:?}",
+    );
+
+    let view = fixture.view().await;
+    let notices = notices(&view);
+
+    assert!(
+        notices.iter().any(|notice| notice
+            .contains("The session that stopped here was part way through")
+            && notice.contains("carries it on")),
+        "and the Timeline says which of the two resumes it was: {notices:?}",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Investigating,
+        "and the investigation is still the investigation",
+    );
+
+    let standing = sets(&view)
+        .into_iter()
+        .find(|asked| asked.set_id == set)
+        .expect("the Set the stopped session was idling on is on the Timeline")
+        .standing
+        .clone();
+
+    assert!(
+        !matches!(standing, verkstead_render::Standing::LockedUnanswered(_)),
+        "and the round is held open for the reader that is coming back rather \
+         than locked: {standing:?}",
+    );
+    assert_eq!(
+        fixture
+            .respond(set, serde_json::json!([{ "label": "Q9", "selected": 1 }]))
+            .await,
+        Submitted::Accepted,
+        "which the human can still answer, that being what open means to them",
     );
 }
 
@@ -37810,7 +40924,7 @@ async fn a_halt_nobody_chose_is_driven_again_by_the_next_server() {
          on the human once the Conversation is being driven again",
     );
     assert_eq!(
-        notices(&view).len(),
+        notices_but_the_carrying_on(&view).len(),
         1,
         "and the Notice stays where it is: {:?}",
         notices(&view),

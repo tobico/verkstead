@@ -6724,6 +6724,7 @@ async fn a_pairing_on_another_harness_than_the_record_says_so_where_the_work_arr
             agent_type: store::AgentType::Grok,
             widened_by: None,
             kept_here_by: None,
+            cut_off: false,
         },
     )
     .await

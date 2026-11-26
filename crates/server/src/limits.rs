@@ -47,6 +47,22 @@
 //! card, whatever phrase it held. The same [`crate::screen::Screen`] the idle
 //! judgement reads is what makes it a line again.
 //!
+//! **A conversation carried on begins again in all three.** A session resumed
+//! with the harness's own resume is read by a [`Watch`] of its own, and each of
+//! the three records opens where that session does: what it has printed is
+//! empty, the frame is the one it draws, and the log is followed from the length
+//! the launch measured before it started — see [`crate::transcript::Carried`].
+//! Which is what the log needs, being the one of the three that outlives a
+//! session: a backend that wrote its spent window out there would otherwise be
+//! read as running out again on the first poll of a session whose window had
+//! come back.
+//!
+//! The terminal needs nothing of its own. A banner is what a display draws
+//! *while* it waits, rather than a turn of the conversation it draws again — and
+//! a line reporting a window that has passed carries the phrase in the middle of
+//! it, which [`says_so`] does not read as one. Nor does the Capture: it is the
+//! record of what one session printed, and no stop is decided off it.
+//!
 //! One phrase apiece, kept in the one place, so a wording that moves is one edit
 //! rather than a search — the same bargain the idle signature makes, and for the
 //! same reason. Which phrase a session is read against is a fact about its

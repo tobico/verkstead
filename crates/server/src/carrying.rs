@@ -21,9 +21,11 @@
 //!
 //! **Where it is written is where it is known**, and the six reasons are known
 //! in three places. The arrival knows there is no session on the record, before
-//! anything is launched — see [`crate::peer::transfers`]. The launch knows the
-//! other four, the last of them only once the memory sync it runs has had
-//! its say — see [`crate::sessions::continuing`]. And the refusal is known only
+//! anything is launched — see [`crate::peer::transfers`]; so does the launch that
+//! reads a cut-off for itself, which is the same absence found at the other end
+//! — see [`crate::resume`]. The launch knows the other four, the last of them
+//! only once the memory sync it runs has had its say — see
+//! [`crate::sessions::continuing`]. And the refusal is known only
 //! after the harness has been asked and has said no, which is the relay reading
 //! the ending of a session that never added a line to the record it was resuming
 //! — see [`crate::sessions::relay`].
@@ -34,13 +36,15 @@ use crate::nudge::Nudges;
 use crate::store::{self, AgentType};
 
 /// What left a conversation standing to be carried on: the work arriving from
-/// another machine, or an answer that widened the sandbox the agent was waiting
-/// in (ADR-0028, *The carrying-on is the Carried Conversation's, on this
-/// device*).
+/// another machine, an answer that widened the sandbox the agent was waiting in
+/// (ADR-0028, *The carrying-on is the Carried Conversation's, on this device*),
+/// or the session being cut off part way through its step.
 ///
 /// The machinery is one and the occasion is what the human is told: an arrival
-/// says where the work came from, and an answer says which question set ended
-/// the session to add to it.
+/// says where the work came from, an answer says which question set ended the
+/// session to add to it, and a cut-off says the session that stopped here is the
+/// one that has been picked up — and nothing about why it stopped, the stop's own
+/// Notice having said that already.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Occasion {
     /// A Transfer landed the work here.
@@ -54,16 +58,31 @@ pub(crate) enum Occasion {
     /// work, was answered *Keep it here*: the session that called was ended for
     /// the move and is carried on where it is (ADR-0029).
     Kept(i64),
+
+    /// The session was **cut off**: stopped part way through its step rather than
+    /// finishing it, so what it had in its head is what the launch after it is
+    /// for.
+    ///
+    /// **The one occasion with nothing beside it**, where the other three carry
+    /// the arrival or the Set that is the whole of what the human needs told. A
+    /// stop said why it stopped in a Notice of its own at the time, so this says
+    /// only which of the two resumes the session in front of them is.
+    CutOff,
 }
 
 impl Occasion {
     /// The occasion a row of the record names — see
     /// [`store::Continued::widened_by`].
     pub(crate) fn of(continued: &store::Continued) -> Self {
-        match (continued.widened_by, continued.kept_here_by) {
-            (Some(set), _) => Self::Widened(set),
-            (None, Some(set)) => Self::Kept(set),
-            (None, None) => Self::Arrived,
+        match (
+            continued.widened_by,
+            continued.kept_here_by,
+            continued.cut_off,
+        ) {
+            (Some(set), _, _) => Self::Widened(set),
+            (None, Some(set), _) => Self::Kept(set),
+            (None, None, true) => Self::CutOff,
+            (None, None, false) => Self::Arrived,
         }
     }
 
@@ -79,6 +98,7 @@ impl Occasion {
                 "Question set {set} kept the work here, so the session that asked to move it was \
                  ended part way through"
             ),
+            Self::CutOff => "The session that stopped here was part way through".to_owned(),
         }
     }
 }
@@ -160,6 +180,10 @@ impl Instead {
                      to carry on from. What starts now is Verkstead's own resume, primed from \
                      this timeline."
                 ),
+                Occasion::CutOff => "The session that stopped here isn't named on the record, so \
+                                     there's no conversation to carry on from. What starts now \
+                                     is Verkstead's own resume, primed from this timeline."
+                    .to_owned(),
             };
         };
 
@@ -197,7 +221,10 @@ impl Instead {
             ),
 
             Self::NoRecord(harness)
-                if matches!(occasion, Occasion::Widened(_) | Occasion::Kept(_)) =>
+                if matches!(
+                    occasion,
+                    Occasion::Widened(_) | Occasion::Kept(_) | Occasion::CutOff
+                ) =>
             {
                 format!(
                     "{harness}'s record of that conversation isn't where {harness} looks for it \
@@ -292,24 +319,33 @@ pub(crate) async fn carried_on(
     harness: AgentType,
     session: &str,
 ) {
-    let from = match occasion {
-        Occasion::Arrived => " from the record the memory sync brought over",
-        Occasion::Widened(_) => " in the wider sandbox",
-        Occasion::Kept(_) => "",
-    };
-
     noted(
         pool,
         nudges,
         conversation_id,
-        &format!(
-            "{opening} a conversation with {harness}, and the session started here carries it \
-             on. Verkstead told {harness} to resume session `{session}`{from}.",
-            opening = occasion.opening(),
-            harness = harness.word(),
-        ),
+        &carrying_it_on(occasion, harness, session),
     )
     .await;
+}
+
+/// The Notice [`carried_on`] writes, whole — parted from the writing so that
+/// what the human reads can be read by a test.
+fn carrying_it_on(occasion: Occasion, harness: AgentType, session: &str) -> String {
+    let from = match occasion {
+        Occasion::Arrived => " from the record the memory sync brought over",
+        Occasion::Widened(_) => " in the wider sandbox",
+
+        // A session kept here and one cut off here both stayed where they were,
+        // so there is nowhere to name and nothing was put right first.
+        Occasion::Kept(_) | Occasion::CutOff => "",
+    };
+
+    format!(
+        "{opening} a conversation with {harness}, and the session started here carries it \
+         on. Verkstead told {harness} to resume session `{session}`{from}.",
+        opening = occasion.opening(),
+        harness = harness.word(),
+    )
 }
 
 /// One sentence on the Conversation's Timeline, and the pages told it is there.
@@ -444,6 +480,57 @@ mod tests {
         assert!(
             !said.contains("arrived") && !said.contains("memory sync"),
             "and no move is claimed: {said:?}"
+        );
+    }
+
+    /// **And a session that was cut off says only which resume this is**: why it
+    /// stopped was said by the stop's own Notice at the time, and a second
+    /// telling would be the human reading the same bad news twice.
+    #[test]
+    fn a_cut_off_session_says_which_resume_it_is_and_not_why_it_stopped() {
+        let said = Instead::NoResumeLine(AgentType::Claude).saying(Occasion::CutOff);
+
+        assert!(
+            said.contains("The session that stopped here was part way through"),
+            "the occasion is the stop itself: {said:?}",
+        );
+        assert!(
+            said.contains("Verkstead's own resume"),
+            "and what was started instead: {said:?}",
+        );
+        assert!(
+            !said.contains("arrived") && !said.contains("question set"),
+            "and neither a move nor a Set is claimed: {said:?}",
+        );
+
+        let said = Instead::NoSession.saying(Occasion::CutOff);
+
+        assert!(
+            said.contains("isn't named on the record"),
+            "a session Verkstead can't name is the absence itself: {said:?}",
+        );
+    }
+
+    /// And the one that worked names the session it resumed, with nothing about
+    /// where it came from: a cut-off session never went anywhere.
+    #[test]
+    fn a_cut_off_carried_on_names_the_session_and_no_journey() {
+        let said = carrying_it_on(Occasion::CutOff, AgentType::Claude, "ses_01");
+
+        assert!(
+            said.contains(
+                "The session that stopped here was part way through a conversation with claude"
+            ),
+            "the stop is the occasion: {said:?}",
+        );
+        assert!(
+            said.contains("carries it on") && said.contains("resume session `ses_01`"),
+            "and the session it was told to resume is named: {said:?}",
+        );
+        assert!(
+            !said.contains("memory sync") && !said.contains("wider sandbox"),
+            "and nothing of a move or a widening, a cut-off session never having gone \
+             anywhere: {said:?}",
         );
     }
 }

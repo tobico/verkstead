@@ -4262,6 +4262,45 @@ async fn resuming_discards_the_pending_steer_it_starts_over() {
     );
 }
 
+/// **A Resume on a server that runs no agents carries nothing on**: no session
+/// has ever run here and none ever will, so nothing was cut off and there is
+/// nothing to say about one.
+///
+/// The far end of the reading that carries a cut-off session's conversation on.
+/// A launch over a session that stopped part way through its step resumes that
+/// session rather than priming a fresh one, and says on the Timeline which of
+/// the two it was — but what tells a cut-off from a launch that never happened
+/// is whether a session ran here at all, one row per session written as its
+/// Capture is opened. A server built without agents has none and never will, so
+/// every press here is the second of those: it recomputes and starts what it
+/// can, exactly as it always did, and writes nothing about carrying anything on.
+///
+/// See the sessions suite, which asks the same thing of a Conversation whose
+/// sessions have gone off the record.
+#[tokio::test]
+async fn a_resume_on_a_server_that_runs_no_agents_carries_nothing_on() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(resume(&app, id).await, Resumed::Resumed);
+
+    let view = opened(&app, id).await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing was said about carrying a conversation on, nothing having run \
+         here to be cut off: {:?}",
+        notices(&view),
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Grilling,
+        "and the Conversation is where it was, the press having recomputed what \
+         ought to be running and found nothing to run it with",
+    );
+}
+
 /// And a Resume refused by name leaves it exactly where it stands.
 ///
 /// The press decided nothing, so neither did it decide anything about the form:

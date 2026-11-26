@@ -24,6 +24,15 @@
 //! followed from where this session began in it, so what is read there is only
 //! what this session said. See [`ReadIn`].
 //!
+//! **And a conversation carried on begins again in the log.** A session resumed
+//! with the harness's own resume is watched by a [`Watch`] of its own, and the
+//! following of the log it is appending to opens at the length the launch
+//! measured before it started — see [`crate::transcript::Carried`]. So the line
+//! a run stopped on the first time sits behind the reading rather than in front
+//! of it, however many times the display draws it again. Where it *is* drawn
+//! again is the terminal and the frame, and for claude neither of those is read;
+//! the Capture is read by nothing that stops a run.
+//!
 //! **The phrase rule.** A session has signed out when one of its lines *ends*
 //! with its harness's phrase — [`CLAUDE_SIGNED_OUT`], [`AGY_SIGNED_OUT`] — once
 //! the terminal's decoration is off both ends of it. Claude says it as

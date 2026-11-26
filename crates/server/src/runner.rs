@@ -596,6 +596,36 @@ async fn follow_breakdown(
     carry_on(state, conversation_id, driving).await
 }
 
+/// Which press is taking the run up, which two of the three directions need
+/// told and nothing else here does.
+///
+/// **Because a Steer reaches this driver too.** A human steering an implementing
+/// Conversation with nothing written in the box is asking for the next step off
+/// the branch, which is exactly what a Resume asks for — so the two share the
+/// driver rather than forking it. What they do not share is the carrying-on: a
+/// session cut off part way through is carried on by every way back in, and a
+/// steer is the human saying what is to happen *instead*, which replaces that
+/// session rather than picking it up (ADR-0020, and ADR-0030's *Every way a
+/// session is cut off*). So the press is carried down to the two readings made
+/// at a launch, and [`crate::resume::cut_off_at_the_launch`] is where it is
+/// answered.
+///
+/// Only the two directions that read their own cut-off ever look at it. A
+/// backlog's was read in the recompute before this was spawned, where a steer
+/// never passes at all — see [`crate::resume::cut_off`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Again {
+    /// A way back in: the human's Resume, a login's carry-on after a sign-out, a
+    /// restart's startup pass, or an arrival. A session cut off part way through
+    /// its step is carried on by it.
+    AWayBackIn,
+
+    /// A **Steer** with nothing in the box, which is the human asking for the
+    /// next step off the branch. What it starts is a fresh session of the work,
+    /// whatever was cut off here.
+    ASteer,
+}
+
 /// Start driving a stalled implementation again, from wherever the repository
 /// now stands.
 ///
@@ -618,7 +648,15 @@ async fn follow_breakdown(
 /// The registration is handed on rather than taken again, so a Conversation the
 /// human has just pressed Resume on is driven from that moment rather than from
 /// whenever the launch gets round to it — see [`crate::drivers`].
-pub(crate) async fn implementing_again(state: AppState, conversation_id: i64, driving: Driving) {
+///
+/// `again` is which press this is, and the two directions that read their own
+/// cut-off are the whole of what it is for — see [`Again`].
+pub(crate) async fn implementing_again(
+    state: AppState,
+    conversation_id: i64,
+    driving: Driving,
+    again: Again,
+) {
     let conversation = match store::load_conversation(&state.pool, conversation_id).await {
         Ok(Some(conversation)) => conversation,
         Ok(None) => {
@@ -652,8 +690,10 @@ pub(crate) async fn implementing_again(state: AppState, conversation_id: i64, dr
     };
 
     match direction {
-        Direction::Inline => inline_again(state, conversation_id, driving).await,
-        Direction::Roadmap => roadmap_again(state, conversation_id, &working_in, driving).await,
+        Direction::Inline => inline_again(state, conversation_id, driving, again).await,
+        Direction::Roadmap => {
+            roadmap_again(state, conversation_id, &working_in, driving, again).await
+        }
         // The backlog's own answer to what is next, asked of `.tasks/` exactly
         // as every other turn of the run asks it — a stage's backlog included,
         // it being a backlog like any other by the time there is one. What is
@@ -698,7 +738,60 @@ async fn backlog_again(
     base: Option<&str>,
     driving: Driving,
 ) {
-    let step = decide(working_in).await;
+    // What the run has left to do, with one correction: where a conversation is
+    // standing to be carried on, the launch below is the session that was cut off
+    // resumed, and the readings an empty backlog would otherwise send it through
+    // are readings about what to do with a run nobody is in the middle of. Each
+    // of them decides a job of its own — plan a stage, wrap a pull request up
+    // with no session in it at all, send one for the pull request that is owed,
+    // give up — and a carried session has its own job in its head already. See
+    // [`carrying_on`], and the Brief's rule that the job must not change under a
+    // resume.
+    //
+    // The finish is what it is carried on as, that being what a run with nothing
+    // left in `.tasks/` is in the middle of: every step of a run ends in a commit
+    // and the finish's is the one that takes the backlog away, so a backlog
+    // already gone and a conversation still standing is a finish part way
+    // through. Which is also where every reading below was trying to get to —
+    // `.tasks/` gone and the branch on a pull request is what says the finish
+    // landed, and nothing less ends the session. See [`Step::Finish`].
+    //
+    // **And only where the branch has written one**, which is what parts the
+    // finish from the other thing an empty `.tasks/` can be: a step that has not
+    // run yet. A stage whose planning never committed has an empty backlog too,
+    // and the two steps are watched for the opposite landing — the planning's is
+    // `.tasks/TODO.md` **arrived** and the finish's is the same file **gone** —
+    // so a planning session carried on as the finish would be seen out against a
+    // rule its own commit makes false, and held at its roadmap's join before it
+    // was launched at all. The branch's own writing is what tells them apart, and
+    // it is the reading [`stage_to_plan`] already turns on, so the two agree
+    // wherever git does: *written* is the branch worked to empty, and a stage that
+    // planned nothing falls through to the reading it has always had. See
+    // [`wrote_a_backlog`], where *written* is also the careful answer to a git
+    // that will not say.
+    //
+    // A run's own cut-off never reads this way: `.tasks/` naming no step is no
+    // step to have been part way through, so [`mid_step`] answers *between
+    // steps* over one and writes no row. A row standing here was written by an
+    // arrival or by an answer that ended the session to widen its sandbox, each
+    // of which has a session mid-turn on the other side of it all the same.
+    let step = match decide(working_in).await {
+        Step::Nothing
+            if carrying_on(&state, conversation_id).await
+                && wrote_a_backlog(working_in, base).await =>
+        {
+            tracing::info!(
+                conversation_id,
+                "a conversation is standing to be carried on here and the backlog this branch \
+                 wrote is worked out, so the finish is carried on rather than what is left of \
+                 the run decided again",
+            );
+
+            Step::Finish
+        }
+
+        step => step,
+    };
 
     if step == Step::Nothing {
         // Asked before GitHub is, and before anything is read as an ending that
@@ -929,7 +1022,31 @@ async fn nothing_left(
 ///   session launched into it could only dead-end on the same missing thing
 ///   when it came to push, and the halt is what reaches the human on their
 ///   phone.
-async fn inline_again(state: AppState, conversation_id: i64, driving: Driving) {
+///
+/// **And the session cut off part way through the work is carried on in the
+/// middle of those three.** An inline implementation is one session's worth of
+/// work ending on the pull request `gh` was just asked about, so there is no
+/// backlog to read a step off and no resting place between two steps to have
+/// stopped in: a press that reaches the second answer is a press over work that
+/// is not finished, which makes the session that stopped here one that was part
+/// way through it. So the row saying it is carried on is written there — in the
+/// one arm of the three that launches a session, after the reading that decides
+/// there is one to launch. Written any earlier and it would be a row the other
+/// two leave standing for the next session of the work to take up, which is the
+/// reason this reading is not in the recompute with the backlog's. See
+/// [`crate::resume::cut_off_at_the_launch`], which is handed [`Again`] because
+/// the same writing is made from [`roadmap_again`], where a steer does arrive —
+/// a bare steer on an inline run is refused outright, there being nothing on a
+/// branch that an inline implementation could be carried on from. See
+/// [`crate::steering::standing`].
+///
+/// **And what the session was sent for is not part of it**, as it is not for a
+/// round of a follow-up: a session Verkstead sent to open the pull request and
+/// lost mid-push reads as a cut-off here exactly as the session that built the
+/// work does, and is carried on under the implementing prompt — which the note
+/// replaces anyway. The alternative is certain rather than possible: a session
+/// killed mid-push would have its turn thrown away every time.
+async fn inline_again(state: AppState, conversation_id: i64, driving: Driving, again: Again) {
     // A run the human is still being asked where to start has not started, and
     // its open Set is the wait — a restart reaching it included. See
     // [`crate::placing::inline_waiting`].
@@ -956,6 +1073,12 @@ async fn inline_again(state: AppState, conversation_id: i64, driving: Driving) {
             crate::wrapping::opened(&state, conversation_id, None).await
         }
         Err(github::Trouble::NoPullRequest) => {
+            // The work is unfinished, which is what makes the session that
+            // stopped here one that was cut off part way through it — and this
+            // is the only one of the three answers with a session to carry it
+            // on.
+            crate::resume::cut_off_at_the_launch(&state, conversation_id, again).await;
+
             let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Implementing).await
             else {
                 return;
@@ -986,7 +1109,26 @@ async fn inline_again(state: AppState, conversation_id: i64, driving: Driving) {
 /// the press is worth something either way — a roadmap that is not written is
 /// written by a fresh session, and one that is written but on no pull request is
 /// sent for the pull request. See [`to_a_pull_request`].
-async fn roadmap_again(state: AppState, conversation_id: i64, working_in: &Path, driving: Driving) {
+///
+/// **And where the writing is what stopped, that session is carried on.** The
+/// reading is the one this driver already makes and nothing more: a roadmap
+/// Conversation's own step is a session writing the document, so a session that
+/// ran here and left nothing of one was part way through the writing, and a
+/// branch that has a roadmap on it had its step — what is left of that is a push
+/// and a `gh pr create`, which is a session of its own sent for it or no session
+/// at all. So the row goes in front of the launch that writes, which is also the
+/// only arm here that launches anything: the sighting and the pull request above
+/// it may both end with nothing started, and a row nothing spends would be taken
+/// up by the next session of the work. See
+/// [`crate::resume::cut_off_at_the_launch`], and [`Again`], which is what parts
+/// a way back in from a steer.
+async fn roadmap_again(
+    state: AppState,
+    conversation_id: i64,
+    working_in: &Path,
+    driving: Driving,
+    again: Again,
+) {
     let Some(base) = base(&state, conversation_id).await else {
         return;
     };
@@ -1015,6 +1157,11 @@ async fn roadmap_again(state: AppState, conversation_id: i64, working_in: &Path,
 
         return to_a_pull_request(&state, conversation_id, None).await;
     }
+
+    // Nothing of the roadmap is written, so a session that ran here was part way
+    // through writing it — and this is where it is carried on, there being no
+    // other launch in this driver to spend the row.
+    crate::resume::cut_off_at_the_launch(&state, conversation_id, again).await;
 
     let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Staging).await else {
         return;
@@ -2130,13 +2277,32 @@ pub(crate) async fn following_up(
     // one the human could answer for ever with nothing reading it, and one this
     // follow-up would never end while it stood. Locked unanswered as the fresh
     // session starts, which is what a relaunched grilling does with its own.
-    if follow_up.again {
-        left_open(&state, conversation_id).await;
-    }
+    //
+    // **Except where a conversation is standing to be carried on**, which is the
+    // one case in which the premise does not hold: the reader has not gone, and
+    // the launch below is the very session that asked, resumed. Held open for it
+    // and named in the note it is primed with — the same reversal a relaunched
+    // grilling makes, where the reasoning is written up: see
+    // `crate::grillings::held_for_a_resume`, and [`carrying_on`].
+    //
+    // **Handed to the launch rather than simply skipped**, which is the rest of
+    // that reversal: whether the resume can be made at all is not settled until
+    // the launch has looked, so the holding is what this hands over and the
+    // launch is what makes it good — see [`held_open`].
+    let held = held_open(&state, conversation_id, follow_up.again).await;
 
-    let Some(mut session) =
-        launch_in_turn(&state, conversation_id, Prompt::FollowingUp(follow_up)).await
+    let Some(mut session) = launch_in_turn_holding(
+        &state,
+        conversation_id,
+        Prompt::FollowingUp(follow_up),
+        &held,
+    )
+    .await
     else {
+        // And a launch that never happened settled nothing, so what was held
+        // for it is made good here instead — the relaunched grilling's own last
+        // step, and for its reason.
+        made_good(&state, conversation_id, &held).await;
         return;
     };
 
@@ -2274,12 +2440,32 @@ pub(crate) async fn following_up(
 /// is where the state would have sent it anyway: a Conversation nobody can read,
 /// an unmarked round, branches with nothing on them. None of those is an ending
 /// left half-made.
+///
+/// **And the reading is not made at all where a conversation is standing to be
+/// carried on**, which is the job-must-not-change rule: see [`carrying_on`]. The
+/// launch below is then the session that was cut off resumed, and what it is
+/// doing is its own turn's to say — so the follow-up is picked up in the role it
+/// stopped in. The incident this is from is exactly that: a follow-up cut off
+/// between the human's answer and the agent reading it, whose press read the
+/// round as marked, the branch as on no pull request, and sent a `submitting`
+/// session to open one instead of letting the follow-up act on the three answers
+/// it had been waiting for.
 pub(crate) async fn follow_up_again(
     state: AppState,
     conversation_id: i64,
     follow_up: FollowUp,
     driving: Driving,
 ) {
+    if carrying_on(&state, conversation_id).await {
+        tracing::info!(
+            conversation_id,
+            "a conversation is standing to be carried on here, so the follow-up is picked up \
+             in the role it stopped in and what it is working is its own turn's to decide",
+        );
+
+        return following_up(state, conversation_id, follow_up, driving).await;
+    }
+
     if owed_a_pull_request(&state, conversation_id).await {
         tracing::info!(
             conversation_id,
@@ -2325,6 +2511,39 @@ async fn owed_a_pull_request(state: &AppState, conversation_id: i64) -> bool {
     }
 
     holds_commits(state, &conversation).await
+}
+
+/// Whether a conversation is standing to be carried on here — **read without
+/// spending it**.
+///
+/// What says the launch about to be made is the session that was cut off resumed
+/// rather than a fresh one primed from the record. Which is the one thing the
+/// drivers that re-derive a job have to ask before they re-derive it: a carried
+/// session comes back with the whole of its turn in its head, and a reading that
+/// sent it somewhere else would be Verkstead deciding a job the agent was already
+/// doing. The Brief's rule, and the incident behind it — see
+/// [`follow_up_again`], and [`crate::resume::cut_off`].
+///
+/// **Read rather than spent**, as every question asked in front of a launch is:
+/// the row is spent by the launch itself, which is what makes the session after a
+/// cut-off the one that carries the conversation on and the session after *that*
+/// an ordinary session of the work — see [`store::take_up_the_conversation`]. The
+/// grilling's relaunch asks the same thing for the other half of the same
+/// reversal, whether to hold a Question Set open or lock it: see
+/// `crate::grillings`.
+///
+/// A read that fails is read as *no*, which is the way round everything about
+/// this decision falls: the readings it guards are what a launch has always made,
+/// and a database that was briefly busy is no reason to stop making them.
+async fn carrying_on(state: &AppState, conversation_id: i64) -> bool {
+    match store::carrying_a_conversation(&state.pool, conversation_id).await {
+        Ok(carrying) => carrying,
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a conversation is standing to be carried on here failed, so the run is taken up the way it always was");
+            false
+        }
+    }
 }
 
 /// What a stop over a gone follow-up session says beyond how it went.
@@ -2571,6 +2790,15 @@ async fn finished(state: &AppState, conversation_id: i64, driving: Driving) {
 /// open leaves the human holding a Conversation they can neither answer nor end,
 /// so it is spoken to, and the human told where it will not answer. The session
 /// is left running for them to move.
+///
+/// **And a round cut off mid-sentence is carried on** (ADR-0030), which is the
+/// follow-up's rule here too and for its reason: a round is a conversation with
+/// nothing of it on the branch, so what the agent had in its head is the whole
+/// of what the session after it is for. The launch below is then that session
+/// resumed, and the Set it was idling on is held for it rather than locked.
+/// Nothing about the job turns on it — an investigation has the one job it was
+/// opened with, whoever launches it — so there is nothing here to tell not to
+/// re-derive one. See [`crate::resume::mid_round`], which is where it is read.
 pub(crate) async fn investigating(
     state: AppState,
     conversation_id: i64,
@@ -2582,18 +2810,22 @@ pub(crate) async fn investigating(
     // handed somebody else's — so a question left over from the session that
     // died is one the human could answer for ever with nothing reading it.
     // Locked unanswered as the fresh session starts, which is what a relaunched
-    // grilling and a relaunched follow-up both do with their own.
-    if investigation.again {
-        left_open(&state, conversation_id).await;
-    }
+    // grilling and a relaunched follow-up both do with their own — and held for
+    // the resume instead where the session that asked is the one being carried
+    // on, which is the same reversal they both make. See [`held_open`].
+    let held = held_open(&state, conversation_id, investigation.again).await;
 
-    let Some(mut session) = launch_in_turn(
+    let Some(mut session) = launch_in_turn_holding(
         &state,
         conversation_id,
         Prompt::Investigating(investigation),
+        &held,
     )
     .await
     else {
+        // And a launch that never happened settled nothing, so what was held
+        // for it is made good here instead.
+        made_good(&state, conversation_id, &held).await;
         return;
     };
 
@@ -2992,6 +3224,93 @@ async fn left_open(state: &AppState, conversation_id: i64) {
     };
 
     if let Some(set_id) = standing {
+        crate::review::closed(state, conversation_id, set_id).await;
+    }
+}
+
+/// The same reading with the other outcome beside it: what the session before
+/// this one left standing is **locked**, or **held** for the resume about to be
+/// tried — and where it is held, it is handed back for the launch to make good.
+///
+/// [`left_open`] is the whole of this where nothing is being carried on, and it
+/// is what runs there. What this adds is the reversal: a conversation standing to
+/// be carried on means the reader has not gone, so the Set it asked is one the
+/// resumed session is coming back for and locking it would throw away a round the
+/// human was part way through. Held, it is named in the note that session is
+/// primed with — see [`crate::sessions::carried_on`].
+///
+/// **And the holding is a promise somebody has to keep**, which is why what is
+/// held comes back rather than simply being skipped. Whether the resume can be
+/// made at all is not settled here: it turns on the harness having a resume line
+/// and on its record being where it looks, and neither is known until the launch
+/// has looked. So the launch is handed the holding and locks it on every way that
+/// comes out *no* — see [`crate::sessions::Held`] — and a launch that never
+/// happened settles nothing, which is what [`made_good`] is for. Without the
+/// hand-over the Set stays open in front of a fresh session that knows nothing
+/// about it: nothing reads what the human writes into it, the rescue passes over
+/// a Conversation with a question standing, and the follow-up can never end while
+/// it stands.
+///
+/// `again` is whether there was a session before this one at all. Empty where
+/// there was not, where nothing is standing, and where the record will not say —
+/// a read that failed is no reason to lock a question and no reason to promise
+/// anybody a resume, so it leaves the Set exactly as it is.
+///
+/// The same shape as a relaunched grilling's, where the reasoning for the
+/// reversal and for its one-launch window is written up: see
+/// `crate::grillings::held_for_a_resume`.
+async fn held_open(state: &AppState, conversation_id: i64, again: bool) -> Vec<i64> {
+    if !again {
+        return Vec::new();
+    }
+
+    let standing = match store::open_set(&state.pool, conversation_id).await {
+        Ok(standing) => standing,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what the round before this one left open failed, so nothing is held for a resume and nothing is locked against one");
+            return Vec::new();
+        }
+    };
+
+    let Some(set_id) = standing else {
+        return Vec::new();
+    };
+
+    if !carrying_on(state, conversation_id).await {
+        crate::review::closed(state, conversation_id, set_id).await;
+        return Vec::new();
+    }
+
+    tracing::info!(
+        conversation_id,
+        set_id,
+        "a conversation is standing to be carried on here, so the Question Set the round \
+         left open is held for the session coming back to it rather than locked",
+    );
+
+    vec![set_id]
+}
+
+/// Lock what [`held_open`] held, because the launch it was held for never
+/// happened.
+///
+/// The launch is what ordinarily settles it, whichever way its reading of the
+/// resume comes out. A launch that was refused before it started — the
+/// Conversation stopped under it, a Pairing gone, a sandbox that would not build
+/// — read nothing and settled nothing, so the holding falls back here and leaves
+/// this exactly where a relaunch that held nothing leaves it: no session, and no
+/// question standing in front of the human with nobody behind it.
+///
+/// Locked the way [`left_open`] locks, that being what this is making good.
+async fn made_good(state: &AppState, conversation_id: i64, held: &[i64]) {
+    for &set_id in held {
+        tracing::info!(
+            conversation_id,
+            set_id,
+            "no session was started to carry the conversation on, so the Question Set held \
+             for it is locked after all",
+        );
+
         crate::review::closed(state, conversation_id, set_id).await;
     }
 }
@@ -3944,13 +4263,80 @@ fn writes(line: &str) -> bool {
 
 /// Whether `.tasks/` has anything left in it to work.
 ///
-/// The one thing about a backlog anybody outside the runner asks: Resume refuses
-/// by name where there is nothing to launch a session for, and what *nothing*
-/// means is this module's own answer rather than a second reading of the
-/// directory — see [`crate::resume`]. What is left is asked again by whatever
+/// One of the two things about a backlog anybody outside the runner asks: Resume
+/// refuses by name where there is nothing to launch a session for, and what
+/// *nothing* means is this module's own answer rather than a second reading of
+/// the directory — see [`crate::resume`]. What is left is asked again by whatever
 /// the resume spawns, a moment later and for itself.
 pub(crate) async fn anything_to_work(worktree: &Path) -> bool {
     decide(worktree).await != Step::Nothing
+}
+
+/// And the other: whether the run that stopped in `worktree` was cut off **part
+/// way through a step** rather than between two of them.
+///
+/// Asked by the two readings [`backlog_again`] makes of a backlog — the step
+/// `.tasks/` says is next, and whether the branch holds what has been written for
+/// it. Every step of a run ends in a commit: a task's ticks its own box off, the
+/// finish takes `.tasks/` away. So a session that got its step done left the
+/// Worktree with nothing in it, and one cut off part way through left what it had
+/// written standing there.
+///
+/// Which is the difference a Resume has to tell, a run stopping between tasks as
+/// routinely as mid-task. A task committed and the run stopped is a next step that
+/// is a fresh session whatever anybody decides about it; a task half-built is a
+/// session with the whole of it still in the agent's head, and that is the one
+/// carried on — see [`crate::resume`], which is what tells a harness to resume
+/// the one and not the other.
+///
+/// `false` where `.tasks/` names no step to have been part way through: a backlog
+/// that is not there, and an entry nothing can be read out of. Those are also the
+/// two readings that may launch no session at all, and a conversation written
+/// down as standing to be carried on with nothing launched to take it up would be
+/// spent by whatever ran next instead.
+///
+/// And `false` where git will not answer, which is the way round everything about
+/// this decision falls: Verkstead's own Resume is a complete way to take the work
+/// up, and a git that was briefly busy is no reason to tell a harness to resume a
+/// conversation.
+pub(crate) async fn mid_step(worktree: &Path) -> bool {
+    match decide(worktree).await {
+        // A task to work, or the finish to run: what says whether a session was
+        // in the middle of one is what it left behind in the Worktree.
+        Step::Task { .. } | Step::Finish => {
+            let worktree = worktree.to_owned();
+
+            match tokio::task::spawn_blocking(move || anything_pending(&worktree)).await {
+                Ok(pending) => pending.unwrap_or(false),
+                Err(error) => {
+                    tracing::error!(error = ?error, "asking a Worktree whether a step was left part way through failed");
+                    false
+                }
+            }
+        }
+
+        // Neither of these is a step, so neither is one a session could have
+        // been stopped in the middle of.
+        Step::Nothing | Step::Broken { .. } => false,
+
+        // And none of these is ever what [`decide`] answers — see
+        // [`Step::Planning`]. Answered the same way, for want of anything a
+        // reading of `.tasks/` could mean by them.
+        Step::Planning | Step::PlanningStage | Step::Handoff(_) | Step::Staging(_) => false,
+    }
+}
+
+/// Whether git has any pending change at all in `worktree`, or `None` where it
+/// cannot say.
+///
+/// The whole of it rather than one path, which is the opposite of what
+/// [`pending`] is asked and for the opposite question: a landing is one step's own
+/// commit having happened, and this is whether *anything* a session wrote is
+/// still waiting for one.
+fn anything_pending(worktree: &Path) -> Option<bool> {
+    let said = git(worktree, &["status", "--porcelain"])?;
+
+    Some(!said.trim().is_empty())
 }
 
 /// What to run next in `worktree`, off the runtime's threads.
@@ -4179,13 +4565,29 @@ impl Prompt {
 /// between sessions. A launch that looked for the waiting press alone would walk
 /// straight past both of them.
 async fn launch_in_turn(state: &AppState, conversation_id: i64, inside: Prompt) -> Option<Session> {
+    launch_in_turn_holding(state, conversation_id, inside, &[]).await
+}
+
+/// The same, for the relaunch that has **held** a Question Set open for the
+/// resume this launch is about to try.
+///
+/// `held` is what the caller held and nothing more — see [`held_open`]. The
+/// launch locks it on every way the resume comes out *no*, and a caller that held
+/// nothing hands over nothing, which is every launch but one. See
+/// [`crate::sessions::Held`], where the hand-over is written up.
+async fn launch_in_turn_holding(
+    state: &AppState,
+    conversation_id: i64,
+    inside: Prompt,
+    held: &[i64],
+) -> Option<Session> {
     let _turn = state.sessions.turn(conversation_id).await;
 
     if crate::stopping::stopped(state, conversation_id).await {
         return None;
     }
 
-    launch(state, conversation_id, inside).await
+    launch_holding(state, conversation_id, inside, held).await
 }
 
 /// The Pairing a session on `role` is launched under, of what the Conversation
@@ -4255,6 +4657,17 @@ fn under(
 /// be taken here: a wrap-up takes the Turn before it decides what to dispatch,
 /// and a lock taken twice by the one task is a task waiting on itself.
 async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Option<Session> {
+    launch_holding(state, conversation_id, inside, &[]).await
+}
+
+/// The same, with whatever Question Set a relaunch held open for the resume this
+/// launch is about to try — see [`launch_in_turn_holding`], and [`held_open`].
+async fn launch_holding(
+    state: &AppState,
+    conversation_id: i64,
+    inside: Prompt,
+    held: &[i64],
+) -> Option<Session> {
     let conversation = match store::load_conversation(&state.pool, conversation_id).await {
         Ok(Some(conversation)) => conversation,
         Ok(None) => {
@@ -4384,10 +4797,14 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
             &pairing,
             &prompt,
             inside.retires_memos(),
-            // Nothing held: a run's relaunch locks no Question Set, so there is
-            // nothing for the launch to make good either way — see
-            // [`crate::sessions::Held`].
-            crate::sessions::Held::nothing(&state.settlements),
+            // Whatever the caller held open for a resume it may not get, which
+            // is empty for every launch but the one that reverses the locking —
+            // see [`held_open`], and [`crate::sessions::Held`]. A launch handed
+            // none locks none, whatever else it finds open.
+            crate::sessions::Held {
+                sets: held,
+                settlements: &state.settlements,
+            },
         )
         .await
     {
@@ -4659,6 +5076,55 @@ mod tests {
         run(path, &["commit", "-m", "feat: count the requests"]);
 
         assert!(landed(path, &landing), "ticked and committed");
+    }
+
+    /// And the same two readings asked the other question: what tells a task
+    /// **cut off part way through** from a run that stopped **between two of
+    /// them**, which is what says whether the session that stopped has a
+    /// conversation worth carrying on — see [`crate::resume`].
+    #[tokio::test]
+    async fn a_task_half_built_is_mid_step_and_a_task_committed_is_not() {
+        let dir = worktree(&list(0), &DOCUMENTS);
+        let path = dir.path();
+
+        assert!(
+            !mid_step(path).await,
+            "a backlog nobody has started on: the first task is next and nothing \
+             is waiting for a commit",
+        );
+
+        std::fs::write(path.join("limiter.md"), "a limiter\n").unwrap();
+
+        assert!(
+            mid_step(path).await,
+            "and a session part way through that task leaves what it has written \
+             standing in the Worktree",
+        );
+
+        // Which is what the task's own commit takes, box and work together.
+        finish(path, "01");
+
+        assert!(
+            !mid_step(path).await,
+            "so a task committed is a run stopped between two of them, where the \
+             next task is a fresh session anyway",
+        );
+
+        finish(path, "02");
+        finish(path, "03");
+
+        assert!(
+            !mid_step(path).await,
+            "and the finish is a step like the others: next, and not half-run",
+        );
+
+        std::fs::remove_dir_all(path.join(BACKLOG)).unwrap();
+
+        assert!(
+            !mid_step(path).await,
+            "while a `.tasks/` that has gone names no step to have been part way \
+             through, however much is pending",
+        );
     }
 
     /// The other way round, which is the breakdown's signal: the plan is written

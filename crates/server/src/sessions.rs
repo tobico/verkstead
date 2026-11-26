@@ -3728,9 +3728,15 @@ impl Sessions {
 /// A relaunch locks every Question Set it orphans, because the session that asked
 /// has gone and the human would be answering into nothing — and it holds off where
 /// a conversation is standing to be carried on here, a resume bringing that reader
-/// back on another machine. Which of the two it is turns on the log having come
-/// across with the memory sync, and that is not settled until the launch has run
-/// the sync: so the holding is handed over and settled there. See [`continuing`].
+/// back. Which of the two it is turns on things the relaunch cannot see: the log
+/// having come across with the memory sync, where the work arrived, and the
+/// harness's record being where it looks, where the session was cut off here. So
+/// the holding is handed over and settled at the launch. See [`continuing`].
+///
+/// **Two relaunches hand one over**, and for the one reason: a grilling's, over a
+/// conversation standing to be carried on, and a follow-up's or an
+/// investigation's round, over the same — see [`crate::grillings::again`] and
+/// [`crate::runner::held_open`].
 ///
 /// **The channel travels with the Sets** because it is what shutting one takes
 /// besides the store, and it has no other business in a launch: the one thing a
@@ -3738,8 +3744,8 @@ impl Sessions {
 #[derive(Clone, Copy)]
 pub(crate) struct Held<'a> {
     /// The Sets left open rather than locked. Empty from every caller that held
-    /// nothing, which is every launch but a grilling relaunched over an arrival —
-    /// and a launch handed none locks none, whatever else it finds open.
+    /// nothing, which is every launch but the relaunches above — and a launch
+    /// handed none locks none, whatever else it finds open.
     pub(crate) sets: &'a [i64],
 
     /// And the channel a settlement is announced on, so a wait held here on one of
@@ -4036,7 +4042,8 @@ async fn carried_on(
     };
 
     // What it is primed with is the occasion's: a move says where the work sits
-    // now, and an answer says the sandbox changed and where its Answers are.
+    // now, an answer says the sandbox changed and where its Answers are, and a
+    // cut-off says only that something stopped it and this is it picked up.
     let note = match occasion {
         crate::carrying::Occasion::Arrived => skills::moved(
             &crate::platform::hostname(),
@@ -4055,6 +4062,13 @@ async fn carried_on(
             let title = crate::answer_additions::titled(pool, set_id).await;
 
             skills::kept(set_id, title.as_deref())
+        }
+
+        // The ids as they stand, rather than [`idling_on`]'s pair: nothing moved
+        // and nothing was renumbered, so the id the agent asked under is the id
+        // the Set has, and a note saying it twice would be inventing a change.
+        crate::carrying::Occasion::CutOff => {
+            skills::cut_off(&idled_on_here(pool, conversation.id).await)
         }
     };
 
@@ -4094,6 +4108,30 @@ async fn attached(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading whether a carried conversation has files attached failed, so the note it is primed with says nothing about where they are now");
             None
+        }
+    }
+}
+
+/// The Question Sets a session cut off on this device was idling on, by the one
+/// id each of them has.
+///
+/// [`idling_on`] without the map, and that is the whole difference: a cut-off
+/// session asked its questions here, under these ids, and the Set it is coming
+/// back for is the row it asked for. There is no landing to have renumbered
+/// anything, so there is no second name to tell it about — and a note that
+/// offered one would be describing a move that never happened.
+///
+/// The same narrow reading of what is open: a Set already answered is one the
+/// agent has read, and a Deferred Ask never had anybody waiting on it. A Timeline
+/// that cannot be read leaves the note without its Set lines, said in the log —
+/// which is worth more than a resume that did not happen.
+async fn idled_on_here(pool: &SqlitePool, conversation_id: i64) -> Vec<i64> {
+    match store::timeline(pool, conversation_id).await {
+        Ok(timeline) => crate::sets::open(&timeline, crate::sets::Open::Idled),
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what a cut-off session was idling on failed, so the note it is carried on with says nothing about its Question Sets");
+            Vec::new()
         }
     }
 }

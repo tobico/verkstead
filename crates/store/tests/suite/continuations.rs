@@ -23,9 +23,9 @@ use std::time::Duration;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, AgentType, Continued, Pairing, ProfileFacts, carrying_a_conversation,
+    Account, AgentType, Continued, Ended, Pairing, ProfileFacts, carrying_a_conversation,
     continue_on_arrival, create_profile, end_session, open_database, register_repo, start_capture,
-    start_conversation, take_up_the_conversation, the_last_session,
+    start_conversation, take_up_the_conversation, the_last_ending, the_last_session,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -56,8 +56,23 @@ async fn conversation(pool: &SqlitePool) -> i64 {
 }
 
 /// A session of that Conversation, named and paired the way a launch names and
-/// pairs one — which is what the lookup below reads.
+/// pairs one — which is what the lookup below reads — and ended on its own
+/// account, which is what writes down how it went.
 async fn ran(pool: &SqlitePool, id: i64, session: &str, agent_type: AgentType) {
+    let event = killed(pool, id, session, agent_type).await;
+
+    end_session(pool, event, Some(0), Duration::from_millis(400), true)
+        .await
+        .unwrap();
+}
+
+/// The same session, **taken away while it was running**: Verkstead ended it, so
+/// nothing is written down about how it went — which is the one ending that is
+/// not a session going wrong, and the absence a launch reads as the live kill.
+///
+/// Answers with the Event it printed into, which is what an ending is written
+/// against.
+async fn killed(pool: &SqlitePool, id: i64, session: &str, agent_type: AgentType) -> i64 {
     let profile = create_profile(
         pool,
         &ProfileFacts {
@@ -84,13 +99,9 @@ async fn ran(pool: &SqlitePool, id: i64, session: &str, agent_type: AgentType) {
         model: Some("claude-opus-5".to_owned()),
     };
 
-    let event = start_capture(pool, id, Some(session), Some(&pairing))
+    start_capture(pool, id, Some(session), Some(&pairing))
         .await
-        .unwrap();
-
-    end_session(pool, event, Some(0), Duration::from_millis(400), true)
-        .await
-        .unwrap();
+        .unwrap()
 }
 
 /// The **newest** session is the one to carry on from, with the harness that ran
@@ -122,6 +133,7 @@ async fn the_last_session_is_the_one_to_carry_on_from() {
             agent_type: AgentType::Claude,
             widened_by: None,
             kept_here_by: None,
+            cut_off: false,
         }),
         "the newest of them, rather than the first: an older one is a conversation \
          somebody had already left",
@@ -173,6 +185,7 @@ async fn taking_the_conversation_up_spends_it() {
         agent_type: AgentType::Claude,
         widened_by: None,
         kept_here_by: None,
+        cut_off: false,
     };
 
     continue_on_arrival(&pool, id, &continued).await.unwrap();
@@ -214,6 +227,7 @@ async fn asking_whether_there_is_a_conversation_to_carry_on_does_not_spend_it() 
         agent_type: AgentType::Claude,
         widened_by: None,
         kept_here_by: None,
+        cut_off: false,
     };
 
     continue_on_arrival(&pool, id, &continued).await.unwrap();
@@ -248,6 +262,7 @@ async fn a_conversation_carried_on_for_an_answer_names_its_set() {
         agent_type: AgentType::Claude,
         widened_by: Some(12),
         kept_here_by: None,
+        cut_off: false,
     };
 
     continue_on_arrival(&pool, id, &continued).await.unwrap();
@@ -271,6 +286,7 @@ async fn a_conversation_kept_here_names_its_set() {
         agent_type: AgentType::Claude,
         widened_by: None,
         kept_here_by: Some(14),
+        cut_off: false,
     };
 
     continue_on_arrival(&pool, id, &continued).await.unwrap();
@@ -279,6 +295,32 @@ async fn a_conversation_kept_here_names_its_set() {
         take_up_the_conversation(&pool, id).await.unwrap(),
         Some(continued),
         "the Set comes back with the session it kept here",
+    );
+}
+
+/// **And a row a cut-off wrote says so with no Set at all**, which is what parts
+/// the third occasion from the two answers: a session stopped part way through
+/// its step is nobody's answer, so there is no Question Set to name — and the
+/// launch that reads the record is what writes the row.
+#[tokio::test]
+async fn a_conversation_carried_on_after_a_cut_off_names_no_set() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    let continued = Continued {
+        session_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned(),
+        agent_type: AgentType::Claude,
+        widened_by: None,
+        kept_here_by: None,
+        cut_off: true,
+    };
+
+    continue_on_arrival(&pool, id, &continued).await.unwrap();
+
+    assert_eq!(
+        take_up_the_conversation(&pool, id).await.unwrap(),
+        Some(continued),
+        "the cut-off comes back with the session it stopped, and no Set beside it",
     );
 }
 
@@ -315,6 +357,7 @@ async fn coming_back_again_carries_on_from_the_newer_session() {
                 agent_type: AgentType::Claude,
                 widened_by: None,
                 kept_here_by: None,
+                cut_off: false,
             },
         )
         .await
@@ -327,5 +370,104 @@ async fn coming_back_again_carries_on_from_the_newer_session() {
             .unwrap()
             .map(|continued| continued.session_id),
         Some("66666666-6666-4666-8666-666666666666".to_owned()),
+    );
+}
+
+/// **How the newest session ended is what a follow-up's cut-off is read off**,
+/// and the reading it is after is the absence of a row: a session Verkstead ended
+/// itself — force-stopped, signed out, out of window — is one that was taken away
+/// while it was running.
+///
+/// A follow-up's rounds are a conversation rather than a step with a commit at
+/// the end of it, so there is nothing on the branch to read and nothing the state
+/// alone can say. What tells a round cut off mid-sentence from one that finished
+/// the turn it was having is this. See the server's `resume::mid_round`.
+#[tokio::test]
+async fn the_last_ending_is_the_newest_sessions_and_is_absent_for_one_verkstead_ended() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    assert_eq!(
+        the_last_ending(&pool, id).await.unwrap(),
+        None,
+        "a Conversation with no sessions at all has no ending to read, which is \
+         asked about by nobody: the launch reads whether a session ran first",
+    );
+
+    ran(
+        &pool,
+        id,
+        "11111111-1111-4111-8111-111111111111",
+        AgentType::Claude,
+    )
+    .await;
+
+    assert_eq!(
+        the_last_ending(&pool, id)
+            .await
+            .unwrap()
+            .map(|ended| ended.code),
+        Some(Some(0)),
+        "a session that exited on its own account wrote down how it went",
+    );
+
+    killed(
+        &pool,
+        id,
+        "22222222-2222-4222-8222-222222222222",
+        AgentType::Claude,
+    )
+    .await;
+
+    assert_eq!(
+        the_last_ending(&pool, id).await.unwrap(),
+        None,
+        "and the newest session is still the newest where nothing was written \
+         down about how it ended: a session Verkstead took away while it was \
+         running, which is the live kill the launch is looking for",
+    );
+}
+
+/// **And a row that is there says which ending it was**: a session that fell
+/// over is a cut-off like one taken away, and the clean exit is the one ending
+/// of the three that finished the turn it was having.
+///
+/// Every way of ending badly, because what the reading turns on is the exit code
+/// and two of the three ways have none: a status the agent chose, a process
+/// something else killed, and a relay that could not reap one at all. See the
+/// server's `resume::mid_round`, which is where the three are read.
+#[tokio::test]
+async fn an_ending_fell_over_unless_the_session_exited_with_nothing_wrong() {
+    assert!(
+        !Ended {
+            code: Some(0),
+            lived: Duration::from_millis(400),
+            printed: true,
+        }
+        .fell_over(),
+        "a session that ran its turn out and exited zero — which is not the same \
+         as having done the work, an agent with nothing to do exiting zero too",
+    );
+
+    assert!(
+        Ended {
+            code: Some(1),
+            lived: Duration::from_millis(400),
+            printed: true,
+        }
+        .fell_over(),
+        "a status the agent chose",
+    );
+
+    assert!(
+        Ended {
+            code: None,
+            lived: Duration::from_millis(400),
+            printed: false,
+        }
+        .fell_over(),
+        "and no status at all, which is a process something else killed or a \
+         relay that could not reap one: no code to read, and no account of \
+         itself either",
     );
 }
