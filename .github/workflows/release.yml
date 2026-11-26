@@ -3224,6 +3224,14 @@ jobs:
       # the manifest promises is what an adopter actually receives. A hash taken
       # from the build output would still be a true hash of a file we built; it
       # would just have never been compared against the one GitHub serves.
+      #
+      # **And retried, a 404 among the replies they retry** — here and in the
+      # step below, which downloads the same four again — for the reason
+      # `ci.yml`'s header gives about the pinned downloads there: every url
+      # between the two names an asset this run has just published, so a reply
+      # that is not the file is never news about the release. And this is the
+      # last job of one, the tag cut and the assets already out, so a single
+      # refusal from the asset CDN would turn a finished release red.
       - name: Build the manifest
         run: |
           mkdir -p downloads
@@ -3238,6 +3246,7 @@ jobs:
             asset=${pair#*:}
             url="$DOWNLOAD_BASE/$asset"
             curl --fail --location --silent --show-error \
+              --retry 5 --retry-all-errors --retry-max-time 120 \
               --output "downloads/$asset" "$url"
             digest=$(sha256sum "downloads/$asset" | cut -d' ' -f1 |
               tr 'a-f' 'A-F' | basenc --base16 --decode | basenc --base64)
@@ -3274,6 +3283,7 @@ jobs:
           # this shell and `drift` survives it.
           while read -r system url hash; do
             curl --fail --location --silent --show-error \
+              --retry 5 --retry-all-errors --retry-max-time 120 \
               --output verify/asset "$url"
             digest=$(sha256sum verify/asset | cut -d' ' -f1 |
               tr 'a-f' 'A-F' | basenc --base16 --decode | basenc --base64)
