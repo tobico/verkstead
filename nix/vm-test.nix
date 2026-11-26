@@ -208,13 +208,24 @@ testers.runNixOSTest {
             exit 1
         fi
 
-        # And the `gh` extension, resolved off that same path and followed to
-        # the file behind it: what the profile holds is a symbolic link into the
-        # store, and a read-only bind of a link is a link inside pointing at a
-        # path nobody was granted. The server does the same — see
-        # `stack_extension` in `crates/server/src/sandbox.rs`.
-        if ! ghstack=$(readlink -f "$(command -v gh-stack)"); then
-            echo "no gh-stack on the unit's path" >&2
+        # And the `gh` extension — resolved over the floor a session's `PATH` is
+        # composed with rather than off this unit's own, because that is where
+        # the server finds it. The extension is on the system profile and the
+        # module's unit `path` does not name it: `/run/current-system/sw/bin`
+        # leads `LINUX_PATH`, which `machine_path` composes under whatever the
+        # server was started with, so `stack_extension` reaches a
+        # system-profile program a unit file never mentioned. Both in
+        # `crates/server/src/sandbox.rs`.
+        if ! ghstack=$(PATH=/run/current-system/sw/bin:"$PATH" command -v gh-stack); then
+            echo "no gh-stack on the floor a session's path is composed with" >&2
+            exit 1
+        fi
+
+        # Followed to the file behind it, as the server does: what the profile
+        # holds is a symbolic link into the store, and a read-only bind of a
+        # link is a link inside pointing at a path nobody was granted.
+        if ! ghstack=$(readlink -f "$ghstack"); then
+            echo "the gh-stack on the profile leads nowhere" >&2
             exit 1
         fi
 
