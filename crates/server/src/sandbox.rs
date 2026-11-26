@@ -2136,8 +2136,13 @@ const RUSTUP_INSIDE_HOME: &str = ".rustup";
 /// session is given cannot come to disagree — see [`crate::stacks::missing`],
 /// which is the other caller.
 ///
+/// **Reachable from outside this module** for the reason [`on_the_path`] is:
+/// what this answers is what a session is *given*, and a suite asking what a
+/// session finds in its HOME has to know whether this machine has one to give
+/// — see `tests/suite/sandbox.rs`.
+///
 /// Blocks: it is a handful of `stat` calls.
-pub(crate) fn stack_extension(platform: Platform, path: &OsStr) -> Option<PathBuf> {
+pub fn stack_extension(platform: Platform, path: &OsStr) -> Option<PathBuf> {
     if platform != Platform::Linux {
         return None;
     }

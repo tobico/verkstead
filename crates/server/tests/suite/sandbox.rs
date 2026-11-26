@@ -35,7 +35,8 @@ use verkstead_server::handoffs::Handoffs;
 use verkstead_server::key::WorkbenchKey;
 use verkstead_server::platform::Platform;
 use verkstead_server::sandbox::{
-    Bind, Closing, Executable, Homes, Reachable, Sandbox, SandboxConfig, under_dev_shell,
+    Bind, Closing, Executable, Homes, Reachable, Sandbox, SandboxConfig, machine_path,
+    stack_extension, under_dev_shell,
 };
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
@@ -3032,7 +3033,8 @@ async fn the_profiles_pair_is_the_whole_of_what_home_holds() {
     assert_eq!(reported["private-key"], "absent");
     assert_eq!(reported["history"], "absent");
     assert_eq!(
-        reported["home"], ".claude .claude.json ",
+        reported["home"],
+        format!(".claude .claude.json {}", and_the_stack_extension()),
         "everything else in HOME is simply not there"
     );
 }
@@ -3071,7 +3073,10 @@ async fn a_codex_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
         "#,
     );
 
-    assert_eq!(reported["home"], ".codex ");
+    assert_eq!(
+        reported["home"],
+        format!(".codex {}", and_the_stack_extension())
+    );
     assert_eq!(
         reported["root"], "auth.json config.toml memories sessions ",
         "the login, the written configuration and the memory store are the whole \
@@ -3383,7 +3388,10 @@ async fn an_agy_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
         "#,
     );
 
-    assert_eq!(reported["home"], ".gemini ");
+    assert_eq!(
+        reported["home"],
+        format!(".gemini {}", and_the_stack_extension())
+    );
     assert_eq!(
         reported["root"], "antigravity-cli config ",
         "agy's own two directories are the whole of the root"
@@ -3536,7 +3544,10 @@ async fn a_grok_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
         "#,
     );
 
-    assert_eq!(reported["home"], ".grok ");
+    assert_eq!(
+        reported["home"],
+        format!(".grok {}", and_the_stack_extension())
+    );
     assert_eq!(
         reported["root"], "auth.json config.toml memory sessions ",
         "the login, the written configuration and the memory store are the whole \
@@ -6947,6 +6958,23 @@ fn a_bind_that_is_not_an_absolute_path_is_refused_by_name() {
             error.contains(&refused),
             "the entry itself is what the refusal names: {error}"
         );
+    }
+}
+
+/// What a session's HOME holds beyond its account's own, said by the machine
+/// rather than written down: `.local`, where this machine has a `gh-stack` on
+/// the `PATH` a session is handed.
+///
+/// The one entry of a HOME listing that is a fact about the host. `gh` looks
+/// for an extension inside the home it runs under, so the file is bound at
+/// `~/.local/share/gh/extensions/gh-stack/gh-stack` and bwrap makes the
+/// parents — see `sandbox::stack_extension`, which is asked here so that the
+/// listings below read the same on a machine with one and a machine without.
+/// Trailing space included, the probe's listing being separator-terminated.
+fn and_the_stack_extension() -> &'static str {
+    match stack_extension(Platform::HERE, &machine_path(Platform::HERE)).is_some() {
+        true => ".local ",
+        false => "",
     }
 }
 

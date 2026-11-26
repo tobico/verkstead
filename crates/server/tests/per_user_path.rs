@@ -680,6 +680,7 @@ async fn the_harness_under_the_servers_home_is_what_a_linux_session_runs() {
             dir {installed} installed
             file "$HOME/{GH_LOOKS_IN}" gh-stack
             dir "$HOME/{THE_DATA_DIRECTORY}" data-directory
+            say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
             file "$HOME/.claude/skills/the-accounts-own/SKILL.md" the-accounts-own
             dir "$HOME/.claude/skills" account-skills
             "#,
@@ -722,6 +723,15 @@ async fn the_harness_under_the_servers_home_is_what_a_linux_session_runs() {
     assert_eq!(
         reported["data-home"], "unset",
         "which is why nothing sets that variable for a session at all",
+    );
+    assert!(
+        reported["home"]
+            .split_whitespace()
+            .any(|held| held == ".local"),
+        "and `.local` is the one entry a HOME listing gains on a machine with \
+         an extension to place, which is what the sandbox suite's own listings \
+         ask this machine about: {}",
+        reported["home"],
     );
 
     assert_eq!(
