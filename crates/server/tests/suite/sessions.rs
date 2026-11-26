@@ -4851,10 +4851,20 @@ async fn a_session_on_a_second_backend_runs_from_its_home_with_the_capture_as_it
         "and the session is told which backend it is, which is what tailors the \
          Guide it reads: {said:?}"
     );
+    // The account's own directory and nothing beside it — but for the one
+    // entry a machine with a `gh-stack` on the `PATH` a session is handed
+    // gains, that file being placed under HOME where `gh` looks for an
+    // extension. Asked of the machine rather than written down, as every other
+    // listing of a session's HOME in this binary is.
+    let held = format!(
+        "home=.codex {}\n",
+        crate::sandbox::and_the_stack_extension()
+    );
+
     assert!(
-        said.contains("home=.codex \n"),
+        said.contains(&held),
         "and its one home is the whole of what HOME holds, bound where that \
-         backend looks for it: {said:?}"
+         backend looks for it — {held:?} in {said:?}"
     );
     assert!(
         said.contains(BRIEF),

@@ -6971,7 +6971,13 @@ fn a_bind_that_is_not_an_absolute_path_is_refused_by_name() {
 /// parents — see `sandbox::stack_extension`, which is asked here so that the
 /// listings below read the same on a machine with one and a machine without.
 /// Trailing space included, the probe's listing being separator-terminated.
-fn and_the_stack_extension() -> &'static str {
+///
+/// **Shared with the suites beside this one**, because the entry is a fact
+/// about the host rather than about this file: every listing of a session's
+/// HOME anywhere in this binary gains it on a machine with an extension to
+/// place, and one that spelled its own answer would be one that goes red on
+/// the Annex box and nowhere else — see `sessions::…_runs_from_its_home_…`.
+pub(crate) fn and_the_stack_extension() -> &'static str {
     match stack_extension(Platform::HERE, &machine_path(Platform::HERE)).is_some() {
         true => ".local ",
         false => "",
