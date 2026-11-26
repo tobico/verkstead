@@ -30608,6 +30608,14 @@ async fn a_sandbox_without_the_stack_extension_stops_before_it_spends_a_go() {
         .await;
 
     assert!(
+        stopped.starts_with(
+            "<p><strong>Syncing the stack that pull request #40 of <code>verkstead</code> \
+             is in</strong> stopped.</p>"
+        ),
+        "the step the stop is about is an activity, which is what `stopping` \
+         appends *stopped* to: {stopped:?}",
+    );
+    assert!(
         stopped.contains("gh stack"),
         "the Notice names the extension that is missing: {stopped:?}",
     );

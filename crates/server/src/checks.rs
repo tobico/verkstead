@@ -1364,7 +1364,16 @@ async fn unsyncable(
         &state.nudges,
         conversation_id,
         crate::stopping::Decided::Verkstead,
-        &format!("syncing the stack {} is one of", named(watched)),
+        // What ought to have been happening, which is what [`crate::stopping`]
+        // asks for and appends *stopped* to — so it has to be an activity, as
+        // its siblings here are. This read "syncing the stack … is one of",
+        // which the Timeline and the phone alike drew as "Syncing the stack
+        // pull request #40 of verkstead is one of stopped."
+        //
+        // "that … is in" rather than the bare relative clause: *the stack pull
+        // request #40 is in* reads as a compound noun for the length of two
+        // words, and the one word takes that away.
+        &format!("syncing the stack that {} is in", named(watched)),
         &how,
         writing,
     )
