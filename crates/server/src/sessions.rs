@@ -2642,6 +2642,13 @@ impl Sessions {
     /// `gh` keeps its extensions under `LOCALAPPDATA` rather than under the
     /// home itself — see [`sandbox::windows_names`].
     ///
+    /// **The home alone is no longer the whole answer**, and the caller sets
+    /// one more name beside what this composes. A session's home has nothing in
+    /// it that anybody installs into, so what puts the stack extension within a
+    /// session's reach is Verkstead placing it there — see
+    /// [`Sessions::stack_extension`], which is the other half of the question
+    /// and is asked by the one caller too.
+    ///
     /// `None` where this server runs no session at all, which is a server with
     /// no home to hand one.
     pub(crate) fn session_environment(
@@ -2670,6 +2677,31 @@ impl Sessions {
         }
 
         Some(named)
+    }
+
+    /// Where the `gh` extension a stack is synced with is on this machine, as a
+    /// session of this server would be given it — `None` where a session would
+    /// be given none.
+    ///
+    /// **[`Sessions::session_environment`]'s other half, and the reason either
+    /// is worth asking.** A `gh` run under a session's home finds an extension
+    /// only where Verkstead put one there, so what the check has to ask is not
+    /// *is one installed* but *would a session be given one* — which is this.
+    /// The resolution is [`sandbox::stack_extension`]'s, off the same two
+    /// values a sandbox is built with: the platform a session runs on and
+    /// [`sandbox::machine_path`].
+    ///
+    /// One reading for both, so that a check and a session cannot come to
+    /// disagree about whether there is an extension on this machine. See
+    /// [`crate::stacks::missing`], which lays what this answers out for the one
+    /// `gh` it runs, and [`sandbox::Sandbox::surface`], which binds it into the
+    /// session.
+    ///
+    /// Blocks: it is a handful of `stat` calls.
+    pub(crate) fn stack_extension(&self) -> Option<PathBuf> {
+        let platform = self.agents.as_ref()?.homes.platform();
+
+        sandbox::stack_extension(platform, &sandbox::machine_path(platform))
     }
 
     /// Where every session's stores are — see [`BuildCache`] — and `None` on a

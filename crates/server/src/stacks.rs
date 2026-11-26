@@ -66,15 +66,21 @@
 //!
 //! **And what syncs a stack is asked for before anything is sent at one.** A
 //! conflict anywhere in a recorded stack dispatches one session told to run
-//! `gh stack sync` — see [`crate::checks::resolve`] — and that extension is a
-//! separate install of a `gh` running under a home of Verkstead's own. So it is
-//! asked for in the environment a session gets, and a Sandbox without it stops
-//! the run with a Notice naming it rather than spending the stack's goes on
-//! sessions that cannot do what they were told. See [`missing`].
+//! `gh stack sync` — see [`crate::checks::resolve`] — and `gh` looks for an
+//! extension inside the home it runs under, which for a session is a directory
+//! of Verkstead's own that nobody installs into. So what puts one within a
+//! session's reach is Verkstead placing the `gh-stack` off the machine's `PATH`
+//! where `gh` looks — see [`sandbox::stack_extension`] — and what is asked here
+//! is whether there is one to place, in the environment a session gets. A
+//! Sandbox that would get none stops the run with a Notice saying so rather
+//! than spending the stack's goes on sessions that cannot do what they were
+//! told. See [`missing`].
+
+use std::path::Path;
 
 use crate::AppState;
 use crate::github::{self, Numbered};
-use crate::store;
+use crate::{sandbox, store};
 
 /// The `gh` extension a stack is synced with, as `gh` is asked for it and as
 /// the Timeline names it.
@@ -84,10 +90,25 @@ use crate::store;
 /// is missing.
 pub(crate) const EXTENSION: &str = "stack";
 
-/// And how a human installs it, which is the other half of that Notice: a stop
-/// that named what was missing and not how to get it would be a stop somebody
-/// had to go and look something up for.
-pub(crate) const INSTALL: &str = "gh extension install github/gh-stack";
+/// And the program a human puts on this machine's `PATH` to get one, which is
+/// the other half of that Notice: a stop that named what was missing and not
+/// how to get it would be a stop somebody had to go and look something up for.
+///
+/// **`gh extension install github/gh-stack` is what this used to say, and it
+/// is advice nobody here can follow.** That command installs into the home it
+/// is run under, and the one home no session has anything of is a session's:
+/// what a Linux session gets is an empty directory made over the server's own
+/// home, and the other two platforms give it a fresh profile of the
+/// Conversation's. So every install a human made went somewhere no session ever
+/// looked, and the check went on stopping the run. What reaches a session is
+/// the program on the machine's own `PATH`, which Verkstead then places where
+/// `gh` looks — see [`sandbox::stack_extension`] and
+/// [`crate::checks::unsyncable`], which is the Notice.
+///
+/// The one word rather than a command, because which command puts a program on
+/// a `PATH` is the machine's own business: `environment.systemPackages` on the
+/// Annex's box and on any other NixOS host, a package manager anywhere else.
+pub(crate) const PROGRAM: &str = sandbox::GH_STACK;
 
 /// Whether a session sent at this Conversation's stack would find `gh stack` —
 /// `None` where it would, and the reason in words where it would not.
@@ -105,12 +126,35 @@ pub(crate) const INSTALL: &str = "gh extension install github/gh-stack";
 /// [`crate::sessions::Sessions::session_environment`], which composes it, and
 /// [`github::Gh::extension`], which runs it.
 ///
+/// **And what a session is given rather than what is installed anywhere**,
+/// which is the half that used to be wrong. Nothing installs into a session's
+/// home: what puts an extension within a session's reach is Verkstead placing
+/// the program off its `PATH` where `gh` looks — see
+/// [`sandbox::stack_extension`], and [`sandbox::Sandbox::surface`], which binds
+/// it. So this asks the same resolution a session's sandbox asks, and lays what
+/// it answers out for the one `gh` it runs: a temporary data directory in the
+/// shape `gh` reads, named to that call alone through
+/// [`sandbox::XDG_DATA_HOME`] and handed to no session.
+///
+/// **Laid out rather than answered off**, which is the whole of why the real
+/// `gh stack --help` is still run. The question is whether a session could sync
+/// a stack, and a `gh-stack` on the `PATH` that will not start — the wrong
+/// architecture, a truncated download — is a session that cannot however
+/// honestly it was resolved. Where nothing resolves there is nothing to lay
+/// out, and `gh` answers that it has no such command, which is the same stop by
+/// the same route.
+///
 /// A server that runs no session answers as though the extension were there:
 /// there is nothing here to equip, so there is nothing for this to be in front
 /// of, and a stop written by a server that dispatches nothing would be a Notice
 /// about a session that was never going to start.
 pub(crate) async fn missing(state: &AppState, conversation_id: i64) -> Option<String> {
     let environment = state.sessions.session_environment(conversation_id)?;
+
+    // What a session would be given, read the way a session's sandbox reads it
+    // — one resolution for both, so that the two cannot come to disagree about
+    // whether this machine has an extension at all.
+    let extension = state.sessions.stack_extension();
 
     // As the Conversation's Repo's Author, whose token the session that would
     // run the extension is handed. A record that cannot be read is asked as
@@ -126,11 +170,33 @@ pub(crate) async fn missing(state: &AppState, conversation_id: i64) -> Option<St
     };
 
     // Off the runtime's threads, as every other reach for `gh` is: it is a
-    // process, and running one blocks.
+    // process, and running one blocks — and the laying out is a directory and a
+    // link, which blocks too.
     let asked = tokio::task::spawn_blocking({
         let gh = state.github.as_author(author.as_deref());
 
-        move || gh.extension(EXTENSION, &environment)
+        move || {
+            let mut environment = environment;
+
+            // Held for as long as the call, and taken away by dropping it:
+            // what is laid out is for this `gh` and nothing else.
+            let _laid = match extension.as_deref().and_then(laid_out) {
+                Some(laid) => {
+                    environment.push((
+                        sandbox::XDG_DATA_HOME.to_owned(),
+                        laid.path().as_os_str().to_owned(),
+                    ));
+
+                    Some(laid)
+                }
+                // Nothing to lay out, which `gh` is asked all the same: what it
+                // says then is that it has no such command, and that is the
+                // honest answer about a session on this machine.
+                None => None,
+            };
+
+            gh.extension(EXTENSION, &environment)
+        }
     })
     .await;
 
@@ -143,6 +209,52 @@ pub(crate) async fn missing(state: &AppState, conversation_id: i64) -> Option<St
             Some("Verkstead couldn't run `gh` to find out.".to_owned())
         }
     }
+}
+
+/// `extension` laid out as a data directory `gh` reads an extension out of, for
+/// the one call [`missing`] makes — `None` where it could not be.
+///
+/// **The shape a session is given, under a directory of this call's own.** A
+/// session finds the file under its own home, where the sandbox bound it; this
+/// is the same arithmetic — [`sandbox::gh_stack_inside`] — under a temporary
+/// directory named as `XDG_DATA_HOME` to that `gh` alone. Which is what lets the
+/// check run the real extension without a session's home existing and without
+/// anything being written into anybody's.
+///
+/// A link rather than a copy: the file is on the machine's own `PATH` and may be
+/// tens of megabytes of Go, and what is being asked is whether *that* file
+/// starts.
+///
+/// `None` where the directory or the link could not be made, which is a check
+/// that then asks `gh` with nothing laid out and reads back that it has no such
+/// command — a stop rather than a pass, which is the right way round for a
+/// machine Verkstead cannot write a temporary directory on.
+///
+/// Blocks: it makes a directory and a link.
+fn laid_out(extension: &Path) -> Option<tempfile::TempDir> {
+    let dir = tempfile::tempdir().ok()?;
+    let inside = sandbox::gh_stack_inside(dir.path());
+
+    std::fs::create_dir_all(inside.parent()?).ok()?;
+    linked(extension, &inside).ok()?;
+
+    Some(dir)
+}
+
+/// `extension` reachable at `inside` without being copied there.
+#[cfg(unix)]
+fn linked(extension: &Path, inside: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(extension, inside)
+}
+
+/// And nothing on the platform no session is given an extension on yet, which
+/// is where [`sandbox::stack_extension`] answers `None` and this is never
+/// reached — writing a symbolic link there being a privileged act besides.
+#[cfg(not(unix))]
+fn linked(_extension: &Path, _inside: &Path) -> std::io::Result<()> {
+    Err(std::io::Error::other(
+        "no session on this platform is given a stack extension",
+    ))
 }
 
 /// What a walk of GitHub's chain found, which is what a take-up needs before it
@@ -804,6 +916,53 @@ mod tests {
                 .is_empty(),
             "and a chain that could not be read names nobody to close",
         );
+    }
+
+    /// The extension is laid out for the check in the shape a session is given
+    /// it, and what runs through the layout is the real file — see [`laid_out`].
+    ///
+    /// Run rather than stat-ed, because the whole reason the check still calls
+    /// `gh stack --help` is that the question is whether the program *starts*:
+    /// a layout that resolved a path and would not execute through it is one
+    /// that answers *installed* about a session that could not sync anything.
+    #[cfg(unix)]
+    #[test]
+    fn the_extension_the_check_asks_about_is_laid_out_where_gh_reads_one() {
+        let machine = tempfile::tempdir().unwrap();
+        let extension = machine.path().join("gh-stack");
+
+        std::fs::write(&extension, "#!/bin/sh\nprintf 'the extension\\n'\n").unwrap();
+        std::fs::set_permissions(
+            &extension,
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .unwrap();
+
+        let laid = laid_out(&extension).expect("a temporary directory and a link");
+        let inside = sandbox::gh_stack_inside(laid.path());
+
+        assert_eq!(
+            inside,
+            laid.path().join("gh/extensions/gh-stack/gh-stack"),
+            "the one shape `gh` reads an extension out of under a data directory",
+        );
+
+        let ran = std::process::Command::new(&inside)
+            .output()
+            .expect("the laid-out extension runs");
+
+        assert!(ran.status.success(), "{:?}", ran);
+        assert_eq!(
+            String::from_utf8_lossy(&ran.stdout).trim(),
+            "the extension",
+            "and what runs is the file off the machine's own `PATH`",
+        );
+
+        // And it goes when the layout does: what was laid out was for one call.
+        let path = laid.path().to_owned();
+        drop(laid);
+
+        assert!(!path.exists(), "{}", path.display());
     }
 
     /// And a chain that could not be read says so, rather than leaving the

@@ -1328,10 +1328,18 @@ async fn resolve(
 /// sessions would find it — so the goes are left where they are and the human
 /// is asked straight away.
 ///
-/// **The Notice names the extension and the command that installs it.** A stop
-/// saying only that something did not work would be one somebody had to open a
+/// **The Notice names the extension and where it has to be.** A stop saying
+/// only that something did not work would be one somebody had to open a
 /// terminal to understand; what this is for is the human reading the one line
-/// and knowing the one thing to run. See [`crate::stacks::INSTALL`].
+/// and knowing the one thing to do. See [`crate::stacks::PROGRAM`].
+///
+/// **And it says what will not work, which is the one thing here that is not
+/// just the fact.** This used to name `gh extension install` as the fix, and
+/// that command installs into the home it is run under — never the home a
+/// session gets. So the advice was followed, twice, into two directories
+/// nothing would ever look in, and every Resume wrote this same stop again. A
+/// human who has done that once is owed the sentence that stops them doing it
+/// again.
 async fn unsyncable(
     state: &AppState,
     conversation_id: i64,
@@ -1342,11 +1350,13 @@ async fn unsyncable(
     let how = format!(
         "{} is one of a stack, and a stack is synced with the `gh {extension}` extension \
          rather than merged into branch by branch. A session here can't run it. {why} \
-         Install it with `{install}` and press **Resume**. Nothing has been spent on the \
-         conflict, and the goes are still there once the extension is.",
+         Put `{program}` on this machine's `PATH` and press **Resume**. \
+         `gh extension install` won't do it: a session's home is Verkstead's own, and \
+         that's the only place `gh` looks. Nothing has been spent on the conflict, and \
+         the goes are still there once a session can reach it.",
         crate::stopping::opening(&named(watched)),
         extension = crate::stacks::EXTENSION,
-        install = crate::stacks::INSTALL,
+        program = crate::stacks::PROGRAM,
     );
 
     if let Err(error) = crate::stopping::stop(

@@ -30261,17 +30261,28 @@ async fn pressing_resolve_on_a_narrowed_wrap_up_comes_back_through_the_same_one(
 ///
 /// `resolved` is the file a resolution session writes, which is where the
 /// bottom stops conflicting — a path nothing writes is a conflict nothing
-/// resolves. `installed` is whether `gh stack --help` answers, which is what
-/// Verkstead asks in the environment a session gets before it sends anything at
-/// a stack at all.
-fn gh_stacked_and_conflicting(resolved: &Path, installed: bool) -> String {
-    let extension = match installed {
-        true => "if [ \"$1\" = stack ]; then exit 0; fi",
-        false => {
-            "if [ \"$1\" = stack ]; then \
-             printf 'unknown command \"stack\" for \"gh\"\\n' >&2; exit 1; fi"
-        }
+/// resolves.
+///
+/// `installed` is whether `gh stack --help` answers, which is what Verkstead
+/// asks before it sends anything at a stack at all — under the environment a
+/// session gets, with whatever extension a session would be given laid out for
+/// that one call. The real `gh stack --help` either way: a `gh-stack` resolved
+/// off a `PATH` and then unable to start is a session that cannot sync a
+/// stack, however honestly it was found.
+///
+/// `asked` is where this `gh` records having been asked at all, which is what
+/// says the check ran the extension rather than answering off the resolution
+/// alone.
+fn gh_stacked_and_conflicting(resolved: &Path, asked: &Path, installed: bool) -> String {
+    let answer = match installed {
+        true => "exit 0",
+        false => "printf 'unknown command \"stack\" for \"gh\"\\n' >&2; exit 1",
     };
+    let extension = format!(
+        "if [ \"$1\" = stack ]; then \
+         printf '%s\\n' \"${{XDG_DATA_HOME-unset}}\" >> {asked}; {answer}; fi",
+        asked = quoted(asked),
+    );
 
     format!(
         r#"
@@ -30337,6 +30348,7 @@ async fn a_conflict_low_in_a_stack_sends_one_session_told_the_whole_chain() {
     let dispatched = spill.path().join("fix-prompts");
     let released = spill.path().join("released");
     let resolved = spill.path().join("conflict-resolved");
+    let asked = spill.path().join("extension-asked");
 
     let fixture = taking_up_to_fix(
         spill,
@@ -30347,7 +30359,7 @@ async fn a_conflict_low_in_a_stack_sends_one_session_told_the_whole_chain() {
             Some(&released),
             &resolved,
         ),
-        &gh_stacked_and_conflicting(&resolved, true),
+        &gh_stacked_and_conflicting(&resolved, &asked, true),
     )
     .await;
 
@@ -30387,6 +30399,16 @@ async fn a_conflict_low_in_a_stack_sends_one_session_told_the_whole_chain() {
         conflict_attempts_spent(&fixture).await,
         1,
         "one go, counted against the stack as the session was dispatched",
+    );
+
+    // And the extension was really asked rather than answered off the
+    // resolution: what says a session can sync a stack is `gh stack --help`
+    // starting, and a `gh-stack` that resolves and will not run is a session
+    // that cannot sync anything.
+    assert!(
+        asked.exists(),
+        "the check ran `gh stack --help` before it dispatched: {:?}",
+        std::fs::read_to_string(&asked).ok(),
     );
 
     let worktree = view.worktree.clone().expect("the work is checked out").path;
@@ -30497,11 +30519,12 @@ async fn two_goes_at_a_stack_and_then_the_human() {
     // as it was — which is a stack the machine cannot fix.
     let claimed = spill.path().join("claimed-resolved");
     let resolved = spill.path().join("conflict-resolved");
+    let asked = spill.path().join("extension-asked");
 
     let fixture = taking_up_to_fix(
         spill,
         &a_conflict_and_nothing_beside_it(&reviews, &batches, &dispatched, None, &claimed),
-        &gh_stacked_and_conflicting(&resolved, true),
+        &gh_stacked_and_conflicting(&resolved, &asked, true),
     )
     .await;
 
@@ -30569,11 +30592,12 @@ async fn a_sandbox_without_the_stack_extension_stops_before_it_spends_a_go() {
     let batches = spill.path().join("batch-prompts");
     let dispatched = spill.path().join("fix-prompts");
     let resolved = spill.path().join("conflict-resolved");
+    let asked = spill.path().join("extension-asked");
 
     let fixture = taking_up_to_fix(
         spill,
         &a_conflict_and_nothing_beside_it(&reviews, &batches, &dispatched, None, &resolved),
-        &gh_stacked_and_conflicting(&resolved, false),
+        &gh_stacked_and_conflicting(&resolved, &asked, false),
     )
     .await;
 
@@ -30588,8 +30612,19 @@ async fn a_sandbox_without_the_stack_extension_stops_before_it_spends_a_go() {
         "the Notice names the extension that is missing: {stopped:?}",
     );
     assert!(
-        stopped.contains("gh extension install github/gh-stack"),
-        "and the one command that installs it: {stopped:?}",
+        stopped.contains("Put <code>gh-stack</code> on this machine's <code>PATH</code>"),
+        "and the one thing that puts one within a session's reach: {stopped:?}",
+    );
+    assert!(
+        stopped.contains("<code>gh extension install</code> won't do it"),
+        "and that the obvious command is not it, which is the sentence that \
+         stops a human installing into a home nothing looks in twice over: \
+         {stopped:?}",
+    );
+    assert!(
+        !stopped.contains("gh extension install github/gh-stack"),
+        "rather than naming that command as the fix, which it never was: \
+         {stopped:?}",
     );
     assert!(
         stopped.contains("#40"),
@@ -30605,6 +30640,12 @@ async fn a_sandbox_without_the_stack_extension_stops_before_it_spends_a_go() {
         0,
         "and no go was spent on a session that could not have done what it was \
          told",
+    );
+    assert!(
+        asked.exists(),
+        "and the answer came from running the extension rather than from a \
+         resolution alone: {:?}",
+        std::fs::read_to_string(&asked).ok(),
     );
     assert!(
         !dispatched.exists(),

@@ -2172,8 +2172,10 @@ pub(crate) fn gh_stack_inside(data_home: &Path) -> PathBuf {
         .join(GH_STACK)
 }
 
-/// The program on a `PATH` that is that extension.
-const GH_STACK: &str = "gh-stack";
+/// The program on a `PATH` that is that extension, which is also the word a
+/// human reads off a Notice saying a session would be given none — see
+/// [`crate::stacks::PROGRAM`].
+pub(crate) const GH_STACK: &str = "gh-stack";
 
 /// And where `gh` keeps its extensions under a data directory.
 const GH_EXTENSIONS_UNDER_DATA: &str = "gh/extensions";
@@ -2181,6 +2183,16 @@ const GH_EXTENSIONS_UNDER_DATA: &str = "gh/extensions";
 /// The data directory under a home, which is where `gh` looks for an extension
 /// when nothing says otherwise — see [`gh_stack_inside`].
 pub(crate) const DATA_INSIDE_HOME: &str = ".local/share";
+
+/// And the variable that moves it, which the check sets for the one `gh` it
+/// runs and no session is ever handed.
+///
+/// **Never set for a session**, which is why it is named here and in
+/// [`crate::stacks::missing`] and nowhere else: everything else under
+/// `~/.local/share` is a session's own to write, and a session whose whole data
+/// directory were the read-only one holding this file is a session whose every
+/// XDG tool has nowhere to keep anything.
+pub(crate) const XDG_DATA_HOME: &str = "XDG_DATA_HOME";
 
 /// The home of whoever is running the server, as it was read at startup, or
 /// `None` on a machine that names none.
