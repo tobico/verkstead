@@ -120,6 +120,20 @@ testers.runNixOSTest {
         file "$HOME/.config/gh/hosts.yml" gh
         say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
 
+        # The `gh` extension a stack is synced with, at the one path `gh` looks
+        # for an extension in. Placed rather than told: `gh` has no variable
+        # naming where one is, so the file on the machine's own `PATH` is bound
+        # under the session's home — and what settles that `gh` really finds it
+        # there is `gh` being asked, which no in-process test can do with a real
+        # one. Everything else under the data directory stays writable.
+        file "$HOME/.local/share/gh/extensions/gh-stack/gh-stack" gh-stack
+        dir "$HOME/.local/share" data-directory
+        if gh stack --help >/dev/null 2>&1; then
+            say gh-finds-it ran
+        else
+            say gh-finds-it refused
+        fi
+
         # The files the human attached to the Conversation, beside the skills in
         # the directory of Verkstead's own — read-only, because the copy is the
         # record. The listing is what says nothing else of the machine came in
@@ -194,6 +208,27 @@ testers.runNixOSTest {
             exit 1
         fi
 
+        # And the `gh` extension — resolved over the floor a session's `PATH` is
+        # composed with rather than off this unit's own, because that is where
+        # the server finds it. The extension is on the system profile and the
+        # module's unit `path` does not name it: `/run/current-system/sw/bin`
+        # leads `LINUX_PATH`, which `machine_path` composes under whatever the
+        # server was started with, so `stack_extension` reaches a
+        # system-profile program a unit file never mentioned. Both in
+        # `crates/server/src/sandbox.rs`.
+        if ! ghstack=$(PATH=/run/current-system/sw/bin:"$PATH" command -v gh-stack); then
+            echo "no gh-stack on the floor a session's path is composed with" >&2
+            exit 1
+        fi
+
+        # Followed to the file behind it, as the server does: what the profile
+        # holds is a symbolic link into the store, and a read-only bind of a
+        # link is a link inside pointing at a path nobody was granted.
+        if ! ghstack=$(readlink -f "$ghstack"); then
+            echo "the gh-stack on the profile leads nowhere" >&2
+            exit 1
+        fi
+
         # And the Conversation's attached files, found the way the worktree is:
         # the test put one there through the running service, so which directory
         # it landed in is the server's to decide.
@@ -218,6 +253,8 @@ testers.runNixOSTest {
             --bind ${account}/.claude.json "$HOME/.claude.json" \
             --bind ${cacheDir} ${cacheDir} \
             --ro-bind "$sccache" /verkstead/bin/sccache \
+            --ro-bind "$ghstack" \
+                "$HOME/.local/share/gh/extensions/gh-stack/gh-stack" \
             --ro-bind "$attachments" /verkstead/attachments \
             --chdir "$worktree" \
             --setenv HOME "$HOME" \
@@ -301,9 +338,18 @@ testers.runNixOSTest {
       # and they are on the system profile rather than named by store path because
       # that profile is what a session's `PATH` points at — so finding them there
       # is part of what is being asked.
+      #
+      # `gh` and `gh-stack` are there for the same reason and for one more: the
+      # extension is the one program a session is given somewhere other than
+      # where the machine keeps it, and the only thing that settles whether `gh`
+      # really finds it there is a real `gh` being asked inside a real sandbox.
+      # The box's own configuration carries the pair too — see
+      # `crates/server/src/annex/box/configuration.nix.in`.
       environment.systemPackages = [
         git
         pkgs.curl
+        pkgs.gh
+        pkgs.gh-stack
         pkgs.nodejs
       ];
 
@@ -1292,8 +1338,26 @@ testers.runNixOSTest {
             "another repository under the same bound directory is another "
             "Conversation's"
         )
-        assert reported["home"] == ".claude .claude.json", (
+        assert reported["home"] == ".claude .claude.json .local", (
             f"everything else in the service's home is absent inside: {reported['home']!r}"
+        )
+
+        # The `gh` extension a stack is synced with, which is the one program a
+        # session is given somewhere other than where the machine keeps it. The
+        # `.local` above is what carries it and is the whole of why that listing
+        # has a third entry: `gh` looks for an extension inside the home it runs
+        # under, so the file is placed there rather than named in a variable.
+        assert reported["gh-stack"] == "read", (
+            "the extension is bound in read-only at the path `gh` looks in: "
+            f"{reported['gh-stack']!r}"
+        )
+        assert reported["gh-finds-it"] == "ran", (
+            "and a real `gh` inside really finds it there, which is the one "
+            "thing no in-process test can ask"
+        )
+        assert reported["data-directory"] == "write", (
+            "while the data directory it sits in stays the session's own to "
+            f"write: {reported['data-directory']!r}"
         )
 
         # The files the human attached, read-only: `read` on a directory is a

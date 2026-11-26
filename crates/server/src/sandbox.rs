@@ -2107,6 +2107,98 @@ pub(crate) const RUSTUP_HOME: &str = "RUSTUP_HOME";
 /// default.
 const RUSTUP_INSIDE_HOME: &str = ".rustup";
 
+/// Where the `gh` extension a stack is synced with is on `path`, as the real
+/// file rather than the link the machine's profile holds — `None` where a
+/// session on `platform` would not be given one.
+///
+/// **[`toolchains`]'s shape, for the same reason and with one difference.**
+/// Both are a tool a session reaches that the `PATH` alone does not deliver:
+/// rustup's shim needs the home behind it, and `gh` needs its extension
+/// *inside* the home it runs under. The difference is that `gh` has no variable
+/// naming one — `GH_DATA_DIR` is not honoured and a name on the `PATH` is not
+/// found — so telling a session where it is means **placing** it there. See
+/// [`gh_stack_inside`], which is the place, and [`Sandbox::surface`], which
+/// binds the file into it.
+///
+/// **Canonicalised, because what the `PATH` holds is a link.** On a nix machine
+/// `/run/current-system/sw/bin/gh-stack` is a symbolic link into the store, and
+/// a read-only bind of a link is a link inside pointing at a store path the
+/// session has not been granted. The real file is what is bound, and the store
+/// is already inside.
+///
+/// **Linux only, for now.** A session starts with an empty profile on all three
+/// platforms, so all three have the gap; the two that do not answer here are
+/// the two whose rendering is a different job — a Mac renders
+/// [`Access::Elsewhere`] through [`seatbelt`] rather than as a bind, and a
+/// Windows profile keeps extensions under `LOCALAPPDATA\GitHub CLI` rather than
+/// under the home. They are a follow-up rather than half an answer here, and
+/// the rule lives in this one function so that what the check asks and what a
+/// session is given cannot come to disagree — see [`crate::stacks::missing`],
+/// which is the other caller.
+///
+/// **Reachable from outside this module** for the reason [`on_the_path`] is:
+/// what this answers is what a session is *given*, and a suite asking what a
+/// session finds in its HOME has to know whether this machine has one to give
+/// — see `tests/suite/sandbox.rs`.
+///
+/// Blocks: it is a handful of `stat` calls.
+pub fn stack_extension(platform: Platform, path: &OsStr) -> Option<PathBuf> {
+    if platform != Platform::Linux {
+        return None;
+    }
+
+    let found = on_the_path(
+        platform,
+        GH_STACK,
+        Some(path),
+        std::env::var_os("PATHEXT").as_deref(),
+    )?;
+
+    found.canonicalize().ok()
+}
+
+/// Where `gh` looks for that extension under a data directory:
+/// `<data>/gh/extensions/gh-stack/gh-stack`, which is `~/.local/share` on this
+/// platform unless `XDG_DATA_HOME` says otherwise.
+///
+/// **One arithmetic for both callers**, because the place is the whole of what
+/// is being agreed on: a session is given the file here under its own home, and
+/// the check lays it out here under a directory of its own to ask `gh` about —
+/// see [`crate::stacks::missing`]. Two spellings would be a check answering
+/// about a path no session has.
+///
+/// **No `manifest.yml` beside it.** Without one `gh` reads the directory as a
+/// local extension and runs the executable in it, which is the whole of what is
+/// wanted: there is no install to record and nothing to upgrade.
+pub(crate) fn gh_stack_inside(data_home: &Path) -> PathBuf {
+    data_home
+        .join(GH_EXTENSIONS_UNDER_DATA)
+        .join(GH_STACK)
+        .join(GH_STACK)
+}
+
+/// The program on a `PATH` that is that extension, which is also the word a
+/// human reads off a Notice saying a session would be given none — see
+/// [`crate::stacks::PROGRAM`].
+pub(crate) const GH_STACK: &str = "gh-stack";
+
+/// And where `gh` keeps its extensions under a data directory.
+const GH_EXTENSIONS_UNDER_DATA: &str = "gh/extensions";
+
+/// The data directory under a home, which is where `gh` looks for an extension
+/// when nothing says otherwise — see [`gh_stack_inside`].
+pub(crate) const DATA_INSIDE_HOME: &str = ".local/share";
+
+/// And the variable that moves it, which the check sets for the one `gh` it
+/// runs and no session is ever handed.
+///
+/// **Never set for a session**, which is why it is named here and in
+/// [`crate::stacks::missing`] and nowhere else: everything else under
+/// `~/.local/share` is a session's own to write, and a session whose whole data
+/// directory were the read-only one holding this file is a session whose every
+/// XDG tool has nowhere to keep anything.
+pub(crate) const XDG_DATA_HOME: &str = "XDG_DATA_HOME";
+
 /// The home of whoever is running the server, as it was read at startup, or
 /// `None` on a machine that names none.
 ///
@@ -5014,6 +5106,36 @@ impl Sandbox {
             }
         }
 
+        // And the `gh` extension a stack is synced with, at the one path `gh`
+        // looks for an extension in — see [`stack_extension`], which is what
+        // resolves it off the `PATH` above, and [`gh_stack_inside`], which is
+        // the place. A session is *placed* this rather than told it, `gh`
+        // having no variable that names where an extension is.
+        //
+        // **The file and not the data directory it is under.** Everything else
+        // beneath `~/.local/share` stays a session's own to write, which is
+        // what `XDG_DATA_HOME` pointing at a read-only tree would have taken
+        // away from every XDG tool a session runs.
+        //
+        // **After the empty HOME**, which is the directory this is inside: a
+        // bind said before it is one the directory made over it takes away
+        // again. The parents are bwrap's to make, as they are for every other
+        // bind landing inside that HOME.
+        //
+        // **And deliberately not standing**, for the reason the image above is
+        // not — see [`Surface::standing`]. It is one file, so there is no tree
+        // beneath it for an entry to be propagated through and nothing to buy
+        // by leaving one on it; and the file is the machine's own, which on the
+        // platform where standing means anything is a mark left on somebody
+        // else's install. The grant is Linux's alone for now either way.
+        if let Some(extension) = stack_extension(self.platform, &session_path) {
+            surface.elsewhere(
+                extension,
+                gh_stack_inside(&self.home.path().join(DATA_INSIDE_HOME)),
+                Reach::ReadOnly,
+            );
+        }
+
         for bind in &self.binds {
             surface.own(&bind.path, bind.reach);
         }
@@ -6769,6 +6891,71 @@ mod tests {
             None,
             "a machine whose toolchain is on the platform's own floor has no \
              rustup for this to be about",
+        );
+    }
+
+    /// The `gh` extension a stack is synced with is answered as the real file
+    /// behind whatever the `PATH` holds, and as nothing where the list has
+    /// none — see [`stack_extension`].
+    ///
+    /// The link is the case a nix machine really has: the entry on the system
+    /// profile is a symbolic link into the store, and a read-only bind of a
+    /// link would leave a session pointing at a path it was never granted.
+    #[cfg(unix)]
+    #[test]
+    fn the_stack_extension_is_answered_as_the_file_the_path_leads_to() {
+        let home = tempfile::tempdir().unwrap();
+        let (store, profile) = (home.path().join("store/bin"), home.path().join("sw/bin"));
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::create_dir_all(&profile).unwrap();
+
+        assert_eq!(
+            stack_extension(Platform::Linux, profile.as_os_str()),
+            None,
+            "a machine with no gh-stack on the list it hands a session is one \
+             where nothing is placed and the check stops the run",
+        );
+
+        let real = store.join("gh-stack");
+        std::fs::write(&real, "#!/bin/sh\nexit 0\n").unwrap();
+        std::os::unix::fs::symlink(&real, profile.join("gh-stack")).unwrap();
+
+        assert_eq!(
+            stack_extension(Platform::Linux, profile.as_os_str()),
+            Some(real.canonicalize().unwrap()),
+            "and one that has it answers the file the link lands on rather than \
+             the link, which is what a bind can carry inside",
+        );
+
+        // And the two platforms a session is not given one on yet, whose
+        // sessions have the same empty profile and want the follow-up this
+        // function's doc names.
+        for elsewhere in [Platform::MacOs, Platform::Windows] {
+            assert_eq!(
+                stack_extension(elsewhere, profile.as_os_str()),
+                None,
+                "{elsewhere:?} is a follow-up rather than half an answer here",
+            );
+        }
+    }
+
+    /// And where it is placed is the one path `gh` looks for an extension in,
+    /// composed once for the session that is given it and the check that asks
+    /// about it — see [`gh_stack_inside`].
+    #[test]
+    fn the_stack_extension_is_placed_where_gh_looks_for_one() {
+        let home = Path::new("/homes/7");
+
+        assert_eq!(
+            gh_stack_inside(&home.join(DATA_INSIDE_HOME)),
+            home.join(".local/share/gh/extensions/gh-stack/gh-stack"),
+            "the default place under a home, which is what a session gets",
+        );
+        assert_eq!(
+            gh_stack_inside(Path::new("/elsewhere")),
+            Path::new("/elsewhere/gh/extensions/gh-stack/gh-stack"),
+            "and the same arithmetic under whatever `XDG_DATA_HOME` says, \
+             which is how the check lays one out to ask `gh` about",
         );
     }
 

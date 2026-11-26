@@ -4851,10 +4851,20 @@ async fn a_session_on_a_second_backend_runs_from_its_home_with_the_capture_as_it
         "and the session is told which backend it is, which is what tailors the \
          Guide it reads: {said:?}"
     );
+    // The account's own directory and nothing beside it — but for the one
+    // entry a machine with a `gh-stack` on the `PATH` a session is handed
+    // gains, that file being placed under HOME where `gh` looks for an
+    // extension. Asked of the machine rather than written down, as every other
+    // listing of a session's HOME in this binary is.
+    let held = format!(
+        "home=.codex {}\n",
+        crate::session_home::and_the_stack_extension()
+    );
+
     assert!(
-        said.contains("home=.codex \n"),
+        said.contains(&held),
         "and its one home is the whole of what HOME holds, bound where that \
-         backend looks for it: {said:?}"
+         backend looks for it — {held:?} in {said:?}"
     );
     assert!(
         said.contains(BRIEF),
@@ -30261,17 +30271,30 @@ async fn pressing_resolve_on_a_narrowed_wrap_up_comes_back_through_the_same_one(
 ///
 /// `resolved` is the file a resolution session writes, which is where the
 /// bottom stops conflicting — a path nothing writes is a conflict nothing
-/// resolves. `installed` is whether `gh stack --help` answers, which is what
-/// Verkstead asks in the environment a session gets before it sends anything at
-/// a stack at all.
-fn gh_stacked_and_conflicting(resolved: &Path, installed: bool) -> String {
-    let extension = match installed {
-        true => "if [ \"$1\" = stack ]; then exit 0; fi",
-        false => {
-            "if [ \"$1\" = stack ]; then \
-             printf 'unknown command \"stack\" for \"gh\"\\n' >&2; exit 1; fi"
-        }
+/// resolves.
+///
+/// `installed` is whether `gh stack --help` answers, which is what Verkstead
+/// asks before it sends anything at a stack at all — under the environment a
+/// session gets, with whatever extension a session would be given laid out for
+/// that one call. The real `gh stack --help` either way: a `gh-stack` resolved
+/// off a `PATH` and then unable to start is a session that cannot sync a
+/// stack, however honestly it was found.
+///
+/// `asked` is where this `gh` records what `XDG_DATA_HOME` it was asked under,
+/// one line per ask: that it was asked at all is what says the check ran the
+/// extension rather than answering off the resolution alone, and what the line
+/// holds is what says it was asked about a session rather than about a home —
+/// see [`laid_out_for_every_ask`].
+fn gh_stacked_and_conflicting(resolved: &Path, asked: &Path, installed: bool) -> String {
+    let answer = match installed {
+        true => "exit 0",
+        false => "printf 'unknown command \"stack\" for \"gh\"\\n' >&2; exit 1",
     };
+    let extension = format!(
+        "if [ \"$1\" = stack ]; then \
+         printf '%s\\n' \"${{XDG_DATA_HOME-unset}}\" >> {asked}; {answer}; fi",
+        asked = quoted(asked),
+    );
 
     format!(
         r#"
@@ -30314,6 +30337,32 @@ esac
     )
 }
 
+/// What that `gh` recorded of `XDG_DATA_HOME` on each ask, checked: the check
+/// asked at all, and every ask named a data directory of its own.
+///
+/// **Never `unset`, whether or not this machine has an extension to lay out.**
+/// `gh` reads an extension out of that directory *instead of* the home it is
+/// run under, so the name is the whole of what keeps the answer about a
+/// session: left off, the `gh` here reads `~/.local/share/gh/extensions` under
+/// the home the session environment composes — the server's own, on Linux — and
+/// answers *installed* off an install no session would ever be given. See
+/// `stacks::missing`, where the measurement is.
+///
+/// The directory itself has gone by now, laid out for that one call and dropped
+/// with it, so what is read back is the name and not what was in it.
+fn laid_out_for_every_ask(asked: &Path) {
+    let recorded = std::fs::read_to_string(asked)
+        .unwrap_or_else(|error| panic!("the check ran `gh stack --help` at all: {error}"));
+    let named: Vec<&str> = recorded.lines().collect();
+
+    assert!(!named.is_empty(), "the check asked `gh` once at least");
+    assert!(
+        named.iter().all(|said| said.starts_with('/')),
+        "every ask named a data directory of the check's own rather than \
+         leaving `gh` to read a home: {named:?}",
+    );
+}
+
 /// A conflict low in a three-deep stack sends **one** `addressing` session,
 /// told the whole ordered chain from the bottom and told to sync it — and
 /// nothing else is dispatched beside it.
@@ -30337,6 +30386,7 @@ async fn a_conflict_low_in_a_stack_sends_one_session_told_the_whole_chain() {
     let dispatched = spill.path().join("fix-prompts");
     let released = spill.path().join("released");
     let resolved = spill.path().join("conflict-resolved");
+    let asked = spill.path().join("extension-asked");
 
     let fixture = taking_up_to_fix(
         spill,
@@ -30347,7 +30397,7 @@ async fn a_conflict_low_in_a_stack_sends_one_session_told_the_whole_chain() {
             Some(&released),
             &resolved,
         ),
-        &gh_stacked_and_conflicting(&resolved, true),
+        &gh_stacked_and_conflicting(&resolved, &asked, true),
     )
     .await;
 
@@ -30389,6 +30439,13 @@ async fn a_conflict_low_in_a_stack_sends_one_session_told_the_whole_chain() {
         "one go, counted against the stack as the session was dispatched",
     );
 
+    // And the extension was really asked rather than answered off the
+    // resolution: what says a session can sync a stack is `gh stack --help`
+    // starting, and a `gh-stack` that resolves and will not run is a session
+    // that cannot sync anything. Asked under a data directory of the check's
+    // own, which is what keeps the answer about a session.
+    laid_out_for_every_ask(&asked);
+
     let worktree = view.worktree.clone().expect("the work is checked out").path;
     let prompt = prompts(&told)[0];
 
@@ -30421,10 +30478,46 @@ async fn a_conflict_low_in_a_stack_sends_one_session_told_the_whole_chain() {
          and then to sync it: {prompt}",
     );
     assert!(
-        prompt.contains("git fetch origin") && prompt.contains("origin's commit"),
-        "and to hold every branch of the chain locally first, an adoption \
-         creating what this checkout has not got and the sync force-pushing it \
-         over the real one: {prompt}",
+        prompt.contains("gh stack checkout https://github.com/tobico/verkstead/pull/40"),
+        "and the adoption is `checkout` off the watched pull request's own URL: \
+         it reads the chain off GitHub and creates what this checkout has not \
+         got at origin's commit, where an `init` over the same names invents \
+         them at the trunk — measured, and in `docs/agents/git-workflow.md`: \
+         {prompt}",
+    );
+    assert!(
+        !prompt.contains("gh stack init"),
+        "rather than the `init` that invents them: {prompt}",
+    );
+    assert!(
+        prompt.contains("git fetch origin")
+            && prompt.contains("origin's commit")
+            && prompt.contains("git rev-parse <branch>")
+            && prompt.contains("git branch -f <branch> origin/<branch>")
+            && prompt.contains("git merge-base --is-ancestor <branch> origin/<branch>"),
+        "and to put every branch of the chain at origin's commit before it \
+         adopts anything, with the one command that says which way round two \
+         branches sit: a branch this worktree already holds is adopted as it \
+         stands, and the sync force-pushes it: {prompt}",
+    );
+    assert!(
+        prompt.contains("needsRebase: false"),
+        "and told why the extension is not what answers that question — it \
+         reports a branch trailing origin as healthy: {prompt}",
+    );
+    assert!(
+        prompt.contains("ahead* of origin") && prompt.contains("stop and"),
+        "and to stop rather than sync over work nobody pushed: {prompt}",
+    );
+    assert!(
+        prompt.contains("top first") && prompt.contains("`stage-03`, `rate-limiting`, `stage-01`"),
+        "and to read the adopted chain back in the order `gh stack view` \
+         prints one, which is the other way up from the list above: {prompt}",
+    );
+    assert!(
+        prompt.contains("switch this worktree back to `stage-01`"),
+        "and to leave this worktree on the Conversation's own branch, which \
+         `gh stack checkout` switches away from: {prompt}",
     );
     assert!(
         !prompt.contains("Merge the pull request's base branch"),
@@ -30497,11 +30590,12 @@ async fn two_goes_at_a_stack_and_then_the_human() {
     // as it was — which is a stack the machine cannot fix.
     let claimed = spill.path().join("claimed-resolved");
     let resolved = spill.path().join("conflict-resolved");
+    let asked = spill.path().join("extension-asked");
 
     let fixture = taking_up_to_fix(
         spill,
         &a_conflict_and_nothing_beside_it(&reviews, &batches, &dispatched, None, &claimed),
-        &gh_stacked_and_conflicting(&resolved, true),
+        &gh_stacked_and_conflicting(&resolved, &asked, true),
     )
     .await;
 
@@ -30569,11 +30663,12 @@ async fn a_sandbox_without_the_stack_extension_stops_before_it_spends_a_go() {
     let batches = spill.path().join("batch-prompts");
     let dispatched = spill.path().join("fix-prompts");
     let resolved = spill.path().join("conflict-resolved");
+    let asked = spill.path().join("extension-asked");
 
     let fixture = taking_up_to_fix(
         spill,
         &a_conflict_and_nothing_beside_it(&reviews, &batches, &dispatched, None, &resolved),
-        &gh_stacked_and_conflicting(&resolved, false),
+        &gh_stacked_and_conflicting(&resolved, &asked, false),
     )
     .await;
 
@@ -30584,12 +30679,38 @@ async fn a_sandbox_without_the_stack_extension_stops_before_it_spends_a_go() {
         .await;
 
     assert!(
+        stopped.starts_with(
+            "<p><strong>Syncing the stack that pull request #40 of <code>verkstead</code> \
+             is in</strong> stopped.</p>"
+        ),
+        "the step the stop is about is an activity, which is what `stopping` \
+         appends *stopped* to: {stopped:?}",
+    );
+    assert!(
         stopped.contains("gh stack"),
         "the Notice names the extension that is missing: {stopped:?}",
     );
     assert!(
-        stopped.contains("gh extension install github/gh-stack"),
-        "and the one command that installs it: {stopped:?}",
+        stopped.contains("Put <code>gh-stack</code> on this machine's <code>PATH</code>"),
+        "and the one thing that puts one within a session's reach: {stopped:?}",
+    );
+    assert!(
+        stopped.contains("<code>gh extension install</code> won't do it"),
+        "and that the obvious command is not it, which is the sentence that \
+         stops a human installing into a home nothing looks in twice over: \
+         {stopped:?}",
+    );
+    assert!(
+        !stopped.contains("gh extension install github/gh-stack"),
+        "rather than naming that command as the fix, which it never was: \
+         {stopped:?}",
+    );
+    assert!(
+        stopped.contains("it installs into the home it's run from")
+            && stopped.contains("a session gets a fresh home with nothing in it"),
+        "and it says why rather than naming a home to install into: a sentence \
+         that named the server's own would send a human at the one install that \
+         passes the check and still reaches no session: {stopped:?}",
     );
     assert!(
         stopped.contains("#40"),
@@ -30606,6 +30727,11 @@ async fn a_sandbox_without_the_stack_extension_stops_before_it_spends_a_go() {
         "and no go was spent on a session that could not have done what it was \
          told",
     );
+    // And the answer came from running the extension rather than from a
+    // resolution alone — under a data directory of the check's own, which on a
+    // machine with nothing to lay out is the empty one a session there gets.
+    laid_out_for_every_ask(&asked);
+
     assert!(
         !dispatched.exists(),
         "nothing was dispatched at all: {:?}",

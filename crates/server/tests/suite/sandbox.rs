@@ -41,6 +41,8 @@ use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::store;
 
+use crate::session_home::and_the_stack_extension;
+
 /// The device every Conversation started here is ranked by, named the way a
 /// cluster names one (ADR-0020, *Ranks*).
 const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
@@ -3032,7 +3034,8 @@ async fn the_profiles_pair_is_the_whole_of_what_home_holds() {
     assert_eq!(reported["private-key"], "absent");
     assert_eq!(reported["history"], "absent");
     assert_eq!(
-        reported["home"], ".claude .claude.json ",
+        reported["home"],
+        format!(".claude .claude.json {}", and_the_stack_extension()),
         "everything else in HOME is simply not there"
     );
 }
@@ -3071,7 +3074,10 @@ async fn a_codex_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
         "#,
     );
 
-    assert_eq!(reported["home"], ".codex ");
+    assert_eq!(
+        reported["home"],
+        format!(".codex {}", and_the_stack_extension())
+    );
     assert_eq!(
         reported["root"], "auth.json config.toml memories sessions ",
         "the login, the written configuration and the memory store are the whole \
@@ -3383,7 +3389,10 @@ async fn an_agy_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
         "#,
     );
 
-    assert_eq!(reported["home"], ".gemini ");
+    assert_eq!(
+        reported["home"],
+        format!(".gemini {}", and_the_stack_extension())
+    );
     assert_eq!(
         reported["root"], "antigravity-cli config ",
         "agy's own two directories are the whole of the root"
@@ -3536,7 +3545,10 @@ async fn a_grok_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
         "#,
     );
 
-    assert_eq!(reported["home"], ".grok ");
+    assert_eq!(
+        reported["home"],
+        format!(".grok {}", and_the_stack_extension())
+    );
     assert_eq!(
         reported["root"], "auth.json config.toml memory sessions ",
         "the login, the written configuration and the memory store are the whole \

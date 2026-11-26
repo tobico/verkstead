@@ -54,8 +54,19 @@ goes counted per pull request.
   requests of the Repo whose base is another's head, followed until a base is
   not an open head and a head is not another's base. `gh stack`'s own registry
   is per-worktree and may not exist, so it is not what discovery reads; the
-  session runs `gh stack init` over the ordered branches where the registry is
-  missing, before it syncs.
+  session adopts the chain with `gh stack checkout <this pull request's URL>`
+  before it syncs, which reads the chain off GitHub. **Not `gh stack init` over
+  the ordered branches**, which is what it was: re-measured against 0.3.0, an
+  `init` over an eleven-branch chain invented all eleven at the trunk and
+  reported success, in a checkout where every `origin/<branch>` was present —
+  and the sync force-pushes whatever was adopted. Neither command aligns a
+  branch the worktree already holds, so the session is told to put every one of
+  them at origin's commit first, by reading git rather than the extension:
+  `git rev-parse` either side where they agree, and
+  `git merge-base --is-ancestor` where they do not, which is the one command
+  that says *which* way they differ. It is also told to leave the worktree back
+  on the Conversation's own branch, `checkout` having switched it to the top of
+  the chain. See `docs/agents/git-workflow.md`, which holds the measurement.
 - **One conflict session per stack**, not per pull request: dispatched when any
   recorded pull request reads *conflicting*, told the ordered list from the
   bottom, told to `gh stack sync` and resolve what it backs out on, run the
@@ -65,10 +76,20 @@ goes counted per pull request.
 - **The Conversation's own branch is the named pull request's head.** The others
   are branches in the same repository, and the session works them in that one
   Worktree with `gh stack checkout`.
-- **`gh stack` is not installed on this machine's `gh`**, and the wrap-up has
-  never driven it. The stage verifies the extension is reachable inside the
-  Sandbox — or says on the Timeline, by name, that it is not — before anything
-  relies on it.
+- **The extension reaches a session by being placed rather than installed.**
+  `gh` looks for an extension inside the home it is run under, and a session's
+  home is a directory of Verkstead's own that nobody installs into — so
+  `gh extension install` reaches no session whoever runs it, which was what the
+  stop used to advise. What puts one within reach is the `gh-stack` on the
+  machine's own `PATH`: resolved off the `PATH` a session is handed and bound
+  read-only at `~/.local/share/gh/extensions/gh-stack/gh-stack` under the
+  session's HOME — see `sandbox::stack_extension`. Linux only for now, a Mac
+  and a Windows session having the same gap and each wanting a rendering of its
+  own; the Annex's box carries the package so a freshly built one needs nothing
+  by hand. The stage asks that same resolution before it sends anything at a
+  stack — one reading, so the check and the session cannot disagree — and where
+  a session would be given none it says so on the Timeline, naming the program
+  and the `PATH` rather than an install command.
 
 ## Proposed tasks (provisional)
 
@@ -93,7 +114,10 @@ goes counted per pull request.
 5. **The extension check** — the Sandbox is asked for `gh stack` before the
    stack session is sent, and a missing extension is said by name on the
    Timeline rather than found in a session's failure. AC: a Sandbox without it
-   stops with a Notice naming the extension; one with it proceeds.
+   stops with a Notice naming the extension; one with it proceeds. *Landed, and
+   then corrected: the check asked under a home nobody installs into, so it
+   always answered* missing *and its Notice advised a command that could not
+   work. It now asks what a session would be given — see the bullet above.*
 
 ## Re-verify at start
 
@@ -108,5 +132,6 @@ goes counted per pull request.
   Conversation's pull requests one per repository, so they are among what has to
   move.
 - `gh stack sync`, `gh stack init` and `gh stack checkout` still behave as
-  `docs/agents/git-workflow.md` describes, and the extension is still a separate
-  install.
+  `docs/agents/git-workflow.md` describes, and the extension is still a program
+  of the machine's own rather than anything Verkstead builds — placed where `gh`
+  looks, never installed into a home.

@@ -93,6 +93,14 @@
   systemd.tmpfiles.rules = [ "d @repos@ 0755 verkstead verkstead -" ];
 
   # Everything a session needs, because on NixOS the wizard installs nothing.
+  #
+  # `gh-stack` is on this list rather than installed into anybody's home. A
+  # home is the one place `gh` looks for an extension and the one place a
+  # session never reaches, its own being a fresh directory of its
+  # Conversation's — so what reaches a session is this file, bound into the
+  # place `gh` looks. See `stack_extension` in
+  # `crates/server/src/sandbox.rs`. From unstable because stable's is 0.0.4
+  # and `docs/agents/git-workflow.md` was measured against 0.1.1.
   environment.systemPackages = [
     pkgs.bubblewrap
     pkgs.git
@@ -101,6 +109,7 @@
     pkgs.sccache
     unstable.claude-code
     unstable.codex
+    unstable.gh-stack
     unstable.opencode
   ];
 

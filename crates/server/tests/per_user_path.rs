@@ -25,6 +25,15 @@
 //! read the same way round: on the list ahead of the system directories, and
 //! read-only inside.
 //!
+//! **And the one program on that list a session is given somewhere else.** `gh`
+//! looks for an extension inside the home it is run under, and a session's home
+//! is a fresh directory of its Conversation's own — so `gh-stack` on the list is
+//! a program a session can run by name and `gh` will never find. What closes
+//! that gap is the file being *placed* under the session's home, at the one path
+//! `gh` looks in, read-only; everything else under the data directory it sits in
+//! stays the session's own to write. Asked here because it needs exactly the
+//! machine this file stands up — see `sandbox::stack_extension`.
+//!
 //! **One test per machine, in a binary of its own, and that is the whole design
 //! of this file.** The `PATH` and the home a session composes from are the
 //! *process's* own — read once at startup, held for the run — so the only way
@@ -117,6 +126,24 @@ const GROK_SAYS: &str = "the grok xAI installed";
 /// The `codex` it put there, and what it says when it runs.
 const A_CODEX: &str = "#!/bin/sh\nprintf '%s\\n' 'the harness Verkstead installed'\n";
 const CODEX_SAYS: &str = "the harness Verkstead installed";
+
+/// And the `gh` extension a stack is synced with, beside it on the same list.
+///
+/// On the `PATH` here because that is where a machine really has one — the
+/// box's own system profile, or whatever directory the human put it in — and
+/// what this file asks of it is the half a `PATH` cannot deliver: `gh` looks
+/// for an extension inside the home it is run under, so the file is *placed*
+/// under a session's home rather than found on its list.
+const A_GH_STACK: &str = "#!/bin/sh\nprintf '%s\\n' 'the extension on the machine'\n";
+const GH_STACK_SAYS: &str = "the extension on the machine";
+
+/// Where `gh` looks for it under a home, spelled out rather than composed: a
+/// test that asked `sandbox::gh_stack_inside` for the path would be a test
+/// agreeing with the arithmetic it is checking.
+const GH_LOOKS_IN: &str = ".local/share/gh/extensions/gh-stack/gh-stack";
+
+/// And the data directory above it, which stays a session's own to write.
+const THE_DATA_DIRECTORY: &str = ".local/share";
 
 /// The `claude` that install left there, and what it says when it runs.
 ///
@@ -245,6 +272,11 @@ async fn standing() -> Standing {
     let installed = home.path().join(VERKSTEAD_INSTALL);
     std::fs::create_dir_all(&installed).unwrap();
     program(&installed.join("codex"), A_CODEX);
+
+    // And the `gh` extension a stack is synced with, on the same list: a
+    // program a session finds by name and `gh` would not, which is the whole
+    // reason it is placed under a session's home as well as granted.
+    program(&installed.join("gh-stack"), A_GH_STACK);
 
     // And what xAI's installer left, inside the human's own Grok Build account
     // beside the login it keeps.
@@ -611,17 +643,44 @@ async fn the_harness_under_the_servers_home_is_what_a_linux_session_runs() {
         "and it is read-only there, as every install a `PATH` names is",
     );
 
+    // And the `gh` extension, which is the one program here a session is given
+    // somewhere other than where the machine keeps it: `gh` looks for an
+    // extension inside the home it runs under, and a session's home is a fresh
+    // directory of its Conversation's own, so a grant on the `PATH` entry alone
+    // would be an extension `gh` never looks at. Run at the path `gh` looks in,
+    // which is what settles that the file behind that bind is the real one.
+    let (rendering, _closing) = sandbox
+        .command(&[SH, "-c", &format!("exec \"$HOME/{GH_LOOKS_IN}\"")])
+        .expect("a rendering on a platform with no identity to make");
+    let output = started(&rendering);
+
+    assert!(
+        output.status.success(),
+        "the extension on the machine's own list did not run at the path `gh` \
+         looks for one in: {}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        GH_STACK_SAYS,
+        "and what ran was that file rather than something else of the name",
+    );
+
     let reported = probe(
         &sandbox,
         &format!(
             r#"
             say path "$PATH"
             say updater "${{DISABLE_AUTOUPDATER-unset}}"
+            say data-home "${{XDG_DATA_HOME-unset}}"
             dir {install} install
             dir {version} version
             file {beside} beside-the-versions
             dir {outside} outside
             dir {installed} installed
+            file "$HOME/{GH_LOOKS_IN}" gh-stack
+            dir "$HOME/{THE_DATA_DIRECTORY}" data-directory
+            say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
             file "$HOME/.claude/skills/the-accounts-own/SKILL.md" the-accounts-own
             dir "$HOME/.claude/skills" account-skills
             "#,
@@ -647,6 +706,32 @@ async fn the_harness_under_the_servers_home_is_what_a_linux_session_runs() {
         "and it is ahead of the system directories on the `PATH` a session \
          really gets, which is what the whole key is for: {}",
         reported["path"],
+    );
+
+    assert_eq!(
+        reported["gh-stack"], "read",
+        "and it is read-only at the place `gh` looks, as every install a \
+         `PATH` names is",
+    );
+    assert_eq!(
+        reported["data-directory"], "write",
+        "while the data directory it was placed under stays a session's own to \
+         write: what is granted is the one file, and an `XDG_DATA_HOME` moved \
+         onto a read-only tree would leave every other XDG tool inside with \
+         nowhere to keep anything",
+    );
+    assert_eq!(
+        reported["data-home"], "unset",
+        "which is why nothing sets that variable for a session at all",
+    );
+    assert!(
+        reported["home"]
+            .split_whitespace()
+            .any(|held| held == ".local"),
+        "and `.local` is the one entry a HOME listing gains on a machine with \
+         an extension to place, which is what the sandbox suite's own listings \
+         ask this machine about: {}",
+        reported["home"],
     );
 
     assert_eq!(
@@ -756,6 +841,16 @@ async fn the_harness_under_the_servers_home_is_read_and_run_by_a_macs_policy() {
     assert!(
         !policy.contains(&format!("(allow file-write* (subpath {installed}))")),
         "read-only there too:\n{policy}",
+    );
+
+    // And the `gh` extension beside it is in no rule at all, which is this
+    // platform's state of the thing rather than an oversight: a Mac session
+    // starts with the same empty profile and has the same gap, and what it
+    // wants is a rendering of its own rather than half of Linux's — see
+    // `sandbox::stack_extension`, which answers nothing here on purpose.
+    assert!(
+        !policy.contains("gh-stack"),
+        "a Mac session is given no stack extension yet:\n{policy}",
     );
 
     let version = in_policy(&real(&standing.version));

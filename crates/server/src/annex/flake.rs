@@ -458,6 +458,38 @@ mod tests {
         assert!(!unfilled(&configuration), "{configuration}");
     }
 
+    /// And the box carries the `gh` extension a stack is synced with, from
+    /// unstable as the harnesses are.
+    ///
+    /// On the system profile and not in a home, which is the whole of how it
+    /// reaches a session: `gh` looks for an extension inside the home it is
+    /// run under, and a session's home is a fresh directory of its
+    /// Conversation's own, so nothing installed into any home on the box is
+    /// ever found. What a session gets is this file, resolved off the `PATH`
+    /// it is given and bound into the place `gh` looks — see
+    /// [`crate::sandbox::stack_extension`].
+    ///
+    /// From unstable because stable's is 0.0.4 and
+    /// `docs/agents/git-workflow.md` was measured against 0.1.1.
+    #[test]
+    fn the_box_carries_the_stack_extension_a_session_is_given() {
+        let configuration = written_for("winvm", &Binary::Released).configuration;
+
+        let (_, packages) = configuration
+            .split_once("environment.systemPackages = [")
+            .unwrap();
+        let (packages, _) = packages.split_once("];").unwrap();
+
+        assert!(
+            packages.contains("unstable.gh-stack"),
+            "no unstable.gh-stack among the box's packages: {packages}"
+        );
+        assert!(
+            packages.contains("pkgs.gh\n"),
+            "beside the `gh` that runs it: {packages}"
+        );
+    }
+
     /// The box logs in as the service's own user: `verkstead` is what WSL
     /// opens a shell as, with a home that exists and sudo, and that home is
     /// bound into the service's namespace beside the Repos parent. What the
@@ -707,6 +739,7 @@ mod tests {
                 "sccache",
                 "claude-code",
                 "codex",
+                "gh-stack",
                 "opencode",
             ] {
                 assert!(packages.contains(&wanted), "no {wanted} in {packages:?}");
