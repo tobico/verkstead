@@ -55,6 +55,9 @@ that would fail against a read-only file anyway. Elsewhere, and only where
 
 Everything below was measured against `gh stack` version 0.1.1 in a scratch
 repository rather than read off its documentation; re-measure after an upgrade.
+**Adopting a chain was re-measured against 0.3.0** against this repository's own
+eleven-deep stack, read-only in a scratch clone whose push URL was broken for
+the purpose — what changed is noted where it changed.
 
 **The registry is per worktree.** `gh stack` keeps what it knows about a
 stack inside the checkout it was run in, and every stage is worked in a
@@ -88,17 +91,53 @@ Where nobody told you what the chain is, read it off GitHub rather than
 off this checkout: `gh pr list` and each open PR's base, one pull
 request's base being the branch of the one below it.
 
-**Fetch, and hold every branch of the chain locally, before adopting
-anything.** Adopting a branch this checkout has not got does not refuse:
-it *creates* it, at the trunk's commit, and reports `✓ Adopted` as though
-nothing were wrong. Everything that follows force-pushes whatever was
-adopted, so a branch invented here is another stage's real work
-overwritten on origin — measured: a five-branch `init` in a checkout
-holding one of them, then a single `gh stack push`, moved four branches on
-origin back to the trunk's commit. So first:
+**And where the chain is already on GitHub, `checkout` adopts it instead
+of `init`**, from 0.3.0 on — one command, and it reads the chain off
+GitHub rather than off an argument list you had to get right:
+
+    git fetch origin
+    gh stack checkout <pr-url-or-number>
+
+Measured on the eleven-deep stack in this repository, in a clone holding
+none of its branches: it pulled all eleven **at origin's commits**,
+imported the chain, switched to the top branch, and wrote nothing to
+GitHub — every pull request's base and head commit was byte-identical
+after. Prefer the **PR URL**. A bare number is read as a *stack* number
+first and only then as a pull request's; the two share one numbering
+sequence, so a given number is one or the other and never both, but the
+URL is unambiguous by construction.
+
+It is not a substitute for the fetch. In a single-branch clone it stopped
+at `✗ failed to pull branch … : fatal: not a valid object name:
+'origin/…'` — it creates local branches from remote-tracking refs and
+does not go and get them.
+
+**Fetch, and hold every branch of the chain locally *at origin's commit*,
+before adopting anything.** This is `init`'s own hazard and it has got
+worse, not better. Adopting a branch this checkout has not got does not
+refuse: it *creates* it, at the trunk's commit, and reports success as
+though nothing were wrong. Everything that follows force-pushes whatever
+was adopted, so a branch invented here is another stage's real work
+overwritten on origin — measured at 0.1.1: a five-branch `init` in a
+checkout holding one of them, then a single `gh stack push`, moved four
+branches on origin back to the trunk's commit. **Re-measured at 0.3.0: an
+eleven-branch `init` invented all eleven at the trunk and printed
+`✓ Created stack`, in a clone where every `origin/<branch>` was present
+and fetched.** Having the remote-tracking ref is not enough; the local
+branch has to be there. So first:
 
     git fetch origin
     git branch --track <branch> origin/<branch>   # for each one not here yet
+
+**And a local branch that is merely *behind* origin is adopted silently by
+both commands.** `checkout` creates the branches it hasn't got and leaves
+the ones it has exactly where they are; `init` adopts whatever is there.
+Measured at 0.3.0: a branch set two commits behind origin came back from
+`gh stack view --json` with `needsRebase: false`, reading as healthy, and
+the sync that follows would force-push it over origin. So the *at origin's
+commit* half of the rule above holds whichever command adopts the chain —
+check each branch against `origin/<branch>` before you sync, not just that
+a branch of the name exists.
 
 **And read the adopted chain back before pushing anything.**
 `gh stack view` prints it top-first and is safe when piped;
