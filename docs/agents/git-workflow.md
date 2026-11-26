@@ -139,6 +139,16 @@ commit* half of the rule above holds whichever command adopts the chain —
 check each branch against `origin/<branch>` before you sync, not just that
 a branch of the name exists.
 
+Two commit ids only say *same* or *not same*, and *not same* is three
+different situations. Where `git rev-parse <branch>` and
+`git rev-parse origin/<branch>` differ, `git merge-base --is-ancestor
+<branch> origin/<branch>` is what says which: it succeeds where origin is
+ahead, which is the only one of the three that
+`git branch -f <branch> origin/<branch>` is the answer to. Where it fails
+the local branch is ahead of origin or the two have diverged, and that is
+unpushed work — neither yours to force-push over nor yours to throw away,
+so stop rather than sync.
+
 **And read the adopted chain back before pushing anything.**
 `gh stack view` prints it top-first and is safe when piped;
 `gh stack view --json` is the form to parse, and the form to use if stdout

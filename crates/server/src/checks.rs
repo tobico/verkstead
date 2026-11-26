@@ -1554,11 +1554,20 @@ fn chained(stack: &[store::PullRequest]) -> Option<Vec<&str>> {
 /// and that trails origin is adopted as it stands, and `gh stack view --json`
 /// reports it `needsRebase: false`, which reads as healthy. Measured too. So
 /// the session is told to put every branch of the chain at origin's commit
-/// *before* it adopts, by comparing `git rev-parse` either side rather than by
-/// asking the extension, and to stop rather than sync where one has diverged:
-/// a branch ahead of origin is somebody's unpushed work, which is not a thing
-/// to force-push over or to throw away. The branches are named in order from
-/// the bottom, which is the order a human checks a chain in.
+/// *before* it adopts, by reading git rather than by asking the extension, and
+/// to stop rather than sync where one has diverged: a branch ahead of origin is
+/// somebody's unpushed work, which is not a thing to force-push over or to
+/// throw away. The branches are named in order from the bottom, which is the
+/// order a human checks a chain in.
+///
+/// **And `git merge-base --is-ancestor` is what is named for that, rather than
+/// two `git rev-parse`s.** Which way round two branches sit is three answers —
+/// origin ahead, the local branch ahead, diverged — and two commit ids are one
+/// bit: same or not. Named the shorter way, a session reading *not the same* as
+/// *origin is ahead* runs the `git branch -f` on work nobody pushed and the
+/// sync force-pushes it away, which is the one outcome the paragraph exists to
+/// prevent. The two `rev-parse`s stay as what settles the ordinary case in one
+/// call, there being nothing to do where they agree.
 ///
 /// **Read back top first**, because that is the order `gh stack view` prints a
 /// chain in — `docs/agents/git-workflow.md`, measured. The list the session is
@@ -1628,12 +1637,16 @@ fn syncing(watched: &Watched, stack: &[store::PullRequest], branches: &[&str]) -
          them atomically, which is what keeps the chain a chain. Its registry is kept per \
          worktree and this worktree is new, so the chain is yours to adopt first.\n\n\
          **Put every branch of the chain at origin's commit before you adopt anything.** \
-         Run `git fetch origin`, then for each of {chain}, bottom first, compare \
-         `git rev-parse <branch>` with `git rev-parse origin/<branch>`. Where origin is \
-         ahead, `git branch -f <branch> origin/<branch>` — a branch this worktree holds is \
+         Run `git fetch origin`, then for each of {chain}, bottom first: where \
+         `git rev-parse <branch>` and `git rev-parse origin/<branch>` are the same commit \
+         there is nothing to do, and where they differ it is \
+         `git merge-base --is-ancestor <branch> origin/<branch>` that says which way — two \
+         commit ids on their own don't. It succeeds where origin is ahead, and then \
+         `git branch -f <branch> origin/<branch>`: a branch this worktree holds is \
          adopted exactly as it stands, and the sync below force-pushes whatever was \
          adopted, so a branch trailing origin here is somebody's real work overwritten. \
-         Where the local branch is *ahead* of origin, or the two have diverged, stop and \
+         It fails where the local branch is *ahead* of origin or the two have diverged — \
+         stop and \
          say so rather than syncing: that is work nobody pushed, and it is neither yours to \
          force-push over nor yours to throw away. A branch this worktree has not got at \
          all is nothing to compare — the adoption below is what creates it. And \
@@ -1666,12 +1679,7 @@ fn syncing(watched: &Watched, stack: &[store::PullRequest], branches: &[&str]) -
         worktree = watched.worktree.display(),
         extension = crate::stacks::EXTENSION,
         chain = quoted.join(", "),
-        reversed = quoted
-            .iter()
-            .rev()
-            .cloned()
-            .collect::<Vec<_>>()
-            .join(", "),
+        reversed = quoted.iter().rev().cloned().collect::<Vec<_>>().join(", "),
         url = adopted(watched, stack),
     )
 }
@@ -2101,9 +2109,16 @@ mod tests {
                 && told.contains("git rev-parse <branch>")
                 && told.contains("git branch -f <branch> origin/<branch>"),
             "and every branch of it is put at origin's commit before anything \
-             is adopted, compared either side rather than asked of the \
-             extension: a branch this worktree already holds is adopted as it \
-             stands, and the sync force-pushes it: {told}",
+             is adopted, read off git rather than asked of the extension: a \
+             branch this worktree already holds is adopted as it stands, and \
+             the sync force-pushes it: {told}",
+        );
+        assert!(
+            told.contains("git merge-base --is-ancestor <branch> origin/<branch>"),
+            "and which way round the two sit is asked of the one command that \
+             answers it: two commit ids say same or not, and a session reading \
+             *not the same* as *origin is ahead* force-pushes away work nobody \
+             pushed: {told}",
         );
         assert!(
             told.contains("needsRebase: false"),
@@ -2127,8 +2142,7 @@ mod tests {
             "rather than the `init` that invents them: {told}",
         );
         assert!(
-            told.contains("top first")
-                && told.contains("`rate-limiting`, `stage-02`, `stage-01`"),
+            told.contains("top first") && told.contains("`rate-limiting`, `stage-02`, `stage-01`"),
             "and the chain is read back in the order `gh stack view` prints \
              one, which is the other way up: named bottom first, a session \
              would stop at a chain that came back perfectly good: {told}",

@@ -30493,10 +30493,11 @@ async fn a_conflict_low_in_a_stack_sends_one_session_told_the_whole_chain() {
         prompt.contains("git fetch origin")
             && prompt.contains("origin's commit")
             && prompt.contains("git rev-parse <branch>")
-            && prompt.contains("git branch -f <branch> origin/<branch>"),
+            && prompt.contains("git branch -f <branch> origin/<branch>")
+            && prompt.contains("git merge-base --is-ancestor <branch> origin/<branch>"),
         "and to put every branch of the chain at origin's commit before it \
-         adopts anything, compared either side rather than asked of the \
-         extension: a branch this worktree already holds is adopted as it \
+         adopts anything, with the one command that says which way round two \
+         branches sit: a branch this worktree already holds is adopted as it \
          stands, and the sync force-pushes it: {prompt}",
     );
     assert!(

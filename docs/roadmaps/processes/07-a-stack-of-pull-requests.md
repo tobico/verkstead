@@ -61,10 +61,12 @@ goes counted per pull request.
   reported success, in a checkout where every `origin/<branch>` was present —
   and the sync force-pushes whatever was adopted. Neither command aligns a
   branch the worktree already holds, so the session is told to put every one of
-  them at origin's commit first, by comparing `git rev-parse` either side. It
-  is also told to leave the worktree back on the Conversation's own branch,
-  `checkout` having switched it to the top of the chain.
-  See `docs/agents/git-workflow.md`, which holds the measurement.
+  them at origin's commit first, by reading git rather than the extension:
+  `git rev-parse` either side where they agree, and
+  `git merge-base --is-ancestor` where they do not, which is the one command
+  that says *which* way they differ. It is also told to leave the worktree back
+  on the Conversation's own branch, `checkout` having switched it to the top of
+  the chain. See `docs/agents/git-workflow.md`, which holds the measurement.
 - **One conflict session per stack**, not per pull request: dispatched when any
   recorded pull request reads *conflicting*, told the ordered list from the
   bottom, told to `gh stack sync` and resolve what it backs out on, run the
