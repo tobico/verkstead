@@ -990,18 +990,25 @@ export function GitPane(props: {
                 />
                 {/* Only where there was one to go back to: with nothing
                     configured, the field is the form rather than a detour
-                    from it. */}
+                    from it.
+
+                    **Cancel**, because it is the one press beside a field
+                    somebody has just pasted into, and that press is read as
+                    the field's own. It was *Keep the saved token*, which read
+                    as *keep this token* — and threw away the one just pasted,
+                    leaving the old one standing. What saves it is **Save**,
+                    at the foot of the form. */}
                 <Show when={holding()}>
                   <div class={styles.tokenActions}>
                     <button
                       type="button"
-                      class={`${styles.keep} secondary`}
+                      class={`${styles.cancel} secondary`}
                       onClick={() => {
                         setReplacing(false);
                         setToken("");
                       }}
                     >
-                      Keep the saved token
+                      Cancel
                     </button>
                   </div>
                 </Show>

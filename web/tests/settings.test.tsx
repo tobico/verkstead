@@ -749,9 +749,11 @@ describe("saving", () => {
 describe("replacing and clearing the token", () => {
   /// The field to paste a credential into is one somebody asked for: with a
   /// token already configured, replacing is a press. And the way back from it is
-  /// named for what it does.
-  it("opens the field on the press, and closes it again on the way back", async () => {
-    theSettings(TOLD);
+  /// **Cancel**, which drops what was typed — so it is named as the way back and
+  /// nothing else. It was *Keep the saved token*, which somebody with a new
+  /// token pasted read as the field's own save, and lost the token to.
+  it("opens the field on the press, and Cancel drops what was typed", async () => {
+    const fetching = theSettings(TOLD, json(SAVED));
     mountPane();
     await waitFor(() => screen.getByRole("button", { name: "Replace" }));
 
@@ -759,12 +761,22 @@ describe("replacing and clearing the token", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Replace" }));
     await waitFor(() => screen.getByLabelText("Token"));
+    fireEvent.input(screen.getByLabelText("Token"), {
+      target: { value: TOKEN },
+    });
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Keep the saved token" }),
-    );
+    expect(screen.queryByRole("button", { name: /keep/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() =>
       expect(screen.queryByLabelText("Token")).toBeNull(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect((sent(fetching) as { github_token: unknown }).github_token).toBe(
+        "Keep",
+      ),
     );
   });
 
