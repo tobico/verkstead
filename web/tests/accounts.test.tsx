@@ -263,6 +263,70 @@ describe("taking an account on", () => {
     });
   });
 
+  /// An OpenCode account is saved with what opencode lists for it, which is
+  /// the one harness the server can ask.
+  it("saves an OpenCode account with the models OpenCode lists for it", async () => {
+    const found: OnboardingView = {
+      ...PART_WAY,
+      accounts: [
+        {
+          account: { agent_type: "OpenCode", home: "/home/you" },
+          harness: true,
+        },
+      ],
+    };
+    const fetching = serving(
+      whenever(PROFILES, json("Saved"), "POST"),
+      whenever(
+        "/api/ui/models",
+        json({ Listed: ["opencode/big-pickle", "opencode/beam-free"] }),
+        "POST",
+      ),
+      json(found),
+    );
+    const { container, onwards: next } = mount(found);
+
+    fireEvent.click(onwards(container));
+
+    await waitFor(() => expect(next).toHaveBeenCalled());
+
+    expect(sent(fetching).models).toEqual([
+      "opencode/big-pickle",
+      "opencode/beam-free",
+    ]);
+  });
+
+  /// And where opencode cannot answer, with the one OpenCode model this build
+  /// knows rather than none — a profile with none would be refused, and the
+  /// step with it.
+  it("saves an OpenCode account with the model it knows where none is listed", async () => {
+    const found: OnboardingView = {
+      ...PART_WAY,
+      accounts: [
+        {
+          account: { agent_type: "OpenCode", home: "/home/you" },
+          harness: true,
+        },
+      ],
+    };
+    const fetching = serving(
+      whenever(PROFILES, json("Saved"), "POST"),
+      whenever(
+        "/api/ui/models",
+        json({ Refused: "OpenCode didn't list its models within 30 seconds." }),
+        "POST",
+      ),
+      json(found),
+    );
+    const { container, onwards: next } = mount(found);
+
+    fireEvent.click(onwards(container));
+
+    await waitFor(() => expect(next).toHaveBeenCalled());
+
+    expect(sent(fetching).models).toEqual(models("OpenCode"));
+  });
+
   /// The greyed row is not saved with the ticked one: it is drawn so that it is
   /// not a surprise later, and there is nothing to launch it with.
   it("writes nothing for the account whose harness is missing", async () => {

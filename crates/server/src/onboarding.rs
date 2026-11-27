@@ -770,20 +770,21 @@ impl Machine {
     /// And `program` resolved on that same list and nothing more asked of it:
     /// no link followed, no reach checked, no second list read.
     ///
-    /// The shorter question, for the three things that go and *run* something
+    /// The shorter question, for the four things that go and *run* something
     /// out here rather than say whether a session could. The Linux sandbox row
     /// starts a `bwrap` in this process, the Mac's `git` row asks an
-    /// `xcode-select` whether the command line tools are installed, and the git
-    /// step reads a `git config` out of the machine's own — see
-    /// [`Machine::sandbox`], [`Machine::command_line_tools`] and
-    /// [`Machine::configured`], which are the three. What each needs is a file
+    /// `xcode-select` whether the command line tools are installed, the git
+    /// step reads a `git config` out of the machine's own, and the profile
+    /// form asks `opencode models` what an account can run — see
+    /// [`Machine::sandbox`], [`Machine::command_line_tools`],
+    /// [`Machine::configured`] and [`crate::models`], which are the four. What each needs is a file
     /// this process can start, and following a link into an install a *session*
     /// could not reach would be answering somebody else's question with it.
     ///
     /// A session's `PATH` rather than the server's all the same, so that what a
     /// row reports having run is a program on the list the row is about — see
     /// [`Machine::reaches`], which is that list asked the whole question.
-    fn found(&self, program: &str) -> Option<PathBuf> {
+    pub(crate) fn found(&self, program: &str) -> Option<PathBuf> {
         sandbox::on_the_path(
             self.platform,
             program,

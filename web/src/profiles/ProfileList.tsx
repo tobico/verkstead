@@ -150,6 +150,7 @@ import {
   createProfile,
   deleteProfile,
   editProfile,
+  listModels,
   listProfiles,
 } from "../api/client";
 import { AGENT_NAME, type AgentType } from "../agents";
@@ -165,7 +166,7 @@ import type {
 import { osIcon } from "../devices";
 import { useReading } from "../freshness";
 import { rowPress } from "../rows";
-import { KNOWN_MODELS, known, prettify } from "../models";
+import { KNOWN_MODELS, LISTS_ITS_MODELS, known, prettify } from "../models";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
 import app from "../App.module.css";
@@ -1145,8 +1146,44 @@ export function ProfileForm(props: {
     setRefused(null);
   };
 
-  /// The models this build knows that the picked agent type can launch: the
-  /// ticks the form offers of its own.
+  /// What the harness lists for the account in the fields, where it is one
+  /// with a listing — OpenCode — and an account this device holds: `opencode
+  /// models`, run on this device against the home typed above. See
+  /// [`LISTS_ITS_MODELS`].
+  ///
+  /// Keyed by the account, so typing a home asks again and going back to one
+  /// already asked about does not. Static, because nothing tells the page an
+  /// account's models moved: a model newly pulled into a local server is there
+  /// at the next page load.
+  const listing = useReading(() => {
+    const account = form().account;
+
+    return {
+      queryKey: ["models", account],
+      queryFn: () => listModels(account),
+      freshness: "static" as const,
+      enabled:
+        !props.unbound &&
+        LISTS_ITS_MODELS[account.agent_type] &&
+        ACCOUNT_FIELDS[account.agent_type].every(
+          (field) => path(account, field.key).trim() !== "",
+        ),
+    };
+  });
+
+  /// The ids the harness listed, or `undefined` where it listed nothing for
+  /// the account in the fields — not asked, still asking, or refused.
+  const listed = (): string[] | undefined => {
+    const said = listing.data;
+
+    return said && typeof said === "object" && "Listed" in said
+      ? said.Listed
+      : undefined;
+  };
+
+  /// The models the picked agent type can launch: the ticks the form offers of
+  /// its own. What the harness listed, where it listed; otherwise the ones
+  /// this build knows.
   ///
   /// Filtered by the type the form is on rather than the whole list, because a
   /// model is one backend's — a Claude Code account cannot be launched on
@@ -1154,9 +1191,32 @@ export function ProfileForm(props: {
   /// cannot run. Picking another type therefore changes what is offered, the way
   /// it changes which account paths are asked for.
   const launchable = (): string[] =>
+    listed() ??
     KNOWN_MODELS.filter(
       (model) => model.agent === form().account.agent_type,
     ).map((model) => model.id);
+
+  /// What is said under the legend about the listing: that it is being asked
+  /// for, why it could not be had, or that it came back empty. Nothing for a
+  /// listing that came back with models, which the ticks already say.
+  const listingNote = (): string | null => {
+    const said = listing.data;
+    const agent = AGENT_NAME[form().account.agent_type];
+
+    if (listing.isFetching) {
+      return `Asking ${agent} which models this account can run…`;
+    }
+
+    if (said && typeof said === "object" && "Refused" in said) {
+      return said.Refused;
+    }
+
+    if (listed()?.length === 0) {
+      return `${agent} lists no models for this account.`;
+    }
+
+    return null;
+  };
 
   /// Every model the form draws a tick for: those, and any this profile carries
   /// that they do not cover — an id this build has never heard of, one saved
@@ -1345,6 +1405,9 @@ export function ProfileForm(props: {
           checking what a session will be launched with. */}
       <fieldset class={styles.models}>
         <legend>Models</legend>
+        <Show when={listingNote()}>
+          {(said) => <Note class={styles.fieldNote}>{said()}</Note>}
+        </Show>
 
         <ul class={styles.picks}>
           <For each={offered()}>

@@ -1754,6 +1754,63 @@ describe("the pane the plus opens", () => {
     },
   );
 
+  /// An OpenCode account's ticks are what opencode lists for it, asked of the
+  /// server with the account typed, rather than the ones this build knows.
+  it("offers the models OpenCode lists for the account typed", async () => {
+    const fetching = serving(
+      whenever("/api/ui/profiles", json(SAVED)),
+      whenever(
+        "/api/ui/models",
+        json({ Listed: ["ollama/qwen3-coder:30b", "opencode/beam-free"] }),
+        "POST",
+      ),
+    );
+    mountPane("new");
+
+    pickAgent("OpenCode");
+    fireEvent.input(
+      await waitFor(() => screen.getByLabelText(/Home directory/)),
+      { target: { value: "/home/you/accounts/zen/opencode" } },
+    );
+
+    await waitFor(() => screen.getByLabelText("ollama/qwen3-coder:30b"));
+
+    expect(sent(fetching, "/api/ui/models")).toEqual(NEW_OPENCODE.account);
+    expect(picks().map((tick) => tick.closest("label")!.textContent)).toEqual([
+      "ollama/qwen3-coder:30b",
+      "opencode/beam-free",
+    ]);
+  });
+
+  /// And one OpenCode could not list for says why, and offers the ticks this
+  /// build knows in the meantime.
+  it("says why OpenCode couldn't list its models", async () => {
+    serving(
+      whenever("/api/ui/profiles", json(SAVED)),
+      whenever(
+        "/api/ui/models",
+        json({
+          Refused: "OpenCode couldn't list its models: config is not valid JSON.",
+        }),
+        "POST",
+      ),
+    );
+    mountPane("new");
+
+    pickAgent("OpenCode");
+    fireEvent.input(
+      await waitFor(() => screen.getByLabelText(/Home directory/)),
+      { target: { value: "/home/you/accounts/zen/opencode" } },
+    );
+
+    await waitFor(() =>
+      screen.getByText(
+        "OpenCode couldn't list its models: config is not valid JSON.",
+      ),
+    );
+    expect(screen.getByLabelText(prettify("opencode/big-pickle"))).toBeTruthy();
+  });
+
   /// Each refusal is a different sentence, and each names which of the two paths
   /// it is about: pointing the config field at a directory is an easy mistake,
   /// and "that path is wrong" would not say which one.

@@ -10,6 +10,7 @@ import type {
   ComponentsView,
   DevicesView,
   ForwardsView,
+  ModelsListed,
   SetReading,
   SetView,
   UnreadableSet,
@@ -34,6 +35,10 @@ const AUTHORS = "/api/ui/authors";
 /// And what this machine has installed beyond the wizard's checks, the fourth —
 /// see the default below.
 const COMPONENTS = "/api/ui/components";
+
+/// And what an account can run, asked of its harness by the profile form and
+/// the wizard wherever an OpenCode account is in them — see the default below.
+const MODELS = "/api/ui/models";
 
 /// One answer per fetch in the order given. The last answer is repeated,
 /// because a page polls for as long as it is open and a test should not have to
@@ -82,6 +87,13 @@ export function serving(...answers: Array<Answer>) {
   // `src/settings/Components.tsx`. A machine that cannot have an Annex, which
   // draws none, and is what every test that has not said otherwise is about.
   held.set(`GET ${COMPONENTS}`, json({ annex: null } satisfies ComponentsView));
+
+  // And the models an account can run: nothing asked, which is what the
+  // server says of every harness but OpenCode and of an OpenCode it cannot
+  // run — so the form offers the ticks it knows, and a test about a listing
+  // answers with a `whenever` of its own. Seeded so that the listing never
+  // takes the positional answer a save was given.
+  held.set(`POST ${MODELS}`, json("Unasked" satisfies ModelsListed));
 
   for (const answer of answers) {
     if (typeof answer === "function") {

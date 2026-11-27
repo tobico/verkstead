@@ -789,7 +789,7 @@ fn named(edit: &ProfileEdit) -> Result<(Option<String>, Vec<String>), ProfileSav
 /// Every path is judged the same way and refused by its own name: pointing the
 /// config field at the directory is an easy mistake, and "that path is wrong"
 /// would not say which one.
-fn inspect(account: &ProfileAccount) -> Result<store::Account, ProfileSaved> {
+pub(crate) fn inspect(account: &ProfileAccount) -> Result<store::Account, ProfileSaved> {
     match account {
         ProfileAccount::Claude {
             claude_dir,

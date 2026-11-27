@@ -50,6 +50,7 @@ mod logins_windows;
 mod matching;
 mod member_updates;
 mod merging;
+mod models;
 mod news;
 mod notices;
 mod nudges;

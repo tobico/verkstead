@@ -47,17 +47,22 @@ const HARNESSES: [AgentType; 5] = [
 /// read off `agy models` on agy 1.4.12 signed in to a Google account on its
 /// starter quota, which lists those three, two Claude models and GPT-OSS, and
 /// no Pro to grill on.
-fn model(harness: AgentType, role: Role) -> &'static str {
-    match (harness, role) {
+///
+/// **And none for OpenCode.** What an OpenCode account can run is whatever
+/// `opencode models` lists for it — free models that come and go, its keys'
+/// providers, its local servers — and its Profile is saved with that list (see
+/// [`crate::models`]), so there is no model this table could name that every
+/// such account has. Its default is the first its Profile lists.
+fn model(harness: AgentType, role: Role) -> Option<&'static str> {
+    Some(match (harness, role) {
         (AgentType::Claude, Role::Grilling) => "claude-fable-5",
         (AgentType::Claude, Role::Implementation | Role::Review) => "claude-opus-5",
         (AgentType::Codex, _) => "gpt-5-codex",
         (AgentType::Grok, _) => "grok-4.6",
-        (AgentType::OpenCode, Role::Grilling) => "opencode/gpt-5.1-codex",
-        (AgentType::OpenCode, Role::Implementation | Role::Review) => "minimax/minimax-m2.1",
+        (AgentType::OpenCode, _) => return None,
         (AgentType::Agy, Role::Grilling) => "gemini-3.8-flash-high",
         (AgentType::Agy, Role::Implementation | Role::Review) => "gemini-3.8-flash-medium",
-    }
+    })
 }
 
 /// The platform default for `role`, out of the Profiles in the order they were
@@ -82,7 +87,7 @@ pub(crate) fn platform_default(profiles: &[Profile], role: Role) -> Picked {
     let model = profile
         .models
         .iter()
-        .find(|listed| *listed == wanted)
+        .find(|listed| Some(listed.as_str()) == wanted)
         .or_else(|| profile.models.first());
 
     match model {

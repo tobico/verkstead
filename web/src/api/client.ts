@@ -77,6 +77,7 @@ import type {
   LanguageCleared,
   MemoPressed,
   MergedRow,
+  ModelsListed,
   OnboardingView,
   OpenTerminal,
   Preflight,
@@ -1948,6 +1949,14 @@ export function listProfiles(device: Device): Promise<ProfileEntry[]> {
 /// a config field pointed at a directory is something to go and correct.
 export function createProfile(profile: ProfileEdit): Promise<ProfileSaved> {
   return post<ProfileSaved>("/api/ui/profiles", profile);
+}
+
+/// The models an account can run, as its harness lists them on this device:
+/// `opencode models` for an OpenCode account, and `Unasked` for every harness
+/// with no listing. Asked of an account the form may not have saved yet, so the
+/// account itself is what is sent.
+export function listModels(account: ProfileAccount): Promise<ModelsListed> {
+  return post<ModelsListed>("/api/ui/models", account);
 }
 
 /// Rewrite one, whole. Everything about a profile is the human's to change:

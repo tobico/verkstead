@@ -50,7 +50,7 @@ import { Copy } from "../Copy";
 import { HarnessMark } from "../HarnessMark";
 import { Icon } from "../Icon";
 import { AGENT_NAME, type AgentType } from "../agents";
-import { createProfile, listProfiles } from "../api/client";
+import { createProfile, listModels, listProfiles } from "../api/client";
 import { harnessAbsent } from "../broken";
 import { useReading } from "../freshness";
 import type {
@@ -59,7 +59,7 @@ import type {
   ProfileEdit,
   ProfileSaved,
 } from "../api/types";
-import { KNOWN_MODELS } from "../models";
+import { KNOWN_MODELS, LISTS_ITS_MODELS } from "../models";
 import { ErrorLine } from "../notices";
 import { rowPress } from "../rows";
 import {
@@ -196,7 +196,7 @@ export function Accounts(props: {
     // about the third, rather than nothing at all.
     mutationFn: async (accounts: AccountView[]): Promise<ProfileSaved> => {
       for (const found of accounts) {
-        const outcome = await createProfile(asProfile(found));
+        const outcome = await createProfile(await asProfile(found));
 
         if (!took(outcome)) {
           return outcome;
@@ -518,19 +518,32 @@ function runnable(reading: OnboardingView): AgentType[] {
 }
 
 /// One found account as the Profile it would be saved as: no name, memory shared,
-/// and every model this build knows for its harness.
+/// and every model its harness lists for it — or, for a harness with no
+/// listing, or one that could not answer, every model this build knows for it.
 ///
 /// Unnamed because a home holds one account per harness, so there is nothing to
 /// tell it from — and the models because a Profile with none is refused, while
 /// which of them a session runs is picked when the session is set up. Both are
 /// the settings page's to change.
-function asProfile(found: AccountView): ProfileEdit {
+async function asProfile(found: AccountView): Promise<ProfileEdit> {
+  const agent = found.account.agent_type;
+  const said = LISTS_ITS_MODELS[agent]
+    ? await listModels(found.account).catch(() => null)
+    : null;
+  const listed =
+    said && typeof said === "object" && "Listed" in said
+      ? said.Listed
+      : [];
+
   return {
     name: null,
     account: found.account,
-    models: KNOWN_MODELS.filter(
-      (model) => model.agent === found.account.agent_type,
-    ).map((model) => model.id),
+    models:
+      listed.length > 0
+        ? listed
+        : KNOWN_MODELS.filter((model) => model.agent === agent).map(
+            (model) => model.id,
+          ),
     memory: true,
   };
 }

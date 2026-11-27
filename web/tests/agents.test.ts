@@ -71,10 +71,10 @@ describe("the reading of who runs a session", () => {
   it("keeps the backend beside a model named after nothing", () => {
     expect(
       reading(
-        { agent: "OpenCode", model: "minimax/minimax-m2.1", profile: "Work" },
+        { agent: "OpenCode", model: "opencode/big-pickle", profile: "Work" },
         [profile("Work", "OpenCode")],
       ),
-    ).toBe("OpenCode Minimax M2.1");
+    ).toBe("OpenCode Big Pickle");
   });
 
   /// A profile picked before a model was paired beside it is half a choice: the
