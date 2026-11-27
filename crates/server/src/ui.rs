@@ -657,6 +657,9 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             post(choose_review_pairing),
         )
         .route("/api/ui/profiles", get(profiles).post(create_profile))
+        // What an account the form names can run, asked of its harness — see
+        // [`crate::models`].
+        .route("/api/ui/models", post(models_listed))
         .route("/api/ui/profiles/{id}", post(edit_profile))
         // Setting a Profile up on this device, a press of its own rather than
         // a side effect of a save — see [`crate::profiles::bind`].
@@ -6196,6 +6199,20 @@ async fn profiles(State(state): State<AppState>) -> HttpResponse {
             unavailable("The agent profiles couldn't be read.")
         }
     }
+}
+
+/// `POST /api/ui/models` — the models the account in the body can run, as its
+/// harness lists them on this device.
+///
+/// A POST because what is asked about is an account the form may not have saved
+/// yet, typed paths and all. Never a failure: a harness that could not answer is
+/// a sentence in [`verkstead_render::ModelsListed::Refused`], and the form goes
+/// on with the ids it already has.
+async fn models_listed(
+    State(state): State<AppState>,
+    Json(account): Json<verkstead_render::ProfileAccount>,
+) -> HttpResponse {
+    Json(crate::models::listed(&state, &account).await).into_response()
 }
 
 /// `POST /api/ui/profiles` — take on an account, named by the pair that is

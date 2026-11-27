@@ -4235,6 +4235,19 @@ export type MissedOut = { number: number, repo: string | null,
 why: string, };
 
 /**
+ * The models an account can run, as its harness lists them — what the profile
+ * form offers as ticks, and what the wizard saves a found account with.
+ *
+ * **Asked of the harness rather than kept in a list**, where the harness has a
+ * way to say: OpenCode's `opencode models` answers with every model that
+ * account reaches — the free ones, the providers it holds a key for, and the
+ * local servers it found running — none of which a list in the viewer could
+ * know. A harness with no such command is [`Self::Unasked`], and its ticks
+ * are the viewer's own list.
+ */
+export type ModelsListed = { "Listed": Array<string> } | "Unasked" | { "Refused": string };
+
+/**
  * A move as the page receives it: when, and to what.
  *
  * No rendered body, unlike the Brief — there is no markdown in a move. What the

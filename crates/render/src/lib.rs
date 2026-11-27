@@ -95,9 +95,9 @@ pub use onboarding::{
 };
 pub use profiles::{
     AccountFile, AccountLogin, AccountLoginTaken, AccountSignedOut, AgentType, Broken, LoginOver,
-    MemoryFile, MemoryLeft, MemoryWanted, PairingView, PickedView, ProfileAccount, ProfileChoice,
-    ProfileChosen, ProfileDeleted, ProfileDevice, ProfileEdit, ProfileEntry, ProfileSaved,
-    ProfileTrouble, RepoPairingsView, RoleChoice,
+    MemoryFile, MemoryLeft, MemoryWanted, ModelsListed, PairingView, PickedView, ProfileAccount,
+    ProfileChoice, ProfileChosen, ProfileDeleted, ProfileDevice, ProfileEdit, ProfileEntry,
+    ProfileSaved, ProfileTrouble, RepoPairingsView, RoleChoice,
 };
 pub use push::{PushKey, RelayedNews, Subscribed, Subscription, Unsubscribe};
 pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};

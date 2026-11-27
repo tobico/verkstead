@@ -4052,6 +4052,16 @@ models are a list and the list is the Profile's own, because different Profiles
 reach different accounts and each can launch different things; none of them is a
 default, so which one a session runs is always picked — as a Pairing, alongside
 the Profile itself.
+**What the form offers to tick is the harness's own list where it has one.**
+OpenCode's does: `opencode models --standalone`, run on the host against the
+account's own XDG directories, lists every model that account reaches — its
+own provider's free ones, the providers it holds a key for, and the local
+servers it found running — so the form offers those, and the wizard saves a
+found OpenCode account with them. It is the server's own process rather than a
+session, there being no agent in it, so no sandbox is built for it; the
+account's plugins load in it as the account's owner's code. Every other
+harness, and an OpenCode that cannot answer, is offered the models this build
+knows, and any id at all can be added by hand.
 **Every Profile has a memory switch**, whatever its type: whether the account's
 memory store is shared into a session's Built Root, or the session starts with
 an empty store of its own. It is a fact about the Profile, stored beside its

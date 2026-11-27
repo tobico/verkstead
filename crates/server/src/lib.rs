@@ -197,6 +197,9 @@ mod merging;
 /// where the device about to launch stands — see
 /// [`mirroring::account::fetched`].
 pub mod mirroring;
+/// The models an account can run, asked of its harness — see
+/// [`verkstead_render::ModelsListed`].
+mod models;
 /// Telling the open viewer pages that the pending world moved (ADR-0009).
 ///
 /// Public for the one thing a Nudge is announced about from outside the

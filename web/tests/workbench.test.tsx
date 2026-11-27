@@ -9383,7 +9383,7 @@ describe("the mark of the harness a session ran under", () => {
     theGrillingOutput({
       agent_type: "OpenCode",
       profile: "Work",
-      model: "minimax/minimax-m2.1",
+      model: "opencode/big-pickle",
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
@@ -9395,7 +9395,7 @@ describe("the mark of the harness a session ran under", () => {
     );
 
     await waitFor(() => expect(marked(head)).toBe(art(opencodeMarkFile)));
-    expect(head.textContent).toBe("OpenCode Minimax M2.1 · Work");
+    expect(head.textContent).toBe("OpenCode Big Pickle · Work");
   });
 
   /// And the Brief's three pairing facts, which say what each role *will* run

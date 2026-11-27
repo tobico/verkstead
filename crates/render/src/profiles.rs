@@ -475,6 +475,30 @@ pub enum ProfileSaved {
     HomeNotADirectory,
 }
 
+/// The models an account can run, as its harness lists them — what the profile
+/// form offers as ticks, and what the wizard saves a found account with.
+///
+/// **Asked of the harness rather than kept in a list**, where the harness has a
+/// way to say: OpenCode's `opencode models` answers with every model that
+/// account reaches — the free ones, the providers it holds a key for, and the
+/// local servers it found running — none of which a list in the viewer could
+/// know. A harness with no such command is [`Self::Unasked`], and its ticks
+/// are the viewer's own list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ModelsListed {
+    /// The ids the harness listed, in its order, each as a Profile carries it.
+    Listed(Vec<String>),
+
+    /// Nothing was asked: the harness has no listing, or the account is not
+    /// one this device can ask about — a path that would not save, or the
+    /// harness not on this machine.
+    Unasked,
+
+    /// Asked, and no list came back. A sentence ready to be shown.
+    Refused(String),
+}
+
 /// What became of removing a Profile.
 ///
 /// Two answers, and neither of them is a refusal about what is using it: a

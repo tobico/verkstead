@@ -41,7 +41,7 @@ export type KnownModel = {
   name: string;
   /// And the backend that launches it. One apiece: the same model reachable
   /// through two of them is two entries, because the id each is launched with
-  /// is that backend's own spelling of it — which is what `minimax/minimax-m2.1`
+  /// is that backend's own spelling of it — which is what `opencode/big-pickle`
   /// is and `grok-4.6` is not.
   agent: AgentType;
 };
@@ -70,8 +70,11 @@ export const KNOWN_MODELS: KnownModel[] = [
   { id: "gpt-5-codex", name: "GPT-5 Codex", agent: "Codex" },
   { id: "grok-4.6", name: "Grok 4.6", agent: "Grok" },
   { id: "grok-4.5", name: "Grok 4.5", agent: "Grok" },
-  { id: "minimax/minimax-m2.1", name: "Minimax M2.1", agent: "OpenCode" },
-  { id: "opencode/gpt-5.1-codex", name: "GPT-5.1 Codex", agent: "OpenCode" },
+  // OpenCode's own list is asked of it — see `LISTS_ITS_MODELS` below — so this
+  // is the one entry kept for when it cannot be: the free model OpenCode's own
+  // provider has served under that name since before 2.0, which a profile the
+  // wizard saves without a listing is given rather than none.
+  { id: "opencode/big-pickle", name: "Big Pickle", agent: "OpenCode" },
   // What `agy models` lists to a signed-in account on agy 1.4.12, each named
   // as agy names it. The Flash tiers first, the two the server's pairing
   // defaults name among them; the other vendors' models agy serves after.
@@ -98,6 +101,22 @@ export const KNOWN_MODELS: KnownModel[] = [
   },
   { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)", agent: "Agy" },
 ];
+
+/// Whether the server can ask a harness which models an account of it can run
+/// — see `ModelsListed` in the generated types.
+///
+/// OpenCode alone: `opencode models` answers with every model that account
+/// reaches, the free ones, the providers it has a key for and the local servers
+/// it found, none of which a list here could know. Where it answers, what it
+/// lists is what is offered and the entries above are not; where it cannot, the
+/// entries are what is left.
+export const LISTS_ITS_MODELS: Record<AgentType, boolean> = {
+  Claude: false,
+  Codex: false,
+  Grok: false,
+  OpenCode: true,
+  Agy: false,
+};
 
 /// What each known id reads as, by id.
 const NAMES: Map<string, string> = new Map(
