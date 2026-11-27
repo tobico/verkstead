@@ -109,6 +109,24 @@ impl AgentType {
             Self::Codex | Self::Grok => Channel::StoreAndNudge,
         }
     }
+
+    /// Whether a session of this type needs a **login file** to run at all.
+    ///
+    /// What says whether an account with none can still be lent to a device
+    /// it is not bound on — see [`Unbound::lending`]. Claude, Codex, Grok and
+    /// the Antigravity CLI are given their credentials by that file and by
+    /// nothing else, so an account of theirs without one is a session that
+    /// comes up logged out wherever it runs. **OpenCode runs without one**:
+    /// its free models answer with no credentials at all, and a provider it
+    /// has a key for keeps that key in the file — so an account with no file
+    /// is one that has not logged in to a provider, not one that has lapsed,
+    /// and a copy of it runs exactly what it runs where it is bound.
+    pub fn needs_a_login(self) -> bool {
+        match self {
+            Self::Claude | Self::Codex | Self::Grok | Self::Agy => true,
+            Self::OpenCode => false,
+        }
+    }
 }
 
 /// How a backend's sessions ask, which is one of two things.
@@ -305,9 +323,12 @@ pub struct Unbound {
     /// arrived.
     pub bound_on: Vec<String>,
 
-    /// And those of them whose binding **holds a login file**, in the same
-    /// order: the devices a session here can fetch the account from. A binding
-    /// without one is not a source — there is nothing in it to copy.
+    /// And those of them a session here can fetch the account from, in the
+    /// same order: every one whose binding **holds a login file**, and every
+    /// one at all where the harness needs none — see
+    /// [`AgentType::needs_a_login`]. A binding without one, of a harness that
+    /// needs one, is not a source: there is nothing in it a session could run
+    /// on.
     pub lending: Vec<String>,
 }
 
@@ -560,7 +581,8 @@ pub struct Binding {
 
     /// Whether the account at those paths holds a **login file**, as the
     /// device bound on it last looked — see [`logins_held`]. A binding without
-    /// one is no source for a device running the Profile from a copy.
+    /// one is no source for a device running the Profile from a copy, where
+    /// the harness needs one — see [`AgentType::needs_a_login`].
     ///
     /// Taken to hold one where a binding does not say, which is every binding
     /// written before it was said: what that device's next look says goes over
@@ -1587,7 +1609,7 @@ fn profile_of(
                 .collect();
 
             let lending = elsewhere
-                .filter(|(_, binding)| binding.login)
+                .filter(|(_, binding)| binding.login || !harness.needs_a_login())
                 .map(|(device, _)| device.clone())
                 .collect();
 

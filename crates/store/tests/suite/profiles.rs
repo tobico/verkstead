@@ -2024,6 +2024,74 @@ async fn a_binding_says_whether_its_account_holds_a_login() {
     );
 }
 
+/// An OpenCode account needs no login file to run, so a member's binding of
+/// one that holds none is still a device to fetch it from — and the binding
+/// goes on saying the file is not there.
+#[tokio::test]
+async fn a_members_opencode_binding_with_no_login_is_still_a_source() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+
+    merge::<Profiles>(
+        &pool,
+        &[Record {
+            uuid: AT_HOME.to_owned(),
+            updated_at: 1,
+            deleted_at: None,
+            written_by: HOME.to_owned(),
+            fields: ProfileRecord {
+                name: Some("theirs".to_owned()),
+                harness: "opencode".to_owned(),
+                models: vec!["opencode/big-pickle".to_owned()],
+                memory: true,
+                minted_on: None,
+                minted_id: None,
+            },
+        }],
+    )
+    .await
+    .unwrap();
+
+    let Account::OpenCode { home } = opencode("theirs") else {
+        unreachable!()
+    };
+
+    merge::<Bindings>(
+        &pool,
+        &[Record {
+            uuid: binding_uuid(AT_HOME, HOME),
+            updated_at: 1,
+            deleted_at: None,
+            written_by: HOME.to_owned(),
+            fields: Binding {
+                claude_dir: None,
+                config_file: None,
+                home: Some(home.to_string_lossy().into_owned()),
+                login: false,
+            },
+        }],
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        load_profile(&pool, AT_HOME).await.unwrap().unwrap().unbound,
+        Some(Unbound {
+            bound_on: vec![HOME.to_owned()],
+            lending: vec![HOME.to_owned()],
+        }),
+        "bound there, and fetched from there with no login in it",
+    );
+
+    let binding = records::<Bindings>(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|binding| binding.uuid == binding_uuid(AT_HOME, HOME))
+        .unwrap();
+    assert!(!binding.fields.login, "and the binding still says no file");
+}
+
 /// A save that looked at the account says on its binding what it found, in the
 /// write that makes the binding: nothing a member pulls in between can read a
 /// fresh account as holding a login it has not got.

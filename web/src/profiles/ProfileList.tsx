@@ -651,10 +651,11 @@ function paths(account: ProfileAccount): string {
     .join(" and ");
 }
 
-/// Whether the account is one with no login file bound here: perfectly
-/// runnable, and not one that can be lent to another device, there being
-/// nothing to copy. Not a refusal — read on a device it is not bound on, it is
-/// broken and says so in its own words.
+/// Whether the account is one with no login file bound here, of a harness that
+/// needs one: perfectly runnable, and not one that can be lent to another
+/// device, there being nothing to copy. An OpenCode account needs none, so the
+/// server never reads one this way. Not a refusal — read on a device it is not
+/// bound on, it is broken and says so in its own words.
 function notLendable(profile: ProfileEntry): boolean {
   return !profile.login && profile.bound;
 }

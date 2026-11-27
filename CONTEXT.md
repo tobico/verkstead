@@ -4146,7 +4146,13 @@ this device's own reading of its membership — the reading a machine is drawn
 unreachable off in the sidebar — and **names no device**: what is missing is a
 source, any of them. A binding whose account holds no login file is no source,
 which is what a Claude login in the macOS Keychain comes to, and a sign-out
-there with it; the fix is a login on that machine. And a Claude login kept only
+there with it; the fix is a login on that machine. **Except where the harness
+needs no login file**, which is OpenCode alone: its free models answer with no
+credentials, and a provider key it holds is in that file — so an OpenCode
+account without one has not logged in rather than lapsed, every binding of it
+is a source, and a copy runs exactly what the bound device runs. Claude, Codex,
+Grok and the Antigravity CLI have no credentials but that file, so theirs keep
+the rule. And a Claude login kept only
 in a Mac's Keychain runs no session even there: every Mac session is refused
 the Keychain (ADR-0011), so it reads as signed out, and the card's login, which
 writes `.credentials.json` into the account, is the fix there too. **Or the harness is not on
@@ -4155,9 +4161,12 @@ onboarding probe's own words, rather than a second vocabulary for one fact.
 **Whether an account holds a login file is its binding's to say**, and the
 device bound on it is the one that looks — at every read of its Profiles, at its
 start, and as a login written back lands — writing it on its binding where it
-moved, which replicates. On the device it is bound on an account with none says
-*it cannot be used from another device*, which is a note rather than a trouble:
-it is perfectly runnable there, the Mac Keychain's Claude login above aside.
+moved, which replicates. The binding says the file and only the file; which
+harness needs one is every device's own reading of the record. On the device it
+is bound on an account with none, of a harness that needs one, says *it cannot
+be used from another device*, which is a note rather than a trouble: it is
+perfectly runnable there, the Mac Keychain's Claude login above aside. An
+OpenCode account with none says nothing of the kind.
 **Refused rather than hidden.** Neither takes the row out of a picker or out of
 the Profiles section, and a Conversation paired with one reads as paired with a
 **broken** Profile rather than as one nothing was picked for: a row saying why
