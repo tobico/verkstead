@@ -84,6 +84,13 @@ const MOST_AN_ACCOUNT_IS: usize = 1024 * 1024;
 const NO_BOUND_DEVICE: &str =
     "No device this profile is bound on has a login to copy. Log in on one of them.";
 
+/// And the same where the harness needs no login — see
+/// [`store::AgentType::needs_a_login`]. Every device bound on such a Profile is
+/// a source, so what is missing is one still linked to this device: a binding
+/// outlives the link to the device that wrote it, and those are passed over
+/// before anything is asked — see [`lending`].
+const NO_LINKED_DEVICE: &str = "No device this profile is bound on is linked to this one.";
+
 /// A member's account mirrored here for a launch to be made out of: the Profile
 /// the launch reads in the record's place, and what its ending has to write
 /// back to the device it was fetched from.
@@ -237,7 +244,16 @@ pub async fn fetched(
     }
 
     let Some((at, said)) = fetched else {
-        return Err(refused.unwrap_or_else(|| Refusal::ours(NO_BOUND_DEVICE.to_owned())));
+        return Err(refused.unwrap_or_else(|| {
+            Refusal::ours(
+                if profile.agent_type().needs_a_login() {
+                    NO_BOUND_DEVICE
+                } else {
+                    NO_LINKED_DEVICE
+                }
+                .to_owned(),
+            )
+        }));
     };
 
     let under = homes.account_mirror(&profile.id);

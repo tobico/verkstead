@@ -1449,6 +1449,55 @@ async fn a_binding_with_no_login_is_no_source_until_its_device_has_one() {
     assert!(called(&rows, "work").unwrap().login);
 }
 
+/// An OpenCode account needs no login file to run — its free models answer
+/// without one — so A's binding of one with none is a source all the same: B
+/// reads the Profile as one to run under, and A's own row carries no note that
+/// it cannot be used from another device.
+#[tokio::test]
+async fn an_opencode_binding_with_no_login_is_a_source() {
+    let (a, b, _holding) = linked_up().await;
+
+    let home = a.dir.path().join("accounts").join("free");
+    std::fs::create_dir_all(home.join(".config/opencode")).unwrap();
+    std::fs::create_dir_all(home.join(".local/share/opencode")).unwrap();
+
+    let said = press(
+        &a.workbench,
+        PROFILES,
+        Some(
+            &serde_json::json!({
+                "name": "free",
+                "account": { "agent_type": "OpenCode", "home": home },
+                "models": ["opencode/big-pickle"],
+                "memory": true,
+            })
+            .to_string(),
+        ),
+    )
+    .await;
+    assert_eq!(said, "\"Saved\"");
+
+    let theirs = called(&a.profiles().await, "free").cloned().unwrap();
+    assert_eq!(theirs.broken, None);
+    assert!(theirs.login, "nothing to log in to, so nothing to note");
+
+    // Landed *with A's binding of it here*, which is what says whether A is a
+    // source: the bare record reads as broken until it arrives.
+    let rows = b
+        .profiles_saying(|rows| {
+            called(rows, "free").is_some_and(|row| {
+                row.devices
+                    .iter()
+                    .any(|line| line.device.id.as_deref() == Some(A) && line.bound.is_some())
+            })
+        })
+        .await;
+
+    let row = called(&rows, "free").unwrap();
+    assert_eq!(row.broken, None, "fetched from A, login or not");
+    assert!(row.login);
+}
+
 /// A member a release apart whose Profile records this device cannot read has
 /// that said on its Devices row, naming both releases and the one to update.
 /// And the line goes once a pull of them lands.

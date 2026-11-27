@@ -55,6 +55,22 @@ export const AGENT_NAME: Record<AgentType, string> = {
   Agy: "Antigravity CLI",
 };
 
+/// Whether a session of each agent type needs a **login file** to run at all —
+/// the server's `AgentType::needs_a_login`, said again here for the one thing
+/// the viewer does with it: choosing which sentence a Profile with no device to
+/// fetch from reads as. See `src/broken.ts`.
+///
+/// OpenCode alone runs without one, its free models answering with no
+/// credentials, so any device bound on an OpenCode Profile is a source and
+/// what can be missing is a device answering rather than a login.
+export const NEEDS_A_LOGIN: Record<AgentType, boolean> = {
+  Claude: true,
+  Codex: true,
+  Grok: true,
+  OpenCode: false,
+  Agy: true,
+};
+
 /// What one session was, or would be, run under: the three recorded facts the
 /// reading is made of.
 ///

@@ -5099,8 +5099,9 @@ models: Array<string>,
  */
 broken: Broken | null, 
 /**
- * Whether the account this row names holds a **login file**, which is what
- * says the Profile can be used from a device it is not bound on.
+ * Whether the Profile can be used from a device it is not bound on: the
+ * account this row names holds a **login file**, or it runs a harness
+ * that needs none — OpenCode, whose free models answer without one.
  *
  * Answered by the devices the account is on: one bound here is looked at
  * here, and one bound elsewhere carries what its bindings last said. A

@@ -813,6 +813,26 @@ describe("a member's account that cannot be run from here", () => {
     expect(card.textContent).not.toContain(said);
   });
 
+  /// An OpenCode account needs no login to be copied, so what is missing is a
+  /// device answering at all, and the sentence says that and no more.
+  it("says no device it is bound on is answering, for OpenCode", async () => {
+    const free: ProfileEntry = {
+      ...MIRROR,
+      account: { agent_type: "OpenCode", home: "/home/them" },
+      broken: "NoBoundDevice",
+    };
+
+    serving(whenever("/api/ui/profiles", json([CLUSTER[0]!, free])));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(free)));
+
+    const said =
+      "No device it's bound on is reachable, so no session here can run under it.";
+
+    expect(marks(theCard(reads(free)))).toEqual([{ label: said, red: true }]);
+  });
+
   /// And a harness that is not on this machine reads in the onboarding probe's
   /// own word, carrying the sentence that step shows — one vocabulary for one
   /// fact, rather than a second invented here. See `src/broken.ts`.

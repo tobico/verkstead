@@ -9,7 +9,8 @@
 //!
 //! **Two of the findings are about a Profile not bound here**, whose account
 //! is on other machines: no device it is bound on with a login to copy
-//! answering, and the harness it runs not being on *this* box. Each is
+//! answering — or, for a harness that needs no login, no device it is bound on
+//! answering at all — and the harness it runs not being on *this* box. Each is
 //! something to go and put right somewhere, and each device answers them for
 //! itself.
 //!
@@ -22,7 +23,7 @@
 //! two answers to it. See [`harnessAbsent`], which the wizard's accounts step
 //! draws from as well.
 
-import { AGENT_NAME, type AgentType } from "./agents";
+import { AGENT_NAME, NEEDS_A_LOGIN, type AgentType } from "./agents";
 import type { Broken, ProfileEntry, ProfileTrouble } from "./api/types";
 
 /// What the onboarding probe says of a harness that is not on this machine.
@@ -84,7 +85,9 @@ export function troubleReading(said: ProfileTrouble): string {
     case "HomeMissing":
       return "The home it kept its account under is gone.";
     case "NoBoundDevice":
-      return "No device it's bound on with a login is reachable, so no session here can run under it.";
+      return NEEDS_A_LOGIN[said.agent_type]
+        ? "No device it's bound on with a login is reachable, so no session here can run under it."
+        : "No device it's bound on is reachable, so no session here can run under it.";
     case "HarnessMissing":
       return harnessAbsent(said.agent_type);
     case "SignedOut":

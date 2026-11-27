@@ -136,7 +136,9 @@ pub enum Broken {
     ///
     /// Names no device: what is missing is *a* source, and with more than one
     /// binding any of them would do. A device bound on it whose account holds
-    /// no login file is no source either — there is nothing in it to copy.
+    /// no login file is no source either, where the harness needs one — there
+    /// is nothing in it a session could run on. OpenCode needs none, so any
+    /// device bound on an OpenCode Profile is a source.
     NoBoundDevice,
 
     /// The harness this Profile runs is not on *this* machine, whatever is true
@@ -208,8 +210,9 @@ pub struct ProfileEntry {
     /// the way of running a session under it here, which is the ordinary case.
     pub broken: Option<Broken>,
 
-    /// Whether the account this row names holds a **login file**, which is what
-    /// says the Profile can be used from a device it is not bound on.
+    /// Whether the Profile can be used from a device it is not bound on: the
+    /// account this row names holds a **login file**, or it runs a harness
+    /// that needs none — OpenCode, whose free models answer without one.
     ///
     /// Answered by the devices the account is on: one bound here is looked at
     /// here, and one bound elsewhere carries what its bindings last said. A

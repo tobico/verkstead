@@ -245,8 +245,8 @@ pub(crate) async fn picked(state: &AppState, picked: store::Picked) -> Result<Pi
 /// [`store::logins_held`] — telling the members to pull where it did.
 ///
 /// **The device bound on an account is the only one that can look**, and a
-/// device running the Profile from a copy fetches only from a binding that
-/// holds one. So it is asked on every read of this device's Profiles, at the
+/// device running the Profile from a copy of a harness that needs one fetches
+/// only from a binding that holds one. So it is asked on every read of this device's Profiles, at the
 /// start, and as a login written back by a member lands; a read where nothing
 /// moved writes nothing.
 pub(crate) async fn looked(state: &AppState, profiles: &[store::Profile]) {
@@ -263,7 +263,7 @@ pub(crate) async fn looked(state: &AppState, profiles: &[store::Profile]) {
     let held = tokio::task::spawn_blocking(move || {
         bound
             .iter()
-            .map(|profile| (profile.id.clone(), lends(profile)))
+            .map(|profile| (profile.id.clone(), holds_login(&profile.account)))
             .collect::<Vec<_>>()
     })
     .await;
@@ -341,8 +341,8 @@ async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<
             .into_iter()
             .map(|profile| {
                 // Whether a device a launch could fetch from is answering, for
-                // one not bound here: one bound with a login, and none being
-                // none.
+                // one not bound here: one bound with a login, or bound at all
+                // where the harness needs none, and none being none.
                 let reachable = profile.unbound.as_ref().is_none_or(|unbound| {
                     unbound
                         .lending
@@ -442,22 +442,27 @@ impl Lines {
     }
 }
 
-/// Whether the account this row names holds a **login file** — the fact that
-/// says whether it can be used on a device it is not bound on at all.
+/// Whether the account this row names can be used on a device it is not bound
+/// on at all: it holds a **login file**, or it runs a harness that needs none —
+/// see [`store::AgentType::needs_a_login`].
 ///
 /// One bound here is looked at here, at the one path the harness keeps a login
-/// under. One bound elsewhere holds one where any device's binding of it says
-/// so — see [`store::Unbound::lending`].
+/// under. One bound elsewhere can be where any device's binding of it is a
+/// source — see [`store::Unbound::lending`].
 ///
 /// A login kept somewhere that is not a file — a Claude login in the macOS
 /// Keychain — reads the same as a sign-out, which is what it is from here: there
 /// is nothing to hand another machine. Neither stops a session here, which is
 /// why this is a fact beside [`ProfileEntry::broken`] rather than a way of being
 /// it.
+///
+/// **What a binding says is the file, and only the file** — see [`looked`]. Which
+/// harness needs one is every device's own reading of the record, so a binding
+/// never says it holds a login it has not got.
 fn lends(profile: &store::Profile) -> bool {
     match &profile.unbound {
         Some(unbound) => !unbound.lending.is_empty(),
-        None => holds_login(&profile.account),
+        None => !profile.agent_type().needs_a_login() || holds_login(&profile.account),
     }
 }
 
@@ -632,7 +637,7 @@ fn runnable(pairing: Option<&PairingView>) -> bool {
 ///    nothing can be built. This device's own reading of its membership is
 ///    what says so, which is the same reading the sidebar draws a member
 ///    unreachable off, and `reachable` is it. A binding with no login is no
-///    source — see [`lends`].
+///    source, where the harness needs one — see [`lends`].
 /// 2. **The harness is not on this machine** — [`Broken::HarnessMissing`]. The
 ///    onboarding probe's own finding, in that step's own word.
 ///
