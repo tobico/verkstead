@@ -507,8 +507,8 @@ describe("the Smart App Control line", () => {
 
     await waitFor(() =>
       expect(said(container)).toContain(
-        "Smart App Control is enforcing on this machine, so a session can't " +
-          "run an executable it builds here.",
+        "Smart App Control is enforcing on this machine. A session can't run " +
+          "an executable it builds here.",
       ),
     );
 
