@@ -535,4 +535,40 @@ describe("the Smart App Control line", () => {
     await waitFor(() => screen.getByRole("checkbox", { name: "Rust" }));
     expect(said(container)).toBeNull();
   });
+
+  /// And the card says it too, which is what makes the line above findable: the
+  /// pane is somewhere you go to edit build caches and binds, and nobody opens
+  /// it to be told about the machine.
+  it("names the state on the card, as a warning", async () => {
+    theSettings(guarded(quiet(TOLD), "Enforcing"));
+    const { container } = mountCard();
+
+    const status = await reads(container, "Smart App Control enforcing");
+    expect(status.classList).toContain(line.warn);
+  });
+
+  /// Evaluating counts as well, and is named as itself: it blocks nothing
+  /// today, and the whole reason it is drawn is that Windows decides by itself
+  /// whether to harden, so a card that said nothing is how nobody is told.
+  it("words evaluating apart on the card too", async () => {
+    theSettings(guarded(quiet(TOLD), "Evaluation"));
+    const { container } = mountCard();
+
+    const status = await reads(container, "Smart App Control evaluating");
+    expect(status.classList).toContain(line.warn);
+  });
+
+  /// And it leads what either part is waiting on, being about neither of
+  /// them — what a session can do with what it builds, over what either part
+  /// hands it.
+  it("leads the warnings either part is waiting on", async () => {
+    theSettings(guarded(unread(TOLD, GLEAM), "Enforcing"));
+    const { container } = mountCard();
+
+    await reads(
+      container,
+      "Smart App Control enforcing · Unreadable config entry · No sccache · " +
+        "2 binds unseen",
+    );
+  });
 });
