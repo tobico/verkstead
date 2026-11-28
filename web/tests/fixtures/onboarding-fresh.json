@@ -103,5 +103,6 @@
     "git": false
   },
   "run": null,
-  "data_directory": "/machine"
+  "data_directory": "/machine",
+  "app_control": null
 }

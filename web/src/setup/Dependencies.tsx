@@ -22,6 +22,12 @@
 //! *Next* where there are none. *Install by hand instead* beside it opens the
 //! by-hand screen over every row this machine is missing, with no run.
 //!
+//! **And one thing on that screen is no row's**: on a Windows machine whose
+//! Smart App Control is on, a warning over the rows saying what that means for
+//! a session. Nothing here installs it and nothing here turns it off, so it
+//! carries no box and holds Next up for nothing. What it says is the settings
+//! page's own words too — see [`APP_CONTROL`](../appControl.ts).
+//!
 //! **Nothing here says in advance which rows cannot be installed.** What a
 //! package manager carries is a fact about the distribution rather than about
 //! the row, so the run is what reports it — see
@@ -107,6 +113,7 @@ import type {
   RunView,
   Seen as SeenSomewhere,
 } from "../api/types";
+import { APP_CONTROL } from "../appControl";
 import { ErrorLine, Note } from "../notices";
 import { rowPress } from "../rows";
 import { Foot } from "./Foot";
@@ -674,6 +681,25 @@ function Choosing(props: {
       <p class={styles.standing}>
         Tick what {props.reading.machine} is missing and Verkstead installs it.
       </p>
+
+      {/* And the one thing about this machine that is no row's: whether
+          Windows will run what a session builds. Over the rows rather than
+          among them, because nothing here installs it and nothing here turns
+          it off. The words are the settings page's as well, which is why they
+          live in `appControl.ts` — see `APP_CONTROL`. */}
+      <Show when={props.reading.app_control}>
+        {(said) => (
+          <div class={styles.callout} data-app-control={said()}>
+            <span class={styles.bang} aria-hidden="true">
+              !
+            </span>
+            <div>
+              <p class={styles.status}>{APP_CONTROL[said()].said}</p>
+              <p class={styles.answer}>{APP_CONTROL[said()].means}</p>
+            </div>
+          </div>
+        )}
+      </Show>
 
       <For each={GROUPS}>
         {(group) => {

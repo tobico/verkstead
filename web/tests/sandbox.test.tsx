@@ -32,7 +32,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { SettingsSaved, SettingsView } from "../src/api/types";
+import type {
+  AppControl,
+  SettingsSaved,
+  SettingsView,
+} from "../src/api/types";
 import card from "../src/CardButton.module.css";
 import rowStyles from "../src/settings/PathEditor.module.css";
 import { SandboxCard, SandboxPane } from "../src/settings/Sandbox";
@@ -101,7 +105,9 @@ function unread(standing: SettingsView, name: string): SettingsView {
             ...language,
             enabled: false,
             unread: {
-              why: "sets RUSTUP_HOME, which is a variable the sandbox sets itself",
+              why:
+                "sets RUSTUP_HOME, which the sandbox sets itself. " +
+                "Take that name out of the entry",
               running_on: "Nothing" as const,
             },
           }
@@ -467,5 +473,102 @@ describe("the round trip", () => {
     fireEvent.click(remove);
 
     await reads(container, "8 build caches · 1 bind");
+  });
+});
+
+/// And the standing line over the two parts, which is the one thing in this
+/// section that is the machine rather than a setting.
+///
+/// Here because the wizard is a first run rather than somewhere to go back to:
+/// the machine step says this while somebody is standing at the box, and this
+/// is where the same condition is read months later.
+describe("the Smart App Control line", () => {
+  /// `standing` with the machine's code-integrity state on it. No fixture
+  /// carries one: the routers that write them are a Linux's, and the setting is
+  /// Windows' own.
+  function guarded(
+    standing: SettingsView,
+    app_control: AppControl | null,
+  ): SettingsView {
+    return { ...standing, app_control };
+  }
+
+  /// The line as it is drawn, or nothing where none is.
+  function said(container: ParentNode): string | null {
+    return (
+      container.querySelector<HTMLElement>(`.${styles.appControl}`)
+        ?.textContent ?? null
+    );
+  }
+
+  it("says what enforcing means for a session", async () => {
+    theSettings(guarded(quiet(TOLD), "Enforcing"));
+    const { container } = mountPane();
+
+    await waitFor(() =>
+      expect(said(container)).toContain(
+        "Smart App Control is enforcing on this machine. A session can't run " +
+          "an executable it builds here.",
+      ),
+    );
+
+    expect(said(container)).toContain("Verkstead never changes this setting");
+  });
+
+  it("words evaluation apart, as a machine that blocks nothing today", async () => {
+    theSettings(guarded(quiet(TOLD), "Evaluation"));
+    const { container } = mountPane();
+
+    await waitFor(() =>
+      expect(said(container)).toContain("It blocks nothing today"),
+    );
+
+    expect(said(container)).toContain("whether to start enforcing it");
+  });
+
+  /// And a machine with nothing to warn about draws no line at all, which is
+  /// every Unix and every Windows box the setting is off on.
+  it("draws nothing where there is nothing to warn about", async () => {
+    theSettings(quiet(TOLD));
+    const { container } = mountPane();
+
+    await waitFor(() => screen.getByRole("checkbox", { name: "Rust" }));
+    expect(said(container)).toBeNull();
+  });
+
+  /// And the card says it too, which is what makes the line above findable: the
+  /// pane is somewhere you go to edit build caches and binds, and nobody opens
+  /// it to be told about the machine.
+  it("names the state on the card, as a warning", async () => {
+    theSettings(guarded(quiet(TOLD), "Enforcing"));
+    const { container } = mountCard();
+
+    const status = await reads(container, "Smart App Control enforcing");
+    expect(status.classList).toContain(line.warn);
+  });
+
+  /// Evaluating counts as well, and is named as itself: it blocks nothing
+  /// today, and the whole reason it is drawn is that Windows decides by itself
+  /// whether to harden, so a card that said nothing is how nobody is told.
+  it("words evaluating apart on the card too", async () => {
+    theSettings(guarded(quiet(TOLD), "Evaluation"));
+    const { container } = mountCard();
+
+    const status = await reads(container, "Smart App Control evaluating");
+    expect(status.classList).toContain(line.warn);
+  });
+
+  /// And it leads what either part is waiting on, being about neither of
+  /// them — what a session can do with what it builds, over what either part
+  /// hands it.
+  it("leads the warnings either part is waiting on", async () => {
+    theSettings(guarded(unread(TOLD, GLEAM), "Enforcing"));
+    const { container } = mountCard();
+
+    await reads(
+      container,
+      "Smart App Control enforcing · Unreadable config entry · No sccache · " +
+        "2 binds unseen",
+    );
   });
 });

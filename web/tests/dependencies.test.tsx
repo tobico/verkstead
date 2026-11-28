@@ -23,6 +23,7 @@ import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  AppControl,
   Dependency,
   DependencyState,
   Distro,
@@ -1908,5 +1909,69 @@ describe("what the WSL row is told to run", () => {
         note: "Restart Windows to finish turning WSL on, then come back to this step.",
       });
     }
+  });
+});
+
+describe("the Smart App Control warning", () => {
+  /// `reading` with the machine's code-integrity state on it, which none of the
+  /// served fixtures carries: they are a Linux's, and the setting is Windows'
+  /// own.
+  function guarded(
+    reading: OnboardingView,
+    app_control: AppControl | null,
+  ): OnboardingView {
+    return { ...reading, app_control };
+  }
+
+  /// The warning as it is drawn, or nothing where none is.
+  function warning(container: ParentNode): HTMLElement | null {
+    return container.querySelector<HTMLElement>("[data-app-control]");
+  }
+
+  /// Enforcing is the state this whole thing exists for: a session that cannot
+  /// run what it builds, said in those words rather than in the policy's.
+  it("says what enforcing means for a session, with no box to press", () => {
+    const { container } = mount(guarded(WINDOWS, "Enforcing"));
+
+    expect(warning(container)!.dataset.appControl).toBe("Enforcing");
+    expect(warning(container)!.textContent).toContain(
+      "Smart App Control is enforcing on this machine.",
+    );
+    expect(warning(container)!.textContent).toContain(
+      "A session can't run an executable it builds here.",
+    );
+    expect(warning(container)!.querySelector("input")).toBeNull();
+  });
+
+  /// Evaluation blocks nothing today, and the line says so rather than reading
+  /// as the state above: what makes it worth drawing at all is that Windows
+  /// decides on its own whether to start enforcing it.
+  it("words evaluation apart, as a machine that can cross into enforcing", () => {
+    const { container } = mount(guarded(WINDOWS, "Evaluation"));
+
+    expect(warning(container)!.dataset.appControl).toBe("Evaluation");
+    expect(warning(container)!.textContent).toContain(
+      "Smart App Control is evaluating on this machine.",
+    );
+    expect(warning(container)!.textContent).toContain("It blocks nothing today");
+    expect(warning(container)!.textContent).toContain(
+      "whether to start enforcing it",
+    );
+  });
+
+  /// Neither state is a row, and neither is anything Next waits on: nothing
+  /// here installs the setting and nothing here turns it off.
+  it("leaves the rows and the press as they were", () => {
+    const { container } = mount(guarded(stating(WINDOWS, "Claude", THERE), "Enforcing"));
+
+    expect(drawn(container)).not.toContain("AppControl");
+    expect(onwards(container).disabled).toBe(false);
+  });
+
+  /// And a machine with nothing to warn about says nothing, which is every Unix
+  /// and every Windows box the human has turned the setting off on.
+  it("says nothing where there is nothing to warn about", () => {
+    expect(warning(mount(guarded(WINDOWS, null)).container)).toBeNull();
+    expect(warning(mount(FRESH).container)).toBeNull();
   });
 });

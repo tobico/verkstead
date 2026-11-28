@@ -1195,6 +1195,27 @@ the root is joined by each platform's own means: a bind on Linux, a symbolic
 link on a Mac, and on Windows a junction for a directory and a hard link for a
 file. On Windows the entries are written on the root and on each thing joined
 into it, and never on the account directory as a whole.
+**And a Windows session is told the machine's own names whole**, which are
+`SystemRoot`, `SystemDrive`, `ComSpec` and `PATHEXT`, where the programs are —
+`ProgramFiles` and the rest of that family, `ProgramData` and `ALLUSERSPROFILE`
+— `windir`, and what the processor is: nineteen of them, read off the server's
+own environment, left unsaid rather than invented where the machine has not got
+one, and refused to a **Descriptor** the way every name a sandbox sets is. Facts
+about the machine rather than choices a sandbox makes, which is the rule that
+says which: `PUBLIC` and `DriverData` name directories the whole machine shares
+and are not among them, a session's directories being its own.
+**What a Windows machine's Smart App Control takes away is running what a
+session built**, and Verkstead reads that setting and never writes it. Enforcing
+means an executable a session compiled in its own worktree will not start — *An
+Application Control policy has blocked this file* — whatever directory it is in,
+and no allow rule or locally trusted certificate changes it; building, testing
+and packaging are untouched. Evaluation blocks nothing today and is Windows
+deciding for itself whether to harden into enforcing, so a machine in it can
+cross into the broken state with nobody told. One read of the machine's
+code-integrity policy, said in three places: the onboarding wizard's machine
+step, the settings page's Sandbox section, and — enforcing only — what primes a
+Windows session, so an agent is told rather than discovering the block by eye.
+Turning it off is the human's one-way decision in Windows Security.
 _Avoid_: container, jail, isolation, environment
 
 **Sandbox Configuration**:
@@ -1480,7 +1501,10 @@ because a save from the settings page writes the whole file and an entry
 nothing could read is still text somebody is about to fix — and while it is
 there the **Build caches** part of the Sandbox pane draws that language's box off with the
 reason under it, naming the variable where a variable is what was
-refused, and saying which of the two became of it.
+refused and saying to take that name out of the entry — the list the sandbox
+sets itself grows, so a name written by hand to get a value the sandbox now says
+is the ordinary way an entry stops loading — and saying which of the two became
+of it.
 _Avoid_: language plugin, language definition, toolchain, language config
 
 **Build Cache**:

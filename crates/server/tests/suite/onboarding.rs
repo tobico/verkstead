@@ -45,8 +45,8 @@ use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    Dependency, DependencyState, DependencyView, Distro, OnboardingView, PrefillView,
-    ProfileAccount, Seen, Source,
+    AppControl, Dependency, DependencyState, DependencyView, Distro, OnboardingView, PrefillView,
+    ProfileAccount, Seen, SettingsView, Source,
 };
 use verkstead_server::github::Gh;
 use verkstead_server::onboarding::Machine;
@@ -156,7 +156,8 @@ fn served_holding(dir: &Path, pool: &SqlitePool, programs: &[(&str, &str)], held
             ..Environment::default()
         },
     )
-    .called(HOSTNAME.to_owned());
+    .called(HOSTNAME.to_owned())
+    .guarded(held.app_control);
 
     router_onboarding_asking_github(pool.clone(), dir.to_owned(), machine, host_gh(dir, held))
 }
@@ -169,6 +170,12 @@ struct Held {
     gh_token: Option<&'static str>,
     github_token: Option<&'static str>,
     host_login: Option<&'static str>,
+
+    /// And what this machine's code-integrity policy says about Smart App
+    /// Control, which is held here for the reason the tokens are: it is a fact
+    /// about the box, and nothing a committed assertion could read off whatever
+    /// ran the suite. See `verkstead_server::app_control`.
+    app_control: Option<AppControl>,
 }
 
 /// The `gh` this server reaches GitHub through: one that answers `gh auth
@@ -367,6 +374,74 @@ async fn reading(app: &Router) -> OnboardingView {
     let body = response.into_body().collect().await.unwrap().to_bytes();
 
     serde_json::from_slice(&body).expect("the reading the wizard is drawn from")
+}
+
+/// And the settings as the page is drawn over them, which is the other reading
+/// the machine's Smart App Control state reaches.
+async fn told(app: &Router) -> SettingsView {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/ui/settings")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+
+    serde_json::from_slice(&body).expect("the settings the page is drawn from")
+}
+
+/// One probe of the machine's Smart App Control, and both of the human's
+/// surfaces read it: the wizard's machine step, where somebody is standing at
+/// the box, and the settings page's Sandbox section, which is where the same
+/// condition is read long after onboarding is over.
+///
+/// **Both states and neither.** Enforcing is a session that cannot run what it
+/// builds here; evaluation blocks nothing today and is a machine that can cross
+/// into the first with nobody told; and nothing at all is every machine the
+/// setting is off on, which is both Unixes and every Windows box the human has
+/// turned it off on. All three go down the wire as themselves, and what each
+/// means is the viewer's to word — see `web/tests/dependencies.test.tsx`, and
+/// `web/tests/sandbox.test.tsx`.
+///
+/// Stated rather than read, which is what lets this be asked at all: the real
+/// answer is one registry value on a machine nobody's suite is standing on.
+#[tokio::test]
+async fn the_wizard_and_the_settings_read_the_one_app_control_probe() {
+    for said in [
+        None,
+        Some(AppControl::Enforcing),
+        Some(AppControl::Evaluation),
+    ] {
+        let (dir, pool) = ready().await;
+        let app = served_holding(
+            dir.path(),
+            &pool,
+            &[],
+            Held {
+                app_control: said,
+                ..Held::default()
+            },
+        );
+
+        assert_eq!(
+            reading(&app).await.app_control,
+            said,
+            "the wizard's machine step says what the state is"
+        );
+        assert_eq!(
+            told(&app).await.app_control,
+            said,
+            "and the settings page's Sandbox section says it again, off the \
+             same reading"
+        );
+    }
 }
 
 /// And what the git step could be prefilled with, which is the read of its own

@@ -141,6 +141,45 @@ pub struct OnboardingView {
     /// `None` is a machine nothing told, which is a stated one no suite pointed
     /// at a directory.
     pub data_directory: Option<String>,
+
+    /// And whether Smart App Control is on, on a Windows machine that has it —
+    /// which is the one thing this reading says about the machine that no row
+    /// of it is a thing to install.
+    ///
+    /// `null` is every machine it is off on and every machine that has no such
+    /// setting, which is both Unixes: nothing to warn about is nothing drawn.
+    /// See [`AppControl`], which is what each of the two states means for a
+    /// session.
+    pub app_control: Option<AppControl>,
+}
+
+/// Whether Smart App Control is on, and in which of its two states.
+///
+/// **Windows decides what may run on the machine, and a session's own build is
+/// not on its list.** What the setting enforces is that an executable be signed
+/// by somebody Microsoft's cloud service vouches for, so a binary a session
+/// compiled a minute ago in its own worktree will not start at all — *An
+/// Application Control policy has blocked this file* — and nothing Verkstead
+/// can do reaches that: the policy takes no allow rule and trusts no
+/// certificate added on the machine. Turning it off is the human's, in Windows
+/// Security, and it cannot be turned back on without reinstalling Windows.
+/// Verkstead says what the state is and never writes it.
+///
+/// Read unprivileged off the machine's own code-integrity policy — see
+/// `crate::app_control` on the server side, which is the one read, and the
+/// three places that draw it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum AppControl {
+    /// On, and blocking: a session on this machine cannot run what it builds.
+    Enforcing,
+
+    /// On and in evaluation, which blocks nothing today. Windows is watching
+    /// what runs here and decides for itself whether to harden into enforcing,
+    /// so this is a machine that can cross into the state above with nobody
+    /// told — which is the whole reason this state is drawn rather than folded
+    /// in with off.
+    Evaluation,
 }
 
 /// The three platforms, as the viewer receives one.

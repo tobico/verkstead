@@ -114,7 +114,7 @@ function unread(
   standing: SettingsView,
   name: string,
   running_on: "BuiltIn" | "Nothing",
-  why = "sets RUSTUP_HOME, which is a variable the sandbox sets itself",
+  why = "sets RUSTUP_HOME, which the sandbox sets itself. Take that name out of the entry",
 ): SettingsView {
   return {
     ...standing,
@@ -326,8 +326,9 @@ describe("the languages as the pane draws them", () => {
       expect(
         container.querySelector(`.${styles.warning}`)?.textContent,
       ).toContain(
-        "Its entry in config.yaml sets RUSTUP_HOME, which is a variable the " +
-          "sandbox sets itself. Verkstead is using the descriptor it ships",
+        "Its entry in config.yaml sets RUSTUP_HOME, which the sandbox sets " +
+          "itself. Take that name out of the entry. Verkstead is using the " +
+          "descriptor it ships",
       ),
     );
 

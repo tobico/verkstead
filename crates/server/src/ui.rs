@@ -34,10 +34,10 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio_util::io::ReaderStream;
 use verkstead_render::{
-    AdditionMade, AdditionRemoved, Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice,
-    AtOnceView, Attached, AttachmentRemoved, Author, AuthorEdit, AuthorEdited, AuthorSaved,
-    BaseBranchChoice, BranchRename, BriefEdit, CheckRollup, CleanupStepView, CleanupView,
-    ClonableRepo, Cloning, CommentedOn, CompanionAdded, CompanionBaseRecorded,
+    AdditionMade, AdditionRemoved, Adopted, AnswerAttached, AnswerAttachmentRemoved, AppControl,
+    AskingDevice, AtOnceView, Attached, AttachmentRemoved, Author, AuthorEdit, AuthorEdited,
+    AuthorSaved, BaseBranchChoice, BranchRename, BriefEdit, CheckRollup, CleanupStepView,
+    CleanupView, ClonableRepo, Cloning, CommentedOn, CompanionAdded, CompanionBaseRecorded,
     CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
     CompanionView, CompileCaching, ComponentsView, Confirming, ConflictResolution,
     ConversationArchived, ConversationClosed, ConversationEntry, ConversationMove,
@@ -6767,6 +6767,7 @@ async fn settings(State(state): State<AppState>) -> HttpResponse {
         &state.binds,
         taken(&state),
         running(&state),
+        state.onboarding.machine().app_control(),
     ))
     .into_response()
 }
@@ -6845,6 +6846,7 @@ async fn clear_language(State(state): State<AppState>, Path(name): Path<String>)
                     &state.binds,
                     taken(&state),
                     running(&state),
+                    state.onboarding.machine().app_control(),
                 )),
             })
             .into_response()
@@ -6977,6 +6979,11 @@ async fn save_settings(
     // And what is running, which a Clear is refused over — the same.
     let running = running(&state);
 
+    // And whether Smart App Control is on, for the same read: the machine
+    // rather than a setting, and nothing a save touches — see
+    // [`crate::app_control`].
+    let app_control = state.onboarding.machine().app_control();
+
     // And the table the Git section's Author is written into, which is the
     // store's: written from the blocking hop below through the runtime, after
     // the files and before the view that rides back reads them.
@@ -7068,6 +7075,7 @@ async fn save_settings(
                         &installed,
                         taking,
                         running,
+                        app_control,
                     ),
                     verified: None,
                     refused,
@@ -7353,6 +7361,7 @@ async fn save_settings(
                     &installed,
                     taking,
                     running,
+                    app_control,
                 ),
                 verified,
                 // Nothing turned down: a save that got this far was one there was
@@ -7594,6 +7603,7 @@ fn stored(resolution: ConflictResolution) -> store::ConflictResolution {
 /// token nobody can read back out is a token that cannot leak through a page,
 /// and the four characters are the whole of what the human needs to tell one
 /// from another.
+#[allow(clippy::too_many_arguments)]
 fn as_told(
     settings: &crate::settings::Settings,
     caches_compiles: bool,
@@ -7602,6 +7612,7 @@ fn as_told(
     binds: &crate::sandbox::SandboxConfig,
     taking: usize,
     running: Running,
+    app_control: Option<AppControl>,
 ) -> SettingsView {
     let secrets = settings.secrets();
     let config = settings.config();
@@ -7683,6 +7694,12 @@ fn as_told(
         // the file again rather than off the `config` above, because that is
         // where the whole of this one question is answered.
         paths: crate::paths::told(binds, settings),
+
+        // And whether Smart App Control is on, which is the Sandbox section's
+        // standing line: the machine rather than a setting, read off the
+        // machine the wizard probes and never written — see
+        // [`crate::app_control`].
+        app_control,
 
         // And the ignore rules exactly as the file holds them, a pattern that
         // will not compile included: this is what the editor draws back into

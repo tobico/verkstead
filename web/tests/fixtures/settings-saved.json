@@ -3,6 +3,7 @@
   "refused_servers": [],
   "refused_sizes": [],
   "settings": {
+    "app_control": null,
     "at_once": {
       "conversations": 2,
       "conversations_configured": true,

@@ -1375,7 +1375,8 @@ async fn an_entry_that_would_not_load_says_so_on_the_page_and_stays_in_the_file(
         .unwrap_or_else(|| panic!("the entry was refused, so the page says so: {told:?}"));
 
     assert_eq!(
-        unread.why, "sets RUSTUP_HOME, which is a variable the sandbox sets itself",
+        unread.why,
+        "sets RUSTUP_HOME, which the sandbox sets itself. Take that name out of the entry",
         "the reason names the variable, because that is what there is to fix",
     );
     assert!(

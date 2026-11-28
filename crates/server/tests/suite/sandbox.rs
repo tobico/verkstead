@@ -2057,15 +2057,45 @@ async fn the_open_rendering_hands_a_session_the_environment_it_was_described_wit
     }))
     .collect();
 
-    // And whichever of the machine's own names the machine has. None of them on
-    // the Linux this suite runs on, which is what makes the set above the whole
-    // of it here — they are read off the server's environment, and a Windows
-    // machine is the only one that has them.
+    // And whichever of the machine's own names the machine has — the nineteen a
+    // Windows session is told about the box it is on. Next to none of them on
+    // the Linux this suite runs on, which is what makes the set above very
+    // nearly the whole of it here: they are read off the server's environment,
+    // and a Windows machine is the one that has them all.
+    //
+    // **Which is also why this is not what keeps the list honest.** A name this
+    // Linux has not got is filtered out of the expectation and absent from what
+    // the process reported, so a twentieth name added to `MACHINE_NAMES` and
+    // not to the literal below would pass here. What fails for that is
+    // `the_machine_names_a_windows_session_is_told_name_no_shared_directory` in
+    // the sandbox module, which pins the list by hand and runs on every
+    // platform. What this asks is the other thing: that the rendering hand a
+    // session no name the description did not say.
     expected.extend(
-        ["SystemRoot", "SystemDrive", "ComSpec", "PATHEXT"]
-            .into_iter()
-            .filter(|name| std::env::var_os(name).is_some())
-            .map(str::to_owned),
+        [
+            "SystemRoot",
+            "SystemDrive",
+            "ComSpec",
+            "PATHEXT",
+            "ProgramFiles",
+            "ProgramFiles(x86)",
+            "ProgramW6432",
+            "ProgramData",
+            "ALLUSERSPROFILE",
+            "CommonProgramFiles",
+            "CommonProgramFiles(x86)",
+            "CommonProgramW6432",
+            "windir",
+            "OS",
+            "NUMBER_OF_PROCESSORS",
+            "PROCESSOR_ARCHITECTURE",
+            "PROCESSOR_IDENTIFIER",
+            "PROCESSOR_LEVEL",
+            "PROCESSOR_REVISION",
+        ]
+        .into_iter()
+        .filter(|name| std::env::var_os(name).is_some())
+        .map(str::to_owned),
     );
 
     assert_eq!(

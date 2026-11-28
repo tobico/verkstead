@@ -38,6 +38,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use rust_embed::Embed;
+use verkstead_render::AppControl;
 
 use crate::handoffs;
 use crate::platform::Platform;
@@ -1503,6 +1504,57 @@ pub(crate) fn transferable(prompt: &str, cluster: Option<&crate::transfers::Clus
         cluster.id,
         cluster.os,
         listed.join("\n"),
+    )
+}
+
+/// The same prompt again, with the one thing this machine will not do said
+/// under it: run a binary the session builds, where Smart App Control is
+/// enforcing — see [`crate::app_control`].
+///
+/// **Which is what this whole feature is for.** A session that compiles a GUI
+/// application and then launches it to look at what it changed gets *An
+/// Application Control policy has blocked this file* instead, and the agent is
+/// left to work out by eye that the block is the machine rather than its own
+/// build. Being told at launch costs one short section and saves a session
+/// discovering it the long way and rounding through the human for every check.
+///
+/// **Enforcing alone.** Evaluation blocks nothing today, so a session warned
+/// about it would be spending its context on a condition that is not there —
+/// the two human surfaces are where that state is said, because the thing to do
+/// about it is a decision rather than a way of working. Nothing at all on a
+/// machine with the setting off, which is every Unix and every Windows box the
+/// human has turned it off on.
+///
+/// **And it says what is *not* blocked**, because the useful half of the answer
+/// is that everything short of running the output works: a session can build,
+/// test, publish and package, and the one thing it cannot do is start what came
+/// out. A section that said only *blocked* would be one an agent read as a
+/// reason not to try.
+///
+/// Applied at the launch point to the fresh prompt and the carried note alike,
+/// the way the cluster's devices are: a session carried onto this machine is
+/// running here now, and what this machine will not run is exactly the sort of
+/// thing it cannot know from its own context.
+pub(crate) fn app_controlled(prompt: &str, app_control: Option<AppControl>) -> String {
+    if app_control != Some(AppControl::Enforcing) {
+        return prompt.to_owned();
+    }
+
+    format!(
+        "{}\n\n# What this machine will not run\n\nSmart App Control is enforcing on \
+         this machine, so an executable you build here will not start: Windows refuses \
+         it with *An Application Control policy has blocked this file*, whatever \
+         directory it is in and whether or not it is in your own worktree. There is \
+         nothing to get around it with — the policy takes no allow rule and trusts no \
+         certificate added on this machine — and `dotnet exec` is no way in either, a \
+         WinUI application crashing as it bootstraps.\n\nWhat still works is everything \
+         short of running the output: building, testing, publishing, packaging and \
+         making an installer all do what they always did. So take a build that \
+         succeeded as the result, and leave looking at the running program to the \
+         human. Turning the setting off is their decision, in Windows Security, and it \
+         is one they cannot undo without reinstalling Windows — so it is theirs to \
+         make rather than yours to ask for.\n",
+        prompt.trim_end(),
     )
 }
 
@@ -5576,6 +5628,52 @@ mod tests {
 
         assert_eq!(transferable(&built, None), built);
         assert!(!built.contains("transfer"), "{built}");
+    }
+
+    /// A session on a machine whose Smart App Control is enforcing is told that
+    /// what it builds will not start, what is still fine, and that the setting
+    /// is not its to ask about.
+    ///
+    /// Which is the thing this feature exists to stop costing a session: the
+    /// block is the machine's and reads, by eye, exactly like a build of its own
+    /// that came out broken.
+    #[test]
+    fn a_session_where_app_control_is_enforcing_is_told_what_will_not_start() {
+        let prompt = app_controlled(
+            &implementing(&mounted(), "# The tray icon\n", None),
+            Some(AppControl::Enforcing),
+        );
+
+        assert!(
+            prompt.contains("# What this machine will not run"),
+            "{prompt}"
+        );
+
+        let said = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
+        for phrase in [
+            "Smart App Control is enforcing on this machine",
+            "An Application Control policy has blocked this file",
+            "takes no allow rule and trusts no certificate added on this machine",
+            "building, testing, publishing, packaging and making an installer",
+            "leave looking at the running program to the human",
+            "theirs to make rather than yours to ask for",
+        ] {
+            assert!(said.contains(phrase), "should say {phrase:?}: {said}");
+        }
+    }
+
+    /// And one on a machine where it is evaluating, or off, is told nothing:
+    /// evaluation blocks nothing today, and a session spending its context on a
+    /// condition that is not there is the cost this would have had.
+    #[test]
+    fn a_session_is_told_nothing_where_app_control_blocks_nothing() {
+        let built = implementing(&mounted(), "# The tray icon\n", None);
+
+        for quiet in [None, Some(AppControl::Evaluation)] {
+            assert_eq!(app_controlled(&built, quiet), built, "{quiet:?}");
+        }
+
+        assert!(!built.contains("Smart App Control"), "{built}");
     }
 
     /// The listing says what is there and nothing about what to do with it. What

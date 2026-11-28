@@ -10,3 +10,23 @@
   flex-direction: column;
   gap: 2rem;
 }
+
+/* And the standing line over them, where Smart App Control is on: the one thing
+   in this section that is the machine rather than a setting, so it stands above
+   the parts rather than being a part of its own.
+
+   Drawn as the warning it is, and as the same warning: this is the shape the
+   unreadable-entry line in the Build caches part below already wears — see
+   `.warning` in `Languages.module.css` — so the two conditions this section can
+   report look like one kind of thing. Written out here rather than borrowed
+   from there, because a class handed across two modules is a rule whose margin
+   wins by whichever of them the bundler wrote first. No bottom margin of its
+   own: the gap between the parts is `.parts`'s to set. */
+.appControl {
+  margin: 0;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--edge);
+  border-inline-start: 3px solid var(--stopped);
+  border-radius: 0.6rem;
+  font-size: 0.9rem;
+}
