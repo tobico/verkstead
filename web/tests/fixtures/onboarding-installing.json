@@ -109,5 +109,6 @@
     "total": 3,
     "cancelling": false
   },
-  "data_directory": "/machine"
+  "data_directory": "/machine",
+  "app_control": null
 }

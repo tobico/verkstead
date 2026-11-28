@@ -532,6 +532,25 @@ error: string,
 violations?: Array<Violation>, };
 
 /**
+ * Whether Smart App Control is on, and in which of its two states.
+ *
+ * **Windows decides what may run on the machine, and a session's own build is
+ * not on its list.** What the setting enforces is that an executable be signed
+ * by somebody Microsoft's cloud service vouches for, so a binary a session
+ * compiled a minute ago in its own worktree will not start at all — *An
+ * Application Control policy has blocked this file* — and nothing Verkstead
+ * can do reaches that: the policy takes no allow rule and trusts no
+ * certificate added on the machine. Turning it off is the human's, in Windows
+ * Security, and it cannot be turned back on without reinstalling Windows.
+ * Verkstead says what the state is and never writes it.
+ *
+ * Read unprivileged off the machine's own code-integrity policy — see
+ * `crate::app_control` on the server side, which is the one read, and the
+ * three places that draw it.
+ */
+export type AppControl = "Enforcing" | "Evaluation";
+
+/**
  * A Question or a Sub-question as the page draws it: the name it answers to,
  * its text already rendered, and the Options it offers.
  *
@@ -4489,7 +4508,18 @@ run: RunView | null,
  * `None` is a machine nothing told, which is a stated one no suite pointed
  * at a directory.
  */
-data_directory: string | null, };
+data_directory: string | null, 
+/**
+ * And whether Smart App Control is on, on a Windows machine that has it —
+ * which is the one thing this reading says about the machine that no row
+ * of it is a thing to install.
+ *
+ * `null` is every machine it is off on and every machine that has no such
+ * setting, which is both Unixes: nothing to warn about is nothing drawn.
+ * See [`AppControl`], which is what each of the two states means for a
+ * session.
+ */
+app_control: AppControl | null, };
 
 /**
  * What a press asking for another terminal says: nothing, for one of
@@ -6685,6 +6715,23 @@ share_on_done: boolean,
  */
 paths: PathsView, 
 /**
+ * And whether Smart App Control is on, on a Windows machine that has it —
+ * which is the standing line in the Sandbox section, and the second of the
+ * three places that state is drawn.
+ *
+ * **Read-only, the way a language's `compiling` is**: it is the machine
+ * rather than a setting, and turning it off is the human's one-way
+ * decision in Windows Security. It is here because the wizard is a first
+ * run rather than somewhere to go back to, and this is where a condition
+ * is read long after one — a machine that has hardened since onboarding
+ * says so here and nowhere else on the page.
+ *
+ * `null` is every machine with nothing to warn about, which is both
+ * Unixes and every Windows box the setting is off on. See
+ * [`crate::AppControl`].
+ */
+app_control: AppControl | null, 
+/**
  * And the comments nobody wants addressed, in the order they were written
  * down — empty on a Verkstead that has been told to ignore nothing, which
  * is the ordinary condition rather than a setting half made.
@@ -8177,8 +8224,8 @@ id: number, line: string, };
 export type UnreadEntry = { 
 /**
  * Why, as a clause the page puts the words *its entry in `config.yaml`* in
- * front of — `sets PATH, which is a variable the Sandbox sets itself`, or
- * `could not be read: …` in the reader's own words.
+ * front of — `sets PATH, which the Sandbox sets itself. Take that name out
+ * of the entry`, or `could not be read: …` in the reader's own words.
  *
  * The server's sentence rather than a code the page turns into one: what
  * goes wrong in a file somebody hand-wrote is open-ended, and a viewer

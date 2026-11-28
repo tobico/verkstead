@@ -22,6 +22,11 @@
 //! *Next* where there are none. *Install by hand instead* beside it opens the
 //! by-hand screen over every row this machine is missing, with no run.
 //!
+//! **And one thing on that screen is no row's**: on a Windows machine whose
+//! Smart App Control is on, a warning over the rows saying what that means for
+//! a session. Nothing here installs it and nothing here turns it off, so it
+//! carries no box and holds Next up for nothing — see [`APP_CONTROL`].
+//!
 //! **Nothing here says in advance which rows cannot be installed.** What a
 //! package manager carries is a fact about the distribution rather than about
 //! the row, so the run is what reports it — see
@@ -97,6 +102,7 @@ import { Icon } from "../Icon";
 import { AGENT_NAME, type AgentType } from "../agents";
 import { cancelInstall, startInstall } from "../api/client";
 import type {
+  AppControl,
   Barred,
   Dependency,
   DependencyState,
@@ -226,6 +232,41 @@ const ANSWER = "Answer it on the machine Verkstead runs on, not here.";
 /// want no Homebrew, and the other Mac has no `brew` line at all — what that
 /// tab says about itself instead is its own `about`, see `instructions.ts`.
 const FIRST = "What the brew commands below are run with:";
+
+/// And what the warning over the rows says, where Smart App Control is on —
+/// the two states worded apart, each with what it means for a session.
+///
+/// **Not a row and never a tick.** Every row of this step is something
+/// Verkstead can put on the machine; this is a setting of Windows' own that
+/// Verkstead reads and never writes, and that the human turns off in Windows
+/// Security or leaves alone. So it is drawn as the warning it is, over the rows
+/// rather than among them.
+///
+/// **Worded apart because the two states are different news.** Enforcing is a
+/// session that cannot run what it builds here, today. Evaluation blocks
+/// nothing today and is Windows deciding for itself whether to start, which is
+/// a machine that can cross into the first state with nobody told — so the line
+/// says that rather than saying everything is fine.
+///
+/// The wording is the viewer's, like `BARRED` and `SEEN` beside it: what the
+/// server sends is which state the machine is in, and what to say about it is
+/// the same two pairs of sentences on every Verkstead.
+const APP_CONTROL: Record<AppControl, { said: string; means: string }> = {
+  Enforcing: {
+    said: "Smart App Control is enforcing on this machine.",
+    means:
+      "A session can't run an executable it builds here. Verkstead never " +
+      "changes this setting: turning it off is in Windows Security, and " +
+      "Windows can't turn it back on without a reinstall.",
+  },
+  Evaluation: {
+    said: "Smart App Control is evaluating on this machine.",
+    means:
+      "It blocks nothing today. Windows decides on its own whether to start " +
+      "enforcing it, and a session then can't run what it builds here. " +
+      "Verkstead never changes this setting.",
+  },
+};
 
 /// Which rows are a harness, so that the row wears the same mark the rest of the
 /// app draws that backend with.
@@ -674,6 +715,24 @@ function Choosing(props: {
       <p class={styles.standing}>
         Tick what {props.reading.machine} is missing and Verkstead installs it.
       </p>
+
+      {/* And the one thing about this machine that is no row's: whether
+          Windows will run what a session builds. Over the rows rather than
+          among them, because nothing here installs it and nothing here turns
+          it off — see `APP_CONTROL`. */}
+      <Show when={props.reading.app_control}>
+        {(said) => (
+          <div class={styles.callout} data-app-control={said()}>
+            <span class={styles.bang} aria-hidden="true">
+              !
+            </span>
+            <div>
+              <p class={styles.status}>{APP_CONTROL[said()].said}</p>
+              <p class={styles.answer}>{APP_CONTROL[said()].means}</p>
+            </div>
+          </div>
+        )}
+      </Show>
 
       <For each={GROUPS}>
         {(group) => {

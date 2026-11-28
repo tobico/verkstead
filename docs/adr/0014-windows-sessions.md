@@ -708,6 +708,70 @@ The local account database issues a new account's RID from a counter that only
 climbs, so an entry left naming a deleted account is untidy rather than a grant
 waiting for the next account made.
 
+## Amended: the machine's own names, and what Smart App Control takes away
+
+(2026-11-28) *The terminal* said a Windows session is given "the Windows names
+added that nothing runs without — `SystemRoot`, `ComSpec`, `PATHEXT`, `TEMP`,
+the profile roots". Four machine names was the list, and it was short of what
+the platform's own tools read: a session told no `ProgramFiles` is one where
+everything that resolves `%ProgramFiles%` resolves it to nothing, and NuGet
+looks for its fallback package folders under that directory — so a `.NET` build
+in a session failed at the restore rather than at anything it was asked to do.
+
+**The rule did not change and the list did.** What a session is told about the
+machine is facts about the machine rather than choices a sandbox makes, read off
+the server's own environment — the server runs inside the human's logon, so it
+has them all — and left unsaid rather than invented where one is missing. The
+rule is now applied once across the whole width of those facts, nineteen names:
+the four above, `ProgramFiles` and its family with `ProgramData` and
+`ALLUSERSPROFILE`, `windir`, and `OS` with the processor's five. `PUBLIC` and
+`DriverData` stay out, naming directories the whole machine shares where a
+session's are its own. Each joins by construction the names a language
+descriptor is refused for setting, and that refusal now says to take the name
+out of the entry: the list grows, and a name somebody wrote by hand to get a
+value the sandbox has since started saying is the ordinary way an entry stops
+loading.
+
+**And a Windows session still cannot run what it builds, wherever Smart App
+Control is on.** That setting enforces that an executable be signed by somebody
+Microsoft's reputation service vouches for, and a binary a session compiled a
+minute ago in its own worktree is nobody's reputation: Windows refuses it with
+*An Application Control policy has blocked this file*, whatever directory it is
+in and with the sandbox off. So an agent changing anything visual could not see
+its own result, and every check by eye went round the human.
+
+Nothing Verkstead can do reaches it. **An application-control allow rule scoped
+to the worktrees directory, and signing a session's build output with a locally
+trusted certificate, are both rejected**: this policy takes no allow rule and
+trusts no certificate added on the machine. `dotnet exec` is no way round it
+either — a WinUI application crashes bootstrapping, `0xC000027B`. Turning it off
+is the human's one-way decision in Windows Security, which is why Verkstead
+reads the setting and never writes it.
+
+**So it is said rather than fixed: one probe, three surfaces.** The probe is the
+machine's code-integrity policy, read unprivileged —
+`HKLM\SYSTEM\CurrentControlSet\Control\CI\Policy`, value
+`VerifiedAndReputablePolicyState`, `1` enforcing, `2` evaluating, `0` or absent
+off — which keeps the stance that the server is never elevated and only ever
+reads. The onboarding wizard's machine step says what the state is while
+somebody is standing at the box; the settings page's Sandbox section says it
+long after, which is where a machine that has hardened since onboarding is read;
+and what primes a Windows session says, where the setting is enforcing, that the
+binaries it builds will not launch here and what still works. The two states are
+worded apart, evaluation blocking nothing today and being Windows deciding for
+itself whether to harden, so a machine in it can cross into the broken state
+with nobody told. **Evaluation does not prime sessions**: a session warned about
+a block it will not hit is spending its context on a condition that is not
+there.
+
+**A `verkstead run` facility, launching a named binary on the human's desktop
+and handing the session a screenshot back, is rejected with it.** With the
+setting off a session launches its own executable: sessions start through
+`CreateProcessWithLogonW` with no desktop named, from a server inside the
+human's logon, so a window lands on the human's desktop — and a process can
+screenshot its own window with its own scripting, with committed images already
+drawing in the Diff ([ADR-0026](0026-pictures-in-the-diff.md)).
+
 ## What stays as it was
 
 Linux and macOS sessions are untouched: no prompt file, no fresh-profile

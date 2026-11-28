@@ -183,6 +183,22 @@ pub struct SettingsView {
     /// And the Sandbox Configuration binds, from both of the places they are said.
     pub paths: PathsView,
 
+    /// And whether Smart App Control is on, on a Windows machine that has it —
+    /// which is the standing line in the Sandbox section, and the second of the
+    /// three places that state is drawn.
+    ///
+    /// **Read-only, the way a language's `compiling` is**: it is the machine
+    /// rather than a setting, and turning it off is the human's one-way
+    /// decision in Windows Security. It is here because the wizard is a first
+    /// run rather than somewhere to go back to, and this is where a condition
+    /// is read long after one — a machine that has hardened since onboarding
+    /// says so here and nowhere else on the page.
+    ///
+    /// `null` is every machine with nothing to warn about, which is both
+    /// Unixes and every Windows box the setting is off on. See
+    /// [`crate::AppControl`].
+    pub app_control: Option<crate::onboarding::AppControl>,
+
     /// And the comments nobody wants addressed, in the order they were written
     /// down — empty on a Verkstead that has been told to ignore nothing, which
     /// is the ordinary condition rather than a setting half made.
@@ -519,8 +535,8 @@ pub enum Eviction {
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct UnreadEntry {
     /// Why, as a clause the page puts the words *its entry in `config.yaml`* in
-    /// front of — `sets PATH, which is a variable the Sandbox sets itself`, or
-    /// `could not be read: …` in the reader's own words.
+    /// front of — `sets PATH, which the Sandbox sets itself. Take that name out
+    /// of the entry`, or `could not be read: …` in the reader's own words.
     ///
     /// The server's sentence rather than a code the page turns into one: what
     /// goes wrong in a file somebody hand-wrote is open-ended, and a viewer

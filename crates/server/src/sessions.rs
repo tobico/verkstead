@@ -3102,6 +3102,17 @@ impl Sessions {
                 .as_ref(),
         );
 
+        // And the one thing this machine will not do, where it will not: run an
+        // executable the session builds, Smart App Control being enforcing here.
+        // Under whichever of the two prompts it is, for the listing above's
+        // reason — a session carried onto this machine is running here now — and
+        // read off the machine at this launch rather than off the Device Reading
+        // the two human surfaces share, because nothing about a session's launch
+        // is holding that reading. One registry read. See
+        // [`crate::app_control`], and [`skills::app_controlled`], which says
+        // nothing wherever the setting is not enforcing.
+        let prompt = skills::app_controlled(&prompt, crate::app_control::of_this_machine());
+
         // The account's login as it is now, before the root is built from it: a
         // sign-out that finds it replaced since is one the run carries on from
         // by itself — see [`crate::signouts::Login`].

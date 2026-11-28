@@ -25,6 +25,14 @@ mod answer_additions;
 /// one, and the WSL distro that is the first of them (ADR-0024).
 pub mod annex;
 
+/// Whether Smart App Control is on, on a Windows machine that has it — which is
+/// whether a session can run the binaries it builds there.
+///
+/// Public for the reason the sandbox is: what a session can and cannot do
+/// inside its own worktree is the product's own promise rather than an
+/// implementation detail of an endpoint.
+pub mod app_control;
+
 /// The files the human put on a Conversation for its sessions to read: where
 /// the bytes are kept, and what a file is called once they are there.
 ///

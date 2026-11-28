@@ -2352,19 +2352,65 @@ pub(crate) const SHELL: &str = "/bin/sh";
 /// The names a Windows session is told about the machine it is on, which are
 /// the machine's own to say.
 ///
-/// Nothing on that platform runs without them. `cmd.exe` with no `SystemRoot`
-/// does not start; a program that looks for a system library resolves it
-/// against `SystemDrive`; `ComSpec` is what anything shelling out runs, and
-/// [`open`] is one of them — see that module, which runs a batch file through
-/// it; and `PATHEXT` is half of what finding a program on this platform means,
-/// which is the other thing that module reads.
+/// Nothing on that platform runs without the first four. `cmd.exe` with no
+/// `SystemRoot` does not start; a program that looks for a system library
+/// resolves it against `SystemDrive`; `ComSpec` is what anything shelling out
+/// runs, and [`open`] is one of them — see that module, which runs a batch file
+/// through it; and `PATHEXT` is half of what finding a program on this platform
+/// means, which is the other thing that module reads.
 ///
-/// Read off the server's own environment because that is what they are: facts
-/// about the machine, not choices a sandbox makes. One that is somehow unset is
-/// left unsaid rather than invented — a Windows machine has all four, and a
-/// value guessed here would be a wrong answer standing where a missing one
-/// would have said which.
-const MACHINE_NAMES: [&str; 4] = ["SystemRoot", "SystemDrive", "ComSpec", "PATHEXT"];
+/// **And then where the machine keeps its programs, which is the same fact
+/// again.** A session told none of `ProgramFiles` and its family is one where
+/// everything that resolves `%ProgramFiles%` resolves it to nothing: NuGet
+/// looks for its fallback package folders under that directory, so a `.NET`
+/// build there fails at the restore rather than at anything it was asked to do.
+/// `ProgramW6432` and the three `CommonProgramFiles` spellings are the same
+/// directories asked for by a program of the other word size, and
+/// `ALLUSERSPROFILE` is `ProgramData` under the name it has been read by since
+/// before it was called that — so a list holding some of them would be a tool
+/// sending somebody back here for the rest.
+///
+/// **And the processor and the Windows directory**, which are the remaining
+/// facts of the same kind: `windir` is `SystemRoot` under the name half the
+/// world spells it by, and `OS` and the five `PROCESSOR_` and `NUMBER_OF_`
+/// names are what a build script reads when it wants to know which machine it
+/// is on. The module's own rule applied once rather than a name at a time —
+/// facts about the machine, not choices a sandbox makes — so nothing that reads
+/// one of them sends anybody back to this list.
+///
+/// **`PUBLIC` and `DriverData` are left out on purpose.** Both name a directory
+/// the whole machine shares, and the stance a session's profile is built on is
+/// that its directories are its own: what it caches, what it writes down and
+/// what it throws away are under the profile this Conversation was given — see
+/// [`windows_names`]. They are facts about the machine in the same sense every
+/// name above is, and they are the one kind of fact this list does not carry.
+///
+/// Read off the server's own environment because that is what they are, and the
+/// server runs inside the human's own logon, so it has every one of them. One
+/// that is somehow unset is left unsaid rather than invented — a value guessed
+/// here would be a wrong answer standing where a missing one would have said
+/// which.
+const MACHINE_NAMES: [&str; 19] = [
+    "SystemRoot",
+    "SystemDrive",
+    "ComSpec",
+    "PATHEXT",
+    "ProgramFiles",
+    "ProgramFiles(x86)",
+    "ProgramW6432",
+    "ProgramData",
+    "ALLUSERSPROFILE",
+    "CommonProgramFiles",
+    "CommonProgramFiles(x86)",
+    "CommonProgramW6432",
+    "windir",
+    "OS",
+    "NUMBER_OF_PROCESSORS",
+    "PROCESSOR_ARCHITECTURE",
+    "PROCESSOR_IDENTIFIER",
+    "PROCESSOR_LEVEL",
+    "PROCESSOR_REVISION",
+];
 
 /// Where the halves of a Windows profile are under it, which is where Windows
 /// itself puts them: the roaming application data, the local application data,
@@ -2473,7 +2519,7 @@ pub(crate) fn windows_names(home: &Path) -> Vec<(&'static str, OsString)> {
 /// descriptor is refused for naming — see [`crate::languages`].
 ///
 /// **The union of all three platforms', on every platform.** Windows tells a
-/// session five names for its profile and four for the machine that the two
+/// session five names for its profile and nineteen for the machine that the two
 /// Unixes have no equivalent of, and a `config.yaml` that loaded on a Mac and
 /// broke the same install on a Windows box would be worse than a refusal the
 /// installer sees wherever they wrote it.
@@ -2524,8 +2570,9 @@ const SANDBOX_PREFIXES: &[&str] = &["GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"];
 /// Whether `name` is one a Sandbox sets itself, whatever case it is written in.
 ///
 /// [`MACHINE_NAMES`] are read here beside the list above rather than written
-/// into it, they being the same four names — a Windows machine's own, read off
-/// the server's environment rather than made.
+/// into it, they being one list already — a Windows machine's own names, read
+/// off the server's environment rather than made. Which is what makes a name
+/// added there refused here by construction, with nothing to keep in step.
 ///
 /// Case-insensitively, because Windows reads its environment that way: a `Path`
 /// in a descriptor is the `PATH` a Windows session would lose, and a rule that
@@ -7563,6 +7610,108 @@ mod tests {
                  that asks the shell for the profile's halves is told there are \
                  none"
             );
+        }
+    }
+
+    /// And the names a Windows session is told about the machine are the
+    /// machine's own facts, with the two that name somewhere shared left out.
+    ///
+    /// Written out again rather than read off the list: what is being asserted
+    /// is the decision — the whole width of *facts about the machine* in one
+    /// list, and `PUBLIC` and `DriverData` out of it because a session's
+    /// directories are its own — and a decision asserted against its own
+    /// implementation is nothing asserted at all. See [`MACHINE_NAMES`].
+    #[test]
+    fn the_machine_names_a_windows_session_is_told_name_no_shared_directory() {
+        assert_eq!(
+            MACHINE_NAMES,
+            [
+                "SystemRoot",
+                "SystemDrive",
+                "ComSpec",
+                "PATHEXT",
+                "ProgramFiles",
+                "ProgramFiles(x86)",
+                "ProgramW6432",
+                "ProgramData",
+                "ALLUSERSPROFILE",
+                "CommonProgramFiles",
+                "CommonProgramFiles(x86)",
+                "CommonProgramW6432",
+                "windir",
+                "OS",
+                "NUMBER_OF_PROCESSORS",
+                "PROCESSOR_ARCHITECTURE",
+                "PROCESSOR_IDENTIFIER",
+                "PROCESSOR_LEVEL",
+                "PROCESSOR_REVISION",
+            ],
+            "the machine facts a Windows session is told, whole: where the \
+             programs are, which Windows directory, and which processor"
+        );
+
+        for shared in ["PUBLIC", "DriverData"] {
+            assert!(
+                !MACHINE_NAMES.contains(&shared),
+                "{shared} names a directory the whole machine shares, and a \
+                 session's directories are its own"
+            );
+        }
+    }
+
+    /// And every one of them is a name a language descriptor is refused for
+    /// setting, however it is spelled.
+    ///
+    /// Which follows from `sets_itself` reading the one list rather than a copy
+    /// of it, and is asserted because the case-folding is the part that could
+    /// be wrong: `ProgramFiles(x86)`'s parentheses are not letters, so a fold
+    /// that went through anything but `eq_ignore_ascii_case` could lose them.
+    #[test]
+    fn a_descriptor_is_refused_every_machine_name_however_it_is_written() {
+        for name in MACHINE_NAMES {
+            assert!(sets_itself(name), "{name} is the sandbox's own to say");
+            assert!(
+                sets_itself(&name.to_ascii_lowercase()),
+                "{name} written in lower case is the same variable on this platform"
+            );
+            assert!(
+                sets_itself(&name.to_ascii_uppercase()),
+                "{name} written in upper case is the same variable on this platform"
+            );
+        }
+
+        assert!(
+            sets_itself("programfiles(x86)"),
+            "the one name whose spelling is not all letters is refused too"
+        );
+    }
+
+    /// And what a session is really told of them is what the server's own
+    /// environment has, with a name the server has not got left unsaid.
+    ///
+    /// Asked of whatever machine this runs on, which is the whole of the claim:
+    /// on Windows that is all nineteen, and on a Linux runner it is next to
+    /// none of them — and either way nothing is invented, which is the stance
+    /// [`MACHINE_NAMES`] is written under.
+    #[test]
+    fn a_machine_name_the_server_has_not_got_is_left_unsaid_rather_than_invented() {
+        let named = windows_names(Path::new("C:/data/homes/7"));
+
+        for name in MACHINE_NAMES {
+            let said = named.iter().find(|(said, _)| *said == name);
+
+            match std::env::var_os(name) {
+                Some(value) => assert_eq!(
+                    said.map(|(_, said)| said),
+                    Some(&value),
+                    "{name} is a fact about this machine, said as this machine says it"
+                ),
+                None => assert!(
+                    said.is_none(),
+                    "{name} is not set here, and a value guessed would stand where \
+                     a missing one would have said which"
+                ),
+            }
         }
     }
 

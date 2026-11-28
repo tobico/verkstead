@@ -624,11 +624,22 @@ impl Descriptor {
     ///
     /// The reason is a clause, so that whoever draws it can put the language in
     /// front of it — see [`crate::ui`], and the pane it reaches.
+    ///
+    /// **And the refused name's clause carries the way out of it.** The list a
+    /// name is refused against grows — a Windows session is told nineteen names
+    /// about the machine it is on where it was once told four, every one of them
+    /// a name somebody may have set by hand to get the value the sandbox now
+    /// says — so the reason has to say that taking the name out is what fixes
+    /// the entry, rather than leaving somebody to read the list and work it out.
+    /// See `MACHINE_NAMES` in [`crate::sandbox`].
     fn read(written: Raw) -> Descriptor {
         let why = match Descriptor::parsed(&written) {
             Ok(descriptor) => match (descriptor.refuses(), descriptor.misplaced()) {
                 (Some(name), _) => {
-                    format!("sets {name}, which is a variable the sandbox sets itself")
+                    format!(
+                        "sets {name}, which the sandbox sets itself. Take that name out of the \
+                         entry"
+                    )
                 }
                 (None, Some(why)) => why,
                 (None, None) => return descriptor,
@@ -2718,7 +2729,9 @@ mod tests {
 
         assert_eq!(
             rust.unread(),
-            Some("sets RUSTUP_HOME, which is a variable the sandbox sets itself"),
+            Some(
+                "sets RUSTUP_HOME, which the sandbox sets itself. Take that name out of the entry"
+            ),
             "the reason names the variable, because that is what there is to fix",
         );
         let given = loaded.given(&machine(true));
@@ -2760,7 +2773,33 @@ mod tests {
 
         assert_eq!(
             loaded.get(RUST).unwrap().unread(),
-            Some("sets Path, which is a variable the sandbox sets itself"),
+            Some("sets Path, which the sandbox sets itself. Take that name out of the entry"),
+        );
+    }
+
+    /// And a workaround somebody wrote to get a machine name a Windows session
+    /// was not told is refused, in words that say taking the name out is the
+    /// fix.
+    ///
+    /// **Which is the whole of what this feature leaves behind.** A session was
+    /// told four names about the machine it was on and is told nineteen now,
+    /// and anybody whose `.NET` build could not resolve `%ProgramFiles%` had
+    /// one way to get it: write it into their own entry. That entry stops
+    /// loading the moment the sandbox says the name itself, so the reason it
+    /// stops has to carry the way out — see [`Descriptor::read`].
+    #[test]
+    fn a_descriptor_setting_a_machine_name_is_told_to_take_the_name_out() {
+        let loaded = built_in().merged(&written(
+            "languages:\n  rust:\n    env:\n      ProgramFiles(x86): C:\\Program Files (x86)\n",
+        ));
+
+        assert_eq!(
+            loaded.get(RUST).unwrap().unread(),
+            Some(
+                "sets ProgramFiles(x86), which the sandbox sets itself. Take that name out of \
+                 the entry"
+            ),
+            "the name, and the one thing to do about it",
         );
     }
 
@@ -2773,7 +2812,9 @@ mod tests {
 
         assert_eq!(
             loaded.get(RUST).unwrap().unread(),
-            Some("sets GIT_CONFIG_KEY_0, which is a variable the sandbox sets itself"),
+            Some(
+                "sets GIT_CONFIG_KEY_0, which the sandbox sets itself. Take that name out of the entry"
+            ),
         );
     }
 
@@ -2788,7 +2829,7 @@ mod tests {
 
         assert_eq!(
             loaded.get(RUST).unwrap().unread(),
-            Some("sets HOME, which is a variable the sandbox sets itself"),
+            Some("sets HOME, which the sandbox sets itself. Take that name out of the entry"),
         );
     }
 
@@ -2898,7 +2939,7 @@ mod tests {
         );
         assert_eq!(
             gleam.unread(),
-            Some("sets PATH, which is a variable the sandbox sets itself"),
+            Some("sets PATH, which the sandbox sets itself. Take that name out of the entry"),
         );
         assert!(
             loaded.given(&machine(true)).env() == built_in().given(&machine(true)).env(),

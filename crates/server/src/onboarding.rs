@@ -101,8 +101,8 @@ use anyhow::Result;
 use sqlx::SqlitePool;
 use tokio::sync::OnceCell;
 use verkstead_render::{
-    AccountView, Barred, Dependency, DependencyState, DependencyView, Distro, InstallState,
-    OnboardingView, Owed, PrefillView, Prefilled, RunView, Seen, Source, StepsView,
+    AccountView, AppControl, Barred, Dependency, DependencyState, DependencyView, Distro,
+    InstallState, OnboardingView, Owed, PrefillView, Prefilled, RunView, Seen, Source, StepsView,
 };
 
 use crate::annex::{self, Backend};
@@ -374,6 +374,17 @@ pub struct Machine {
     /// else: no other platform has a backend yet. A stated machine has what
     /// its suite stood it up with.
     annex: Option<Arc<dyn Backend>>,
+
+    /// And whether Smart App Control is on, which is the one thing a reading of
+    /// this machine says that is not a thing to install — see
+    /// [`crate::app_control`].
+    ///
+    /// `None` is a machine with nothing to warn about, which is every Unix and
+    /// every Windows box the setting is off on. Held here with the rest rather
+    /// than read where it is drawn, for the reason everything here is held: it
+    /// is a fact about the machine, and a warning row read off the real
+    /// registry could be asserted on nobody's runner.
+    app_control: Option<AppControl>,
 }
 
 impl Machine {
@@ -409,6 +420,12 @@ impl Machine {
             (Platform::HERE == Platform::Windows)
                 .then(|| Arc::new(annex::wsl::Wsl::here()) as Arc<dyn Backend>),
         )
+        // And whether Smart App Control is on, which is one registry read on
+        // the one platform that has such a setting — see
+        // [`crate::app_control`]. Read here with everything else rather than
+        // where it is drawn, so that what the three surfaces say is asserted
+        // on any runner.
+        .guarded(crate::app_control::of_this_machine())
     }
 
     /// A machine stated rather than read, which is what a test stands a server
@@ -485,6 +502,20 @@ impl Machine {
         Machine { annex, ..self }
     }
 
+    /// And the same, with `said` as what the machine's code-integrity policy
+    /// says about Smart App Control — see [`crate::app_control`].
+    ///
+    /// Said here rather than passed to [`Machine::stated`] for the reason
+    /// [`Machine::arm64`] is: it is one fact about one platform, and every
+    /// suite that states a Linux or a Mac would be carrying a `None` through it
+    /// for nothing.
+    pub fn guarded(self, said: Option<AppControl>) -> Machine {
+        Machine {
+            app_control: said,
+            ..self
+        }
+    }
+
     /// The two ways of making one, said once: a `PATH` a caller stated, or none
     /// at all for the machine that composes its own.
     #[allow(clippy::too_many_arguments)]
@@ -516,6 +547,7 @@ impl Machine {
             verkstead: None,
             arm64: None,
             annex: None,
+            app_control: None,
         }
     }
 
@@ -560,6 +592,13 @@ impl Machine {
     /// And the image that verb is a verb of.
     fn verkstead(&self) -> Option<&Path> {
         self.verkstead.as_deref()
+    }
+
+    /// And whether Smart App Control is on, which the wizard's machine step and
+    /// the settings page's Sandbox section both say — see
+    /// [`crate::app_control`], and [`crate::ui`], which is the second of them.
+    pub(crate) fn app_control(&self) -> Option<AppControl> {
+        self.app_control
     }
 
     /// And the box an Annex would run in, on a Windows machine that has a way
@@ -1185,6 +1224,11 @@ impl Onboarding {
             // about — see [`OnboardingView::data_directory`], which is the one
             // line on that screen this machine is the word on.
             data_directory: self.machine.data_dir().map(shown_path),
+
+            // And whether Smart App Control is on, which is the one thing here
+            // that is a warning rather than a row to tick: Verkstead says what
+            // the state is and never writes it — see [`crate::app_control`].
+            app_control: self.machine.app_control(),
         })
     }
 

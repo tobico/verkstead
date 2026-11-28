@@ -2055,15 +2055,38 @@ async fn the_open_rendering_hands_a_session_the_environment_it_was_described_wit
     }))
     .collect();
 
-    // And whichever of the machine's own names the machine has. None of them on
-    // the Linux this suite runs on, which is what makes the set above the whole
-    // of it here — they are read off the server's environment, and a Windows
-    // machine is the only one that has them.
+    // And whichever of the machine's own names the machine has — the nineteen a
+    // Windows session is told about the box it is on, written out here rather
+    // than read off the list that renders them: two hand-written lists is what
+    // makes a name added to one and not the other a failing test. Next to none
+    // of them on the Linux this suite runs on, which is what makes the set above
+    // very nearly the whole of it there — they are read off the server's
+    // environment, and a Windows machine is the one that has them all.
     expected.extend(
-        ["SystemRoot", "SystemDrive", "ComSpec", "PATHEXT"]
-            .into_iter()
-            .filter(|name| std::env::var_os(name).is_some())
-            .map(str::to_owned),
+        [
+            "SystemRoot",
+            "SystemDrive",
+            "ComSpec",
+            "PATHEXT",
+            "ProgramFiles",
+            "ProgramFiles(x86)",
+            "ProgramW6432",
+            "ProgramData",
+            "ALLUSERSPROFILE",
+            "CommonProgramFiles",
+            "CommonProgramFiles(x86)",
+            "CommonProgramW6432",
+            "windir",
+            "OS",
+            "NUMBER_OF_PROCESSORS",
+            "PROCESSOR_ARCHITECTURE",
+            "PROCESSOR_IDENTIFIER",
+            "PROCESSOR_LEVEL",
+            "PROCESSOR_REVISION",
+        ]
+        .into_iter()
+        .filter(|name| std::env::var_os(name).is_some())
+        .map(str::to_owned),
     );
 
     assert_eq!(

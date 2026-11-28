@@ -10,3 +10,10 @@
   flex-direction: column;
   gap: 2rem;
 }
+
+/* And the standing line over them, where Smart App Control is on: the one thing
+   in this section that is the machine rather than a setting, so it is a note
+   above the parts rather than a part of its own. */
+.appControl {
+  margin: 0;
+}

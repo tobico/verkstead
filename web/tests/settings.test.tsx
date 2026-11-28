@@ -809,6 +809,7 @@ describe("replacing and clearing the token", () => {
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
         paths: TOLD.paths,
+        app_control: TOLD.app_control,
         ignored_comments: TOLD.ignored_comments,
         running: TOLD.running,
         mcp_servers: TOLD.mcp_servers,
