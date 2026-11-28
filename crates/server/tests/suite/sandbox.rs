@@ -2056,12 +2056,19 @@ async fn the_open_rendering_hands_a_session_the_environment_it_was_described_wit
     .collect();
 
     // And whichever of the machine's own names the machine has — the nineteen a
-    // Windows session is told about the box it is on, written out here rather
-    // than read off the list that renders them: two hand-written lists is what
-    // makes a name added to one and not the other a failing test. Next to none
-    // of them on the Linux this suite runs on, which is what makes the set above
-    // very nearly the whole of it there — they are read off the server's
-    // environment, and a Windows machine is the one that has them all.
+    // Windows session is told about the box it is on. Next to none of them on
+    // the Linux this suite runs on, which is what makes the set above very
+    // nearly the whole of it here: they are read off the server's environment,
+    // and a Windows machine is the one that has them all.
+    //
+    // **Which is also why this is not what keeps the list honest.** A name this
+    // Linux has not got is filtered out of the expectation and absent from what
+    // the process reported, so a twentieth name added to `MACHINE_NAMES` and
+    // not to the literal below would pass here. What fails for that is
+    // `the_machine_names_a_windows_session_is_told_name_no_shared_directory` in
+    // the sandbox module, which pins the list by hand and runs on every
+    // platform. What this asks is the other thing: that the rendering hand a
+    // session no name the description did not say.
     expected.extend(
         [
             "SystemRoot",
