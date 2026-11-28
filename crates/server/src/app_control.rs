@@ -46,7 +46,7 @@ use verkstead_render::AppControl;
 /// **Asked twice, by the two things that ask on their own schedule.** A
 /// session's priming asks here at every launch, which is one registry read
 /// against a launch that builds a boundary. The two human surfaces read it off
-/// the Device Reading the wizard and the settings page share, which is taken
+/// the machine the wizard probes and the settings page shares, which is taken
 /// once when this server starts — see [`crate::onboarding::Machine::here`],
 /// where the hostname and the Mac's own `sysctl` are read the same way. So a
 /// machine whose setting changes under a running Verkstead is one a restart

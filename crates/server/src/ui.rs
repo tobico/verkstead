@@ -7679,8 +7679,8 @@ fn as_told(
         paths: crate::paths::told(binds, settings),
 
         // And whether Smart App Control is on, which is the Sandbox section's
-        // standing line: the machine rather than a setting, read off the Device
-        // Reading the wizard shares and never written — see
+        // standing line: the machine rather than a setting, read off the
+        // machine the wizard probes and never written — see
         // [`crate::app_control`].
         app_control,
 

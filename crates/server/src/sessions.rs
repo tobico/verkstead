@@ -3106,9 +3106,9 @@ impl Sessions {
         // executable the session builds, Smart App Control being enforcing here.
         // Under whichever of the two prompts it is, for the listing above's
         // reason — a session carried onto this machine is running here now — and
-        // read off the machine at this launch rather than off the Device Reading
-        // the two human surfaces share, because nothing about a session's launch
-        // is holding that reading. One registry read. See
+        // read off the machine at this launch rather than off the machine
+        // reading the two human surfaces share, because nothing about a
+        // session's launch is holding that reading. One registry read. See
         // [`crate::app_control`], and [`skills::app_controlled`], which says
         // nothing wherever the setting is not enforcing.
         let prompt = skills::app_controlled(&prompt, crate::app_control::of_this_machine());
