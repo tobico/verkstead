@@ -379,12 +379,31 @@ pub struct Machine {
     /// this machine says that is not a thing to install — see
     /// [`crate::app_control`].
     ///
-    /// `None` is a machine with nothing to warn about, which is every Unix and
-    /// every Windows box the setting is off on. Held here with the rest rather
-    /// than read where it is drawn, for the reason everything here is held: it
-    /// is a fact about the machine, and a warning row read off the real
-    /// registry could be asserted on nobody's runner.
-    app_control: Option<AppControl>,
+    /// **Read afresh at every read on the machine this server is running on**,
+    /// the way the `PATH` above is and for the same reason: this is the one
+    /// state Verkstead asks the human to go and change, so a value held here
+    /// since startup would be the settings page going on saying a session
+    /// cannot run what it builds after they had turned the setting off on the
+    /// strength of its saying so. One registry read, which is what makes that
+    /// affordable where the `PATH`'s walk is put on a thread. A stated machine
+    /// is a suite's own word and holds whatever it was told, which is what lets
+    /// all three surfaces be asserted on a runner with no such policy to read.
+    app_control: AppControlSaid,
+}
+
+/// Whether a machine's Smart App Control state is read off the machine or
+/// stated — [`Machine::path`]'s shape said in two words rather than as an
+/// `Option` inside an `Option`.
+#[derive(Debug, Clone, Copy)]
+enum AppControlSaid {
+    /// Read off this machine, at the moment it is asked for — see
+    /// [`crate::app_control::of_this_machine`].
+    Read,
+
+    /// What a suite stood this machine up saying, and nothing read. `None` is a
+    /// machine with nothing to warn about, which is every Unix and every
+    /// Windows box the setting is off on.
+    Stated(Option<AppControl>),
 }
 
 impl Machine {
@@ -420,12 +439,13 @@ impl Machine {
             (Platform::HERE == Platform::Windows)
                 .then(|| Arc::new(annex::wsl::Wsl::here()) as Arc<dyn Backend>),
         )
-        // And whether Smart App Control is on, which is one registry read on
-        // the one platform that has such a setting — see
-        // [`crate::app_control`]. Read here with everything else rather than
-        // where it is drawn, so that what the three surfaces say is asserted
-        // on any runner.
-        .guarded(crate::app_control::of_this_machine())
+        // And whether Smart App Control is on, asked at every read rather than
+        // held from here: the human turns that setting off on the strength of
+        // what Verkstead said about it, and a reading held since startup would
+        // go on saying the old thing until this server was restarted — see
+        // [`crate::app_control`], and [`Machine::path`], whose reason is the
+        // same one.
+        .reading_app_control()
     }
 
     /// A machine stated rather than read, which is what a test stands a server
@@ -502,8 +522,14 @@ impl Machine {
         Machine { annex, ..self }
     }
 
-    /// And the same, with `said` as what the machine's code-integrity policy
-    /// says about Smart App Control — see [`crate::app_control`].
+    /// And the same, with `said` standing in for what the machine's
+    /// code-integrity policy says about Smart App Control — see
+    /// [`crate::app_control`].
+    ///
+    /// A suite's own word, which stands instead of a read rather than beside
+    /// one: the real answer is one registry value on a machine nobody's runner
+    /// is standing on, and this is what lets all three surfaces be asserted
+    /// anyway.
     ///
     /// Said here rather than passed to [`Machine::stated`] for the reason
     /// [`Machine::arm64`] is: it is one fact about one platform, and every
@@ -511,7 +537,17 @@ impl Machine {
     /// for nothing.
     pub fn guarded(self, said: Option<AppControl>) -> Machine {
         Machine {
-            app_control: said,
+            app_control: AppControlSaid::Stated(said),
+            ..self
+        }
+    }
+
+    /// And the same, reading Smart App Control off this machine at every read
+    /// rather than holding what it says now — which is what [`Machine::here`]
+    /// wants and no stated machine does.
+    fn reading_app_control(self) -> Machine {
+        Machine {
+            app_control: AppControlSaid::Read,
             ..self
         }
     }
@@ -547,7 +583,7 @@ impl Machine {
             verkstead: None,
             arm64: None,
             annex: None,
-            app_control: None,
+            app_control: AppControlSaid::Stated(None),
         }
     }
 
@@ -597,8 +633,16 @@ impl Machine {
     /// And whether Smart App Control is on, which the wizard's machine step and
     /// the settings page's Sandbox section both say — see
     /// [`crate::app_control`], and [`crate::ui`], which is the second of them.
+    ///
+    /// Asked of the machine here rather than answered off something held, on
+    /// the machine this server is running on: both surfaces are read long after
+    /// startup, and the setting is the one thing on this reading that the human
+    /// is being told to go and change.
     pub(crate) fn app_control(&self) -> Option<AppControl> {
-        self.app_control
+        match self.app_control {
+            AppControlSaid::Read => crate::app_control::of_this_machine(),
+            AppControlSaid::Stated(said) => said,
+        }
     }
 
     /// And the box an Annex would run in, on a Windows machine that has a way

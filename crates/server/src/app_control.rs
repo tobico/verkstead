@@ -43,15 +43,17 @@ use verkstead_render::AppControl;
 /// `None` on every machine it is off on, and on every machine that has no such
 /// setting — which is both Unixes, where this is one branch and no call at all.
 ///
-/// **Asked twice, by the two things that ask on their own schedule.** A
-/// session's priming asks here at every launch, which is one registry read
-/// against a launch that builds a boundary. The two human surfaces read it off
-/// the machine the wizard probes and the settings page shares, which is taken
-/// once when this server starts — see [`crate::onboarding::Machine::here`],
-/// where the hostname and the Mac's own `sysctl` are read the same way. So a
-/// machine whose setting changes under a running Verkstead is one a restart
-/// says the truth about, and a session launched after the change is told
-/// correctly either way.
+/// **Asked by each of the three that ask, at the moment it asks.** A session's
+/// priming asks here at every launch; the wizard's machine step and the
+/// settings page ask at every reading they are drawn from — see
+/// [`crate::onboarding::Machine::app_control`], which is the shape that
+/// machine's `PATH` has for the same reason.
+///
+/// Nothing holds an answer, because this is the one state Verkstead tells the
+/// human to go and change: a reading kept from startup would be the settings
+/// page going on saying a session cannot run what it builds after they had
+/// turned the setting off on the strength of its saying so. One registry read,
+/// which is what makes asking every time affordable.
 pub fn of_this_machine() -> Option<AppControl> {
     #[cfg(windows)]
     return read_the_policy().and_then(stated);
